@@ -3,7 +3,7 @@ import './globals.css';
 import {Providers} from './providers';
 import {Shell} from '@/components/Shell';
 
-export const metadata: Metadata = {title: 'Model Studio'};
+export const metadata: Metadata = {title: 'Language Model Training Platform'};
 
 export default function RootLayout({children}: {children: React.ReactNode}) {
   return (

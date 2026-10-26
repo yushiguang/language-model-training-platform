@@ -1,7 +1,7 @@
 export type Locale = 'en' | 'zh-CN';
 
 const en = {
-  'app.title': 'Model Studio',
+  'app.title': 'Language Model Training Platform',
   'app.subtitle': 'Train task models by talking to an agent',
   'app.demoBanner': 'Demo with made-up data',
   'lang.label': 'Language',
@@ -24,7 +24,7 @@ const en = {
 export type MessageKey = keyof typeof en;
 
 const zh: Record<MessageKey, string> = {
-  'app.title': '模型工坊',
+  'app.title': '模型训练平台',
   'app.subtitle': '和智能体对话，训练任务模型',
   'app.demoBanner': '演示版，数据均为虚构',
   'lang.label': '语言',
