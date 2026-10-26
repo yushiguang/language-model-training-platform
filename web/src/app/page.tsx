@@ -1,16 +1,7 @@
 'use client';
 
-import {Heading} from '@astryxdesign/core/Heading';
-import {Text} from '@astryxdesign/core/Text';
-import {VStack} from '@astryxdesign/core/VStack';
-import {useLocale} from '@/i18n/LocaleProvider';
+import {Workspace} from '@/components/Workspace';
 
-export default function ProjectsPage() {
-  const {t} = useLocale();
-  return (
-    <VStack gap={3}>
-      <Heading level={1}>{t('projects.heading')}</Heading>
-      <Text>{t('common.comingNext')}</Text>
-    </VStack>
-  );
+export default function Home() {
+  return <Workspace />;
 }
