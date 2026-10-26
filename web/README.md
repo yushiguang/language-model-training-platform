@@ -6,6 +6,7 @@ A clickable demo of the platform, built with Next.js 16 and Astryx. A PM trains 
 npm install
 npm run dev     # http://localhost:3000
 npm run build   # static export to out/
+npm run build:artifact   # one HTML file with inline CSS and JS, for the shared private link
 ```
 
 ## How it fits together
