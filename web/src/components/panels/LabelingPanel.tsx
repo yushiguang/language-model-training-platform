@@ -5,7 +5,7 @@ import {Button} from '@astryxdesign/core/Button';
 import {CheckboxList, CheckboxListItem} from '@astryxdesign/core/CheckboxList';
 import {Icon} from '@astryxdesign/core/Icon';
 import {RadioList, RadioListItem} from '@astryxdesign/core/RadioList';
-import {CircleCheck, Eye, EyeOff, Pencil} from 'lucide-react';
+import {ChevronLeft, ChevronRight, CircleCheck, Eye, EyeOff, Pencil} from 'lucide-react';
 import {IconLine} from '@/components/cards/CardFrame';
 import {PostLabels, sameAnswer} from '@/components/PostLabels';
 import {PostPreview} from '@/components/PostPreview';
@@ -84,26 +84,24 @@ export function LabelingPanel() {
   }
 
   const isSent = Boolean(choice);
+  const canReveal = story.state.choices['q-order'] === 'prompt';
+  // Positions 0 to 4 are the posts; one past the last is the summary, reachable once all are labeled.
+  const position = open ?? posts.length;
+  const lastPosition = isAllLabeled ? posts.length : posts.length - 1;
   const nav = (
-    <div className="post-nav" role="tablist" aria-label={tr(t('Your posts', '你的帖子'))}>
-      {posts.map((p, i) => (
-        <button
-          key={p.id}
-          type="button"
-          role="tab"
-          className="post-nav-item"
-          aria-selected={open === i}
-          onClick={() => setOpen(i)}
-          disabled={isSent}>
-          {mine[p.id] ? <Icon icon={CircleCheck} size="sm" color="success" /> : <span className="post-nav-dot" />}
-          {tr(t(`Post ${i + 1}`, `第 ${i + 1} 条`))}
-        </button>
-      ))}
-      {isAllLabeled && (
-        <button type="button" role="tab" className="post-nav-item" aria-selected={open === null} onClick={() => setOpen(null)}>
-          {tr(t('Review all', '查看全部'))}
-        </button>
-      )}
+    <div className="labeling-nav">
+      <span className="labeling-where">{open === null ? tr(t('All 5 posts', '全部 5 条')) : tr(t(`Post ${open + 1} of ${posts.length}`, `第 ${open + 1} / ${posts.length} 条`))}</span>
+      <div className="labeling-nav-buttons">
+        <Button label={tr(t('Previous', '上一条'))} variant="secondary" size="sm" icon={<Icon icon={ChevronLeft} size="sm" />} isDisabled={position === 0} onClick={() => setOpen(position - 1)} />
+        <Button
+          label={tr(t('Next', '下一条'))}
+          variant="secondary"
+          size="sm"
+          endContent={<Icon icon={ChevronRight} size="sm" />}
+          isDisabled={position >= lastPosition}
+          onClick={() => setOpen(position + 1 >= posts.length ? null : position + 1)}
+        />
+      </div>
     </div>
   );
 
@@ -117,10 +115,12 @@ export function LabelingPanel() {
         </IconLine>
         <p className="page-text">
           {tr(
-            t(
-              `The teacher agreed with you on primary value for ${matches('primary_value')} of 5, format for ${matches('format')} and topics for ${matches('topics')}. Where you and the other labeler disagree, it goes to the disagreements page, not to the teacher’s side.`,
-              `教师模型与你一致的：主要价值 ${matches('primary_value')}/5、形式 ${matches('format')}/5、话题 ${matches('topics')}/5。你和另一位标注员不一致的会进入分歧裁决，不会默认采用教师的答案。`,
-            ),
+            canReveal
+              ? t(
+                  `The teacher agreed with you on primary value for ${matches('primary_value')} of 5, format for ${matches('format')} and topics for ${matches('topics')}. Where you and the other labeler disagree, it goes to the disagreements page, not to the teacher’s side.`,
+                  `教师模型与你一致的：主要价值 ${matches('primary_value')}/5、形式 ${matches('format')}/5、话题 ${matches('topics')}/5。你和另一位标注员不一致的会进入分歧裁决，不会默认采用教师的答案。`,
+                )
+              : t('Where you and the other labeler disagree, it goes to the disagreements page.', '你和另一位标注员不一致的会进入分歧裁决。'),
           )}
         </p>
         <div className="answer-list">
@@ -132,7 +132,7 @@ export function LabelingPanel() {
                 </div>
                 {!isSent && <Button label={tr(t('Edit', '修改'))} variant="ghost" size="sm" icon={<Icon icon={Pencil} size="sm" />} onClick={() => setOpen(i)} />}
               </div>
-              <PostLabels labels={mine[p.id]} compareTo={p.teacher} differsNote={tr(t('teacher differs', '教师不同'))} />
+              <PostLabels labels={mine[p.id]} compareTo={canReveal ? p.teacher : undefined} differsNote={tr(t('teacher differs', '教师不同'))} />
             </div>
           ))}
         </div>
@@ -165,13 +165,8 @@ export function LabelingPanel() {
         key={post.id}
         post={post}
         initial={mine[post.id]}
-        saveLabel={
-          mine[post.id]
-            ? t('Save changes', '保存修改')
-            : posts.filter(p => !mine[p.id]).length === 1
-              ? t('Save and finish', '保存并完成')
-              : t('Save and next', '保存，下一条')
-        }
+        canReveal={canReveal}
+        saveLabel={mine[post.id] ? t('Save changes', '保存修改') : posts.filter(p => !mine[p.id]).length === 1 ? t('Save and finish', '保存并完成') : t('Save and next', '保存，下一条')}
         onSave={labels => {
           story.saveLabels(post.id, labels);
           const next = posts.findIndex((p, i) => i !== open && !mine[p.id]);
@@ -182,7 +177,7 @@ export function LabelingPanel() {
   );
 }
 
-function LabelForm({post, initial, saveLabel, onSave}: {post: Post; initial?: Labels; saveLabel: T; onSave: (labels: Labels) => void}) {
+function LabelForm({post, initial, saveLabel, canReveal, onSave}: {post: Post; initial?: Labels; saveLabel: T; canReveal: boolean; onSave: (labels: Labels) => void}) {
   const {tr} = useLocale();
   const [primary, setPrimary] = useState<LabelId | ''>(initial?.primary_value ?? '');
   const [format, setFormat] = useState<FormatId | ''>(initial?.format ?? '');
@@ -192,53 +187,50 @@ function LabelForm({post, initial, saveLabel, onSave}: {post: Post; initial?: La
   const [primaryField, formatField, topicsField] = FIELDS;
 
   return (
-      <div className="labeling">
-        <div className="labeling-post">
-          <div className="card-inset">
-            <PostPreview post={post} />
-          </div>
-          {isRevealed ? (
-            <>
-              <TeacherAnswer post={post} />
-              <div>
-                <Button label={tr(t('Hide the teacher’s output', '隐藏教师模型的输出'))} variant="ghost" size="sm" icon={<Icon icon={EyeOff} size="sm" />} onClick={() => setIsRevealed(false)} />
-              </div>
-            </>
-          ) : (
-            <div className="reveal">
-              <Button label={tr(t('Reveal the teacher’s output', '查看教师模型的输出'))} variant="secondary" size="sm" icon={<Icon icon={Eye} size="sm" />} onClick={() => setIsRevealed(true)} />
-              <span className="reveal-hint">{tr(t('Labeling is blind; look only if you’re stuck.', '标注是盲标的，卡住时再看。'))}</span>
-            </div>
-          )}
+    <div className="labeling">
+      <div className="labeling-post">
+        <div className="card-inset">
+          <PostPreview post={post} />
         </div>
-        <div className="labeling-form">
-          <RadioList label={`${tr(primaryField.name)} · ${tr(fieldKind(primaryField))}`} value={primary} onChange={v => setPrimary(v as LabelId)}>
-            {primaryField.values.map(v => (
-              <RadioListItem key={v.id} value={v.id} label={<ValueChip field="primary_value" id={v.id} />} description={v.definition && tr(v.definition)} />
-            ))}
-          </RadioList>
-          <RadioList label={`${tr(formatField.name)} · ${tr(fieldKind(formatField))}`} value={format} onChange={v => setFormat(v as FormatId)}>
-            {formatField.values.map(v => (
-              <RadioListItem key={v.id} value={v.id} label={tr(v.name)} description={v.definition && tr(v.definition)} />
-            ))}
-          </RadioList>
-          <div className="topic-list">
-            <CheckboxList label={`${tr(topicsField.name)} · ${tr(fieldKind(topicsField))}`} value={topics} onChange={v => setTopics((v as TopicId[]).slice(0, MAX_TOPICS))}>
-              {topicsField.values.map(v => (
-                <CheckboxListItem key={v.id} value={v.id} label={tr(v.name)} isDisabled={topics.length >= MAX_TOPICS && !topics.includes(v.id as TopicId)} />
-              ))}
-            </CheckboxList>
+        {!canReveal ? (
+          <p className="reveal-hint">{tr(t('You chose to label first, so the teacher hasn’t run on these posts yet.', '你选择了先标注，教师模型还没有在这些帖子上运行。'))}</p>
+        ) : isRevealed ? (
+          <>
+            <TeacherAnswer post={post} />
+            <div>
+              <Button label={tr(t('Hide the teacher’s output', '隐藏教师模型的输出'))} variant="ghost" size="sm" icon={<Icon icon={EyeOff} size="sm" />} onClick={() => setIsRevealed(false)} />
+            </div>
+          </>
+        ) : (
+          <div className="reveal">
+            <Button label={tr(t('Reveal the teacher’s output', '查看教师模型的输出'))} variant="secondary" size="sm" icon={<Icon icon={Eye} size="sm" />} onClick={() => setIsRevealed(true)} />
+            <span className="reveal-hint">{tr(t('Labeling is blind; look only if you’re stuck.', '标注是盲标的，卡住时再看。'))}</span>
           </div>
-          <div className="card-actions">
-            <Button
-              label={tr(saveLabel)}
-              variant="primary"
-              isDisabled={!isComplete}
-              onClick={() => isComplete && onSave({primary_value: primary, format, topics})}
-            />
-            {!isComplete && <span className="reveal-hint">{tr(t('Answer all three fields to save.', '三个字段都填完才能保存。'))}</span>}
-          </div>
+        )}
+      </div>
+      <div className="labeling-form">
+        <RadioList label={`${tr(primaryField.name)} · ${tr(fieldKind(primaryField))}`} value={primary} onChange={v => setPrimary(v as LabelId)}>
+          {primaryField.values.map(v => (
+            <RadioListItem key={v.id} value={v.id} label={<ValueChip field="primary_value" id={v.id} />} description={v.definition && tr(v.definition)} />
+          ))}
+        </RadioList>
+        <RadioList label={`${tr(formatField.name)} · ${tr(fieldKind(formatField))}`} value={format} onChange={v => setFormat(v as FormatId)}>
+          {formatField.values.map(v => (
+            <RadioListItem key={v.id} value={v.id} label={tr(v.name)} description={v.definition && tr(v.definition)} />
+          ))}
+        </RadioList>
+        <div className="topic-list">
+          <CheckboxList label={`${tr(topicsField.name)} · ${tr(fieldKind(topicsField))}`} value={topics} onChange={v => setTopics((v as TopicId[]).slice(0, MAX_TOPICS))}>
+            {topicsField.values.map(v => (
+              <CheckboxListItem key={v.id} value={v.id} label={tr(v.name)} isDisabled={topics.length >= MAX_TOPICS && !topics.includes(v.id as TopicId)} />
+            ))}
+          </CheckboxList>
+        </div>
+        <div className="card-actions">
+          <Button label={tr(saveLabel)} variant="primary" isDisabled={!isComplete} onClick={() => isComplete && onSave({primary_value: primary, format, topics})} />
+          {!isComplete && <span className="reveal-hint">{tr(t('Answer all three fields to save.', '三个字段都填完才能保存。'))}</span>}
         </div>
       </div>
+    </div>
   );
 }

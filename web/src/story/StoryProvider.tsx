@@ -38,6 +38,7 @@ type Action =
   | {type: 'reveal'; now: number}
   | {type: 'resolve'; cardId: string; choice: string}
   | {type: 'say'; text: string}
+  | {type: 'exchange'; user: T; agent: T}
   | {type: 'selectModel'; id: string}
   | {type: 'openPanel'; panel: PanelId}
   | {type: 'closePanel'}
@@ -67,10 +68,7 @@ function initialState(): State {
   };
 }
 
-const CANNED_REPLY = t(
-  'This demo follows a script. To continue, use the buttons on the latest card.',
-  '这个演示按脚本进行。请使用最新卡片上的按钮继续。',
-);
+const CANNED_REPLY = t('This demo follows a script. To continue, use the buttons on the latest card.', '这个演示按脚本进行。请使用最新卡片上的按钮继续。');
 
 function suggestionsForRest(rulings: Record<string, string[]>): Record<string, string[]> {
   const next = {...rulings};
@@ -83,11 +81,13 @@ function reducer(state: State, action: Action): State {
     case 'reveal': {
       if (state.pending.length === 0) return state;
       const [next, ...rest] = state.pending;
-      const progressStart =
-        next.kind === 'card' && next.card.type === 'progress'
-          ? {...state.progressStart, [next.card.id]: action.now}
-          : state.progressStart;
-      return {...state, log: [...state.log, next], pending: rest, progressStart};
+      const progressStart = next.kind === 'card' && next.card.type === 'progress' ? {...state.progressStart, [next.card.id]: action.now} : state.progressStart;
+      return {
+        ...state,
+        log: [...state.log, next],
+        pending: rest,
+        progressStart,
+      };
     }
     case 'resolve': {
       const step = STEPS[state.cursor];
@@ -106,8 +106,16 @@ function reducer(state: State, action: Action): State {
     }
     case 'say': {
       const text = {en: action.text, zh: action.text};
-      return {...state, log: [...state.log, {kind: 'user', text}, {kind: 'agent', text: CANNED_REPLY}]};
+      return {
+        ...state,
+        log: [...state.log, {kind: 'user', text}, {kind: 'agent', text: CANNED_REPLY}],
+      };
     }
+    case 'exchange':
+      return {
+        ...state,
+        log: [...state.log, {kind: 'user', text: action.user}, {kind: 'agent', text: action.agent}],
+      };
     case 'selectModel':
       return {...state, selectedModel: action.id, panel: null};
     case 'openPanel':
@@ -117,15 +125,28 @@ function reducer(state: State, action: Action): State {
     case 'savePromptDraft':
       return {...state, promptDrafts: [...state.promptDrafts, action.text]};
     case 'saveLabels':
-      return {...state, myLabels: {...state.myLabels, [action.postId]: action.labels}};
+      return {
+        ...state,
+        myLabels: {...state.myLabels, [action.postId]: action.labels},
+      };
     case 'rule':
-      return {...state, rulings: {...state.rulings, [action.conflictId]: action.values}};
+      return {
+        ...state,
+        rulings: {...state.rulings, [action.conflictId]: action.values},
+      };
     case 'acceptRest':
-      return {...state, rulings: suggestionsForRest(state.rulings), hasAcceptedRest: true};
+      return {
+        ...state,
+        rulings: suggestionsForRest(state.rulings),
+        hasAcceptedRest: true,
+      };
     case 'sendSchemaEdit': {
       const n = state.schemaEdits.length + 1;
       const items: Item[] = [
-        {kind: 'user', text: t('I edited the schema. Please review my changes.', '我修改了 Schema，请检查我的改动。')},
+        {
+          kind: 'user',
+          text: t('I edited the schema. Please review my changes.', '我修改了 Schema，请检查我的改动。'),
+        },
         {
           kind: 'agent',
           text: t(
@@ -133,9 +154,21 @@ function reducer(state: State, action: Action): State {
             '收到你的修改。在正式产品里，我会用已标注的帖子检查这些改动，标出会影响已有标签的地方，并保存为新的 Schema 版本。演示按脚本进行，所以后面仍沿用起草的 Schema。',
           ),
         },
-        {kind: 'artifact', panel: 'schema', action: 'updated', title: t('Schema', 'Schema'), version: 'v1', detail: t(`Your edit ${n}, received`, `已收到你的第 ${n} 次修改`)},
+        {
+          kind: 'artifact',
+          panel: 'schema',
+          action: 'updated',
+          title: t('Schema', 'Schema'),
+          version: 'v1',
+          detail: t(`Your edit ${n}, received`, `已收到你的第 ${n} 次修改`),
+        },
       ];
-      return {...state, schemaEdits: [...state.schemaEdits, action.json], log: [...state.log, ...items], panel: null};
+      return {
+        ...state,
+        schemaEdits: [...state.schemaEdits, action.json],
+        log: [...state.log, ...items],
+        panel: null,
+      };
     }
     case 'trainNow':
       return state.trainedModels.includes(action.modelId) ? state : {...state, trainedModels: [...state.trainedModels, action.modelId]};
@@ -205,7 +238,7 @@ export function choiceLabel(card: Card, choice: string): T | null {
     case 'question':
       return card.options.find(o => o.id === choice)?.label ?? null;
     case 'approval':
-      return card.approve;
+      return choice === 'command' ? {en: '/train', zh: '/train'} : card.approve;
     case 'advice':
       return ADOPT;
     case 'link':
@@ -251,6 +284,8 @@ interface StoryContextValue {
   datasets: Datasets | null;
   resolve: (cardId: string, choice: string) => void;
   say: (text: string) => void;
+  /** A message from the user and the agent's answer outside the script, such as a command it can't run yet. */
+  exchange: (user: T, agent: T) => void;
   selectModel: (id: string) => void;
   openPanel: (panel: PanelId) => void;
   closePanel: () => void;
@@ -291,6 +326,7 @@ export function StoryProvider({children}: {children: ReactNode}) {
 
   const resolve = useCallback((cardId: string, choice: string) => dispatch({type: 'resolve', cardId, choice}), []);
   const say = useCallback((text: string) => dispatch({type: 'say', text}), []);
+  const exchange = useCallback((user: T, agent: T) => dispatch({type: 'exchange', user, agent}), []);
   const selectModel = useCallback((id: string) => dispatch({type: 'selectModel', id}), []);
   const openPanel = useCallback((panel: PanelId) => dispatch({type: 'openPanel', panel}), []);
   const closePanel = useCallback(() => dispatch({type: 'closePanel'}), []);
@@ -319,6 +355,7 @@ export function StoryProvider({children}: {children: ReactNode}) {
       datasets: datasetsAt(state.cursor),
       resolve,
       say,
+      exchange,
       selectModel,
       openPanel,
       closePanel,
@@ -332,7 +369,7 @@ export function StoryProvider({children}: {children: ReactNode}) {
       isResolved,
       isPanelAvailable: panel => artifacts.some(a => a.panel === panel),
     };
-  }, [state, step.stage, awaited, artifacts, resolve, say, selectModel, openPanel, closePanel, saveLabels, savePromptDraft, rule, acceptRest, sendSchemaEdit, trainNow, restart]);
+  }, [state, step.stage, awaited, artifacts, resolve, say, exchange, selectModel, openPanel, closePanel, saveLabels, savePromptDraft, rule, acceptRest, sendSchemaEdit, trainNow, restart]);
 
   return <StoryContext.Provider value={value}>{children}</StoryContext.Provider>;
 }

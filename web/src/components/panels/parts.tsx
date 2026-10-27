@@ -1,5 +1,6 @@
 'use client';
 
+import {titleCase} from '@/i18n/titleCase';
 import type {ReactNode} from 'react';
 import {Heading} from '@astryxdesign/core/Heading';
 import {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl';
@@ -25,7 +26,7 @@ export function PanelSection({title, description, aside, children}: {title: T; d
       <VStack gap={3}>
         <VStack gap={0.5}>
           <div className="panel-section-head">
-            <Heading level={3}>{tr(title)}</Heading>
+            <Heading level={3}>{titleCase(tr(title))}</Heading>
             {aside}
           </div>
           {description && (

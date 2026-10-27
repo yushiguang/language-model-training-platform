@@ -1,5 +1,6 @@
 'use client';
 
+import {titleCase} from '@/i18n/titleCase';
 import {DropdownMenu} from '@astryxdesign/core/DropdownMenu';
 import {Icon} from '@astryxdesign/core/Icon';
 import {Layers3} from 'lucide-react';
@@ -16,14 +17,20 @@ export function ArtifactsMenu() {
 
   return (
     <DropdownMenu
-      button={{label, variant: 'secondary', size: 'sm', icon: <Icon icon={Layers3} size="sm" />, isDisabled: artifacts.length === 0}}
+      button={{
+        label,
+        variant: 'secondary',
+        size: 'sm',
+        icon: <Icon icon={Layers3} size="sm" />,
+        isDisabled: artifacts.length === 0,
+      }}
       alignment="end"
       menuWidth={340}
       menuMaxHeight={560}
       header={<div className="menu-header">{tr(t('Written by the agent for this model', '智能体为这个模型生成的内容'))}</div>}
       items={artifacts.map(a => ({
         id: a.panel,
-        label: a.version ? `${tr(a.title)} · ${a.version.toUpperCase()}` : tr(a.title),
+        label: a.version ? `${titleCase(tr(a.title))} · ${a.version.toUpperCase()}` : titleCase(tr(a.title)),
         icon: PANEL_META[a.panel].icon,
         description: `${tr(PANEL_META[a.panel].kind)} · ${tr(a.detail)}`,
         endContent: a.writes > 1 ? <span className="menu-updated">{tr(t('Updated', '已更新'))}</span> : undefined,

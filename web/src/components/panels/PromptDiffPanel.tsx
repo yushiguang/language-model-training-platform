@@ -1,5 +1,6 @@
 'use client';
 
+import {titleCase} from '@/i18n/titleCase';
 import {useState} from 'react';
 import {Badge} from '@astryxdesign/core/Badge';
 import {Button} from '@astryxdesign/core/Button';
@@ -46,10 +47,14 @@ export function PromptDiffPanel() {
     <div className="page prompt-page">
       <div className="prompt-main">
         <div className="page-toolbar">
-          <SegmentedControl label={tr(t('Prompt version', 'Prompt 版本'))} size="sm" value={shown} onChange={v => {
-            setPicked(v);
-            setDraft(null);
-          }}>
+          <SegmentedControl
+            label={tr(t('Prompt version', 'Prompt 版本'))}
+            size="sm"
+            value={shown}
+            onChange={v => {
+              setPicked(v);
+              setDraft(null);
+            }}>
             {ids.map(id => (
               <SegmentedControlItem key={id} value={id} label={id.startsWith('d') ? nameOf(id) : id} />
             ))}
@@ -57,14 +62,7 @@ export function PromptDiffPanel() {
           {shown === latest && <Badge variant="success" label={tr(t('In use', '使用中'))} />}
           {isDraft && <Badge variant="neutral" label={tr(t('Draft · not scored yet', '草稿 · 尚未评估'))} />}
           {draft === null && (
-            <Button
-              className="toolbar-end"
-              label={tr(t('Edit prompt', '编辑 Prompt'))}
-              variant="secondary"
-              size="sm"
-              icon={<Icon icon={Pencil} size="sm" />}
-              onClick={() => setDraft(text)}
-            />
+            <Button className="toolbar-end" label={tr(t('Edit prompt', '编辑 Prompt'))} variant="secondary" size="sm" icon={<Icon icon={Pencil} size="sm" />} onClick={() => setDraft(text)} />
           )}
         </div>
 
@@ -117,9 +115,14 @@ export function PromptDiffPanel() {
                 <span className="version-name">Prompt {card.to}</span>
                 <span className="version-meta">{tr(t(`from ${card.from}, on the agent’s advice`, `由 ${card.from} 按智能体建议修改`))}</span>
               </div>
-              <div className="version-title">{tr(card.title)}</div>
+              <div className="version-title">{titleCase(tr(card.title))}</div>
               <PromptDiff removed={card.removed} added={card.added} label={tr(t(`Changes from ${card.from} to ${card.to}`, `${card.from} 到 ${card.to} 的修改`))} />
-              <FactRows rows={measureRows(card.measures, card.from, card.to).map(r => ({label: tr(r.label), value: <BeforeAfter row={r} />}))} />
+              <FactRows
+                rows={measureRows(card.measures, card.from, card.to).map(r => ({
+                  label: tr(r.label),
+                  value: <BeforeAfter row={r} />,
+                }))}
+              />
             </li>
           ))}
           <li className="version">
@@ -127,7 +130,12 @@ export function PromptDiffPanel() {
               <span className="version-name">Prompt v1</span>
               <span className="version-meta">{tr(t('your team’s original prompt', '团队原有的 Prompt'))}</span>
             </div>
-            <FactRows rows={FIELDS.map(f => ({label: tr(t(`${f.name.en} macro-F1`, `${f.name.zh} macro-F1`)), value: fmt2(macroF1(PROMPT_RUNS.v1, f.id))}))} />
+            <FactRows
+              rows={FIELDS.map(f => ({
+                label: tr(t(`${f.name.en} macro-F1`, `${f.name.zh} macro-F1`)),
+                value: fmt2(macroF1(PROMPT_RUNS.v1, f.id)),
+              }))}
+            />
           </li>
         </ol>
       </PanelSection>

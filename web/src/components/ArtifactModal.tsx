@@ -1,5 +1,6 @@
 'use client';
 
+import {titleCase} from '@/i18n/titleCase';
 import {useEffect, useState} from 'react';
 import {Button} from '@astryxdesign/core/Button';
 import {Dialog} from '@astryxdesign/core/Dialog';
@@ -56,7 +57,7 @@ export function ArtifactModal() {
   if (!panel || !entry) return null;
   const meta = PANEL_META[panel];
   const Body = PANELS[panel];
-  const title = tr(entry.title);
+  const title = titleCase(tr(entry.title));
 
   return (
     <Dialog
@@ -107,12 +108,7 @@ export function ArtifactModal() {
               <Icon icon={Info} size="sm" color="secondary" />
             </span>
             <span>
-              {tr(
-                t(
-                  'Full pages come after the demo. In the product, this opens at ',
-                  '完整页面会在演示之后实现。在正式产品里，它会在这个地址打开：',
-                ),
-              )}
+              {tr(t('Full pages come after the demo. In the product, this opens at ', '完整页面会在演示之后实现。在正式产品里，它会在这个地址打开：'))}
               <code>/models/video-tags/{meta.path}</code>
             </span>
           </div>
@@ -130,7 +126,7 @@ function LabelingProgress() {
   const {tr} = useLocale();
   const {state} = useStory();
   const done = LABELING_POSTS.filter(id => state.myLabels[id]).length;
-  const label = tr(t(`${done} of ${LABELING_POSTS.length} labeled`, `已标注 ${done}/${LABELING_POSTS.length}`));
+  const label = tr(t(`${done} / ${LABELING_POSTS.length} labeled`, `已标注 ${done} / ${LABELING_POSTS.length}`));
   return (
     <div className="header-progress">
       <span className="labeling-count">{label}</span>

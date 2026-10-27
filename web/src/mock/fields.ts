@@ -27,14 +27,18 @@ export interface Field {
   range?: [number, number];
   description: T;
   values: FieldValue[];
-  /** The label a post gets when no value fits. */
-  defaultValue: string;
-  /** For fields whose prompt says to check values in a fixed order: the first that fits wins. */
-  order?: string[];
+  /** The label a post gets when no value fits; optional. */
+  defaultValue?: string;
 }
 
 /** primary_value, in matrix order (metrics.ts rows and columns follow it). */
-export const LABELS: (FieldValue & {id: LabelId; color: string; definition: T; examples: T[]; counterexamples: T[]})[] = [
+export const LABELS: (FieldValue & {
+  id: LabelId;
+  color: string;
+  definition: T;
+  examples: T[];
+  counterexamples: T[];
+})[] = [
   {
     id: 'entertainment',
     name: t('Entertainment', '娱乐'),
@@ -70,25 +74,89 @@ export const LABELS: (FieldValue & {id: LabelId; color: string; definition: T; e
 ];
 
 export const FORMATS: (FieldValue & {id: FormatId})[] = [
-  {id: 'vlog', name: t('Vlog', 'Vlog'), definition: t('The creator films their own day or experience.', '创作者拍摄自己的日常或经历。')},
-  {id: 'tutorial', name: t('Tutorial', '教程'), definition: t('Step-by-step instructions.', '分步骤的教学。')},
-  {id: 'review', name: t('Review', '测评'), definition: t('The creator tries and judges a product, place or service.', '创作者体验并评价产品、地点或服务。')},
-  {id: 'skit', name: t('Skit', '短剧'), definition: t('A scripted or acted scene.', '有剧本或表演的情景。')},
-  {id: 'clip', name: t('Clip', '片段'), definition: t('An excerpt of a show, interview, game or another creator’s video.', '节目、访谈、比赛或他人视频的片段。')},
-  {id: 'other', name: t('Other', '其他'), definition: t('None of the above.', '以上都不是。')},
+  {
+    id: 'vlog',
+    name: t('Vlog', 'Vlog'),
+    definition: t('The creator films their own day or experience.', '创作者拍摄自己的日常或经历。'),
+  },
+  {
+    id: 'tutorial',
+    name: t('Tutorial', '教程'),
+    definition: t('Step-by-step instructions.', '分步骤的教学。'),
+  },
+  {
+    id: 'review',
+    name: t('Review', '测评'),
+    definition: t('The creator tries and judges a product, place or service.', '创作者体验并评价产品、地点或服务。'),
+  },
+  {
+    id: 'skit',
+    name: t('Skit', '短剧'),
+    definition: t('A scripted or acted scene.', '有剧本或表演的情景。'),
+  },
+  {
+    id: 'clip',
+    name: t('Clip', '片段'),
+    definition: t('An excerpt of a show, interview, game or another creator’s video.', '节目、访谈、比赛或他人视频的片段。'),
+  },
+  {
+    id: 'other',
+    name: t('Other', '其他'),
+    definition: t('None of the above.', '以上都不是。'),
+  },
 ];
 
 export const TOPICS: (FieldValue & {id: TopicId})[] = [
-  {id: 'food', name: t('Food & drink', '美食饮品'), definition: t('Cooking, restaurants, snacks and drinks.', '烹饪、餐厅、零食和饮品。')},
-  {id: 'travel', name: t('Travel', '旅行'), definition: t('Trips, places to visit and getting around.', '出行、景点和交通。')},
-  {id: 'home', name: t('Home & renting', '居家租房'), definition: t('Housing, renting, decorating and chores.', '住房、租房、装修和家务。')},
-  {id: 'work', name: t('Work & money', '工作理财'), definition: t('Jobs, careers, salaries and personal finance.', '工作、职业、薪资和个人理财。')},
-  {id: 'tech', name: t('Tech', '科技'), definition: t('Gadgets, apps, software and the internet.', '数码产品、应用、软件和互联网。')},
-  {id: 'beauty', name: t('Beauty & fashion', '美妆时尚'), definition: t('Makeup, skincare, clothes and style.', '化妆、护肤、服装和穿搭。')},
-  {id: 'pets', name: t('Pets & animals', '宠物动物'), definition: t('Pets, wildlife and animal care.', '宠物、野生动物和动物养护。')},
-  {id: 'sports', name: t('Sports & fitness', '运动健身'), definition: t('Matches, athletes, workouts and outdoor activity.', '比赛、运动员、健身和户外活动。')},
-  {id: 'news', name: t('Entertainment news', '娱乐资讯'), definition: t('Celebrities, shows, films and music news.', '明星、节目、电影和音乐资讯。')},
-  {id: 'other', name: t('Other', '其他'), definition: t('None of the above.', '以上都不是。')},
+  {
+    id: 'food',
+    name: t('Food & drink', '美食饮品'),
+    definition: t('Cooking, restaurants, snacks and drinks.', '烹饪、餐厅、零食和饮品。'),
+  },
+  {
+    id: 'travel',
+    name: t('Travel', '旅行'),
+    definition: t('Trips, places to visit and getting around.', '出行、景点和交通。'),
+  },
+  {
+    id: 'home',
+    name: t('Home & renting', '居家租房'),
+    definition: t('Housing, renting, decorating and chores.', '住房、租房、装修和家务。'),
+  },
+  {
+    id: 'work',
+    name: t('Work & money', '工作理财'),
+    definition: t('Jobs, careers, salaries and personal finance.', '工作、职业、薪资和个人理财。'),
+  },
+  {
+    id: 'tech',
+    name: t('Tech', '科技'),
+    definition: t('Gadgets, apps, software and the internet.', '数码产品、应用、软件和互联网。'),
+  },
+  {
+    id: 'beauty',
+    name: t('Beauty & fashion', '美妆时尚'),
+    definition: t('Makeup, skincare, clothes and style.', '化妆、护肤、服装和穿搭。'),
+  },
+  {
+    id: 'pets',
+    name: t('Pets & animals', '宠物动物'),
+    definition: t('Pets, wildlife and animal care.', '宠物、野生动物和动物养护。'),
+  },
+  {
+    id: 'sports',
+    name: t('Sports & fitness', '运动健身'),
+    definition: t('Matches, athletes, workouts and outdoor activity.', '比赛、运动员、健身和户外活动。'),
+  },
+  {
+    id: 'news',
+    name: t('Entertainment news', '娱乐资讯'),
+    definition: t('Celebrities, shows, films and music news.', '明星、节目、电影和音乐资讯。'),
+  },
+  {
+    id: 'other',
+    name: t('Other', '其他'),
+    definition: t('None of the above.', '以上都不是。'),
+  },
 ];
 
 export const FIELDS: Field[] = [
@@ -98,8 +166,6 @@ export const FIELDS: Field[] = [
     kind: 'single',
     description: t('What the viewer mainly gets from the post.', '观众从帖子里主要获得什么。'),
     values: LABELS,
-    defaultValue: 'entertainment',
-    order: ['ecosystem', 'practical', 'discussion', 'entertainment'],
   },
   {
     id: 'format',

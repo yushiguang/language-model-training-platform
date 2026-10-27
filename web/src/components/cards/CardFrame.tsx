@@ -1,5 +1,6 @@
 'use client';
 
+import {titleCase} from '@/i18n/titleCase';
 import type {ReactNode} from 'react';
 import {Icon} from '@astryxdesign/core/Icon';
 import type {LucideIcon} from 'lucide-react';
@@ -11,6 +12,7 @@ export function CardFrame({
   title,
   children,
   isActive = false,
+  isSentence = false,
 }: {
   icon: LucideIcon;
   kind: string;
@@ -18,7 +20,10 @@ export function CardFrame({
   children?: ReactNode;
   /** Waiting on the user: gets an accent edge so it stands out in a long chat. */
   isActive?: boolean;
+  /** A question reads as a sentence, so it keeps sentence case. */
+  isSentence?: boolean;
 }) {
+  const heading = isSentence ? title : titleCase(title);
   return (
     <section className={isActive ? 'agent-card agent-card-active' : 'agent-card'} aria-label={title}>
       <div className="agent-card-kind icon-line">
@@ -27,7 +32,7 @@ export function CardFrame({
         </span>
         <span>{kind}</span>
       </div>
-      <div className="agent-card-title">{title}</div>
+      <div className="agent-card-title">{heading}</div>
       {children}
     </section>
   );

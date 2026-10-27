@@ -1,19 +1,12 @@
 'use client';
 
-import {useEffect, useRef} from 'react';
-import {
-  ChatComposer,
-  ChatLayout,
-  ChatMessage,
-  ChatMessageBubble,
-  ChatMessageList,
-  ChatSystemMessage,
-  ChatToolCalls,
-} from '@astryxdesign/core/Chat';
+import {useEffect, useRef, useState} from 'react';
+import {ChatComposer, ChatLayout, ChatMessage, ChatMessageBubble, ChatMessageList, ChatSystemMessage, ChatToolCalls} from '@astryxdesign/core/Chat';
 import {Markdown} from '@astryxdesign/core/Markdown';
 import {AgentMark} from '@/components/AgentMark';
 import {ArtifactCard} from '@/components/ArtifactCard';
 import {AgentCard} from '@/components/cards/AgentCard';
+import {isTrainCommand, TrainWarning, TRAIN_COMMAND, useTraining} from '@/components/training';
 import {useLocale} from '@/i18n/LocaleProvider';
 import {t} from '@/i18n/text';
 import {CARDS, choiceLabel, useStory} from '@/story/StoryProvider';
@@ -57,7 +50,12 @@ function ItemView({item, isReadOnly}: {item: Item; isReadOnly: boolean}) {
         <ChatMessage sender="assistant">
           {item.tools && (
             <ChatToolCalls
-              calls={item.tools.map(tool => ({name: tool.name, target: tr(tool.target), duration: tool.duration, status: 'complete'}))}
+              calls={item.tools.map(tool => ({
+                name: tool.name,
+                target: tr(tool.target),
+                duration: tool.duration,
+                status: 'complete',
+              }))}
             />
           )}
           <ChatMessageBubble variant="ghost" width="100%" className="agent-bubble">
@@ -94,10 +92,29 @@ function ItemView({item, isReadOnly}: {item: Item; isReadOnly: boolean}) {
 
 export function Conversation({model}: {model: ModelSummary}) {
   const {tr} = useLocale();
-  const {state, say} = useStory();
+  const story = useStory();
+  const {state, say} = story;
   const layoutRef = useRef<HTMLDivElement>(null);
   const isReadOnly = !model.isScripted;
   const isTrained = state.trainedModels.includes(model.id);
+  const training = useTraining(model, model.isScripted ? story.datasets : (model.datasets ?? null));
+  const [isWarningOpen, setIsWarningOpen] = useState(false);
+  // Read-only histories still take /train when the model is waiting for it.
+  const isComposerOn = model.isScripted || (model.acceptsTrain === true && !isTrained);
+
+  const submit = (text: string) => {
+    if (!isTrainCommand(text)) {
+      if (model.isScripted) say(text);
+      return;
+    }
+    if (training.offReason) {
+      // Only the scripted conversation keeps a log of its own; elsewhere the composer is off once training can't start.
+      story.exchange({en: text, zh: text}, t(`I can’t start training yet. ${training.offReason.en}`, `现在还不能开始训练。${training.offReason.zh}`));
+      return;
+    }
+    if (training.missing.length > 0) setIsWarningOpen(true);
+    else training.start(true);
+  };
   const items = model.isScripted ? state.log : [...(model.items ?? []), ...(isTrained ? (model.afterTrain ?? []) : [])];
   const isAgentWorking = model.isScripted && state.pending.length > 0;
 
@@ -117,11 +134,15 @@ export function Conversation({model}: {model: ModelSummary}) {
       composer={
         <ChatComposer
           onSubmit={value => {
-            if (value.trim()) say(value.trim());
+            if (value.trim()) submit(value.trim());
           }}
-          isDisabled={isReadOnly}
+          isDisabled={!isComposerOn}
           placeholder={tr(
-            isReadOnly ? t('This model’s history is read-only in the demo', '演示中该模型的记录为只读') : t('Message the agent…', '给智能体发消息…'),
+            !isComposerOn
+              ? t('This model’s history is read-only in the demo', '演示中该模型的记录为只读')
+              : isReadOnly
+                ? t(`Type ${TRAIN_COMMAND} to start training`, `输入 ${TRAIN_COMMAND} 开始训练`)
+                : t(`Message the agent, or type ${TRAIN_COMMAND}`, `给智能体发消息，或输入 ${TRAIN_COMMAND}`),
           )}
         />
       }>
@@ -138,6 +159,16 @@ export function Conversation({model}: {model: ModelSummary}) {
           </AgentMessage>
         )}
       </ChatMessageList>
+      {isWarningOpen && (
+        <TrainWarning
+          missing={training.missing}
+          onCancel={() => setIsWarningOpen(false)}
+          onConfirm={() => {
+            setIsWarningOpen(false);
+            training.start(true);
+          }}
+        />
+      )}
     </ChatLayout>
   );
 }

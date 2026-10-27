@@ -1,5 +1,6 @@
 'use client';
 
+import {titleCase} from '@/i18n/titleCase';
 import {Icon} from '@astryxdesign/core/Icon';
 import {ArrowUpRight, FilePen, FilePlus2} from 'lucide-react';
 import {PANEL_META} from '@/components/panels/panelMeta';
@@ -23,7 +24,7 @@ export function ArtifactCard({item}: {item: Extract<Item, {kind: 'artifact'}>}) 
   const {openPanel} = useStory();
   const meta = PANEL_META[item.panel];
   const action = ACTION[item.action];
-  const title = tr(item.title);
+  const title = titleCase(tr(item.title));
 
   return (
     <button

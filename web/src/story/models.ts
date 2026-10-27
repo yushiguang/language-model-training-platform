@@ -15,11 +15,15 @@ export interface ModelSummary {
   items?: Item[];
   /** Fixed dataset status for models that aren't scripted. */
   datasets?: Datasets;
-  /** Why Train is off for a model that isn't scripted; absent means the user can train it now. */
+  /** Why training can't start for a model that isn't scripted; absent means the user can train it now. */
   trainOffReason?: T;
+  /** One line of status per workflow step, by step index, for models that aren't scripted. */
+  stepNotes?: Partial<Record<number, T>>;
+  /** A model that isn't scripted but takes /train in its chat. */
+  acceptsTrain?: boolean;
   /** Workflow steps this model went without, such as gold labels on the fast path. */
   skippedStages?: number[];
-  /** What the agent posts once the user starts training from the header. */
+  /** What the agent posts once the user starts training with /train. */
   afterTrain?: Item[];
 }
 
@@ -39,7 +43,12 @@ export const MODELS: ModelSummary[] = [
     task: t('Flag scam ads in Brazil, today', '今天就要拦截巴西的诈骗广告'),
     status: 'waiting',
     stage: 5,
+    acceptsTrain: true,
     skippedStages: [2, 3],
+    stepNotes: {
+      0: t('V1 · 1 label field: scam or not scam', 'V1 · 1 个标签字段：诈骗/非诈骗'),
+      4: t('3,200 rows from your uploaded CSV', '来自你上传 CSV 的 3,200 行'),
+    },
     datasets: {
       train: {total: 3_200, labeled: 3_200, source: UPLOADED},
       eval: {total: 0, labeled: 0},
@@ -56,21 +65,40 @@ export const MODELS: ModelSummary[] = [
       {
         kind: 'agent',
         tools: [
-          {name: 'read_csv', target: t('scam-ads-br.csv · 3,200 rows', 'scam-ads-br.csv · 3,200 行'), duration: '0.6s'},
-          {name: 'validate_labels', target: t('schema v1 · 1 field', 'Schema v1 · 1 个字段'), duration: '1s'},
+          {
+            name: 'read_csv',
+            target: t('scam-ads-br.csv · 3,200 rows', 'scam-ads-br.csv · 3,200 行'),
+            duration: '0.6s',
+          },
+          {
+            name: 'validate_labels',
+            target: t('schema v1 · 1 field', 'Schema v1 · 1 个字段'),
+            duration: '1s',
+          },
         ],
         text: t(
-          'Your file matches the schema: 3,200 rows, 18% scam. I put every row in the training set, so there is no eval or test set yet.\n\nYou can press **Train model** in the header now, but I don’t recommend it: without eval and test I can’t tell you how often the model is wrong, and the release gate can’t run. **Next, I recommend** that I sample 300 recent ads for eval and test. Two reviewers can label them in about 30 minutes, and training can run at the same time.',
-          '文件符合 Schema：3,200 行，18% 为诈骗。我把所有行都放进了训练集，所以还没有评估集和测试集。\n\n你现在就可以点页头的**训练模型**，但我不建议：没有评估集和测试集，我无法告诉你模型错得有多频繁，发布门禁也无法运行。**下一步，我建议**我从近期广告里抽 300 条作为评估集和测试集，两位审核员大约 30 分钟能标完，训练可以同时进行。',
+          'Your file matches the schema: 3,200 rows, 18% scam. I put every row in the training set, so there is no eval or test set yet.\n\nYou can start training now with `/train`, but I don’t recommend it: without eval and test I can’t tell you how often the model is wrong, and the release gate can’t run. **Next, I recommend** that I sample 300 recent ads for eval and test. Two reviewers can label them in about 30 minutes, and training can run at the same time.',
+          '文件符合 Schema：3,200 行，18% 为诈骗。我把所有行都放进了训练集，所以还没有评估集和测试集。\n\n你现在就可以输入 `/train` 开始训练，但我不建议：没有评估集和测试集，我无法告诉你模型错得有多频繁，发布门禁也无法运行。**下一步，我建议**我从近期广告里抽 300 条作为评估集和测试集，两位审核员大约 30 分钟能标完，训练可以同时进行。',
         ),
       },
     ],
     afterTrain: [
-      {kind: 'user', text: t('Train model without eval and test', '在没有评估集和测试集的情况下训练模型')},
-      {kind: 'system', text: t('Training started without an eval or test set', '已在没有评估集和测试集的情况下开始训练')},
+      {kind: 'user', text: t('/train', '/train')},
+      {
+        kind: 'system',
+        text: t('Training started without an eval or test set', '已在没有评估集和测试集的情况下开始训练'),
+      },
       {
         kind: 'card',
-        card: {type: 'progress', id: 'scam-train', title: t('Training student 1B · 3,200 rows', '训练学生模型 1B · 3,200 行'), total: 3_200, unit: t('rows', '行'), durationMs: 0, frozenAt: 0.08},
+        card: {
+          type: 'progress',
+          id: 'scam-train',
+          title: t('Training student 1B · 3,200 rows', '训练学生模型 1B · 3,200 行'),
+          total: 3_200,
+          unit: t('rows', '行'),
+          durationMs: 0,
+          frozenAt: 0.08,
+        },
       },
       {
         kind: 'agent',
@@ -88,11 +116,21 @@ export const MODELS: ModelSummary[] = [
     status: 'running',
     stage: 4,
     datasets: {
-      train: {total: 120_000, labeled: 73_200, source: t('Teacher, prompt v4 (running)', '教师模型，Prompt v4（进行中）')},
+      train: {
+        total: 120_000,
+        labeled: 73_200,
+        source: t('Teacher, prompt v4 (running)', '教师模型，Prompt v4（进行中）'),
+      },
       eval: {total: 800, labeled: 800, source: HUMAN},
       test: {total: 500, labeled: 500, source: HUMAN},
     },
     trainOffReason: t('The teacher is still labeling the training set.', '教师模型还在标注训练集。'),
+    stepNotes: {
+      0: t('V2 · 1 label field, 3 values', 'V2 · 1 个标签字段，3 个取值'),
+      2: t('1,300 posts with human gold labels', '1,300 条人工金标'),
+      3: t('Prompt v4 in use · macro-F1 0.82 · gate passed', '使用 Prompt v4 · macro-F1 0.82 · 已过门禁'),
+      4: t('Teacher labeling: 73,200 of 120,000 pages', '教师标注中：73,200 / 120,000 个页面'),
+    },
     items: [
       {
         kind: 'user',
@@ -126,13 +164,28 @@ export const MODELS: ModelSummary[] = [
     status: 'idle',
     stage: 7,
     datasets: {
-      train: {total: 60_000, labeled: 60_000, source: t('Teacher, prompt v2', '教师模型，Prompt v2')},
+      train: {
+        total: 60_000,
+        labeled: 60_000,
+        source: t('Teacher, prompt v2', '教师模型，Prompt v2'),
+      },
       eval: {total: 600, labeled: 600, source: HUMAN},
       test: {total: 400, labeled: 400, source: HUMAN},
     },
     trainOffReason: t('Released two weeks ago. Retraining isn’t part of this demo.', '两周前已发布。重新训练不在本演示范围内。'),
+    stepNotes: {
+      0: t('V1 · 1 label field, 3 values', 'V1 · 1 个标签字段，3 个取值'),
+      2: t('1,000 comments with human gold labels', '1,000 条人工金标'),
+      3: t('Prompt v2 · macro-F1 0.86', 'Prompt v2 · macro-F1 0.86'),
+      4: t('60,000 rows · teacher, prompt v2', '60,000 行 · 教师模型，Prompt v2'),
+      5: t('Student 3B · macro-F1 0.81 on test', '学生模型 3B · 测试集 macro-F1 0.81'),
+      6: t('V2 released two weeks ago', 'V2 已于两周前发布'),
+    },
     items: [
-      {kind: 'system', text: t('Comment toxicity v2 released 2 weeks ago', '评论毒性 v2 已于两周前发布')},
+      {
+        kind: 'system',
+        text: t('Comment toxicity v2 released 2 weeks ago', '评论毒性 v2 已于两周前发布'),
+      },
       {
         kind: 'agent',
         text: t(
@@ -147,7 +200,10 @@ export const MODELS: ModelSummary[] = [
           id: 'tox-weekly',
           title: t('Weekly health check', '每周健康检查'),
           stats: [
-            {label: t('Macro-F1 on fresh labels', '新标注样本 macro-F1'), value: '0.81'},
+            {
+              label: t('Macro-F1 on fresh labels', '新标注样本 macro-F1'),
+              value: '0.81',
+            },
             {label: t('Label drift', '标签分布漂移'), value: t('none', '无')},
             {label: t('Hard cases harvested', '收集到的难例'), value: '38'},
           ],

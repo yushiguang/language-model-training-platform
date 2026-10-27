@@ -85,7 +85,7 @@ export function AgentCard({card, isReadOnly = false}: {card: Card; isReadOnly?: 
       const post = card.postId ? POST_BY_ID[card.postId] : null;
       const recommended = card.options.find(o => o.id === card.recommended)!;
       return (
-        <CardFrame icon={CircleHelp} kind={tr(t('Question for you', '需要你决定'))} title={tr(card.title)} isActive={isActive}>
+        <CardFrame icon={CircleHelp} kind={tr(t('Question for you', '需要你决定'))} title={tr(card.title)} isActive={isActive} isSentence>
           {card.body && <p className="agent-card-body">{tr(card.body)}</p>}
           {post && (
             <div className="card-inset">
@@ -98,13 +98,7 @@ export function AgentCard({card, isReadOnly = false}: {card: Card; isReadOnly?: 
             <>
               <div className="card-actions">
                 {card.options.map(o => (
-                  <Button
-                    key={o.id}
-                    label={tr(o.label)}
-                    variant={o.id === card.recommended ? 'primary' : 'secondary'}
-                    isDisabled={!isActive}
-                    onClick={() => story.resolve(card.id, o.id)}
-                  />
+                  <Button key={o.id} label={tr(o.label)} variant={o.id === card.recommended ? 'primary' : 'secondary'} isDisabled={!isActive} onClick={() => story.resolve(card.id, o.id)} />
                 ))}
               </div>
               <IconLine className="card-hint" icon={<Icon icon={Sparkles} size="sm" color="inherit" />}>
@@ -119,14 +113,17 @@ export function AgentCard({card, isReadOnly = false}: {card: Card; isReadOnly?: 
     case 'approval':
       return (
         <CardFrame icon={ClipboardCheck} kind={tr(t('Approval needed', '需要你批准'))} title={tr(card.title)} isActive={isActive}>
-          {card.rows && <FactRows rows={card.rows.map(r => ({label: tr(r.label), value: value(r.value)}))} />}
+          {card.rows && (
+            <FactRows
+              rows={card.rows.map(r => ({
+                label: tr(r.label),
+                value: value(r.value),
+              }))}
+            />
+          )}
           {card.checks && <CheckList checks={card.checks} />}
           <div className="card-actions">
-            {isResolved ? (
-              <ResolvedNote card={card} />
-            ) : (
-              !isReadOnly && <Button label={tr(card.approve)} variant="primary" isDisabled={!isActive} onClick={() => story.resolve(card.id, 'approve')} />
-            )}
+            {isResolved ? <ResolvedNote card={card} /> : !isReadOnly && <Button label={tr(card.approve)} variant="primary" isDisabled={!isActive} onClick={() => story.resolve(card.id, 'approve')} />}
             {card.panel && <OpenPanelButton panel={card.panel} />}
           </div>
         </CardFrame>
@@ -161,7 +158,12 @@ export function AgentCard({card, isReadOnly = false}: {card: Card; isReadOnly?: 
           <PromptDiff removed={card.removed} added={card.added} label={tr(t('Proposed prompt change', '建议的 Prompt 修改'))} />
           <div className="measured">
             <div className="measured-title">{tr(t('Measured on the 600-post eval split before proposing', '提出前已在 600 条评估集上实测'))}</div>
-            <FactRows rows={measureRows(card.measures, card.from, card.to).map(r => ({label: tr(r.label), value: <BeforeAfter row={r} />}))} />
+            <FactRows
+              rows={measureRows(card.measures, card.from, card.to).map(r => ({
+                label: tr(r.label),
+                value: <BeforeAfter row={r} />,
+              }))}
+            />
           </div>
           <div className="card-actions">
             {isResolved ? (
@@ -185,13 +187,7 @@ export function AgentCard({card, isReadOnly = false}: {card: Card; isReadOnly?: 
               </>
             ) : (
               <>
-                <Button
-                  label={tr(card.cta)}
-                  variant="primary"
-                  icon={<Icon icon={PANEL_META[card.panel].icon} size="sm" />}
-                  isDisabled={!isActive}
-                  onClick={() => story.openPanel(card.panel)}
-                />
+                <Button label={tr(card.cta)} variant="primary" icon={<Icon icon={PANEL_META[card.panel].icon} size="sm" />} isDisabled={!isActive} onClick={() => story.openPanel(card.panel)} />
                 <Button label={tr(card.skip)} variant="ghost" isDisabled={!isActive} onClick={() => story.resolve(card.id, 'skip')} />
               </>
             )}
@@ -297,7 +293,10 @@ function SettingsCard({card, isActive}: {card: Extract<Card, {type: 'settings'}>
                       label={tr(f.label)}
                       value={String(values[f.id])}
                       onChange={v => set(f.id, v)}
-                      options={f.options.map(o => ({value: o.id, label: tr(o.label)}))}
+                      options={f.options.map(o => ({
+                        value: o.id,
+                        label: tr(o.label),
+                      }))}
                       isDisabled={!isActive}
                     />
                   );

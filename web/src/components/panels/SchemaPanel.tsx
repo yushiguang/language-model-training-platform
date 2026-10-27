@@ -13,68 +13,64 @@ import {HelpTip} from '@/components/HelpTip';
 import {useLocale} from '@/i18n/LocaleProvider';
 import {t, type T} from '@/i18n/text';
 import {FIELDS, RULES, valueOf, type Field} from '@/mock/fields';
-import {schemaJson, type Schema} from '@/mock/schema';
+import {defaultIn, outputSchema, withDefault, type Defaults, type OutputSchema} from '@/mock/schema';
+import {titleCase} from '@/i18n/titleCase';
 import {useStory} from '@/story/StoryProvider';
 
-const TYPE_HELP = {
-  single: t('Single-select: each post gets exactly one value.', '单选：每条帖子只取一个值。'),
-  multi: t('Multi-select: each post gets one or more values, within the limits shown.', '多选：每条帖子取一个或多个值，数量在所示范围内。'),
-};
+const NO_DEFAULT = '';
 
-function parse(json: string): Schema | null {
+function parse(json: string): OutputSchema | null {
   try {
-    const value = JSON.parse(json) as Schema;
-    return Array.isArray(value.label_fields) ? value : null;
+    const value = JSON.parse(json) as OutputSchema;
+    return value && typeof value.properties === 'object' ? value : null;
   } catch {
     return null;
   }
 }
+
+const TEACHER_ONLY = [
+  {
+    id: 'summary',
+    description: t('What happens in the video, in one sentence', '一句话说明视频内容'),
+  },
+  {
+    id: 'reasoning',
+    description: t('Why each field has its value, in two to four sentences', '用两到四句话说明每个字段为什么这样标'),
+  },
+];
 
 /** A section heading with its explanation behind a circled question mark. */
 function TermHeading({title, help}: {title: T; help: T}) {
   const {tr} = useLocale();
   return (
     <div className="term-heading">
-      <h3>{tr(title)}</h3>
+      <h3>{titleCase(tr(title))}</h3>
       <HelpTip text={tr(help)} label={tr(title)} />
     </div>
   );
 }
 
 /** One label field. Every field, single- or multi-select, is laid out the same way. */
-function FieldSection({field, defaultId, onDefaultChange}: {field: Field; defaultId: string; onDefaultChange: (id: string) => void}) {
+function FieldSection({field, defaultId, onDefaultChange}: {field: Field; defaultId?: string; onDefaultChange: (id: string | undefined) => void}) {
   const {tr} = useLocale();
   const type = field.kind === 'single' ? t('Single-select', '单选') : t(`Multi-select · ${field.range![0]} to ${field.range![1]}`, `多选 · ${field.range![0]} 到 ${field.range![1]} 个`);
   return (
     <section className="schema-field">
       <div className="schema-field-head">
-        <h3>{tr(field.name)}</h3>
+        <h3>{titleCase(tr(field.name))}</h3>
         <code>{field.id}</code>
-        <span className="schema-type">
-          <Badge label={tr(type)} variant="neutral" />
-          <HelpTip text={tr(TYPE_HELP[field.kind])} label={tr(type)} />
-        </span>
+        <Badge label={tr(type)} variant="neutral" />
       </div>
       <p className="page-text">{tr(field.description)}</p>
-      <div className="schema-field-meta">
-        <div className="schema-default">
-          <Selector
-            label={tr(t('Default label', '默认标签'))}
-            size="sm"
-            value={defaultId}
-            onChange={onDefaultChange}
-            options={field.values.map(v => ({value: v.id, label: tr(v.name)}))}
-            width={200}
-          />
-          <HelpTip text={tr(t('The label a post gets when none of the values fits.', '当所有取值都不符合时，帖子得到的标签。'))} label={tr(t('Default label', '默认标签'))} />
-        </div>
-        {field.order && (
-          <div className="schema-order">
-            <span className="setting-label">{tr(t('Check order', '判断顺序'))}</span>
-            <span className="schema-order-list">{field.order.map(id => tr(valueOf(field.id, id).name)).join(' → ')}</span>
-            <HelpTip text={tr(t('Values are checked in this order, and the first that fits wins.', '按这个顺序逐个判断，取第一个符合的。'))} label={tr(t('Check order', '判断顺序'))} />
-          </div>
-        )}
+      <div className="schema-default">
+        <Selector
+          label={tr(t('Default label', '默认标签'))}
+          size="sm"
+          value={defaultId ?? NO_DEFAULT}
+          onChange={v => onDefaultChange(v === NO_DEFAULT ? undefined : v)}
+          options={[{value: NO_DEFAULT, label: tr(t('No default', '不设默认'))}, ...field.values.map(v => ({value: v.id, label: tr(v.name)}))]}
+          width={200}
+        />
       </div>
       <div className="table-scroll">
         <table className="data-table value-table">
@@ -124,23 +120,16 @@ export function SchemaPanel() {
   const isConfirmed = story.isResolved('a-schema');
   const repost = story.state.choices['q-repost'];
   const sent = story.state.schemaEdits;
-  const baseline = sent.length ? sent[sent.length - 1] : JSON.stringify(schemaJson(repost), null, 2);
+  const initialDefaults = Object.fromEntries(FIELDS.filter(f => f.defaultValue).map(f => [f.id, f.defaultValue])) as Defaults;
+  const baseline = sent.length ? sent[sent.length - 1] : JSON.stringify(outputSchema(initialDefaults), null, 2);
   const [view, setView] = useState<'form' | 'json'>('form');
   const [json, setJson] = useState(baseline);
   const schema = parse(json);
   const isDirty = json !== baseline;
 
-  const defaultOf = (field: Field) => {
-    const name = schema?.label_fields.find(f => f.name === field.id)?.default;
-    return field.values.find(v => v.name.en === name)?.id ?? field.defaultValue;
-  };
-  const setDefault = (field: Field, id: string) => {
-    if (!schema) return;
-    const next: Schema = {
-      ...schema,
-      label_fields: schema.label_fields.map(f => (f.name === field.id ? {...f, default: valueOf(field.id, id).name.en} : f)),
-    };
-    setJson(JSON.stringify(next, null, 2));
+  const defaultOf = (field: Field) => (schema ? defaultIn(schema, field) : field.defaultValue);
+  const setDefault = (field: Field, id: string | undefined) => {
+    if (schema) setJson(JSON.stringify(withDefault(schema, field, id), null, 2));
   };
 
   return (
@@ -169,12 +158,20 @@ export function SchemaPanel() {
       {view === 'json' ? (
         <div className="prompt-edit">
           <TextArea
-            label={tr(t('Schema as JSON', 'Schema 的 JSON'))}
+            label={tr(t('Teacher output schema (JSON)', '教师输出 Schema（JSON）'))}
             isLabelHidden
             value={json}
             onChange={setJson}
             rows={30}
-            status={schema ? undefined : {type: 'error', message: tr(t('This isn’t valid schema JSON yet.', '这还不是有效的 Schema JSON。'))}}
+            description={tr(t('The JSON Schema used to parse and validate the teacher’s output.', '用于解析和校验教师输出的 JSON Schema。'))}
+            status={
+              schema
+                ? undefined
+                : {
+                    type: 'error',
+                    message: tr(t('This isn’t valid JSON Schema yet.', '这还不是有效的 JSON Schema。')),
+                  }
+            }
           />
         </div>
       ) : (
@@ -194,7 +191,10 @@ export function SchemaPanel() {
 
           {repost && (
             <section className="schema-section">
-              <TermHeading title={t('Your rulings', '你的裁决')} help={t('Edge cases you decided in the chat. They become examples in the prompt.', '你在对话里决定的边界情况，会写进 Prompt 的示例。')} />
+              <TermHeading
+                title={t('Your rulings', '你的裁决')}
+                help={t('Edge cases you decided in the chat. They become examples in the prompt.', '你在对话里决定的边界情况，会写进 Prompt 的示例。')}
+              />
               <FactRows
                 rows={[
                   {
@@ -211,12 +211,28 @@ export function SchemaPanel() {
               title={t('Teacher-only fields', '仅教师模型字段')}
               help={t('The teacher writes these to reason better. The student only learns the label fields.', '教师模型写这些字段来帮助推理，学生模型只学标签字段。')}
             />
-            <FactRows
-              rows={[
-                {label: 'summary', value: tr(t('What happens in the video, in one sentence', '一句话说明视频内容'))},
-                {label: 'reasoning', value: tr(t('Why each field has its value, in two to four sentences', '用两到四句话说明每个字段为什么这样标'))},
-              ]}
-            />
+            <div className="table-scroll">
+              <table className="data-table value-table">
+                <thead>
+                  <tr>
+                    <th scope="col">{tr(t('Field', '字段'))}</th>
+                    <th scope="col">{tr(t('Type', '类型'))}</th>
+                    <th scope="col">{tr(t('Description', '说明'))}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {TEACHER_ONLY.map(f => (
+                    <tr key={f.id}>
+                      <th scope="row">
+                        <code>{f.id}</code>
+                      </th>
+                      <td>{tr(t('Text', '文本'))}</td>
+                      <td>{tr(f.description)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </section>
         </>
       )}

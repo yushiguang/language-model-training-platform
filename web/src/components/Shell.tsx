@@ -18,6 +18,9 @@ import type {Locale} from '@/i18n/messages';
 import {RELEASED_STAGE} from '@/story/videoTags';
 import {MODELS, type ModelStatus} from '@/story/models';
 import {useStory} from '@/story/StoryProvider';
+import {TrainingJobs} from '@/components/TrainingJobs';
+import {WorkflowPanel} from '@/components/WorkflowPanel';
+import {titleCase} from '@/i18n/titleCase';
 
 /** Top bar plus the models list. Each model is a conversation with the agent, like a project. */
 export function Shell({children}: {children: React.ReactNode}) {
@@ -32,6 +35,7 @@ export function Shell({children}: {children: React.ReactNode}) {
     return {status, stage: model.stage ?? 0};
   };
   const waitingCount = MODELS.filter(m => modelState(m.id).status === 'waiting').length;
+  const selected = MODELS.find(m => m.id === story.state.selectedModel) ?? MODELS[0];
 
   const topNav = (
     <TopNav
@@ -48,22 +52,8 @@ export function Shell({children}: {children: React.ReactNode}) {
       }
       endContent={
         <HStack gap={2} align="center">
-          <Button
-            className="only-wide"
-            label={t('nav.restart')}
-            variant="ghost"
-            size="sm"
-            icon={<Icon icon={RotateCcw} size="sm" />}
-            onClick={story.restart}
-          />
-          <IconButton
-            className="only-narrow"
-            label={t('nav.restart')}
-            variant="ghost"
-            size="sm"
-            icon={<Icon icon={RotateCcw} size="sm" />}
-            onClick={story.restart}
-          />
+          <Button className="only-wide" label={t('nav.restart')} variant="ghost" size="sm" icon={<Icon icon={RotateCcw} size="sm" />} onClick={story.restart} />
+          <IconButton className="only-narrow" label={t('nav.restart')} variant="ghost" size="sm" icon={<Icon icon={RotateCcw} size="sm" />} onClick={story.restart} />
           <SegmentedControl label={t('lang.label')} size="sm" value={locale} onChange={v => setLocale(v as Locale)}>
             <SegmentedControlItem value="en" label="EN" />
             <SegmentedControlItem value="zh-CN" label="中文" />
@@ -81,7 +71,7 @@ export function Shell({children}: {children: React.ReactNode}) {
           return (
             <SideNavItem
               key={model.id}
-              label={tr(model.name)}
+              label={titleCase(tr(model.name))}
               icon={Boxes}
               isSelected={story.state.selectedModel === model.id}
               onClick={() => story.selectModel(model.id)}
@@ -89,7 +79,19 @@ export function Shell({children}: {children: React.ReactNode}) {
             />
           );
         })}
-        <SideNavItem label={t('nav.newModel')} isDisabled endContent={<Text type="supporting" color="secondary">{t('nav.newModelHint')}</Text>} />
+        <SideNavItem
+          label={t('nav.newModel')}
+          isDisabled
+          endContent={
+            <Text type="supporting" color="secondary">
+              {t('nav.newModelHint')}
+            </Text>
+          }
+        />
+        <TrainingJobs />
+      </SideNavSection>
+      <SideNavSection title={`${titleCase(tr(selected.name))} · ${tr({en: 'Workflow', zh: '流程'})}`}>
+        <WorkflowPanel key={selected.id} model={selected} />
       </SideNavSection>
     </SideNav>
   );
