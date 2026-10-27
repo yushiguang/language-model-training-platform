@@ -11,10 +11,11 @@ import {SideNav, SideNavItem, SideNavSection} from '@astryxdesign/core/SideNav';
 import {Text} from '@astryxdesign/core/Text';
 import {TopNav} from '@astryxdesign/core/TopNav';
 import {Boxes, RotateCcw} from 'lucide-react';
+import {AgentMark} from '@/components/AgentMark';
 import {ModelStatusDot} from '@/components/ModelStatus';
 import {useLocale} from '@/i18n/LocaleProvider';
 import type {Locale} from '@/i18n/messages';
-import {RELEASED_STAGE} from '@/story/contentValue';
+import {RELEASED_STAGE} from '@/story/videoTags';
 import {MODELS, type ModelStatus} from '@/story/models';
 import {useStory} from '@/story/StoryProvider';
 
@@ -33,9 +34,12 @@ export function Shell({children}: {children: React.ReactNode}) {
     <TopNav
       heading={
         <HStack gap={2} align="center">
-          <Text weight="bold">{t('app.title')}</Text>
+          <span className="brand">
+            <AgentMark size={14} />
+            <span className="brand-name">{t('app.title')}</span>
+          </span>
           <span className="only-wide">
-            <Badge label={t('app.demoBanner')} variant="info" />
+            <Badge label={t('app.demoBanner')} variant="neutral" />
           </span>
         </HStack>
       }
@@ -67,7 +71,7 @@ export function Shell({children}: {children: React.ReactNode}) {
   );
 
   const sideNav = (
-    <SideNav>
+    <SideNav className="side-nav">
       <SideNavSection title={waitingCount > 0 ? `${t('nav.models')} · ${waitingCount} ${t('nav.waiting')}` : t('nav.models')}>
         {MODELS.map(model => {
           const {status, stage} = modelState(model.id);

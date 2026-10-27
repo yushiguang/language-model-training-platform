@@ -1,6 +1,5 @@
 'use client';
 
-import {VStack} from '@astryxdesign/core/Layout';
 import {Text} from '@astryxdesign/core/Text';
 import {BarRows} from '@/components/charts/BarRows';
 import {useLocale} from '@/i18n/LocaleProvider';
@@ -17,7 +16,7 @@ export function EfficiencyPanel() {
   const hours = (h: number) => tr(t(`${h} h`, `${h} 小时`));
 
   return (
-    <VStack gap={6}>
+    <div className="page">
       <div className="compare">
         <div className="compare-col">
           <Text type="supporting" color="secondary" weight="medium">
@@ -80,6 +79,6 @@ export function EfficiencyPanel() {
           </table>
         </div>
       </PanelSection>
-    </VStack>
+    </div>
   );
 }

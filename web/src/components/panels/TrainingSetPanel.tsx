@@ -1,11 +1,10 @@
 'use client';
 
-import {VStack} from '@astryxdesign/core/Layout';
 import {BarRows} from '@/components/charts/BarRows';
-import {LabelChip} from '@/components/LabelChip';
+import {ValueList} from '@/components/ValueChip';
 import {useLocale} from '@/i18n/LocaleProvider';
 import {t} from '@/i18n/text';
-import {LABELS} from '@/mock/labels';
+import {FIELDS, LABELS} from '@/mock/fields';
 import {LABEL_MIX, TRAINING_SET} from '@/mock/metrics';
 import {POSTS} from '@/mock/posts';
 import {PanelSection, StatGrid, pct, useNumber} from './parts';
@@ -26,7 +25,7 @@ export function TrainingSetPanel() {
   ];
 
   return (
-    <VStack gap={6}>
+    <div className="page">
       <StatGrid
         stats={[
           {label: tr(t('Training rows', '训练数据行数')), value: num(ts.finalRows)},
@@ -36,7 +35,8 @@ export function TrainingSetPanel() {
         ]}
       />
       <PanelSection title={t('From teacher outputs to training rows', '从教师输出到训练数据')}>
-        <table className="data-table numeric funnel">
+        <div className="table-scroll funnel-wrap">
+        <table className="data-table numeric">
           <tbody>
             {funnel.map(row => (
               <tr key={row.label.en}>
@@ -50,10 +50,11 @@ export function TrainingSetPanel() {
             </tr>
           </tbody>
         </table>
+        </div>
       </PanelSection>
       <PanelSection
-        title={t('Label mix, before and after balancing', '平衡前后的标签分布')}
-        description={t('Entertainment is capped so the student sees enough of the rarer labels; Ecosystem is raised to a minimum share.', '限制娱乐消费的占比，让学生模型看到足够多的少数标签；生态问题提到最低占比。')}>
+        title={t('Primary value mix, before and after balancing', '平衡前后的主要价值分布')}
+        description={t('Entertainment is capped so the student sees enough of the rarer values; Ecosystem issue is raised to a minimum share.', '限制娱乐的占比，让学生模型看到足够多的少数类别；生态问题提到最低占比。')}>
         <BarRows
           series={[
             {name: tr(t('Sampled pool (teacher pre-scan)', '抽样池（教师预扫）')), color: POOL_COLOR},
@@ -62,16 +63,22 @@ export function TrainingSetPanel() {
           rows={LABELS.map(l => ({label: tr(l.name), values: [LABEL_MIX.pool[l.id], LABEL_MIX.trainingSet[l.id]]}))}
           max={0.6}
           format={v => pct(v)}
-          caption={tr(t('Share of each label in the sampled pool and in the training set', '各标签在抽样池和训练集中的占比'))}
+          caption={tr(t('Share of each primary value in the sampled pool and in the training set', '各主要价值在抽样池和训练集中的占比'))}
         />
       </PanelSection>
-      <PanelSection title={t('Sample rows', '数据样例')} description={t('What the student learns from: the post’s text fields and the teacher’s label.', '学生模型学习的内容：帖子的文本字段和教师模型的标签。')}>
+      <PanelSection
+        title={t('Sample rows', '数据样例')}
+        description={t('What the student learns from: the post’s text fields and the teacher’s three label fields. Summary and reasoning are left out.', '学生模型学习的内容：帖子的文本字段和教师模型的三个标签字段，不包含 summary 和 reasoning。')}>
         <div className="table-scroll">
           <table className="data-table">
             <thead>
               <tr>
                 <th scope="col">{tr(t('Post', '帖子'))}</th>
-                <th scope="col">{tr(t('Label', '标签'))}</th>
+                {FIELDS.map(f => (
+                  <th key={f.id} scope="col">
+                    {tr(f.name)}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -80,15 +87,17 @@ export function TrainingSetPanel() {
                   <td dir="auto" lang={p.lang} className="cell-title">
                     {p.title}
                   </td>
-                  <td>
-                    <LabelChip id={p.teacher} />
-                  </td>
+                  {FIELDS.map(f => (
+                    <td key={f.id}>
+                      <ValueList field={f.id} ids={p.teacher[f.id]} />
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </PanelSection>
-    </VStack>
+    </div>
   );
 }

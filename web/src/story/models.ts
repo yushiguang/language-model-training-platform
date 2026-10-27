@@ -17,9 +17,9 @@ export interface ModelSummary {
 
 export const MODELS: ModelSummary[] = [
   {
-    id: 'content-value',
-    name: t('Content value', '内容价值'),
-    task: t('What value a post gives its viewers', '帖子给观众带来的主要价值'),
+    id: 'video-tags',
+    name: t('Video tags', '视频标签'),
+    task: t('Primary value, format and topics of a short video', '短视频的主要价值、形式和话题'),
     isScripted: true,
   },
   {

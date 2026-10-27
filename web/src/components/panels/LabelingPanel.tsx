@@ -2,68 +2,120 @@
 
 import {useState} from 'react';
 import {Button} from '@astryxdesign/core/Button';
+import {CheckboxList, CheckboxListItem} from '@astryxdesign/core/CheckboxList';
 import {Icon} from '@astryxdesign/core/Icon';
-import {HStack, VStack} from '@astryxdesign/core/Layout';
 import {ProgressBar} from '@astryxdesign/core/ProgressBar';
 import {RadioList, RadioListItem} from '@astryxdesign/core/RadioList';
-import {Text} from '@astryxdesign/core/Text';
-import {CircleCheck, Eye} from 'lucide-react';
-import {LabelChip} from '@/components/LabelChip';
+import {CircleCheck, Eye, EyeOff} from 'lucide-react';
+import {IconLine} from '@/components/cards/CardFrame';
+import {PostLabels, sameAnswer} from '@/components/PostLabels';
 import {PostPreview} from '@/components/PostPreview';
+import {ValueChip, ValueList} from '@/components/ValueChip';
 import {useLocale} from '@/i18n/LocaleProvider';
 import {t} from '@/i18n/text';
-import {LABELS, type LabelId} from '@/mock/labels';
-import {LABELING_POSTS, POST_BY_ID} from '@/mock/posts';
+import {FIELD_BY_ID, FIELDS, type FieldId, type FormatId, type LabelId, type TopicId} from '@/mock/fields';
+import {LABELING_POSTS, POST_BY_ID, type Labels, type Post} from '@/mock/posts';
 import {useStory} from '@/story/StoryProvider';
-import {PanelSection} from './parts';
+import {PanelSection, fieldKind} from './parts';
 
-/** The user's labeling share: blind by default, one post at a time, then handed back to the agent. */
+const MAX_TOPICS = FIELD_BY_ID.topics.range![1];
+
+/** Everything the teacher wrote for the post: the label fields and its teacher-only summary and reasoning. */
+function TeacherAnswer({post}: {post: Post}) {
+  const {tr} = useLocale();
+  const out = post.teacher;
+  return (
+    <div className="teacher-answer">
+      <div className="teacher-answer-title">{tr(t('Teacher’s output (prompt v1)', '教师模型的输出（Prompt v1）'))}</div>
+      <dl className="post-labels">
+        <div className="post-labels-row">
+          <dt>summary</dt>
+          <dd>{tr(out.summary)}</dd>
+        </div>
+        <div className="post-labels-row">
+          <dt>reasoning</dt>
+          <dd>{tr(out.reasoning)}</dd>
+        </div>
+        {FIELDS.map(f => (
+          <div key={f.id} className="post-labels-row">
+            <dt>{f.id}</dt>
+            <dd>
+              <ValueList field={f.id} ids={out[f.id]} />
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
+}
+
+/** The user's labeling share: blind by default, one post at a time, three fields each, then handed back to the agent. */
 export function LabelingPanel() {
   const {tr} = useLocale();
   const story = useStory();
-  const [index, setIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, LabelId>>({});
-  const [draft, setDraft] = useState<LabelId | ''>('');
+  const [primary, setPrimary] = useState<LabelId | ''>('');
+  const [format, setFormat] = useState<FormatId | ''>('');
+  const [topics, setTopics] = useState<TopicId[]>([]);
   const [isRevealed, setIsRevealed] = useState(false);
 
   const choice = story.state.choices['l-label'];
   const isAwaited = story.awaitedCardId === 'l-label';
   const posts = LABELING_POSTS.map(id => POST_BY_ID[id]);
-  const isFinished = index >= posts.length;
+  const mine = story.state.myLabels;
+  const index = posts.findIndex(p => !mine[p.id]);
 
-  if (choice && Object.keys(answers).length === 0) {
+  if (choice && index !== -1) {
     return (
-      <VStack gap={4}>
-        <HStack gap={2} align="center">
-          <Icon icon={CircleCheck} size="md" color="success" />
-          <Text weight="semibold">
-            {tr(choice === 'skip' ? t('You skipped your share. Mei and Ravi covered it.', '你跳过了这部分，Mei 和 Ravi 已补上。') : t('Your 5 labels are in.', '你的 5 条标注已提交。'))}
-          </Text>
-        </HStack>
+      <div className="page">
+        <IconLine className="page-status" icon={<Icon icon={CircleCheck} size="md" color="success" />}>
+          {tr(t('You skipped your share. Mei and Ravi covered it.', '你跳过了这部分，Mei 和 Ravi 已补上。'))}
+        </IconLine>
         <PanelSection title={t('Your posts and their gold labels', '你的帖子及其金标')}>
-          <AnswerTable rows={posts.map(p => ({postId: p.id, title: p.title, lang: p.lang, label: p.gold}))} heading={t('Gold label', '金标')} />
+          <div className="answer-list">
+            {posts.map(p => (
+              <div key={p.id} className="answer-row">
+                <div className="answer-title" dir="auto" lang={p.lang}>
+                  {p.title}
+                </div>
+                <PostLabels labels={p.gold} />
+              </div>
+            ))}
+          </div>
         </PanelSection>
-      </VStack>
+      </div>
     );
   }
 
-  if (isFinished) {
-    const matches = posts.filter(p => answers[p.id] === p.teacher).length;
+  if (index === -1) {
+    const matches = (f: FieldId) => posts.filter(p => sameAnswer(mine[p.id][f], p.teacher[f])).length;
     return (
-      <VStack gap={4}>
-        <HStack gap={2} align="center">
-          <Icon icon={CircleCheck} size="md" color="success" />
-          <Text weight="semibold">{tr(t('All 5 posts labeled', '5 条帖子已全部标注'))}</Text>
-        </HStack>
-        <Text color="secondary">
-          {tr(t(`The teacher agreed with you on ${matches} of 5. Disagreements go to adjudication, not to the teacher’s side.`, `教师模型和你一致的有 ${matches} 条。不一致的会进入裁决，不会默认采用教师的答案。`))}
-        </Text>
-        <AnswerTable rows={posts.map(p => ({postId: p.id, title: p.title, lang: p.lang, label: answers[p.id], teacher: p.teacher}))} heading={t('Your label', '你的标注')} />
-        <div>
+      <div className="page">
+        <IconLine className="page-status" icon={<Icon icon={CircleCheck} size="md" color="success" />}>
+          {tr(t('All 5 posts labeled', '5 条帖子已全部标注'))}
+        </IconLine>
+        <p className="page-text">
+          {tr(
+            t(
+              `The teacher agreed with you on primary value for ${matches('primary_value')} of 5, format for ${matches('format')} and topics for ${matches('topics')}. Where you and the other labeler disagree, it goes to the disagreements page, not to the teacher’s side.`,
+              `教师模型与你一致的：主要价值 ${matches('primary_value')}/5、形式 ${matches('format')}/5、话题 ${matches('topics')}/5。你和另一位标注员不一致的会进入分歧裁决，不会默认采用教师的答案。`,
+            ),
+          )}
+        </p>
+        <div className="answer-list">
+          {posts.map(p => (
+            <div key={p.id} className="answer-row">
+              <div className="answer-title" dir="auto" lang={p.lang}>
+                {p.title}
+              </div>
+              <PostLabels labels={mine[p.id]} compareTo={p.teacher} differsNote={tr(t('teacher differs', '教师不同'))} />
+            </div>
+          ))}
+        </div>
+        <div className="card-actions">
           {choice ? (
-            <Text type="supporting" color="secondary">
-              {tr(t('Sent to the agent.', '已交给智能体。'))}
-            </Text>
+            <IconLine className="resolved-note" icon={<Icon icon={CircleCheck} size="sm" color="success" />}>
+              {tr(t('Sent to the agent', '已交给智能体'))}
+            </IconLine>
           ) : (
             <Button
               label={tr(t('Send to the agent', '提交给智能体'))}
@@ -76,83 +128,79 @@ export function LabelingPanel() {
             />
           )}
         </div>
-      </VStack>
+      </div>
     );
   }
 
   const post = posts[index];
+  const isComplete = primary !== '' && format !== '' && topics.length > 0;
   const save = () => {
-    if (!draft) return;
-    setAnswers(a => ({...a, [post.id]: draft}));
-    setDraft('');
+    if (!isComplete) return;
+    story.saveLabels(post.id, {primary_value: primary, format, topics} satisfies Labels);
+    setPrimary('');
+    setFormat('');
+    setTopics([]);
     setIsRevealed(false);
-    setIndex(i => i + 1);
   };
+  const [primaryField, formatField, topicsField] = FIELDS;
 
   return (
-    <VStack gap={4}>
-      <VStack gap={1}>
-        <Text type="supporting" color="secondary" hasTabularNumbers>
-          {tr(t(`Post ${index + 1} of ${posts.length}`, `第 ${index + 1} / ${posts.length} 条`))}
-        </Text>
+    <div className="page">
+      <div className="labeling-progress">
+        <span className="labeling-count">{tr(t(`Post ${index + 1} of ${posts.length}`, `第 ${index + 1} / ${posts.length} 条`))}</span>
         <ProgressBar label={tr(t('Labeling progress', '标注进度'))} isLabelHidden value={(index / posts.length) * 100} />
-      </VStack>
+      </div>
       <div className="labeling">
-        <div className="card-inset">
-          <PostPreview post={post} />
-        </div>
-        <VStack gap={3}>
-          <RadioList label={tr(t('Main value for viewers', '对观众的主要价值'))} value={draft} onChange={v => setDraft(v as LabelId)}>
-            {LABELS.map(label => (
-              <RadioListItem key={label.id} value={label.id} label={<LabelChip id={label.id} />} description={tr(label.definition)} />
-            ))}
-          </RadioList>
+        <div className="labeling-post">
+          <div className="card-inset">
+            <PostPreview post={post} />
+          </div>
           {isRevealed ? (
-            <Text type="supporting" color="secondary">
-              {tr(t('Teacher’s answer: ', '教师模型的答案：'))}
-              <LabelChip id={post.teacher} />
-            </Text>
+            <>
+              <TeacherAnswer post={post} />
+              <div>
+                <Button label={tr(t('Hide the teacher’s output', '隐藏教师模型的输出'))} variant="ghost" size="sm" icon={<Icon icon={EyeOff} size="sm" />} onClick={() => setIsRevealed(false)} />
+              </div>
+            </>
           ) : (
-            <div>
-              <Button label={tr(t('Reveal the teacher’s answer', '查看教师模型的答案'))} variant="ghost" size="sm" icon={<Icon icon={Eye} size="sm" />} onClick={() => setIsRevealed(true)} />
+            <div className="reveal">
+              <Button label={tr(t('Reveal the teacher’s output', '查看教师模型的输出'))} variant="secondary" size="sm" icon={<Icon icon={Eye} size="sm" />} onClick={() => setIsRevealed(true)} />
+              <span className="reveal-hint">{tr(t('Labeling is blind; look only if you’re stuck.', '标注是盲标的，卡住时再看。'))}</span>
             </div>
           )}
-          <div>
-            <Button label={tr(index === posts.length - 1 ? t('Save and finish', '保存并完成') : t('Save and next', '保存，下一条'))} variant="primary" isDisabled={!draft} onClick={save} />
+        </div>
+        <div className="labeling-form">
+          <RadioList label={`${tr(primaryField.name)} · ${tr(fieldKind(primaryField))}`} value={primary} onChange={v => setPrimary(v as LabelId)}>
+            {primaryField.values.map(v => (
+              <RadioListItem key={v.id} value={v.id} label={<ValueChip field="primary_value" id={v.id} />} description={v.definition && tr(v.definition)} />
+            ))}
+          </RadioList>
+          <RadioList label={`${tr(formatField.name)} · ${tr(fieldKind(formatField))}`} value={format} onChange={v => setFormat(v as FormatId)}>
+            {formatField.values.map(v => (
+              <RadioListItem key={v.id} value={v.id} label={tr(v.name)} description={v.definition && tr(v.definition)} />
+            ))}
+          </RadioList>
+          <div className="topic-list">
+          <CheckboxList
+            label={`${tr(topicsField.name)} · ${tr(fieldKind(topicsField))}`}
+            value={topics}
+            onChange={v => setTopics((v as TopicId[]).slice(0, MAX_TOPICS))}>
+            {topicsField.values.map(v => (
+              <CheckboxListItem key={v.id} value={v.id} label={tr(v.name)} isDisabled={topics.length >= MAX_TOPICS && !topics.includes(v.id as TopicId)} />
+            ))}
+          </CheckboxList>
           </div>
-        </VStack>
+          <div className="card-actions">
+            <Button
+              label={tr(index === posts.length - 1 ? t('Save and finish', '保存并完成') : t('Save and next', '保存，下一条'))}
+              variant="primary"
+              isDisabled={!isComplete}
+              onClick={save}
+            />
+            {!isComplete && <span className="reveal-hint">{tr(t('Answer all three fields to save.', '三个字段都填完才能保存。'))}</span>}
+          </div>
+        </div>
       </div>
-    </VStack>
-  );
-}
-
-function AnswerTable({rows, heading}: {rows: {postId: string; title: string; lang: string; label: LabelId; teacher?: LabelId}[]; heading: {en: string; zh: string}}) {
-  const {tr} = useLocale();
-  const hasTeacher = rows.some(r => r.teacher);
-  return (
-    <div className="table-scroll">
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th scope="col">{tr(t('Post', '帖子'))}</th>
-            <th scope="col">{tr(heading)}</th>
-            {hasTeacher && <th scope="col">{tr(t('Teacher', '教师模型'))}</th>}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(r => (
-            <tr key={r.postId}>
-              <td dir="auto" lang={r.lang} className="cell-title">
-                {r.title}
-              </td>
-              <td>
-                <LabelChip id={r.label} />
-              </td>
-              {hasTeacher && <td>{r.teacher && <LabelChip id={r.teacher} />}</td>}
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   );
 }

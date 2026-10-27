@@ -1,9 +1,12 @@
 import type {T} from '@/i18n/text';
+import type {FieldId} from '@/mock/fields';
 
+/** Every page the agent can create or update. Each opens in the modal over the chat. */
 export type PanelId =
   | 'schema'
   | 'samples'
   | 'labeling'
+  | 'adjudication'
   | 'evalReport'
   | 'promptDiff'
   | 'trainingSet'
@@ -27,7 +30,7 @@ export interface Check {
   pass: boolean;
 }
 
-/** Cards the agent posts in the chat. Every card that waits for Lin resolves to a choice id. */
+/** Cards the agent posts in the chat. Every card that waits for the user resolves to a choice id. */
 export type Card =
   | {
       type: 'question';
@@ -35,7 +38,6 @@ export type Card =
       title: T;
       body?: T;
       postId?: string;
-      showVotes?: boolean;
       options: Option[];
       recommended: string;
       reason: T;
@@ -76,6 +78,8 @@ export type Card =
       added: string[];
       from: 'v1' | 'v2';
       to: 'v2' | 'v3';
+      /** What the agent measured on the eval split before proposing the change. */
+      measures: Measure[];
     }
   | {
       type: 'link';
@@ -85,7 +89,14 @@ export type Card =
       panel: PanelId;
       cta: T;
       skip: T;
+      /** How the user's answer reads in the chat once the task is done. */
+      doneLabel: T;
     };
+
+export type Measure =
+  | {kind: 'macro'; field: FieldId}
+  | {kind: 'value'; field: FieldId; value: string}
+  | {kind: 'invalid'};
 
 export interface ToolCall {
   name: string;
@@ -98,9 +109,11 @@ export type Item =
   | {kind: 'agent'; text: T; tools?: ToolCall[]}
   | {kind: 'system'; text: T}
   | {kind: 'card'; card: Card}
-  /** Lin's answer to a card, echoed as a user message. */
+  /** A write the agent made: a page it created or updated, shown as an artifact card. */
+  | {kind: 'artifact'; panel: PanelId; action: 'created' | 'updated'; title: T; detail: T}
+  /** The user's answer to a card, echoed as a user message. */
   | {kind: 'choice'; cardId: string}
-  /** The agent's reply, which depends on the answer Lin picked. */
+  /** The agent's reply, which depends on the answer the user picked. */
   | {kind: 'reply'; cardId: string; replies: Record<string, T>};
 
 export interface Step {

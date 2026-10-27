@@ -1,17 +1,17 @@
-import {BarChart3, ChartLine, Database, FileText, Gauge, GitCompare, Layers, ShieldCheck, Tags, type LucideIcon} from 'lucide-react';
+import {BarChart3, ChartLine, Database, FileText, Gauge, GitCompare, Layers, Scale, ShieldCheck, Tags, type LucideIcon} from 'lucide-react';
 import {t, type T} from '@/i18n/text';
 import type {PanelId} from '@/story/types';
 
-export const PANEL_META: Record<PanelId, {title: T; icon: LucideIcon; lockedHint: T}> = {
-  schema: {title: t('Schema', 'Schema'), icon: FileText, lockedHint: t('', '')},
-  samples: {title: t('Samples', '样本'), icon: Database, lockedHint: t('Available once the schema is confirmed.', '确认 Schema 后可用。')},
-  labeling: {title: t('Labeling', '标注'), icon: Tags, lockedHint: t('Available once the sampling plan is approved.', '批准抽样方案后可用。')},
-  evalReport: {title: t('Eval report', '评估报告'), icon: BarChart3, lockedHint: t('Available after the first teacher run.', '教师模型首次运行后可用。')},
-  promptDiff: {title: t('Prompt versions', 'Prompt 版本'), icon: GitCompare, lockedHint: t('Available after you adopt a prompt change.', '采纳 Prompt 修改后可用。')},
-  trainingSet: {title: t('Training set', '训练集'), icon: Layers, lockedHint: t('Available once the teacher batch job finishes.', '教师批量任务完成后可用。')},
-  runs: {title: t('Training runs', '训练记录'), icon: ChartLine, lockedHint: t('Available once training finishes.', '训练完成后可用。')},
-  gate: {title: t('Release gate', '发布门禁'), icon: ShieldCheck, lockedHint: t('Available once a run goes to the release gate.', '选定版本进入发布门禁后可用。')},
-  efficiency: {title: t('Efficiency', '效率对比'), icon: Gauge, lockedHint: t('Available once the model is released.', '模型发布后可用。')},
+/** What kind of artifact each page is, shown beside its title, and its icon. */
+export const PANEL_META: Record<PanelId, {kind: T; icon: LucideIcon; path: string}> = {
+  schema: {kind: t('Schema', 'Schema'), icon: FileText, path: 'schema'},
+  samples: {kind: t('Dataset', '数据集'), icon: Database, path: 'datasets/ds-1'},
+  labeling: {kind: t('Labeling task', '标注任务'), icon: Tags, path: 'labeling'},
+  adjudication: {kind: t('Disagreements', '分歧裁决'), icon: Scale, path: 'labeling/disagreements'},
+  evalReport: {kind: t('Eval report', '评估报告'), icon: BarChart3, path: 'evals'},
+  promptDiff: {kind: t('Prompt versions', 'Prompt 版本'), icon: GitCompare, path: 'prompts'},
+  trainingSet: {kind: t('Training set', '训练集'), icon: Layers, path: 'training-sets/ts-1'},
+  runs: {kind: t('Training runs', '训练记录'), icon: ChartLine, path: 'runs'},
+  gate: {kind: t('Release gate', '发布门禁'), icon: ShieldCheck, path: 'release'},
+  efficiency: {kind: t('Report', '报告'), icon: Gauge, path: 'report'},
 };
-
-export const PANEL_ORDER: PanelId[] = ['schema', 'samples', 'labeling', 'evalReport', 'promptDiff', 'trainingSet', 'runs', 'gate', 'efficiency'];

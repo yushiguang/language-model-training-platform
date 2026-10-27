@@ -23,7 +23,11 @@ const result = await build({
 const js = result.outputFiles.find(f => f.path.endsWith('.js')).text.replaceAll('</script', '<\\/script');
 const css = result.outputFiles.find(f => f.path.endsWith('.css')).text.replaceAll('</style', '<\\/style');
 
+// Serif titles; the page falls back to system serifs if Google Fonts is unreachable.
+const fonts = 'https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap';
+
 const html = `<title>Language Model Training Platform</title>
+<link rel="stylesheet" href="${fonts}">
 <style>${css}</style>
 <div id="root"></div>
 <script>${js}</script>

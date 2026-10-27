@@ -1,10 +1,7 @@
 'use client';
 
 import type {ReactNode} from 'react';
-import {Card} from '@astryxdesign/core/Card';
 import {Icon} from '@astryxdesign/core/Icon';
-import {HStack, VStack} from '@astryxdesign/core/Layout';
-import {Text} from '@astryxdesign/core/Text';
 import type {LucideIcon} from 'lucide-react';
 
 /** The shared shell of every agent card: a kind line with an icon, a title, then the body. */
@@ -23,22 +20,16 @@ export function CardFrame({
   isActive?: boolean;
 }) {
   return (
-    <Card padding={4} maxWidth={560} className={isActive ? 'agent-card agent-card-active' : 'agent-card'}>
-      <VStack gap={3}>
-        <VStack gap={1}>
-          <HStack gap={1.5} align="center">
-            <Icon icon={icon} size="sm" color="secondary" />
-            <Text type="supporting" color="secondary" weight="medium">
-              {kind}
-            </Text>
-          </HStack>
-          <Text type="large" weight="semibold">
-            {title}
-          </Text>
-        </VStack>
-        {children}
-      </VStack>
-    </Card>
+    <section className={isActive ? 'agent-card agent-card-active' : 'agent-card'} aria-label={title}>
+      <div className="agent-card-kind icon-line">
+        <span className="icon-slot">
+          <Icon icon={icon} size="sm" color="inherit" />
+        </span>
+        <span>{kind}</span>
+      </div>
+      <div className="agent-card-title">{title}</div>
+      {children}
+    </section>
   );
 }
 
@@ -53,5 +44,15 @@ export function FactRows({rows}: {rows: {label: string; value: ReactNode}[]}) {
         </div>
       ))}
     </dl>
+  );
+}
+
+/** An icon that sits on the first line of the text beside it, however the text wraps. */
+export function IconLine({icon, children, className}: {icon: ReactNode; children: ReactNode; className?: string}) {
+  return (
+    <div className={className ? `icon-line ${className}` : 'icon-line'}>
+      <span className="icon-slot">{icon}</span>
+      <span>{children}</span>
+    </div>
   );
 }
