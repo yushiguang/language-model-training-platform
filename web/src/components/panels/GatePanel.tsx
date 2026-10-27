@@ -22,7 +22,7 @@ export function GatePanel() {
     ...FIELDS.map(f => {
       const v = macroF1(student, f.id);
       const min = RELEASE_GATE.macroF1[f.id];
-      return {label: t(`${f.name.en} macro-F1 ≥ ${fmt2(min)}`, `${f.name.zh}宏平均 F1 ≥ ${fmt2(min)}`), value: fmt2(v), pass: v >= min};
+      return {label: t(`${f.name.en} macro-F1 ≥ ${fmt2(min)}`, `${f.name.zh} macro-F1 ≥ ${fmt2(min)}`), value: fmt2(v), pass: v >= min};
     }),
     {
       label: t(`Every primary value F1 ≥ ${fmt2(RELEASE_GATE.labelF1)}`, `每个主要价值 F1 ≥ ${fmt2(RELEASE_GATE.labelF1)}`),
@@ -52,7 +52,7 @@ export function GatePanel() {
         description={t('Thresholds for a first model are a starting point; you can change them per model.', '首个模型的阈值只是起点，每个模型都可以调整。')}>
         <CheckList checks={checks} />
       </PanelSection>
-      <PanelSection title={t('Macro-F1 per field on the test split', '测试集上各字段的宏平均 F1')}>
+      <PanelSection title={t('Macro-F1 per field on the test split', '测试集上各字段的 macro-F1')}>
         <BarRows
           series={[
             {name: tr(t('Student 8B', '学生模型 8B')), color: STUDENT_COLOR},
@@ -61,7 +61,7 @@ export function GatePanel() {
           rows={FIELDS.map(f => ({label: tr(f.name), values: [macroF1(student, f.id), macroF1(teacher, f.id)]}))}
           max={1}
           format={fmt2}
-          caption={tr(t('Student and teacher macro-F1 per field on the sealed test split', '封存测试集上学生模型与教师模型各字段的宏平均 F1'))}
+          caption={tr(t('Student and teacher macro-F1 per field on the sealed test split', '封存测试集上学生模型与教师模型各字段的 macro-F1'))}
         />
       </PanelSection>
       <PanelSection title={t('Primary value, per value', '主要价值的各取值')}>

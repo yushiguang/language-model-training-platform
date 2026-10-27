@@ -3,7 +3,7 @@ import './globals.css';
 import {Providers} from './providers';
 import {Shell} from '@/components/Shell';
 
-const FONTS = 'https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap';
+const FONTS = 'https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600;700&display=swap';
 
 export const metadata: Metadata = {title: 'Language Model Training Platform'};
 

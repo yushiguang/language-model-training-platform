@@ -5,6 +5,7 @@ import {Button} from '@astryxdesign/core/Button';
 import {Icon} from '@astryxdesign/core/Icon';
 import {ProgressBar} from '@astryxdesign/core/ProgressBar';
 import {CircleCheck, CircleHelp, CircleX, ClipboardCheck, Lightbulb, ListChecks, Loader, Sparkles} from 'lucide-react';
+import {BeforeAfter} from '@/components/Change';
 import {measureRows} from '@/components/measures';
 import {PostPreview} from '@/components/PostPreview';
 import {PANEL_META} from '@/components/panels/panelMeta';
@@ -156,7 +157,7 @@ export function AgentCard({card, isReadOnly = false}: {card: Card; isReadOnly?: 
           <PromptDiff removed={card.removed} added={card.added} label={tr(t('Proposed prompt change', '建议的 Prompt 修改'))} />
           <div className="measured">
             <div className="measured-title">{tr(t('Measured on the 600-post eval split before proposing', '提出前已在 600 条评估集上实测'))}</div>
-            <FactRows rows={measureRows(card.measures, card.from, card.to).map(r => ({label: tr(r.label), value: r.value}))} />
+            <FactRows rows={measureRows(card.measures, card.from, card.to).map(r => ({label: tr(r.label), value: <BeforeAfter row={r} />}))} />
           </div>
           <div className="card-actions">
             {isResolved ? (

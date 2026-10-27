@@ -29,7 +29,7 @@ export function TrainingSetPanel() {
       <StatGrid
         stats={[
           {label: tr(t('Training rows', '训练数据行数')), value: num(ts.finalRows)},
-          {label: tr(t('Pilot agreement with gold', '试点与金标一致率')), value: pct(ts.pilotAgreement), note: tr(t(`${ts.pilotSize} posts`, `${ts.pilotSize} 条`))},
+          {label: tr(t('Pilot agreement with gold', 'Pilot agreement（与金标）')), value: pct(ts.pilotAgreement), note: tr(t(`${ts.pilotSize} posts`, `${ts.pilotSize} 条`))},
           {label: tr(t('Teacher cost', '教师模型费用')), value: `$${ts.costUsd}`, note: tr(t('batch mode', '批量模式'))},
           {label: tr(t('Prompt', 'Prompt')), value: 'v3'},
         ]}

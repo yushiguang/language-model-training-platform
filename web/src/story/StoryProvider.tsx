@@ -22,6 +22,8 @@ interface State {
   panel: PanelId | null;
   /** The user's own labels, kept here so closing the modal doesn't lose them. */
   myLabels: Record<string, Labels>;
+  /** Prompt edits the user saved on the prompt page; none of them is scored or adopted in the demo. */
+  promptDrafts: string[];
   /** The user's decision on each sample disagreement shown on the page. */
   rulings: Record<string, string[]>;
   /** The user accepted the agent's suggestion for every disagreement they didn't decide. */
@@ -36,6 +38,7 @@ type Action =
   | {type: 'openPanel'; panel: PanelId}
   | {type: 'closePanel'}
   | {type: 'saveLabels'; postId: string; labels: Labels}
+  | {type: 'savePromptDraft'; text: string}
   | {type: 'rule'; conflictId: string; values: string[]}
   | {type: 'acceptRest'}
   | {type: 'restart'};
@@ -50,6 +53,7 @@ function initialState(): State {
     selectedModel: MODELS[0].id,
     panel: null,
     myLabels: {},
+    promptDrafts: [],
     rulings: {},
     hasAcceptedRest: false,
   };
@@ -102,6 +106,8 @@ function reducer(state: State, action: Action): State {
       return {...state, panel: action.panel};
     case 'closePanel':
       return {...state, panel: null};
+    case 'savePromptDraft':
+      return {...state, promptDrafts: [...state.promptDrafts, action.text]};
     case 'saveLabels':
       return {...state, myLabels: {...state.myLabels, [action.postId]: action.labels}};
     case 'rule':
@@ -189,6 +195,7 @@ interface StoryContextValue {
   openPanel: (panel: PanelId) => void;
   closePanel: () => void;
   saveLabels: (postId: string, labels: Labels) => void;
+  savePromptDraft: (text: string) => void;
   rule: (conflictId: string, values: string[]) => void;
   acceptRest: () => void;
   restart: () => void;
@@ -225,6 +232,7 @@ export function StoryProvider({children}: {children: ReactNode}) {
   const selectModel = useCallback((id: string) => dispatch({type: 'selectModel', id}), []);
   const openPanel = useCallback((panel: PanelId) => dispatch({type: 'openPanel', panel}), []);
   const closePanel = useCallback(() => dispatch({type: 'closePanel'}), []);
+  const savePromptDraft = useCallback((text: string) => dispatch({type: 'savePromptDraft', text}), []);
   const saveLabels = useCallback((postId: string, labels: Labels) => dispatch({type: 'saveLabels', postId, labels}), []);
   const rule = useCallback((conflictId: string, values: string[]) => dispatch({type: 'rule', conflictId, values}), []);
   const acceptRest = useCallback(() => dispatch({type: 'acceptRest'}), []);
@@ -250,13 +258,14 @@ export function StoryProvider({children}: {children: ReactNode}) {
       openPanel,
       closePanel,
       saveLabels,
+      savePromptDraft,
       rule,
       acceptRest,
       restart,
       isResolved,
       isPanelAvailable: panel => artifacts.some(a => a.panel === panel),
     };
-  }, [state, step.stage, awaited, artifacts, resolve, say, selectModel, openPanel, closePanel, saveLabels, rule, acceptRest, restart]);
+  }, [state, step.stage, awaited, artifacts, resolve, say, selectModel, openPanel, closePanel, saveLabels, savePromptDraft, rule, acceptRest, restart]);
 
   return <StoryContext.Provider value={value}>{children}</StoryContext.Provider>;
 }

@@ -37,7 +37,7 @@ export const MODELS: ModelSummary[] = [
         kind: 'agent',
         text: t(
           'Prompt v4 passed the teacher-quality gate at macro-F1 0.82. The teacher is now labeling **120,000 landing pages** in batch mode. I’ll tell you when the training set is ready.',
-          'Prompt v4 以宏平均 F1 0.82 通过了教师质量门禁。教师模型正在以批量模式标注 **120,000 个落地页**，训练集准备好后我会通知你。',
+          'Prompt v4 以 macro-F1 0.82 通过了教师质量门禁。教师模型正在以批量模式标注 **120,000 个落地页**，训练集准备好后我会通知你。',
         ),
       },
       {
@@ -66,7 +66,7 @@ export const MODELS: ModelSummary[] = [
         kind: 'agent',
         text: t(
           'Weekly check: the label mix on live traffic hasn’t drifted, and 200 freshly labeled comments score macro-F1 0.81, the same as at release. Nothing needs your attention.',
-          '每周检查：线上流量的标签分布没有漂移，新标注的 200 条评论宏平均 F1 为 0.81，与发布时持平。暂时不需要你处理。',
+          '每周检查：线上流量的标签分布没有漂移，新标注的 200 条评论 macro-F1 为 0.81，与发布时持平。暂时不需要你处理。',
         ),
       },
       {
@@ -76,7 +76,7 @@ export const MODELS: ModelSummary[] = [
           id: 'tox-weekly',
           title: t('Weekly health check', '每周健康检查'),
           stats: [
-            {label: t('Macro-F1 on fresh labels', '新标注样本宏平均 F1'), value: '0.81'},
+            {label: t('Macro-F1 on fresh labels', '新标注样本 macro-F1'), value: '0.81'},
             {label: t('Label drift', '标签分布漂移'), value: t('none', '无')},
             {label: t('Hard cases harvested', '收集到的难例'), value: '38'},
           ],

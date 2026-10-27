@@ -3,7 +3,9 @@
 import {useState} from 'react';
 import {Badge} from '@astryxdesign/core/Badge';
 import {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl';
+import {Delta} from '@/components/Change';
 import {ConfusionMatrix} from '@/components/charts/ConfusionMatrix';
+import {trendOf} from '@/components/trend';
 import {ValueChip} from '@/components/ValueChip';
 import {useLocale} from '@/i18n/LocaleProvider';
 import {t} from '@/i18n/text';
@@ -18,11 +20,6 @@ const VERSIONS: {id: Version; unlockedBy: string}[] = [
   {id: 'v2', unlockedBy: 'adv-1'},
   {id: 'v3', unlockedBy: 'adv-2'},
 ];
-
-function signed(v: number): string {
-  const r = Math.round(v * 100) / 100;
-  return r > 0 ? `+${r.toFixed(2)}` : r < 0 ? `−${(-r).toFixed(2)}` : '±0.00';
-}
 
 export function passesTeacherGate(run: EvalRun): boolean {
   return (
@@ -75,11 +72,11 @@ export function EvalReportPanel() {
       <StatGrid
         stats={[
           ...FIELDS.map(f => ({
-            label: tr(t(`${f.name.en} macro-F1`, `${f.name.zh}宏平均 F1`)),
+            label: tr(t(`${f.name.en} macro-F1`, `${f.name.zh} macro-F1`)),
             value: fmt2(macroF1(run, f.id)),
             note: tr(t(`gate ≥ ${fmt2(gate[f.id])}`, `门禁 ≥ ${fmt2(gate[f.id])}`)),
           })),
-          {label: tr(t('Invalid outputs', '无效输出')), value: pct(invalidRate(run), 1), note: tr(t('gate ≤ 1%', '门禁 ≤ 1%'))},
+          {label: tr(t('Invalid outputs', 'Invalid outputs')), value: pct(invalidRate(run), 1), note: tr(t('gate ≤ 1%', '门禁 ≤ 1%'))},
         ]}
       />
 
@@ -90,7 +87,7 @@ export function EvalReportPanel() {
             ? t(`${total(run)} eval posts with human labels. Change is against prompt ${prevId}.`, `评估集 ${total(run)} 条人工标注。变化相对于 Prompt ${prevId}。`)
             : t(
                 `${total(run)} eval posts with human labels. Precision: of the posts the teacher gave a value, how many were right. Recall: of the posts that have it, how many it found.`,
-                `评估集 ${total(run)} 条人工标注。精确率：教师给出该取值的帖子里，有多少是对的。召回率：真正属于该取值的帖子里，找到了多少。`,
+                `评估集 ${total(run)} 条人工标注。Precision：教师给出该取值的帖子里，有多少是对的。Recall：真正属于该取值的帖子里，找到了多少。`,
               )
         }
         aside={<FieldSwitch value={field} onChange={setField} />}>
@@ -99,8 +96,8 @@ export function EvalReportPanel() {
             <thead>
               <tr>
                 <th scope="col">{tr(meta.name)}</th>
-                <th scope="col">{tr(t('Precision', '精确率'))}</th>
-                <th scope="col">{tr(t('Recall', '召回率'))}</th>
+                <th scope="col">{tr(t('Precision', 'Precision'))}</th>
+                <th scope="col">{tr(t('Recall', 'Recall'))}</th>
                 <th scope="col">F1</th>
                 {prev && <th scope="col">{tr(t('Change', '变化'))}</th>}
                 <th scope="col">{tr(t('Posts', '帖子数'))}</th>
@@ -118,7 +115,11 @@ export function EvalReportPanel() {
                     {fmt2(r.f1)}
                     {field === 'primary_value' && r.f1 < TEACHER_GATE.labelF1 && <span className="cell-flag"> · {tr(t('below 0.60', '低于 0.60'))}</span>}
                   </td>
-                  {prev && <td>{signed(r.f1 - prev[i].f1)}</td>}
+                  {prev && (
+                    <td>
+                      <Delta value={r.f1 - prev[i].f1} trend={trendOf(r.f1 - prev[i].f1, 'higher')} />
+                    </td>
+                  )}
                   <td>{r.support}</td>
                 </tr>
               ))}
@@ -130,19 +131,19 @@ export function EvalReportPanel() {
       {field === 'topics' ? (
         <PanelSection
           title={t('How many topics the teacher picks', '教师模型选几个话题')}
-          description={t('Precision on topics drops when the teacher adds topics people wouldn’t.', '教师模型多加人不会加的话题时，话题的精确率就会下降。')}>
+          description={t('Precision on topics drops when the teacher adds topics people wouldn’t.', '教师模型多加人不会加的话题时，话题的 Precision 就会下降。')}>
           <StatGrid
             stats={[
               {label: tr(t('Topics per post, teacher', '每条话题数（教师）')), value: tags.tagged.toFixed(1)},
               {label: tr(t('Topics per post, people', '每条话题数（人工）')), value: tags.gold.toFixed(1)},
-              {label: tr(t('Exact match with people', '与人工完全一致')), value: pct(run.topicsExactMatch)},
+              {label: tr(t('Exact match with people', 'Exact match（与人工）')), value: pct(run.topicsExactMatch)},
             ]}
           />
         </PanelSection>
       ) : (
         <PanelSection
           title={t('Where the teacher goes wrong', '教师模型错在哪里')}
-          description={t('Rows are the human label, columns the teacher’s. Shading is the share of each row, so the diagonal is recall. Invalid outputs count as wrong.', '行是人工标签，列是教师模型的判断。颜色深浅是该行内的占比，对角线就是召回率。无效输出计为错误。')}>
+          description={t('Rows are the human label, columns the teacher’s. Shading is the share of each row, so the diagonal is recall. Invalid outputs count as wrong.', '行是人工标签，列是教师模型的判断。颜色深浅是该行内的占比，对角线就是 Recall。无效输出计为错误。')}>
           <ConfusionMatrix
             labels={meta.values.map(v => tr(v.name))}
             matrix={run[field].matrix}

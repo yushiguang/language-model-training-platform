@@ -223,14 +223,14 @@ export const VIDEO_TAGS_STEPS: Step[] = [
           id: 'r-agree',
           title: t('Labeling finished', '标注完成'),
           stats: [
-            {label: t('Agreement · primary value', '一致性 · 主要价值'), value: fmt2(LABELING.alpha.primary_value)},
-            {label: t('Agreement · format', '一致性 · 形式'), value: fmt2(LABELING.alpha.format)},
-            {label: t('Agreement · topics', '一致性 · 话题'), value: fmt2(LABELING.alpha.topics)},
+            {label: t('Agreement · primary value', 'Agreement (α) · 主要价值'), value: fmt2(LABELING.alpha.primary_value)},
+            {label: t('Agreement · format', 'Agreement (α) · 形式'), value: fmt2(LABELING.alpha.format)},
+            {label: t('Agreement · topics', 'Agreement (α) · 话题'), value: fmt2(LABELING.alpha.topics)},
             {label: t('Disagreements', '分歧'), value: String(conflictTotal)},
           ],
           note: t(
             'Agreement is Krippendorff’s alpha. Most primary-value disagreements are personal stories told as vlogs, and reposted clips. Most topic disagreements are a second topic that one labeler added.',
-            '一致性用 Krippendorff’s alpha 衡量。主要价值的分歧大多来自用 vlog 讲的个人经历和转发的片段；话题的分歧大多是某位标注员多加了一个话题。',
+            'Agreement 用 Krippendorff’s alpha 衡量。主要价值的分歧大多来自用 vlog 讲的个人经历和转发的片段；话题的分歧大多是某位标注员多加了一个话题。',
           ),
         },
       },
@@ -290,8 +290,8 @@ export const VIDEO_TAGS_STEPS: Step[] = [
           id: 'r-v1',
           title: t('Prompt v1 results', 'Prompt v1 结果'),
           stats: [
-            {label: t('Macro-F1 · primary value', '宏平均 F1 · 主要价值'), value: fmt2(macroF1(v1))},
-            {label: t('Invalid outputs', '无效输出'), value: pct(invalidRate(v1), 1)},
+            {label: t('Macro-F1 · primary value', 'macro-F1 · 主要价值'), value: fmt2(macroF1(v1))},
+            {label: t('Invalid outputs', 'Invalid outputs'), value: pct(invalidRate(v1), 1)},
             {label: t(`Weakest: ${LABEL_BY_ID[v1Weakest.id].name.en}`, `最弱：${LABEL_BY_ID[v1Weakest.id].name.zh}`), value: fmt2(v1Weakest.f1)},
           ],
           panel: 'evalReport',
@@ -332,7 +332,7 @@ export const VIDEO_TAGS_STEPS: Step[] = [
           `已采纳，生成 **Prompt v2**。无效输出降到 ${pct(invalidRate(v2), 1)}，生态问题升到 ${fmt2(scoreOf(v2, 'primary_value', 'ecosystem').f1)}。还有两处没过门禁，我分析了它们的错误。`,
         ),
       },
-      {kind: 'artifact', panel: 'promptDiff', action: 'created', title: t('Prompt v2', 'Prompt v2'), detail: t('1 line changed', '修改 1 行')},
+      {kind: 'artifact', panel: 'promptDiff', action: 'created', title: t('Prompt v2', 'Prompt v2'), detail: t('Full prompt, editable', 'Prompt 全文，可编辑')},
       {kind: 'artifact', panel: 'evalReport', action: 'updated', title: t('Eval report · prompt v2', '评估报告 · Prompt v2'), detail: t('Re-scored on 600 posts', '在 600 条上重新评估')},
       {
         kind: 'card',
@@ -342,7 +342,7 @@ export const VIDEO_TAGS_STEPS: Step[] = [
           title: t('Check the poster’s own view before Discussion, and tag fewer topics', '判断“讨论”前先看发布者自己的观点，并少打话题'),
           diagnosis: t(
             `Discussion precision is ${fmt2(v2DiscPrecision)}: ${v2EntAsDisc} Entertainment posts were tagged Discussion, mostly clips where only the guests give views. Rule 1 covers this but sits far from the field. Topics has the opposite problem: the teacher adds ${topicTags(v2).toFixed(1)} topics per post where people add ${goldTags.toFixed(1)}.`,
-            `“讨论”的精确率只有 ${fmt2(v2DiscPrecision)}：${v2EntAsDisc} 条娱乐被标成了讨论，大多是只有嘉宾在表达观点的片段。第 1 条规则覆盖了这种情况，但离字段定义太远。话题的问题正相反：教师模型平均每条打 ${topicTags(v2).toFixed(1)} 个话题，而人工只打 ${goldTags.toFixed(1)} 个。`,
+            `“讨论”的 Precision 只有 ${fmt2(v2DiscPrecision)}：${v2EntAsDisc} 条娱乐被标成了讨论，大多是只有嘉宾在表达观点的片段。第 1 条规则覆盖了这种情况，但离字段定义太远。话题的问题正相反：教师模型平均每条打 ${topicTags(v2).toFixed(1)} 个话题，而人工只打 ${goldTags.toFixed(1)} 个。`,
           ),
           removed: ['- Discussion: the poster shares their own view or experience and invites others to respond.', '### 3. topics (pick 1 to 3)'],
           added: [
@@ -378,11 +378,11 @@ export const VIDEO_TAGS_STEPS: Step[] = [
           id: 'a-teacher-gate',
           title: t('Teacher-quality gate', '教师质量门禁'),
           checks: [
-            {label: t(`Primary value macro-F1 ≥ ${TEACHER_GATE.macroF1.primary_value}`, `主要价值宏平均 F1 ≥ ${TEACHER_GATE.macroF1.primary_value}`), value: fmt2(macroF1(v3)), pass: true},
+            {label: t(`Primary value macro-F1 ≥ ${TEACHER_GATE.macroF1.primary_value}`, `主要价值 macro-F1 ≥ ${TEACHER_GATE.macroF1.primary_value}`), value: fmt2(macroF1(v3)), pass: true},
             {label: t(`Every primary value ≥ ${fmt2(TEACHER_GATE.labelF1)}`, `每个主要价值 ≥ ${fmt2(TEACHER_GATE.labelF1)}`), value: t(`lowest ${fmt2(weakestLabel(v3).f1)}`, `最低 ${fmt2(weakestLabel(v3).f1)}`), pass: true},
-            {label: t(`Format macro-F1 ≥ ${TEACHER_GATE.macroF1.format}`, `形式宏平均 F1 ≥ ${TEACHER_GATE.macroF1.format}`), value: fmt2(macroF1(v3, 'format')), pass: true},
-            {label: t(`Topics macro-F1 ≥ ${fmt2(TEACHER_GATE.macroF1.topics)}`, `话题宏平均 F1 ≥ ${fmt2(TEACHER_GATE.macroF1.topics)}`), value: fmt2(macroF1(v3, 'topics')), pass: true},
-            {label: t('Invalid outputs ≤ 1%', '无效输出 ≤ 1%'), value: pct(invalidRate(v3), 1), pass: true},
+            {label: t(`Format macro-F1 ≥ ${TEACHER_GATE.macroF1.format}`, `形式 macro-F1 ≥ ${TEACHER_GATE.macroF1.format}`), value: fmt2(macroF1(v3, 'format')), pass: true},
+            {label: t(`Topics macro-F1 ≥ ${fmt2(TEACHER_GATE.macroF1.topics)}`, `话题 macro-F1 ≥ ${fmt2(TEACHER_GATE.macroF1.topics)}`), value: fmt2(macroF1(v3, 'topics')), pass: true},
+            {label: t('Invalid outputs ≤ 1%', 'Invalid outputs ≤ 1%'), value: pct(invalidRate(v3), 1), pass: true},
           ],
           approve: t('Pass the gate', '通过门禁'),
           panel: 'evalReport',
@@ -510,7 +510,7 @@ export const VIDEO_TAGS_STEPS: Step[] = [
         tools: [{name: 'evaluate', target: t('sealed test split · 400 posts', '封存测试集 · 400 条'), duration: '2m'}],
         text: t(
           `On the sealed **test split** (400 posts), the student scores macro-F1 **${fmt2(test.student.p)}** on primary value, ${fmt2(test.student.f)} on format and ${fmt2(test.student.t)} on topics, against the teacher’s ${fmt2(test.teacher.p)}, ${fmt2(test.teacher.f)} and ${fmt2(test.teacher.t)}. Every field clears its minimum; the weakest label is ${LABEL_BY_ID[studentWeakest.id].name.en} at ${fmt2(studentWeakest.f1)}.`,
-          `在封存的**测试集**（400 条）上，学生模型的宏平均 F1：主要价值 **${fmt2(test.student.p)}**、形式 ${fmt2(test.student.f)}、话题 ${fmt2(test.student.t)}；教师模型分别为 ${fmt2(test.teacher.p)}、${fmt2(test.teacher.f)}、${fmt2(test.teacher.t)}。每个字段都过了最低线，最弱的标签是“${LABEL_BY_ID[studentWeakest.id].name.zh}”，${fmt2(studentWeakest.f1)}。`,
+          `在封存的**测试集**（400 条）上，学生模型的 macro-F1：主要价值 **${fmt2(test.student.p)}**、形式 ${fmt2(test.student.f)}、话题 ${fmt2(test.student.t)}；教师模型分别为 ${fmt2(test.teacher.p)}、${fmt2(test.teacher.f)}、${fmt2(test.teacher.t)}。每个字段都过了最低线，最弱的标签是“${LABEL_BY_ID[studentWeakest.id].name.zh}”，${fmt2(studentWeakest.f1)}。`,
         ),
       },
       {kind: 'artifact', panel: 'gate', action: 'created', title: t('Release gate report', '发布门禁报告'), detail: t('Student 8B · 400 test posts', '学生模型 8B · 400 条测试帖子')},

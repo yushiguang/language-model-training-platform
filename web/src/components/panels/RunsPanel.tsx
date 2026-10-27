@@ -30,14 +30,14 @@ export function RunsPanel() {
       />
       <PanelSection
         title={t('Does more data still help?', '更多数据还有帮助吗？')}
-        description={t('Student 8B trained on nested subsets of the training set, scored on the eval split. Macro-F1 per field.', '学生模型 8B 在训练集的嵌套子集上训练，在评估集上打分。每个字段的宏平均 F1。')}>
+        description={t('Student 8B trained on nested subsets of the training set, scored on the eval split. Macro-F1 per field.', '学生模型 8B 在训练集的嵌套子集上训练，在评估集上打分。每个字段的 macro-F1。')}>
         <LineChart
           xs={LEARNING_CURVE.map(p => p.size)}
           formatX={kilo}
           series={FIELDS.map(f => ({name: tr(f.name), color: FIELD_COLORS[f.id], values: LEARNING_CURVE.map(p => p.f1[f.id])}))}
           yDomain={[0.5, 0.9]}
           formatY={fmt2}
-          caption={tr(t('Student macro-F1 per field by training-set size', '学生模型各字段宏平均 F1 随训练集规模的变化'))}
+          caption={tr(t('Student macro-F1 per field by training-set size', '学生模型各字段 macro-F1 随训练集规模的变化'))}
         />
       </PanelSection>
       <PanelSection title={t('Runs', '训练记录')}>

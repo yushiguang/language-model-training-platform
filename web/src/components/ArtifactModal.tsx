@@ -5,6 +5,7 @@ import {Button} from '@astryxdesign/core/Button';
 import {Dialog} from '@astryxdesign/core/Dialog';
 import {Icon} from '@astryxdesign/core/Icon';
 import {IconButton} from '@astryxdesign/core/IconButton';
+import {ProgressBar} from '@astryxdesign/core/ProgressBar';
 import {Info, SquareArrowOutUpRight, X} from 'lucide-react';
 import {AdjudicationPanel} from '@/components/panels/AdjudicationPanel';
 import {EfficiencyPanel} from '@/components/panels/EfficiencyPanel';
@@ -20,6 +21,7 @@ import {TrainingSetPanel} from '@/components/panels/TrainingSetPanel';
 import {useMediaQuery} from '@/components/useMediaQuery';
 import {useLocale} from '@/i18n/LocaleProvider';
 import {t} from '@/i18n/text';
+import {LABELING_POSTS} from '@/mock/posts';
 import {useStory} from '@/story/StoryProvider';
 import type {PanelId} from '@/story/types';
 
@@ -79,6 +81,7 @@ export function ArtifactModal() {
               {updated}
             </div>
           </div>
+          {panel === 'labeling' && <LabelingProgress />}
           <div className="artifact-modal-actions">
             <Button
               className="only-wide"
@@ -120,5 +123,19 @@ export function ArtifactModal() {
         </div>
       </div>
     </Dialog>
+  );
+}
+
+/** How far the user's labeling share has come, kept in the header so it stays visible while labeling. */
+function LabelingProgress() {
+  const {tr} = useLocale();
+  const {state} = useStory();
+  const done = LABELING_POSTS.filter(id => state.myLabels[id]).length;
+  const label = tr(t(`${done} of ${LABELING_POSTS.length} labeled`, `已标注 ${done}/${LABELING_POSTS.length}`));
+  return (
+    <div className="header-progress">
+      <span className="labeling-count">{label}</span>
+      <ProgressBar label={label} isLabelHidden value={(done / LABELING_POSTS.length) * 100} variant={done === LABELING_POSTS.length ? 'success' : 'accent'} />
+    </div>
   );
 }
