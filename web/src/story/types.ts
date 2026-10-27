@@ -52,6 +52,14 @@ export type Card =
       panel?: PanelId;
     }
   | {
+      type: 'settings';
+      id: string;
+      title: T;
+      fields: Setting[];
+      submit: T;
+      panel?: PanelId;
+    }
+  | {
       type: 'progress';
       id: string;
       title: T;
@@ -93,6 +101,28 @@ export type Card =
       doneLabel: T;
     };
 
+/** One editable setting on a settings card. The card resolves to its values as JSON. */
+export type Setting =
+  | {id: string; label: T; kind: 'number'; value: number; min: number; max: number; step: number; units?: T}
+  | {id: string; label: T; kind: 'select'; value: string; options: Option[]}
+  /** Worked out from the other settings, shown but not editable. */
+  | {id: string; label: T; kind: 'computed'; compute: (values: Record<string, string | number>) => string};
+
+export type SettingValues = Record<string, string | number>;
+
+/** Where one split stands: how many posts, how many have labels, and where the labels came from. */
+export interface SplitStatus {
+  total: number;
+  labeled: number;
+  source?: T;
+}
+
+export interface Datasets {
+  train: SplitStatus;
+  eval: SplitStatus;
+  test: SplitStatus;
+}
+
 export type Measure =
   | {kind: 'macro'; field: FieldId}
   | {kind: 'value'; field: FieldId; value: string}
@@ -110,7 +140,7 @@ export type Item =
   | {kind: 'system'; text: T}
   | {kind: 'card'; card: Card}
   /** A write the agent made: a page it created or updated, shown as an artifact card. */
-  | {kind: 'artifact'; panel: PanelId; action: 'created' | 'updated'; title: T; detail: T}
+  | {kind: 'artifact'; panel: PanelId; action: 'created' | 'updated'; title: T; version?: string; detail: T}
   /** The user's answer to a card, echoed as a user message. */
   | {kind: 'choice'; cardId: string}
   /** The agent's reply, which depends on the answer the user picked. */
@@ -120,6 +150,8 @@ export interface Step {
   /** Index into STAGES; STAGES.length means released. */
   stage: number;
   items: Item[];
+  /** The datasets from this step on; absent means unchanged. */
+  datasets?: Datasets;
   /** The card that must resolve before the next step. Absent on the last step. */
   waitFor?: string;
 }

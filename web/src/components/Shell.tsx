@@ -26,7 +26,10 @@ export function Shell({children}: {children: React.ReactNode}) {
 
   const modelState = (id: string): {status: ModelStatus; stage: number} => {
     const model = MODELS.find(m => m.id === id)!;
-    return model.isScripted ? {status: story.status, stage: story.stage} : {status: model.status ?? 'idle', stage: model.stage ?? 0};
+    if (model.isScripted) return {status: story.status, stage: story.stage};
+    // A model the user just started training on from the header is running.
+    const status = story.state.trainedModels.includes(id) ? 'running' : (model.status ?? 'idle');
+    return {status, stage: model.stage ?? 0};
   };
   const waitingCount = MODELS.filter(m => modelState(m.id).status === 'waiting').length;
 

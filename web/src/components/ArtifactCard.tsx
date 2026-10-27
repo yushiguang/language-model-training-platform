@@ -3,6 +3,7 @@
 import {Icon} from '@astryxdesign/core/Icon';
 import {ArrowUpRight, FilePen, FilePlus2} from 'lucide-react';
 import {PANEL_META} from '@/components/panels/panelMeta';
+import {VersionTag} from '@/components/VersionTag';
 import {useLocale} from '@/i18n/LocaleProvider';
 import {t} from '@/i18n/text';
 import {useStory} from '@/story/StoryProvider';
@@ -29,12 +30,15 @@ export function ArtifactCard({item}: {item: Extract<Item, {kind: 'artifact'}>}) 
       type="button"
       className="artifact-card"
       onClick={() => openPanel(item.panel)}
-      aria-label={`${title} · ${tr(action.label)} · ${tr(t('Open', '打开'))}`}>
+      aria-label={`${title}${item.version ? ` ${item.version.toUpperCase()}` : ''} · ${tr(action.label)} · ${tr(t('Open', '打开'))}`}>
       <span className="artifact-tile" aria-hidden>
         <Icon icon={meta.icon} size="md" color="inherit" />
       </span>
       <span className="artifact-text">
-        <span className="artifact-title">{title}</span>
+        <span className="artifact-title">
+          {title}
+          <VersionTag version={item.version} />
+        </span>
         <span className="artifact-meta">
           <span className={`write-pill write-pill-${item.action}`}>
             <Icon icon={action.icon} size="xsm" color="inherit" />

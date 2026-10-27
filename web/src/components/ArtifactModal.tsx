@@ -19,6 +19,7 @@ import {SamplesPanel} from '@/components/panels/SamplesPanel';
 import {SchemaPanel} from '@/components/panels/SchemaPanel';
 import {TrainingSetPanel} from '@/components/panels/TrainingSetPanel';
 import {useMediaQuery} from '@/components/useMediaQuery';
+import {VersionTag} from '@/components/VersionTag';
 import {useLocale} from '@/i18n/LocaleProvider';
 import {t} from '@/i18n/text';
 import {LABELING_POSTS} from '@/mock/posts';
@@ -56,7 +57,6 @@ export function ArtifactModal() {
   const meta = PANEL_META[panel];
   const Body = PANELS[panel];
   const title = tr(entry.title);
-  const updated = entry.writes > 1 ? ` · ${tr(t('Updated', '已更新'))}` : '';
 
   return (
     <Dialog
@@ -67,7 +67,7 @@ export function ArtifactModal() {
       variant={isNarrow ? 'fullscreen' : 'standard'}
       purpose="info"
       padding={0}
-      aria-label={title}
+      aria-label={entry.version ? `${title} ${entry.version.toUpperCase()}` : title}
       className="artifact-dialog">
       <div className="artifact-modal">
         <header className="artifact-modal-header">
@@ -75,11 +75,10 @@ export function ArtifactModal() {
             <Icon icon={meta.icon} size="md" color="inherit" />
           </span>
           <div className="artifact-modal-heading">
-            <h2 className="artifact-modal-title">{title}</h2>
-            <div className="artifact-modal-meta">
-              {tr(meta.kind)} · {tr(entry.detail)}
-              {updated}
-            </div>
+            <h2 className="artifact-modal-title">
+              {title}
+              <VersionTag version={entry.version} />
+            </h2>
           </div>
           {panel === 'labeling' && <LabelingProgress />}
           <div className="artifact-modal-actions">

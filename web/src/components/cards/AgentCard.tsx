@@ -3,8 +3,10 @@
 import {useEffect, useState} from 'react';
 import {Button} from '@astryxdesign/core/Button';
 import {Icon} from '@astryxdesign/core/Icon';
+import {NumberInput} from '@astryxdesign/core/NumberInput';
 import {ProgressBar} from '@astryxdesign/core/ProgressBar';
-import {CircleCheck, CircleHelp, CircleX, ClipboardCheck, Lightbulb, ListChecks, Loader, Sparkles} from 'lucide-react';
+import {Selector} from '@astryxdesign/core/Selector';
+import {CircleCheck, CircleHelp, CircleX, ClipboardCheck, Info, Lightbulb, ListChecks, Loader, SlidersHorizontal, Sparkles} from 'lucide-react';
 import {BeforeAfter} from '@/components/Change';
 import {measureRows} from '@/components/measures';
 import {PostPreview} from '@/components/PostPreview';
@@ -13,7 +15,7 @@ import {useLocale} from '@/i18n/LocaleProvider';
 import {t, type T} from '@/i18n/text';
 import {POST_BY_ID} from '@/mock/posts';
 import {choiceLabel, useStory} from '@/story/StoryProvider';
-import type {Card, Check, PanelId} from '@/story/types';
+import type {Card, Check, PanelId, SettingValues} from '@/story/types';
 import {CardFrame, FactRows, IconLine} from './CardFrame';
 
 function useValue() {
@@ -129,6 +131,8 @@ export function AgentCard({card, isReadOnly = false}: {card: Card; isReadOnly?: 
           </div>
         </CardFrame>
       );
+    case 'settings':
+      return <SettingsCard card={card} isActive={isActive} />;
     case 'progress':
       return <ProgressCard card={card} isReadOnly={isReadOnly} />;
     case 'result':
@@ -244,6 +248,80 @@ function ProgressCard({card, isReadOnly}: {card: Extract<Card, {type: 'progress'
       <div className="progress-count">
         {numberFormat.format(done)} / {numberFormat.format(card.total)} {tr(card.unit)}
       </div>
+    </CardFrame>
+  );
+}
+
+/** Settings the agent suggests, editable until the user submits them. */
+function SettingsCard({card, isActive}: {card: Extract<Card, {type: 'settings'}>; isActive: boolean}) {
+  const {tr, locale} = useLocale();
+  const story = useStory();
+  const defaults = Object.fromEntries(card.fields.filter(f => f.kind !== 'computed').map(f => [f.id, f.value])) as SettingValues;
+  const [values, setValues] = useState<SettingValues>(defaults);
+  const isResolved = story.isResolved(card.id);
+  const isChanged = card.fields.some(f => f.kind !== 'computed' && values[f.id] !== defaults[f.id]);
+  const set = (id: string, v: string | number) => setValues(prev => ({...prev, [id]: v}));
+  const numberFormat = new Intl.NumberFormat(locale);
+
+  return (
+    <CardFrame icon={SlidersHorizontal} kind={tr(t('Settings', '设置'))} title={tr(card.title)} isActive={isActive}>
+      {isResolved ? (
+        <div className="card-actions">
+          <ResolvedNote card={card} />
+          {card.panel && <OpenPanelButton panel={card.panel} />}
+        </div>
+      ) : (
+        <>
+          <div className="settings-grid">
+            {card.fields.map(f => {
+              switch (f.kind) {
+                case 'number':
+                  return (
+                    <NumberInput
+                      key={f.id}
+                      label={tr(f.label)}
+                      value={Number(values[f.id])}
+                      onChange={v => set(f.id, v)}
+                      min={f.min}
+                      max={f.max}
+                      step={f.step}
+                      formatValue={v => numberFormat.format(v)}
+                      isIntegerOnly
+                      isDisabled={!isActive}
+                    />
+                  );
+                case 'select':
+                  return (
+                    <Selector
+                      key={f.id}
+                      label={tr(f.label)}
+                      value={String(values[f.id])}
+                      onChange={v => set(f.id, v)}
+                      options={f.options.map(o => ({value: o.id, label: tr(o.label)}))}
+                      isDisabled={!isActive}
+                    />
+                  );
+                case 'computed':
+                  return (
+                    <div key={f.id} className="setting-computed">
+                      <div className="setting-label">{tr(f.label)}</div>
+                      <div className="setting-value">{f.compute(values)}</div>
+                    </div>
+                  );
+              }
+            })}
+          </div>
+          {isChanged && (
+            <IconLine className="card-hint" icon={<Icon icon={Info} size="sm" color="inherit" />}>
+              {tr(t('This demo follows a script, so it continues with the suggested values.', '演示按脚本进行，后面仍使用建议的数值。'))}
+            </IconLine>
+          )}
+          <div className="card-actions">
+            <Button label={tr(card.submit)} variant="primary" isDisabled={!isActive} onClick={() => story.resolve(card.id, JSON.stringify(values))} />
+            {card.panel && <OpenPanelButton panel={card.panel} />}
+          </div>
+        </>
+      )}
     </CardFrame>
   );
 }

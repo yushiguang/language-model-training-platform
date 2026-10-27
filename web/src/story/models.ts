@@ -1,5 +1,5 @@
 import {t, type T} from '@/i18n/text';
-import type {Item} from './types';
+import type {Datasets, Item} from './types';
 
 export type ModelStatus = 'running' | 'waiting' | 'idle';
 
@@ -13,7 +13,18 @@ export interface ModelSummary {
   stage?: number;
   /** Read-only conversation for models that aren't scripted. */
   items?: Item[];
+  /** Fixed dataset status for models that aren't scripted. */
+  datasets?: Datasets;
+  /** Why Train is off for a model that isn't scripted; absent means the user can train it now. */
+  trainOffReason?: T;
+  /** Workflow steps this model went without, such as gold labels on the fast path. */
+  skippedStages?: number[];
+  /** What the agent posts once the user starts training from the header. */
+  afterTrain?: Item[];
 }
+
+const UPLOADED = t('Uploaded CSV', '上传的 CSV');
+const HUMAN = t('Human gold labels', '人工金标');
 
 export const MODELS: ModelSummary[] = [
   {
@@ -23,11 +34,65 @@ export const MODELS: ModelSummary[] = [
     isScripted: true,
   },
   {
+    id: 'scam-ads',
+    name: t('Scam ads', '诈骗广告'),
+    task: t('Flag scam ads in Brazil, today', '今天就要拦截巴西的诈骗广告'),
+    status: 'waiting',
+    stage: 5,
+    skippedStages: [2, 3],
+    datasets: {
+      train: {total: 3_200, labeled: 3_200, source: UPLOADED},
+      eval: {total: 0, labeled: 0},
+      test: {total: 0, labeled: 0},
+    },
+    items: [
+      {
+        kind: 'user',
+        text: t(
+          'Scam ads are spiking in Brazil and Trust & Safety needs a classifier today. I uploaded 3,200 ads that reviewers already labeled scam or not scam.',
+          '巴西的诈骗广告激增，信任与安全团队今天就需要一个分类模型。我上传了 3,200 条审核员已标注“诈骗/非诈骗”的广告。',
+        ),
+      },
+      {
+        kind: 'agent',
+        tools: [
+          {name: 'read_csv', target: t('scam-ads-br.csv · 3,200 rows', 'scam-ads-br.csv · 3,200 行'), duration: '0.6s'},
+          {name: 'validate_labels', target: t('schema v1 · 1 field', 'Schema v1 · 1 个字段'), duration: '1s'},
+        ],
+        text: t(
+          'Your file matches the schema: 3,200 rows, 18% scam. I put every row in the training set, so there is no eval or test set yet.\n\nYou can press **Train model** in the header now, but I don’t recommend it: without eval and test I can’t tell you how often the model is wrong, and the release gate can’t run. **Next, I recommend** that I sample 300 recent ads for eval and test. Two reviewers can label them in about 30 minutes, and training can run at the same time.',
+          '文件符合 Schema：3,200 行，18% 为诈骗。我把所有行都放进了训练集，所以还没有评估集和测试集。\n\n你现在就可以点页头的**训练模型**，但我不建议：没有评估集和测试集，我无法告诉你模型错得有多频繁，发布门禁也无法运行。**下一步，我建议**我从近期广告里抽 300 条作为评估集和测试集，两位审核员大约 30 分钟能标完，训练可以同时进行。',
+        ),
+      },
+    ],
+    afterTrain: [
+      {kind: 'user', text: t('Train model without eval and test', '在没有评估集和测试集的情况下训练模型')},
+      {kind: 'system', text: t('Training started without an eval or test set', '已在没有评估集和测试集的情况下开始训练')},
+      {
+        kind: 'card',
+        card: {type: 'progress', id: 'scam-train', title: t('Training student 1B · 3,200 rows', '训练学生模型 1B · 3,200 行'), total: 3_200, unit: t('rows', '行'), durationMs: 0, frozenAt: 0.08},
+      },
+      {
+        kind: 'agent',
+        text: t(
+          'Training started; it takes about 40 minutes. Until there is a test set, I’d use the model to send likely scams to reviewers rather than block them outright.\n\n**Next, I recommend** the 300-ad eval and test sample. I can start it now so the gate is ready when training finishes.',
+          '训练已开始，大约需要 40 分钟。在有测试集之前，建议先用它把疑似诈骗送给审核员，而不是直接拦截。\n\n**下一步，我建议**抽 300 条广告做评估集和测试集。我现在就可以开始，训练结束时门禁就能运行。',
+        ),
+      },
+    ],
+  },
+  {
     id: 'ad-landing',
     name: t('Ad landing quality', '广告落地页质量'),
     task: t('Good, misleading or broken landing pages', '落地页：优质、误导或失效'),
     status: 'running',
     stage: 4,
+    datasets: {
+      train: {total: 120_000, labeled: 73_200, source: t('Teacher, prompt v4 (running)', '教师模型，Prompt v4（进行中）')},
+      eval: {total: 800, labeled: 800, source: HUMAN},
+      test: {total: 500, labeled: 500, source: HUMAN},
+    },
+    trainOffReason: t('The teacher is still labeling the training set.', '教师模型还在标注训练集。'),
     items: [
       {
         kind: 'user',
@@ -60,6 +125,12 @@ export const MODELS: ModelSummary[] = [
     task: t('Toxic, borderline or fine comments', '评论：有害、边缘或正常'),
     status: 'idle',
     stage: 7,
+    datasets: {
+      train: {total: 60_000, labeled: 60_000, source: t('Teacher, prompt v2', '教师模型，Prompt v2')},
+      eval: {total: 600, labeled: 600, source: HUMAN},
+      test: {total: 400, labeled: 400, source: HUMAN},
+    },
+    trainOffReason: t('Released two weeks ago. Retraining isn’t part of this demo.', '两周前已发布。重新训练不在本演示范围内。'),
     items: [
       {kind: 'system', text: t('Comment toxicity v2 released 2 weeks ago', '评论毒性 v2 已于两周前发布')},
       {

@@ -7,8 +7,10 @@ import {
   macroF1,
   PROMPT_RUNS,
   RELEASE_GATE,
+  SPLITS,
   TEACHER_GATE,
   TEST_RUNS,
+  TRAINING_SET,
   valueScores,
   weakestLabel,
 } from '@/mock/metrics';
@@ -16,15 +18,15 @@ import {fmt2, pct} from '@/mock/numbers';
 import {CONFLICT_TOTALS} from '@/mock/posts';
 import type {Step} from './types';
 
-/** Workflow stages shown in the stage strip. Index 5 depends on Platform S, which is not integrated yet. */
+/** Workflow stages shown in the header. Training depends on Platform S, which is not integrated yet. */
 export const STAGES = [
-  {name: t('Requirement', '定义需求')},
+  {name: t('Schema', 'Schema')},
   {name: t('Dataset', '数据集')},
-  {name: t('Human labeling', '人工标注')},
-  {name: t('Teacher tuning', '教师调优')},
+  {name: t('Gold labels', '金标')},
+  {name: t('Teacher prompt', '教师 Prompt')},
   {name: t('Training set', '训练集')},
-  {name: t('Train & evaluate', '训练与评估'), isPlanned: true},
-  {name: t('Release gate', '发布门禁')},
+  {name: t('Training', '训练'), isPlanned: true},
+  {name: t('Release', '发布')},
 ];
 
 export const RELEASED_STAGE = STAGES.length;
@@ -49,6 +51,15 @@ const test = {
   teacher: {p: macroF1(TEST_RUNS.teacher), f: macroF1(TEST_RUNS.teacher, 'format'), t: macroF1(TEST_RUNS.teacher, 'topics')},
 };
 const studentWeakest = weakestLabel(TEST_RUNS.student);
+const num = (n: number) => n.toLocaleString('en-US');
+
+const HUMAN_GOLD = t('Human gold labels', '人工金标');
+const NO_LABELS = {train: {total: SPLITS.train, labeled: 0}, eval: {total: SPLITS.eval, labeled: 0}, test: {total: SPLITS.test, labeled: 0}};
+const GOLD = {
+  ...NO_LABELS,
+  eval: {total: SPLITS.eval, labeled: SPLITS.eval, source: HUMAN_GOLD},
+  test: {total: SPLITS.test, labeled: SPLITS.test, source: HUMAN_GOLD},
+};
 
 /**
  * The scripted conversation for the "Video tags" model. Prompt text lives in
@@ -73,11 +84,11 @@ export const VIDEO_TAGS_STEPS: Step[] = [
           {name: 'draft_schema', target: t('3 fields · 20 values', '3 个字段 · 20 个取值'), duration: '2.6s'},
         ],
         text: t(
-          'I read the prompt and drafted **schema v1**: three label fields, with a definition for every value, examples for primary value, and the prompt’s judgment order and rules. `summary` and `reasoning` stay teacher-only, so the student won’t learn them.\n\nOne case is ambiguous, so I need your call before you confirm it.',
-          '我读了 Prompt，起草了 **Schema v1**：三个标签字段，每个取值都有定义，主要价值还附有示例，并保留了 Prompt 里的判断顺序和规则。`summary` 和 `reasoning` 只给教师模型用，学生模型不学。\n\n有一个情况有歧义，确认前需要你来定。',
+          'I read the prompt and drafted the **schema**: three label fields, each with a definition for every value, a default label, and the prompt’s rules. `summary` and `reasoning` stay teacher-only, so the student won’t learn them.\n\nOne case is ambiguous, so I need your call before you confirm it.',
+          '我读了 Prompt，起草了 **Schema**：三个标签字段，每个取值都有定义，每个字段有默认标签，并保留了 Prompt 里的规则。`summary` 和 `reasoning` 只给教师模型用，学生模型不学。\n\n有一个情况有歧义，确认前需要你来定。',
         ),
       },
-      {kind: 'artifact', panel: 'schema', action: 'created', title: t('Schema v1', 'Schema v1'), detail: t('3 fields · 20 values', '3 个字段 · 20 个取值')},
+      {kind: 'artifact', panel: 'schema', action: 'created', title: t('Schema', 'Schema'), version: 'v1', detail: t('3 label fields', '3 个标签字段')},
       {
         kind: 'card',
         card: {
@@ -117,18 +128,13 @@ export const VIDEO_TAGS_STEPS: Step[] = [
           ),
         },
       },
-      {kind: 'artifact', panel: 'schema', action: 'updated', title: t('Schema v1', 'Schema v1'), detail: t('Added your ruling as an example', '已把你的裁决加为示例')},
+      {kind: 'artifact', panel: 'schema', action: 'updated', title: t('Schema', 'Schema'), version: 'v1', detail: t('Added your ruling as an example', '已把你的裁决加为示例')},
       {
         kind: 'card',
         card: {
           type: 'approval',
           id: 'a-schema',
-          title: t('Confirm schema v1', '确认 Schema v1'),
-          rows: [
-            {label: t('Label fields', '标签字段'), value: t('primary_value · format · topics', 'primary_value · format · topics')},
-            {label: t('Field types', '字段类型'), value: t('single · single · multi (1 to 3)', '单选 · 单选 · 多选（1 到 3 个）')},
-            {label: t('Teacher-only fields', '仅教师模型字段'), value: 'summary, reasoning'},
-          ],
+          title: t('Confirm the schema', '确认 Schema'),
           approve: t('Confirm schema', '确认 Schema'),
           panel: 'schema',
         },
@@ -137,35 +143,153 @@ export const VIDEO_TAGS_STEPS: Step[] = [
   },
   {
     stage: 1,
-    waitFor: 'a-sampling',
+    waitFor: 'q-dataset',
     items: [
       {kind: 'choice', cardId: 'a-schema'},
       {kind: 'system', text: t('Schema v1 confirmed', 'Schema v1 已确认')},
       {
         kind: 'agent',
-        tools: [
-          {name: 'sample_posts', target: t('last 30 days · 23 countries', '近 30 天 · 23 个国家'), duration: '41s'},
-          {name: 'extract_features', target: t('frames, OCR, ASR', '抽帧、OCR、ASR'), duration: '18m'},
-          {name: 'find_near_duplicates', target: t('50,000 posts', '50,000 条帖子'), duration: '2m'},
-        ],
         text: t(
-          'Next, the dataset. I sampled **50,000 posts** from the last 30 days across 23 countries and extracted frames, OCR and ASR for each. 6% were near-duplicates, so I grouped them to keep each group in one split. I also split by creator, so no creator appears in both training and test.',
-          '接下来是数据集。我从近 30 天、23 个国家的内容里抽样了 **50,000 条帖子**，并为每条抽取了视频帧、OCR 和 ASR。其中 6% 是近似重复，我把它们分组，保证同组只落在一个划分里。我还按作者划分，同一作者不会同时出现在训练集和测试集。',
+          'Next, the dataset. You can upload a CSV of posts, with or without labels, or I can sample recent posts for you. Either way, the rows go through the same steps afterwards.\n\nYou have no labeled data for this task yet, so I recommend sampling: it matches what the model will see online.',
+          '接下来是数据集。你可以上传帖子的 CSV（带不带标签都行），也可以让我从近期帖子里抽样。无论哪种，之后的处理步骤都一样。\n\n这个任务你还没有标注数据，所以我建议抽样：它和模型上线后看到的内容一致。',
         ),
       },
-      {kind: 'artifact', panel: 'samples', action: 'created', title: t('Dataset snapshot ds-1', '数据快照 ds-1'), detail: t('50,000 posts · 3 splits', '50,000 条帖子 · 3 个划分')},
       {
         kind: 'card',
         card: {
-          type: 'approval',
-          id: 'a-sampling',
-          title: t('Approve the sampling plan', '批准抽样方案'),
-          rows: [
-            {label: t('Source', '来源'), value: t('Posts published in the last 30 days', '近 30 天发布的帖子')},
-            {label: t('Sampling', '抽样'), value: t('Stratified by country and format', '按国家和内容形式分层')},
-            {label: t('Splits', '划分'), value: t('Train 49,000 · eval 600 · test 400', '训练 49,000 · 评估 600 · 测试 400')},
+          type: 'question',
+          id: 'q-dataset',
+          title: t('How do you want to build the dataset?', '数据集怎么来？'),
+          options: [
+            {id: 'upload', label: t('Upload a CSV', '上传 CSV')},
+            {id: 'sample', label: t('Sample automatically', '自动抽样')},
           ],
-          approve: t('Approve plan', '批准方案'),
+          recommended: 'sample',
+          reason: t('No labeled data exists for this task, and recent posts match live traffic.', '这个任务还没有标注数据，近期帖子也和线上流量一致。'),
+        },
+      },
+    ],
+  },
+  {
+    stage: 1,
+    waitFor: 's-sample',
+    items: [
+      {kind: 'choice', cardId: 'q-dataset'},
+      {
+        kind: 'reply',
+        cardId: 'q-dataset',
+        replies: {
+          sample: t('Here are the sampling settings I suggest. Change anything you like.', '这是我建议的抽样设置，可以随意修改。'),
+          upload: t(
+            'Uploading isn’t part of this demo, so let’s sample instead. An uploaded file would go through exactly the same steps. Here are the sampling settings I suggest.',
+            '上传不在这个演示范围内，我们改用抽样。上传的文件会走完全相同的步骤。这是我建议的抽样设置。',
+          ),
+        },
+      },
+      {
+        kind: 'card',
+        card: {
+          type: 'settings',
+          id: 's-sample',
+          title: t('Sampling settings', '抽样设置'),
+          fields: [
+            {id: 'posts', label: t('Number of posts', '帖子数量'), kind: 'number', value: SPLITS.pool, min: 1000, max: 500_000, step: 1000},
+            {
+              id: 'window',
+              label: t('Published in', '发布时间'),
+              kind: 'select',
+              value: '30',
+              options: [
+                {id: '7', label: t('Last 7 days', '近 7 天')},
+                {id: '30', label: t('Last 30 days', '近 30 天')},
+                {id: '90', label: t('Last 90 days', '近 90 天')},
+              ],
+            },
+            {
+              id: 'countries',
+              label: t('Countries', '国家'),
+              kind: 'select',
+              value: 'all',
+              options: [
+                {id: 'all', label: t('All 23 countries', '全部 23 个国家')},
+                {id: 'top5', label: t('Top 5 by traffic', '流量前 5 的国家')},
+              ],
+            },
+            {
+              id: 'stratify',
+              label: t('Stratify by', '分层依据'),
+              kind: 'select',
+              value: 'country-format',
+              options: [
+                {id: 'country-format', label: t('Country and format', '国家和形式')},
+                {id: 'country', label: t('Country', '国家')},
+                {id: 'none', label: t('None', '不分层')},
+              ],
+            },
+          ],
+          submit: t('Start sampling', '开始抽样'),
+        },
+      },
+    ],
+  },
+  {
+    stage: 1,
+    waitFor: 'pr-sample',
+    items: [
+      {kind: 'choice', cardId: 's-sample'},
+      {
+        kind: 'agent',
+        tools: [{name: 'sample_posts', target: t('last 30 days · 23 countries', '近 30 天 · 23 个国家'), duration: '41s'}],
+        text: t(
+          'Sampling now. For each post I also extract frames, OCR and ASR, and group near-duplicates so each group stays in one split.',
+          '正在抽样。我会同时为每条帖子抽取视频帧、OCR 和 ASR，并把近似重复的帖子分组，保证同组只落在一个划分里。',
+        ),
+      },
+      {
+        kind: 'card',
+        card: {type: 'progress', id: 'pr-sample', title: t('Sampling posts', '抽样帖子'), total: SPLITS.pool, unit: t('posts', '条'), durationMs: 3500},
+      },
+    ],
+  },
+  {
+    stage: 1,
+    waitFor: 's-split',
+    items: [
+      {kind: 'artifact', panel: 'samples', action: 'created', title: t('Dataset', '数据集'), version: 'v1', detail: t(`${num(SPLITS.pool)} posts`, `${num(SPLITS.pool)} 条帖子`)},
+      {
+        kind: 'agent',
+        text: t(
+          `**${num(SPLITS.pool)} posts** sampled from ${SPLITS.countries} countries and ${SPLITS.languages} languages. ${pct(SPLITS.nearDuplicateShare)} were near-duplicates, now grouped.\n\nNext, how to split them. I suggest ${num(SPLITS.eval)} posts for eval and ${num(SPLITS.test)} for test, labeled by people, and the rest for training, labeled by the teacher. Splitting by creator keeps any creator out of both training and test.`,
+          `已抽样 **${num(SPLITS.pool)} 条帖子**，覆盖 ${SPLITS.countries} 个国家、${SPLITS.languages} 种语言。其中 ${pct(SPLITS.nearDuplicateShare)} 是近似重复，已分组。\n\n接下来是怎么划分。我建议评估集 ${num(SPLITS.eval)} 条、测试集 ${num(SPLITS.test)} 条，由人工标注；其余作为训练集，由教师模型标注。按作者划分，同一作者不会同时出现在训练集和测试集。`,
+        ),
+      },
+      {
+        kind: 'card',
+        card: {
+          type: 'settings',
+          id: 's-split',
+          title: t('Split the dataset', '划分数据集'),
+          fields: [
+            {id: 'eval', label: t('Eval', '评估集'), kind: 'number', value: SPLITS.eval, min: 100, max: 5000, step: 50},
+            {id: 'test', label: t('Test', '测试集'), kind: 'number', value: SPLITS.test, min: 100, max: 5000, step: 50},
+            {
+              id: 'train',
+              label: t('Train', '训练集'),
+              kind: 'computed',
+              compute: v => num(SPLITS.pool - Number(v.eval) - Number(v.test)),
+            },
+            {
+              id: 'by',
+              label: t('Keep together', '保持在同一划分'),
+              kind: 'select',
+              value: 'creator',
+              options: [
+                {id: 'creator', label: t('Same creator and near-duplicates', '同一作者和近似重复')},
+                {id: 'random', label: t('Nothing (random split)', '不限制（随机划分）')},
+              ],
+            },
+          ],
+          submit: t('Create splits', '创建划分'),
           panel: 'samples',
         },
       },
@@ -174,14 +298,16 @@ export const VIDEO_TAGS_STEPS: Step[] = [
   {
     stage: 2,
     waitFor: 'l-label',
+    datasets: NO_LABELS,
     items: [
-      {kind: 'choice', cardId: 'a-sampling'},
+      {kind: 'choice', cardId: 's-split'},
+      {kind: 'artifact', panel: 'samples', action: 'updated', title: t('Dataset', '数据集'), version: 'v1', detail: t('Split into train, eval and test', '已划分训练、评估、测试集')},
       {
         kind: 'agent',
         tools: [{name: 'create_labeling_task', target: t('1,000 posts · 3 fields · 3 labelers', '1,000 条 · 3 个字段 · 3 位标注员'), duration: '0.8s'}],
         text: t(
-          'I created a labeling task for the eval and test splits: **1,000 posts**, each labeled on all three fields by two of Lin, Mei and Ravi, so we can measure agreement. Labeling is blind; the teacher’s answer stays hidden unless you reveal it.',
-          '我为评估集和测试集建了标注任务：**1,000 条帖子**，每条由 Lin、Mei、Ravi 中的两人标注全部三个字段，用来衡量一致性。标注是盲标的，教师模型的答案默认隐藏，除非你主动查看。',
+          'The splits are ready, and their status is now in the header. **Train model** stays off until the training set has labels.\n\n**Next, I recommend gold labels for eval and test.** They are how we’ll measure the teacher prompt and the student, so they should come from people. I created a labeling task: **1,000 posts**, each labeled on all three fields by two of Lin, Mei and Ravi. Labeling is blind; the teacher’s answer stays hidden unless you reveal it.',
+          '划分已完成，状态显示在页头。训练集有标签之前，**训练模型**按钮保持关闭。\n\n**下一步，我建议先给评估集和测试集做金标。** 我们要靠它们衡量教师 Prompt 和学生模型，所以应该由人来标。我建了标注任务：**1,000 条帖子**，每条由 Lin、Mei、Ravi 中的两人标注全部三个字段。标注是盲标的，教师模型的答案默认隐藏，除非你主动查看。',
         ),
       },
       {kind: 'artifact', panel: 'labeling', action: 'created', title: t('Labeling task', '标注任务'), detail: t('1,000 posts · your share: 5', '1,000 条 · 你的部分：5 条')},
@@ -262,14 +388,15 @@ export const VIDEO_TAGS_STEPS: Step[] = [
   {
     stage: 3,
     waitFor: 'pr-v1',
+    datasets: GOLD,
     items: [
       {kind: 'choice', cardId: 'l-adj'},
       {
         kind: 'agent',
         tools: [{name: 'derive_gold_labels', target: t('2 labels per post + adjudication', '每条 2 份标注 + 裁决'), duration: '0.3s'}],
         text: t(
-          '**Gold labels v1** are ready: 600 eval posts and 400 test posts. The test split is now sealed, and I only ever see its totals.\n\nNow I’ll run the teacher on the eval split with your prompt as **v1**.',
-          '**金标 v1** 已就绪：评估集 600 条，测试集 400 条。测试集现已封存，我只能看到汇总指标。\n\n现在我用你的 Prompt 作为 **v1**，在评估集上运行教师模型。',
+          '**Gold labels** are ready for 600 eval posts and 400 test posts. The test split is now sealed, and I only ever see its totals.\n\n**Next, I recommend checking the teacher prompt** on the eval split before it labels 49,000 training posts. I’m running your prompt as **v1**.',
+          '**金标**已就绪：评估集 600 条，测试集 400 条。测试集现已封存，我只能看到汇总指标。\n\n**下一步，我建议先检验教师 Prompt**，再让它标注 49,000 条训练帖子。我正用你的 Prompt 作为 **v1** 在评估集上运行。',
         ),
       },
       {
@@ -282,7 +409,7 @@ export const VIDEO_TAGS_STEPS: Step[] = [
     stage: 3,
     waitFor: 'adv-1',
     items: [
-      {kind: 'artifact', panel: 'evalReport', action: 'created', title: t('Eval report · prompt v1', '评估报告 · Prompt v1'), detail: t('3 fields on 600 posts', '600 条帖子 · 3 个字段')},
+      {kind: 'artifact', panel: 'evalReport', action: 'created', title: t('Eval report', '评估报告'), version: 'v1', detail: t('Prompt v1 on 600 eval posts', 'Prompt v1 · 600 条评估帖子')},
       {
         kind: 'card',
         card: {
@@ -332,8 +459,8 @@ export const VIDEO_TAGS_STEPS: Step[] = [
           `已采纳，生成 **Prompt v2**。无效输出降到 ${pct(invalidRate(v2), 1)}，生态问题升到 ${fmt2(scoreOf(v2, 'primary_value', 'ecosystem').f1)}。还有两处没过门禁，我分析了它们的错误。`,
         ),
       },
-      {kind: 'artifact', panel: 'promptDiff', action: 'created', title: t('Prompt v2', 'Prompt v2'), detail: t('Full prompt, editable', 'Prompt 全文，可编辑')},
-      {kind: 'artifact', panel: 'evalReport', action: 'updated', title: t('Eval report · prompt v2', '评估报告 · Prompt v2'), detail: t('Re-scored on 600 posts', '在 600 条上重新评估')},
+      {kind: 'artifact', panel: 'promptDiff', action: 'created', title: t('Prompt', 'Prompt'), version: 'v2', detail: t('Full prompt, editable', 'Prompt 全文，可编辑')},
+      {kind: 'artifact', panel: 'evalReport', action: 'updated', title: t('Eval report', '评估报告'), version: 'v2', detail: t('Prompt v2, re-scored on 600 posts', 'Prompt v2 · 在 600 条上重新评估')},
       {
         kind: 'card',
         card: {
@@ -369,8 +496,8 @@ export const VIDEO_TAGS_STEPS: Step[] = [
           `已采纳，生成 **Prompt v3**。“讨论”的 F1 从 ${fmt2(scoreOf(v2, 'primary_value', 'discussion').f1)} 升到 ${fmt2(scoreOf(v3, 'primary_value', 'discussion').f1)}，话题从 ${fmt2(macroF1(v2, 'topics'))} 升到 ${fmt2(macroF1(v3, 'topics'))}。教师模型现在三个字段都通过了质量门禁。`,
         ),
       },
-      {kind: 'artifact', panel: 'promptDiff', action: 'updated', title: t('Prompt v3', 'Prompt v3'), detail: t('3 lines changed', '修改 3 行')},
-      {kind: 'artifact', panel: 'evalReport', action: 'updated', title: t('Eval report · prompt v3', '评估报告 · Prompt v3'), detail: t('Re-scored on 600 posts', '在 600 条上重新评估')},
+      {kind: 'artifact', panel: 'promptDiff', action: 'updated', title: t('Prompt', 'Prompt'), version: 'v3', detail: t('3 lines changed', '修改 3 行')},
+      {kind: 'artifact', panel: 'evalReport', action: 'updated', title: t('Eval report', '评估报告'), version: 'v3', detail: t('Prompt v3, re-scored on 600 posts', 'Prompt v3 · 在 600 条上重新评估')},
       {
         kind: 'card',
         card: {
@@ -400,8 +527,8 @@ export const VIDEO_TAGS_STEPS: Step[] = [
         kind: 'agent',
         tools: [{name: 'run_pilot', target: t('500 posts vs. gold labels', '500 条 vs. 金标'), duration: '3m'}],
         text: t(
-          'Next, the teacher labels the **49,000 training posts**. I ran a 500-post pilot first. It matches your gold labels on primary value **91%** of the time, so the full run is worth paying for.',
-          '接下来由教师模型标注 **49,000 条训练帖子**。我先跑了 500 条试点，主要价值与金标的一致率为 **91%**，值得跑全量。',
+          '**Next, I recommend letting the teacher label the 49,000 training posts.** I ran a 500-post pilot first. It matches your gold labels on primary value **91%** of the time, so the full run is worth paying for.',
+          '**下一步，我建议让教师模型标注 49,000 条训练帖子。** 我先跑了 500 条试点，主要价值与金标的一致率为 **91%**，值得跑全量。',
         ),
       },
       {
@@ -434,8 +561,9 @@ export const VIDEO_TAGS_STEPS: Step[] = [
     ],
   },
   {
-    stage: 5,
-    waitFor: 'pr-train',
+    stage: 4,
+    waitFor: 'a-train',
+    datasets: {...GOLD, train: {total: TRAINING_SET.finalRows, labeled: TRAINING_SET.finalRows, source: t('Teacher, prompt v3', '教师模型，Prompt v3')}},
     items: [
       {
         kind: 'agent',
@@ -445,11 +573,32 @@ export const VIDEO_TAGS_STEPS: Step[] = [
           {name: 'decontaminate', target: t('−212 rows overlapping eval/test', '−212 行与评估/测试集重叠'), duration: '25s'},
         ],
         text: t(
-          'The training set is ready: **46,000 rows**. I removed invalid outputs, near-duplicates and posts that overlap eval or test, then capped Entertainment and raised Ecosystem issue to a minimum share.\n\nTraining runs on Platform S, which isn’t connected yet, so the results from here on are illustrative.',
-          '训练集已就绪：**46,000 行**。我去掉了无效输出、近似重复和与评估/测试集重叠的帖子，并限制了娱乐的占比、把生态问题提到最低占比。\n\n训练在 Platform S 上进行，目前还没接通，所以接下来的结果是示意数据。',
+          'The training set is ready: **46,000 rows**. I removed invalid outputs, near-duplicates and posts that overlap eval or test, then capped Entertainment and raised Ecosystem issue to a minimum share.\n\nTrain, eval and test all have labels, so **Train model** in the header is on. **I recommend training now:** three runs on 10k, 30k and 46k rows, to see whether more data still helps. Training runs on Platform S, which isn’t connected yet, so the results from here on are illustrative.',
+          '训练集已就绪：**46,000 行**。我去掉了无效输出、近似重复和与评估/测试集重叠的帖子，并限制了娱乐的占比、把生态问题提到最低占比。\n\n训练、评估、测试集都有了标签，页头的**训练模型**按钮已开启。**我建议现在开始训练：** 分别用 10k、30k、46k 行跑三次，看更多数据是否还有帮助。训练在 Platform S 上进行，目前还没接通，所以接下来的结果是示意数据。',
         ),
       },
-      {kind: 'artifact', panel: 'trainingSet', action: 'created', title: t('Training set ts-1', '训练集 ts-1'), detail: t('46,000 rows · prompt v3', '46,000 行 · Prompt v3')},
+      {kind: 'artifact', panel: 'trainingSet', action: 'created', title: t('Training set', '训练集'), version: 'v1', detail: t('46,000 rows · prompt v3', '46,000 行 · Prompt v3')},
+      {
+        kind: 'card',
+        card: {
+          type: 'approval',
+          id: 'a-train',
+          title: t('Train student 8B', '训练学生模型 8B'),
+          rows: [
+            {label: t('Runs', '训练次数'), value: t('10k · 30k · 46k rows', '10k · 30k · 46k 行')},
+            {label: t('Platform', '平台'), value: t('Platform S (planned)', 'Platform S（规划中）')},
+          ],
+          approve: t('Train model', '训练模型'),
+          panel: 'trainingSet',
+        },
+      },
+    ],
+  },
+  {
+    stage: 5,
+    waitFor: 'pr-train',
+    items: [
+      {kind: 'choice', cardId: 'a-train'},
       {
         kind: 'card',
         card: {type: 'progress', id: 'pr-train', title: t('Training student 8B · 10k / 30k / 46k', '训练学生模型 8B · 10k / 30k / 46k'), total: 3, unit: t('runs', '次'), durationMs: 4500},
@@ -460,7 +609,7 @@ export const VIDEO_TAGS_STEPS: Step[] = [
     stage: 5,
     waitFor: 'q-more',
     items: [
-      {kind: 'artifact', panel: 'runs', action: 'created', title: t('Training runs', '训练记录'), detail: t('3 runs · 10k / 30k / 46k', '3 次 · 10k / 30k / 46k')},
+      {kind: 'artifact', panel: 'runs', action: 'created', title: t('Training runs', '训练记录'), version: 'v1', detail: t('3 runs · 10k / 30k / 46k', '3 次 · 10k / 30k / 46k')},
       {
         kind: 'card',
         card: {
@@ -513,7 +662,7 @@ export const VIDEO_TAGS_STEPS: Step[] = [
           `在封存的**测试集**（400 条）上，学生模型的 macro-F1：主要价值 **${fmt2(test.student.p)}**、形式 ${fmt2(test.student.f)}、话题 ${fmt2(test.student.t)}；教师模型分别为 ${fmt2(test.teacher.p)}、${fmt2(test.teacher.f)}、${fmt2(test.teacher.t)}。每个字段都过了最低线，最弱的标签是“${LABEL_BY_ID[studentWeakest.id].name.zh}”，${fmt2(studentWeakest.f1)}。`,
         ),
       },
-      {kind: 'artifact', panel: 'gate', action: 'created', title: t('Release gate report', '发布门禁报告'), detail: t('Student 8B · 400 test posts', '学生模型 8B · 400 条测试帖子')},
+      {kind: 'artifact', panel: 'gate', action: 'created', title: t('Release gate report', '发布门禁报告'), version: 'v1', detail: t('Student 8B · 400 test posts', '学生模型 8B · 400 条测试帖子')},
       {
         kind: 'card',
         card: {

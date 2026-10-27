@@ -23,7 +23,7 @@ export function ArtifactsMenu() {
       header={<div className="menu-header">{tr(t('Written by the agent for this model', '智能体为这个模型生成的内容'))}</div>}
       items={artifacts.map(a => ({
         id: a.panel,
-        label: tr(a.title),
+        label: a.version ? `${tr(a.title)} · ${a.version.toUpperCase()}` : tr(a.title),
         icon: PANEL_META[a.panel].icon,
         description: `${tr(PANEL_META[a.panel].kind)} · ${tr(a.detail)}`,
         endContent: a.writes > 1 ? <span className="menu-updated">{tr(t('Updated', '已更新'))}</span> : undefined,

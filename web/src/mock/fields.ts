@@ -27,6 +27,10 @@ export interface Field {
   range?: [number, number];
   description: T;
   values: FieldValue[];
+  /** The label a post gets when no value fits. */
+  defaultValue: string;
+  /** For fields whose prompt says to check values in a fixed order: the first that fits wins. */
+  order?: string[];
 }
 
 /** primary_value, in matrix order (metrics.ts rows and columns follow it). */
@@ -75,16 +79,16 @@ export const FORMATS: (FieldValue & {id: FormatId})[] = [
 ];
 
 export const TOPICS: (FieldValue & {id: TopicId})[] = [
-  {id: 'food', name: t('Food & drink', '美食饮品')},
-  {id: 'travel', name: t('Travel', '旅行')},
-  {id: 'home', name: t('Home & renting', '居家租房')},
-  {id: 'work', name: t('Work & money', '工作理财')},
-  {id: 'tech', name: t('Tech', '科技')},
-  {id: 'beauty', name: t('Beauty & fashion', '美妆时尚')},
-  {id: 'pets', name: t('Pets & animals', '宠物动物')},
-  {id: 'sports', name: t('Sports & fitness', '运动健身')},
-  {id: 'news', name: t('Entertainment news', '娱乐资讯')},
-  {id: 'other', name: t('Other', '其他')},
+  {id: 'food', name: t('Food & drink', '美食饮品'), definition: t('Cooking, restaurants, snacks and drinks.', '烹饪、餐厅、零食和饮品。')},
+  {id: 'travel', name: t('Travel', '旅行'), definition: t('Trips, places to visit and getting around.', '出行、景点和交通。')},
+  {id: 'home', name: t('Home & renting', '居家租房'), definition: t('Housing, renting, decorating and chores.', '住房、租房、装修和家务。')},
+  {id: 'work', name: t('Work & money', '工作理财'), definition: t('Jobs, careers, salaries and personal finance.', '工作、职业、薪资和个人理财。')},
+  {id: 'tech', name: t('Tech', '科技'), definition: t('Gadgets, apps, software and the internet.', '数码产品、应用、软件和互联网。')},
+  {id: 'beauty', name: t('Beauty & fashion', '美妆时尚'), definition: t('Makeup, skincare, clothes and style.', '化妆、护肤、服装和穿搭。')},
+  {id: 'pets', name: t('Pets & animals', '宠物动物'), definition: t('Pets, wildlife and animal care.', '宠物、野生动物和动物养护。')},
+  {id: 'sports', name: t('Sports & fitness', '运动健身'), definition: t('Matches, athletes, workouts and outdoor activity.', '比赛、运动员、健身和户外活动。')},
+  {id: 'news', name: t('Entertainment news', '娱乐资讯'), definition: t('Celebrities, shows, films and music news.', '明星、节目、电影和音乐资讯。')},
+  {id: 'other', name: t('Other', '其他'), definition: t('None of the above.', '以上都不是。')},
 ];
 
 export const FIELDS: Field[] = [
@@ -94,6 +98,8 @@ export const FIELDS: Field[] = [
     kind: 'single',
     description: t('What the viewer mainly gets from the post.', '观众从帖子里主要获得什么。'),
     values: LABELS,
+    defaultValue: 'entertainment',
+    order: ['ecosystem', 'practical', 'discussion', 'entertainment'],
   },
   {
     id: 'format',
@@ -101,6 +107,7 @@ export const FIELDS: Field[] = [
     kind: 'single',
     description: t('How the video is made.', '视频是怎么拍的。'),
     values: FORMATS,
+    defaultValue: 'other',
   },
   {
     id: 'topics',
@@ -109,6 +116,7 @@ export const FIELDS: Field[] = [
     range: [1, 3],
     description: t('What the post is about. Pick 1 to 3.', '帖子关于什么，选 1 到 3 个。'),
     values: TOPICS,
+    defaultValue: 'other',
   },
 ];
 
@@ -118,9 +126,6 @@ export const LABEL_BY_ID = Object.fromEntries(LABELS.map(l => [l.id, l])) as Rec
 export function valueOf(field: FieldId, id: string): FieldValue {
   return FIELD_BY_ID[field].values.find(v => v.id === id)!;
 }
-
-/** The prompt's judgment order for primary_value: the first match wins. */
-export const JUDGMENT_ORDER: LabelId[] = ['ecosystem', 'practical', 'discussion', 'entertainment'];
 
 /** The prompt's general rules, numbered as in the prompt. */
 export const RULES: T[] = [

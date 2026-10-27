@@ -97,7 +97,8 @@ export function Conversation({model}: {model: ModelSummary}) {
   const {state, say} = useStory();
   const layoutRef = useRef<HTMLDivElement>(null);
   const isReadOnly = !model.isScripted;
-  const items = model.isScripted ? state.log : (model.items ?? []);
+  const isTrained = state.trainedModels.includes(model.id);
+  const items = model.isScripted ? state.log : [...(model.items ?? []), ...(isTrained ? (model.afterTrain ?? []) : [])];
   const isAgentWorking = model.isScripted && state.pending.length > 0;
 
   // When the user answers a card further up, bring them down to where the agent replies.

@@ -5,7 +5,7 @@ import {t, type T} from '@/i18n/text';
 import type {Labels} from '@/mock/posts';
 import {CONFLICTS} from '@/mock/posts';
 import {MODELS, type ModelStatus} from './models';
-import type {Card, Item, PanelId} from './types';
+import type {Card, Datasets, Item, PanelId, SettingValues} from './types';
 import {RELEASED_STAGE, VIDEO_TAGS_STEPS} from './videoTags';
 
 const STEPS = VIDEO_TAGS_STEPS;
@@ -28,6 +28,10 @@ interface State {
   rulings: Record<string, string[]>;
   /** The user accepted the agent's suggestion for every disagreement they didn't decide. */
   hasAcceptedRest: boolean;
+  /** Schema edits the user sent to the agent from the schema page, as JSON. */
+  schemaEdits: string[];
+  /** Models the user started training on from the header outside the script (the fast path). */
+  trainedModels: string[];
 }
 
 type Action =
@@ -41,6 +45,8 @@ type Action =
   | {type: 'savePromptDraft'; text: string}
   | {type: 'rule'; conflictId: string; values: string[]}
   | {type: 'acceptRest'}
+  | {type: 'sendSchemaEdit'; json: string}
+  | {type: 'trainNow'; modelId: string}
   | {type: 'restart'};
 
 function initialState(): State {
@@ -56,6 +62,8 @@ function initialState(): State {
     promptDrafts: [],
     rulings: {},
     hasAcceptedRest: false,
+    schemaEdits: [],
+    trainedModels: [],
   };
 }
 
@@ -114,6 +122,23 @@ function reducer(state: State, action: Action): State {
       return {...state, rulings: {...state.rulings, [action.conflictId]: action.values}};
     case 'acceptRest':
       return {...state, rulings: suggestionsForRest(state.rulings), hasAcceptedRest: true};
+    case 'sendSchemaEdit': {
+      const n = state.schemaEdits.length + 1;
+      const items: Item[] = [
+        {kind: 'user', text: t('I edited the schema. Please review my changes.', '我修改了 Schema，请检查我的改动。')},
+        {
+          kind: 'agent',
+          text: t(
+            'Got your edits. In the product I’d check them against the labeled posts, flag anything that breaks earlier labels, and save them as a new schema version. This demo keeps its script, so the story continues with the schema as drafted.',
+            '收到你的修改。在正式产品里，我会用已标注的帖子检查这些改动，标出会影响已有标签的地方，并保存为新的 Schema 版本。演示按脚本进行，所以后面仍沿用起草的 Schema。',
+          ),
+        },
+        {kind: 'artifact', panel: 'schema', action: 'updated', title: t('Schema', 'Schema'), version: 'v1', detail: t(`Your edit ${n}, received`, `已收到你的第 ${n} 次修改`)},
+      ];
+      return {...state, schemaEdits: [...state.schemaEdits, action.json], log: [...state.log, ...items], panel: null};
+    }
+    case 'trainNow':
+      return state.trainedModels.includes(action.modelId) ? state : {...state, trainedModels: [...state.trainedModels, action.modelId]};
     case 'restart':
       return {...initialState(), selectedModel: state.selectedModel};
   }
@@ -138,7 +163,7 @@ function revealDelay(item: Item): number {
 }
 
 export const CARDS: Record<string, Card> = Object.fromEntries(
-  [...STEPS.flatMap(s => s.items), ...MODELS.flatMap(m => m.items ?? [])]
+  [...STEPS.flatMap(s => s.items), ...MODELS.flatMap(m => [...(m.items ?? []), ...(m.afterTrain ?? [])])]
     .filter((item): item is Extract<Item, {kind: 'card'}> => item.kind === 'card')
     .map(item => [item.card.id, item.card]),
 );
@@ -148,6 +173,8 @@ export interface ArtifactEntry {
   panel: PanelId;
   title: T;
   detail: T;
+  /** The latest version the agent wrote, shown as a tag beside the title. */
+  version?: string;
   /** How many times the agent wrote to it; 1 means only created. */
   writes: number;
 }
@@ -159,7 +186,13 @@ export function artifactsIn(log: Item[]): ArtifactEntry[] {
     if (item.kind !== 'artifact') continue;
     const prev = byPanel.get(item.panel);
     // An update's detail says what changed, so the entry keeps the detail from creation.
-    byPanel.set(item.panel, {panel: item.panel, title: item.title, detail: prev?.detail ?? item.detail, writes: (prev?.writes ?? 0) + 1});
+    byPanel.set(item.panel, {
+      panel: item.panel,
+      title: item.title,
+      version: item.version ?? prev?.version,
+      detail: prev?.detail ?? item.detail,
+      writes: (prev?.writes ?? 0) + 1,
+    });
   }
   return [...byPanel.values()];
 }
@@ -177,9 +210,35 @@ export function choiceLabel(card: Card, choice: string): T | null {
       return ADOPT;
     case 'link':
       return choice === 'skip' ? card.skip : card.doneLabel;
+    case 'settings':
+      return settingsSummary(card, JSON.parse(choice) as SettingValues);
     default:
       return null;
   }
+}
+
+/** Settings as the user submitted them, one value after another, as their reply in the chat. */
+function settingsSummary(card: Extract<Card, {type: 'settings'}>, values: SettingValues): T {
+  const line = (lang: 'en' | 'zh') =>
+    card.fields
+      .map(f => {
+        switch (f.kind) {
+          case 'number':
+            return `${f.label[lang]} ${Number(values[f.id]).toLocaleString('en-US')}`;
+          case 'select':
+            return f.options.find(o => o.id === values[f.id])?.label[lang] ?? '';
+          case 'computed':
+            return `${f.label[lang]} ${f.compute(values)}`;
+        }
+      })
+      .join(' · ');
+  return {en: line('en'), zh: line('zh')};
+}
+
+/** The datasets as of the step the story is on. */
+function datasetsAt(cursor: number): Datasets | null {
+  for (let i = cursor; i >= 0; i--) if (STEPS[i].datasets) return STEPS[i].datasets!;
+  return null;
 }
 
 interface StoryContextValue {
@@ -189,6 +248,7 @@ interface StoryContextValue {
   /** The card waiting on the user, if any. */
   awaitedCardId: string | null;
   artifacts: ArtifactEntry[];
+  datasets: Datasets | null;
   resolve: (cardId: string, choice: string) => void;
   say: (text: string) => void;
   selectModel: (id: string) => void;
@@ -198,6 +258,8 @@ interface StoryContextValue {
   savePromptDraft: (text: string) => void;
   rule: (conflictId: string, values: string[]) => void;
   acceptRest: () => void;
+  sendSchemaEdit: (json: string) => void;
+  trainNow: (modelId: string) => void;
   restart: () => void;
   isPanelAvailable: (panel: PanelId) => boolean;
   isResolved: (cardId: string) => boolean;
@@ -236,6 +298,8 @@ export function StoryProvider({children}: {children: ReactNode}) {
   const saveLabels = useCallback((postId: string, labels: Labels) => dispatch({type: 'saveLabels', postId, labels}), []);
   const rule = useCallback((conflictId: string, values: string[]) => dispatch({type: 'rule', conflictId, values}), []);
   const acceptRest = useCallback(() => dispatch({type: 'acceptRest'}), []);
+  const sendSchemaEdit = useCallback((json: string) => dispatch({type: 'sendSchemaEdit', json}), []);
+  const trainNow = useCallback((modelId: string) => dispatch({type: 'trainNow', modelId}), []);
   const restart = useCallback(() => dispatch({type: 'restart'}), []);
 
   const artifacts = useMemo(() => artifactsIn(state.log), [state.log]);
@@ -252,6 +316,7 @@ export function StoryProvider({children}: {children: ReactNode}) {
       status,
       awaitedCardId: awaited,
       artifacts,
+      datasets: datasetsAt(state.cursor),
       resolve,
       say,
       selectModel,
@@ -261,11 +326,13 @@ export function StoryProvider({children}: {children: ReactNode}) {
       savePromptDraft,
       rule,
       acceptRest,
+      sendSchemaEdit,
+      trainNow,
       restart,
       isResolved,
       isPanelAvailable: panel => artifacts.some(a => a.panel === panel),
     };
-  }, [state, step.stage, awaited, artifacts, resolve, say, selectModel, openPanel, closePanel, saveLabels, savePromptDraft, rule, acceptRest, restart]);
+  }, [state, step.stage, awaited, artifacts, resolve, say, selectModel, openPanel, closePanel, saveLabels, savePromptDraft, rule, acceptRest, sendSchemaEdit, trainNow, restart]);
 
   return <StoryContext.Provider value={value}>{children}</StoryContext.Provider>;
 }
