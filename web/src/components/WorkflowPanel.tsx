@@ -11,6 +11,7 @@ import {titleCase} from '@/i18n/titleCase';
 import {FIELDS} from '@/mock/fields';
 import {macroF1, PROMPT_RUNS} from '@/mock/metrics';
 import {fmt2} from '@/mock/numbers';
+import type {PromptId} from '@/mock/prompt';
 import {CONFLICT_TOTALS, LABELING_POSTS} from '@/mock/posts';
 import type {ModelSummary} from '@/story/models';
 import {useStory} from '@/story/StoryProvider';
@@ -34,7 +35,7 @@ function useScriptedNotes(datasets: Datasets | null, trainingNote: ReactNode): R
   const story = useStory();
   const done = story.isResolved;
   const line = (text: T) => <p className="step-note">{tr(text)}</p>;
-  const prompt = done('a-teacher-gate') ? 'v3b' : done('adv-1') ? 'v2' : 'v1';
+  const prompt: PromptId = done('pr-v13') ? 'v1.3' : done('pr-v12') ? 'v1.2' : done('adv-1') ? 'v1.1' : 'v1.0';
   const notes: Record<number, ReactNode> = {};
 
   if (story.isPanelAvailable('schema'))
@@ -50,9 +51,10 @@ function useScriptedNotes(datasets: Datasets | null, trainingNote: ReactNode): R
     notes[2] = line(t(`Labeling 1,000 posts · your share ${mine} / 5`, `标注 1,000 条 · 你的部分 ${mine} / 5`));
   }
 
-  const isV1Scored = story.isPanelAvailable('evalReport', 'v1');
-  if (done('adv-2') && !done('pr-v3')) notes[3] = line(t('Running v3a and v3b side by side', 'v3a 和 v3b 正在同时运行'));
-  else if (done('pr-v3') && !done('a-teacher-gate')) notes[3] = line(t('v3b passed the gate · waiting for your approval', 'v3b 已过门禁 · 等待你批准'));
+  const isV1Scored = story.isPanelAvailable('evalReport', 'v1.0');
+  if (done('adv-2') && !done('pr-v12')) notes[3] = line(t('Running prompt v1.2', '正在运行 Prompt v1.2'));
+  else if (done('adv-3') && !done('pr-v13')) notes[3] = line(t('Running prompt v1.3', '正在运行 Prompt v1.3'));
+  else if (done('pr-v13') && !done('a-teacher-gate')) notes[3] = line(t('v1.3 passed the gate · waiting for your approval', 'v1.3 已过门禁 · 等待你批准'));
   else if (isV1Scored) {
     const run = PROMPT_RUNS[prompt];
     notes[3] = (
@@ -68,11 +70,11 @@ function useScriptedNotes(datasets: Datasets | null, trainingNote: ReactNode): R
         </dl>
       </>
     );
-  } else if (done('pr-v1-early')) notes[3] = line(t('Prompt v1 ran on 1,000 posts · scored once gold labels are in', 'Prompt v1 已在 1,000 条上运行 · 金标完成后打分'));
-  else if (done('a-run-v1-early') || done('a-run-v1')) notes[3] = line(t('Running prompt v1', '正在运行 Prompt v1'));
-  else if (story.isPanelAvailable('promptDiff')) notes[3] = line(t('Prompt v1 drafted · editable', 'Prompt v1 已起草 · 可编辑'));
+  } else if (done('pr-v1-early')) notes[3] = line(t('Prompt v1.0 ran on 1,000 posts · scored once gold labels are in', 'Prompt v1.0 已在 1,000 条上运行 · 金标完成后打分'));
+  else if (done('a-run-v1-early') || done('a-run-v1')) notes[3] = line(t('Running prompt v1.0', '正在运行 Prompt v1.0'));
+  else if (story.isPanelAvailable('promptDiff')) notes[3] = line(t('Prompt v1.0 drafted · editable', 'Prompt v1.0 已起草 · 可编辑'));
 
-  if (done('pr-batch')) notes[4] = line(t('46,000 rows · teacher, prompt v3b', '46,000 行 · 教师模型，Prompt v3b'));
+  if (done('pr-batch')) notes[4] = line(t('46,000 rows · teacher, prompt v1.3', '46,000 行 · 教师模型，Prompt v1.3'));
   else if (done('a-cost')) notes[4] = line(t('Teacher labeling 49,000 posts', '教师模型正在标注 49,000 条'));
 
   notes[5] = trainingNote;

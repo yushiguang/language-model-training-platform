@@ -1,7 +1,7 @@
 /**
- * The full teacher prompt at each version. v1 is docs/demo/video-tagging-prompt-v1.md. v2 applies the
- * agent's first advice (adv-1 in story/videoTags.ts); v3a and v3b are the two variants of the second
- * (adv-2), run side by side from v2. Keep them in step with those cards.
+ * The full teacher prompt at each version. Versions have two parts: changes bump the minor number, and
+ * the user can ask for a major one. v1.0 is docs/demo/video-tagging-prompt-v1.md; v1.1, v1.2 and v1.3
+ * apply the agent's advice cards adv-1, adv-2 and adv-3 in story/videoTags.ts. Keep them in step.
  */
 const V1 = `You are a content analyst for a short-video platform. Watch the post and tag it.
 
@@ -61,21 +61,22 @@ export const TOPICS = '### 3. topics (pick 1 to 3)';
 export const DISCUSSION_STRICT = '- Discussion: only when the poster gives their own view on camera and invites others to respond.';
 export const TOPICS_FIX = '### 3. topics (pick 1 to 3; pick 1 unless the post clearly covers more)';
 
-// Both variants tag fewer topics; they differ in how they keep guests' views out of Discussion.
+// v1.2 and v1.3 both tag fewer topics; they differ in how they keep guests' views out of Discussion.
 const V3A = V2.replace(DISCUSSION, DISCUSSION_STRICT).replace(TOPICS, TOPICS_FIX);
 const V3B = V2.replace(DISCUSSION, DISCUSSION_FIX).replace(TOPICS, TOPICS_FIX);
 
-export type PromptId = 'v1' | 'v2' | 'v3a' | 'v3b';
+export type PromptId = 'v1.0' | 'v1.1' | 'v1.2' | 'v1.3';
 
-export const PROMPT_TEXT: Record<PromptId, string> = {v1: V1, v2: V2, v3a: V3A, v3b: V3B};
+export const PROMPT_TEXT: Record<PromptId, string> = {'v1.0': V1, 'v1.1': V2, 'v1.2': V3A, 'v1.3': V3B};
 
-/** Prompt versions form a tree: each comes from a parent, and siblings can run side by side. In creation order. */
-export const PROMPT_PARENT: Record<PromptId, PromptId | null> = {v1: null, v2: 'v1', v3a: 'v2', v3b: 'v2'};
-export const PROMPT_ORDER: PromptId[] = ['v1', 'v2', 'v3a', 'v3b'];
+/** The version each one was made from. v1.3 starts again from v1.1, the best before v1.2's drop. */
+export const PROMPT_PARENT: Record<PromptId, PromptId | null> = {'v1.0': null, 'v1.1': 'v1.0', 'v1.2': 'v1.1', 'v1.3': 'v1.1'};
+export const PROMPT_ORDER: PromptId[] = ['v1.0', 'v1.1', 'v1.2', 'v1.3'];
 
-/** The versions from the root down to this one. */
-export function promptPath(id: PromptId): PromptId[] {
-  const path: PromptId[] = [];
-  for (let at: PromptId | null = id; at; at = PROMPT_PARENT[at]) path.unshift(at);
-  return path;
+/** The next version after the newest one: a minor bump by default, or a major one when asked. */
+export function nextVersion(existing: string[], isMajor: boolean): string {
+  const parts = existing.map(v => v.slice(1).split('.').map(Number));
+  const major = Math.max(...parts.map(p => p[0]));
+  if (isMajor) return `v${major + 1}.0`;
+  return `v${major}.${Math.max(...parts.filter(p => p[0] === major).map(p => p[1])) + 1}`;
 }

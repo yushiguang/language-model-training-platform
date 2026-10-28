@@ -28,8 +28,9 @@ export interface OpenArtifact {
   focus?: string;
 }
 
-/** A prompt the user edited on the prompt page, and the version it started from. */
+/** A prompt the user edited and saved on the prompt page as a new version, and the version it started from. */
 export interface PromptDraft {
+  version: string;
   text: string;
   parent: PromptId;
 }

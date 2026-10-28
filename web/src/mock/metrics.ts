@@ -90,9 +90,9 @@ export function invalidRate(run: EvalRun): number {
 
 /** Teacher prompt versions on the 600-post eval split. */
 export const PROMPT_RUNS: Record<PromptId, EvalRun> = {
-  v1: {
-    id: 'v1',
-    name: t('Prompt v1', 'Prompt v1'),
+  'v1.0': {
+    id: 'v1.0',
+    name: t('Prompt v1.0', 'Prompt v1.0'),
     split: 'eval',
     // 19 of the 23 invalid outputs wrote "Ecosystem", the value named in the output section.
     primary_value: {
@@ -129,9 +129,9 @@ export const PROMPT_RUNS: Record<PromptId, EvalRun> = {
     ],
     topicsExactMatch: 0.38,
   },
-  v2: {
-    id: 'v2',
-    name: t('Prompt v2', 'Prompt v2'),
+  'v1.1': {
+    id: 'v1.1',
+    name: t('Prompt v1.1', 'Prompt v1.1'),
     split: 'eval',
     primary_value: {
       matrix: [
@@ -167,9 +167,9 @@ export const PROMPT_RUNS: Record<PromptId, EvalRun> = {
     ],
     topicsExactMatch: 0.4,
   },
-  v3a: {
-    id: 'v3a',
-    name: t('Prompt v3a', 'Prompt v3a'),
+  'v1.2': {
+    id: 'v1.2',
+    name: t('Prompt v1.2', 'Prompt v1.2'),
     split: 'eval',
     // Discussion only when the poster speaks on camera: too strict, so many real Discussion posts fall to other values.
     primary_value: {
@@ -206,9 +206,9 @@ export const PROMPT_RUNS: Record<PromptId, EvalRun> = {
     ],
     topicsExactMatch: 0.6,
   },
-  v3b: {
-    id: 'v3b',
-    name: t('Prompt v3b', 'Prompt v3b'),
+  'v1.3': {
+    id: 'v1.3',
+    name: t('Prompt v1.3', 'Prompt v1.3'),
     split: 'eval',
     primary_value: {
       matrix: [
@@ -288,7 +288,7 @@ export const TEST_RUNS: Record<'student' | 'teacher', EvalRun> = {
   },
   teacher: {
     id: 'teacher-v3',
-    name: t('Teacher · prompt v3b', '教师模型 · Prompt v3b'),
+    name: t('Teacher · prompt v1.3', '教师模型 · Prompt v1.3'),
     split: 'test',
     primary_value: {
       matrix: [

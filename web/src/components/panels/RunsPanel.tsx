@@ -74,10 +74,10 @@ export function RunsPanel() {
                 </tr>
               ))}
               <tr className="total-row">
-                <th scope="row">{tr(t('Teacher · prompt v3b', '教师模型 · Prompt v3b'))}</th>
+                <th scope="row">{tr(t('Teacher · prompt v1.3', '教师模型 · Prompt v1.3'))}</th>
                 <td>—</td>
                 {FIELDS.map(f => (
-                  <td key={f.id}>{fmt2(macroF1(PROMPT_RUNS.v3b, f.id))}</td>
+                  <td key={f.id}>{fmt2(macroF1(PROMPT_RUNS['v1.3'], f.id))}</td>
                 ))}
               </tr>
             </tbody>

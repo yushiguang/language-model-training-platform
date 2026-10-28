@@ -9,7 +9,7 @@ import {t} from '@/i18n/text';
 import {FIELDS, type FieldId} from '@/mock/fields';
 import {macroF1, macroOf, passesTeacherGate, PROMPT_RUNS, TEACHER_GATE, type Metric} from '@/mock/metrics';
 import {fmt2} from '@/mock/numbers';
-import {PROMPT_ORDER, PROMPT_PARENT, promptPath, type PromptId} from '@/mock/prompt';
+import {PROMPT_ORDER, PROMPT_PARENT, type PromptId} from '@/mock/prompt';
 import {useStory} from '@/story/StoryProvider';
 
 const METRICS: {id: Metric; label: string}[] = [
@@ -41,8 +41,8 @@ function thresholds(gateWord: string): TrendThreshold[] {
 }
 
 /**
- * How each field scored across the prompt versions run so far. Lines follow the selected version's
- * lineage; the gate's minimums are dashed lines. Clicking a version selects it.
+ * How each field scored across the prompt versions run so far, joined in the order they ran.
+ * The gate's minimums are dashed lines. Clicking a version selects it.
  */
 export function PromptTrend({selected, onSelect}: {selected: PromptId; onSelect?: (id: PromptId) => void}) {
   const {tr} = useLocale();
@@ -67,15 +67,15 @@ export function PromptTrend({selected, onSelect}: {selected: PromptId; onSelect?
           values: Object.fromEntries(FIELDS.map(f => [f.id, macroOf(PROMPT_RUNS[id], f.id, metric)])),
         }))}
         series={FIELDS.map(f => ({id: f.id, name: tr(f.name), color: FIELD_COLORS[f.id]}))}
-        path={promptPath(selected)}
+        path={ids}
         highlight={selected}
         best={bestPrompt(ids)}
         thresholds={metric === 'f1' ? thresholds(tr(t('Gate', '门禁'))) : []}
         formatY={fmt2}
         caption={tr(
           t(
-            `Macro-${metricName} per field on the 600 eval posts, for each prompt version. Lines follow ${selected}’s lineage; faint points are other branches.${metric === 'f1' ? ' Dashed lines are the teacher-quality gate.' : ' The gate checks F1 only.'}`,
-            `每个 Prompt 版本在 600 条评估帖子上各字段的 macro-${metricName}。连线是 ${selected} 的版本路径，浅色点是其他分支。${metric === 'f1' ? '虚线是教师质量门禁。' : '门禁只看 F1。'}`,
+            `Macro-${metricName} per field on the 600 eval posts, for each prompt version, in the order they ran.${metric === 'f1' ? ' Dashed lines are the teacher-quality gate.' : ' The gate checks F1 only.'}`,
+            `每个 Prompt 版本在 600 条评估帖子上各字段的 macro-${metricName}，按运行顺序排列。${metric === 'f1' ? '虚线是教师质量门禁。' : '门禁只看 F1。'}`,
           ),
         )}
         passedLabel={tr(t('Passed gate', '已过门禁'))}
