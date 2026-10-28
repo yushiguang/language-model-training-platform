@@ -1,33 +1,21 @@
 'use client';
 
 import {useState} from 'react';
-import {Badge} from '@astryxdesign/core/Badge';
-import {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl';
+import {Button} from '@astryxdesign/core/Button';
+import {Icon} from '@astryxdesign/core/Icon';
+import {FileText} from 'lucide-react';
 import {Delta} from '@/components/Change';
+import {PromptTrend, useScoredPrompts} from '@/components/PromptTrend';
 import {ConfusionMatrix} from '@/components/charts/ConfusionMatrix';
 import {trendOf} from '@/components/trend';
 import {ValueChip} from '@/components/ValueChip';
 import {useLocale} from '@/i18n/LocaleProvider';
 import {t} from '@/i18n/text';
 import {FIELD_BY_ID, FIELDS, type FieldId} from '@/mock/fields';
-import {invalidRate, macroF1, PROMPT_RUNS, TEACHER_GATE, total, valueScores, weakestLabel, type EvalRun} from '@/mock/metrics';
+import {invalidRate, macroF1, PROMPT_RUNS, TEACHER_GATE, total, valueScores, type EvalRun} from '@/mock/metrics';
+import {PROMPT_PARENT, type PromptId} from '@/mock/prompt';
 import {useStory} from '@/story/StoryProvider';
 import {FieldSwitch, PanelSection, StatGrid, fmt2, pct} from './parts';
-
-type Version = keyof typeof PROMPT_RUNS;
-const VERSIONS: {id: Version; unlockedBy: string}[] = [
-  {id: 'v1', unlockedBy: 'pr-v1'},
-  {id: 'v2', unlockedBy: 'adv-1'},
-  {id: 'v3', unlockedBy: 'adv-2'},
-];
-
-export function passesTeacherGate(run: EvalRun): boolean {
-  return (
-    FIELDS.every(f => macroF1(run, f.id) >= TEACHER_GATE.macroF1[f.id]) &&
-    weakestLabel(run).f1 >= TEACHER_GATE.labelF1 &&
-    invalidRate(run) <= TEACHER_GATE.invalid
-  );
-}
 
 /** Topics per post, as tagged and as people tagged them. */
 function tagsPerPost(run: EvalRun): {tagged: number; gold: number} {
@@ -38,19 +26,20 @@ function tagsPerPost(run: EvalRun): {tagged: number; gold: number} {
   };
 }
 
-/** The teacher on the human-labeled eval split, for each prompt version adopted so far, field by field. */
-export function EvalReportPanel() {
+/**
+ * One eval run: the teacher with one prompt version on the human-labeled eval split, field by field.
+ * Each run is its own report and never changes; the trend at the top compares it with the other runs.
+ */
+export function EvalReportPanel({artifactRef}: {artifactRef?: string}) {
   const {tr} = useLocale();
   const story = useStory();
-  const available = VERSIONS.filter(v => story.isResolved(v.unlockedBy)).map(v => v.id);
-  const [picked, setPicked] = useState<Version | null>(null);
+  const scored = useScoredPrompts();
   const [field, setField] = useState<FieldId>('primary_value');
-  const version = picked && available.includes(picked) ? picked : available[available.length - 1];
+  const version = (artifactRef as PromptId | undefined) ?? scored[scored.length - 1];
   const run = PROMPT_RUNS[version];
-  const prevId = available[available.indexOf(version) - 1];
+  const prevId = PROMPT_PARENT[version];
   const prev = prevId ? valueScores(PROMPT_RUNS[prevId], field) : null;
   const rows = valueScores(run, field);
-  const passes = passesTeacherGate(run);
   const meta = FIELD_BY_ID[field];
   const gate = TEACHER_GATE.macroF1;
   const tags = tagsPerPost(run);
@@ -58,16 +47,33 @@ export function EvalReportPanel() {
   return (
     <div className="page">
       <div className="page-toolbar">
-        <SegmentedControl label={tr(t('Prompt version', 'Prompt 版本'))} size="sm" value={version} onChange={v => setPicked(v as Version)}>
-          {available.map(v => (
-            <SegmentedControlItem key={v} value={v} label={`Prompt ${v}`} />
-          ))}
-        </SegmentedControl>
-        <Badge
-          variant={passes ? 'success' : 'warning'}
-          label={tr(passes ? t('Passes the teacher-quality gate', '通过教师质量门禁') : t('Below the teacher-quality gate', '未达教师质量门禁'))}
+        <span className="report-of">
+          {tr(
+            prevId
+              ? t(`Prompt ${version}, from ${prevId} · 600 eval posts`, `Prompt ${version}，基于 ${prevId} · 600 条评估帖子`)
+              : t(`Prompt ${version} · 600 eval posts`, `Prompt ${version} · 600 条评估帖子`),
+          )}
+        </span>
+        <Button
+          className="toolbar-end"
+          label={tr(t(`Open prompt ${version}`, `打开 Prompt ${version}`))}
+          variant="secondary"
+          size="sm"
+          icon={<Icon icon={FileText} size="sm" />}
+          onClick={() => story.openPanel('promptDiff', undefined, version)}
         />
       </div>
+
+      {scored.length > 1 && (
+        <PanelSection
+          title={t('Across prompt versions', '各 Prompt 版本对比')}
+          description={t(
+            'Click a version to open its report. A drop on the line means that change made things worse; start again from the best version on the prompt page.',
+            '点击某个版本可打开它的报告。连线下降说明那次修改变差了，可以在 Prompt 页面从最佳版本重新开始。',
+          )}>
+          <PromptTrend selected={version} onSelect={id => id !== version && story.openPanel('evalReport', id)} />
+        </PanelSection>
+      )}
 
       <StatGrid
         stats={[
@@ -84,7 +90,7 @@ export function EvalReportPanel() {
         title={t('By field', '按字段')}
         description={
           prev
-            ? t(`${total(run)} eval posts with human labels. Change is against prompt ${prevId}.`, `评估集 ${total(run)} 条人工标注。变化相对于 Prompt ${prevId}。`)
+            ? t(`${total(run)} eval posts with human labels. Change is against prompt ${prevId}, the version it came from.`, `评估集 ${total(run)} 条人工标注。变化相对于它的上一版 Prompt ${prevId}。`)
             : t(
                 `${total(run)} eval posts with human labels. Precision: of the posts the teacher gave a value, how many were right. Recall: of the posts that have it, how many it found.`,
                 `评估集 ${total(run)} 条人工标注。Precision：教师给出该取值的帖子里，有多少是对的。Recall：真正属于该取值的帖子里，找到了多少。`,
@@ -143,7 +149,10 @@ export function EvalReportPanel() {
       ) : (
         <PanelSection
           title={t('Where the teacher goes wrong', '教师模型错在哪里')}
-          description={t('Rows are the human label, columns the teacher’s. Shading is the share of each row, so the diagonal is recall. Invalid outputs count as wrong.', '行是人工标签，列是教师模型的判断。颜色深浅是该行内的占比，对角线就是 Recall。无效输出计为错误。')}>
+          description={t(
+            'Rows are the human label, columns the teacher’s. Shading is the share of each row, so the diagonal is recall. Invalid outputs count as wrong.',
+            '行是人工标签，列是教师模型的判断。颜色深浅是该行内的占比，对角线就是 Recall。无效输出计为错误。',
+          )}>
           <ConfusionMatrix
             labels={meta.values.map(v => tr(v.name))}
             matrix={run[field].matrix}

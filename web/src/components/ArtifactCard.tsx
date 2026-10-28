@@ -4,6 +4,7 @@ import {titleCase} from '@/i18n/titleCase';
 import {Icon} from '@astryxdesign/core/Icon';
 import {ArrowUpRight, FilePen, FilePlus2} from 'lucide-react';
 import {PANEL_META} from '@/components/panels/panelMeta';
+import {GateTag} from '@/components/GateTag';
 import {VersionTag} from '@/components/VersionTag';
 import {useLocale} from '@/i18n/LocaleProvider';
 import {t} from '@/i18n/text';
@@ -30,7 +31,7 @@ export function ArtifactCard({item}: {item: Extract<Item, {kind: 'artifact'}>}) 
     <button
       type="button"
       className="artifact-card"
-      onClick={() => openPanel(item.panel)}
+      onClick={() => openPanel(item.panel, item.ref)}
       aria-label={`${title}${item.version ? ` ${item.version.toUpperCase()}` : ''} · ${tr(action.label)} · ${tr(t('Open', '打开'))}`}>
       <span className="artifact-tile" aria-hidden>
         <Icon icon={meta.icon} size="md" color="inherit" />
@@ -45,6 +46,7 @@ export function ArtifactCard({item}: {item: Extract<Item, {kind: 'artifact'}>}) 
             <Icon icon={action.icon} size="xsm" color="inherit" />
             {tr(action.label)}
           </span>
+          <GateTag passed={item.gate} />
           <span className="artifact-detail">
             {tr(meta.kind)} · {tr(item.detail)}
           </span>

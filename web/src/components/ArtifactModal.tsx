@@ -20,14 +20,16 @@ import {SamplesPanel} from '@/components/panels/SamplesPanel';
 import {SchemaPanel} from '@/components/panels/SchemaPanel';
 import {TrainingSetPanel} from '@/components/panels/TrainingSetPanel';
 import {useMediaQuery} from '@/components/useMediaQuery';
+import {GateTag} from '@/components/GateTag';
 import {VersionTag} from '@/components/VersionTag';
 import {useLocale} from '@/i18n/LocaleProvider';
 import {t} from '@/i18n/text';
 import {LABELING_POSTS} from '@/mock/posts';
-import {useStory} from '@/story/StoryProvider';
+import {findArtifact, useStory} from '@/story/StoryProvider';
 import type {PanelId} from '@/story/types';
 
-const PANELS: Record<PanelId, () => React.ReactNode> = {
+/** Each page renders one artifact; `artifactRef` picks which one when a kind has several, such as eval reports. */
+const PANELS: Record<PanelId, (props: {artifactRef?: string; focus?: string}) => React.ReactNode> = {
   schema: SchemaPanel,
   samples: SamplesPanel,
   labeling: LabelingPanel,
@@ -49,10 +51,11 @@ export function ArtifactModal() {
   const {state, artifacts, closePanel} = useStory();
   const isNarrow = useMediaQuery('(max-width: 640px)');
   const [hasPageNote, setHasPageNote] = useState(false);
-  const panel = state.panel;
-  const entry = artifacts.find(a => a.panel === panel);
+  const panel = state.panel?.panel;
+  const entry = panel ? findArtifact(artifacts, panel, state.panel?.ref) : undefined;
+  const key = entry ? `${entry.panel}:${entry.ref ?? ''}:${state.panel?.focus ?? ''}` : '';
 
-  useEffect(() => setHasPageNote(false), [panel]);
+  useEffect(() => setHasPageNote(false), [key]);
 
   if (!panel || !entry) return null;
   const meta = PANEL_META[panel];
@@ -79,6 +82,7 @@ export function ArtifactModal() {
             <h2 className="artifact-modal-title">
               {title}
               <VersionTag version={entry.version} />
+              <GateTag passed={entry.gate} />
             </h2>
           </div>
           {panel === 'labeling' && <LabelingProgress />}
@@ -109,12 +113,15 @@ export function ArtifactModal() {
             </span>
             <span>
               {tr(t('Full pages come after the demo. In the product, this opens at ', '完整页面会在演示之后实现。在正式产品里，它会在这个地址打开：'))}
-              <code>/models/video-tags/{meta.path}</code>
+              <code>
+                /models/video-tags/{meta.path}
+                {entry.ref ? `/${entry.ref}` : ''}
+              </code>
             </span>
           </div>
         )}
-        <div className="artifact-modal-body" key={panel}>
-          <Body />
+        <div className="artifact-modal-body" key={key}>
+          <Body artifactRef={entry.ref} focus={state.panel?.focus} />
         </div>
       </div>
     </Dialog>

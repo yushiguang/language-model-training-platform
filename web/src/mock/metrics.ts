@@ -1,5 +1,6 @@
 import {t, type T} from '@/i18n/text';
 import {FIELD_BY_ID, type FieldId, type LabelId} from './fields';
+import type {PromptId} from './prompt';
 
 /**
  * One evaluation of the teacher or the student on a human-labeled split.
@@ -63,6 +64,14 @@ export function macroF1(run: EvalRun, field: FieldId = 'primary_value'): number 
   return s.reduce((a, b) => a + b.f1, 0) / s.length;
 }
 
+export type Metric = 'f1' | 'precision' | 'recall';
+
+/** The mean of a per-value score over a field's values: macro-F1, macro precision or macro recall. */
+export function macroOf(run: EvalRun, field: FieldId, metric: Metric): number {
+  const s = valueScores(run, field);
+  return s.reduce((a, b) => a + b[metric], 0) / s.length;
+}
+
 /** The weakest primary_value label, which gates check against a minimum. */
 export function weakestLabel(run: EvalRun): {id: LabelId; f1: number} {
   const s = valueScores(run, 'primary_value');
@@ -80,7 +89,7 @@ export function invalidRate(run: EvalRun): number {
 }
 
 /** Teacher prompt versions on the 600-post eval split. */
-export const PROMPT_RUNS: Record<'v1' | 'v2' | 'v3', EvalRun> = {
+export const PROMPT_RUNS: Record<PromptId, EvalRun> = {
   v1: {
     id: 'v1',
     name: t('Prompt v1', 'Prompt v1'),
@@ -158,9 +167,48 @@ export const PROMPT_RUNS: Record<'v1' | 'v2' | 'v3', EvalRun> = {
     ],
     topicsExactMatch: 0.4,
   },
-  v3: {
-    id: 'v3',
-    name: t('Prompt v3', 'Prompt v3'),
+  v3a: {
+    id: 'v3a',
+    name: t('Prompt v3a', 'Prompt v3a'),
+    split: 'eval',
+    // Discussion only when the poster speaks on camera: too strict, so many real Discussion posts fall to other values.
+    primary_value: {
+      matrix: [
+        [290, 26, 13, 18],
+        [11, 107, 11, 3],
+        [21, 24, 27, 0],
+        [0, 0, 4, 44],
+      ],
+      invalid: [1, 0, 0, 0],
+    },
+    format: {
+      matrix: [
+        [158, 8, 6, 6, 8, 4],
+        [10, 90, 5, 1, 0, 4],
+        [8, 5, 71, 0, 1, 5],
+        [5, 0, 0, 60, 4, 1],
+        [9, 0, 1, 4, 63, 3],
+        [6, 2, 3, 1, 2, 45],
+      ],
+      invalid: [0, 0, 0, 0, 0, 1],
+    },
+    topics: [
+      [92, 36, 28],
+      [57, 18, 13],
+      [45, 14, 15],
+      [70, 18, 20],
+      [48, 18, 12],
+      [67, 28, 13],
+      [39, 11, 11],
+      [44, 15, 16],
+      [65, 19, 25],
+      [81, 26, 19],
+    ],
+    topicsExactMatch: 0.6,
+  },
+  v3b: {
+    id: 'v3b',
+    name: t('Prompt v3b', 'Prompt v3b'),
     split: 'eval',
     primary_value: {
       matrix: [
@@ -240,7 +288,7 @@ export const TEST_RUNS: Record<'student' | 'teacher', EvalRun> = {
   },
   teacher: {
     id: 'teacher-v3',
-    name: t('Teacher · prompt v3', '教师模型 · Prompt v3'),
+    name: t('Teacher · prompt v3b', '教师模型 · Prompt v3b'),
     split: 'test',
     primary_value: {
       matrix: [
@@ -280,6 +328,13 @@ export const TEST_RUNS: Record<'student' | 'teacher', EvalRun> = {
 
 /** Minimum macro-F1 per field, and the minimum for every primary_value label. Arbitrary for a first model. */
 export const TEACHER_GATE = {macroF1: {primary_value: 0.75, format: 0.75, topics: 0.7} as Record<FieldId, number>, labelF1: 0.6, invalid: 0.01};
+/** Whether a teacher run clears every check of the teacher-quality gate. */
+export function passesTeacherGate(run: EvalRun): boolean {
+  return (
+    (Object.keys(TEACHER_GATE.macroF1) as FieldId[]).every(f => macroF1(run, f) >= TEACHER_GATE.macroF1[f]) && weakestLabel(run).f1 >= TEACHER_GATE.labelF1 && invalidRate(run) <= TEACHER_GATE.invalid
+  );
+}
+
 export const RELEASE_GATE = {macroF1: {primary_value: 0.72, format: 0.72, topics: 0.65} as Record<FieldId, number>, labelF1: 0.6};
 
 /** Student macro-F1 per field on the eval split by training-set size (nested subsets, fixed seed). */

@@ -7,7 +7,7 @@ import {Icon} from '@astryxdesign/core/Icon';
 import {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl';
 import {Selector} from '@astryxdesign/core/Selector';
 import {TextArea} from '@astryxdesign/core/TextArea';
-import {Check, Send, X} from 'lucide-react';
+import {Check, Save, X} from 'lucide-react';
 import {FactRows, IconLine} from '@/components/cards/CardFrame';
 import {HelpTip} from '@/components/HelpTip';
 import {useLocale} from '@/i18n/LocaleProvider';
@@ -143,14 +143,7 @@ export function SchemaPanel() {
         {isDirty && (
           <div className="toolbar-end schema-edit-actions">
             <Button label={tr(t('Discard', '放弃修改'))} variant="ghost" size="sm" onClick={() => setJson(baseline)} />
-            <Button
-              label={tr(t('Send edits to the agent', '把修改发给智能体'))}
-              variant="primary"
-              size="sm"
-              icon={<Icon icon={Send} size="sm" />}
-              isDisabled={!schema}
-              onClick={() => story.sendSchemaEdit(json)}
-            />
+            <Button label={tr(t('Save', '保存'))} variant="primary" size="sm" icon={<Icon icon={Save} size="sm" />} isDisabled={!schema} onClick={() => story.sendSchemaEdit(json)} />
           </div>
         )}
       </div>
@@ -162,7 +155,9 @@ export function SchemaPanel() {
             isLabelHidden
             value={json}
             onChange={setJson}
-            rows={30}
+            // As tall as the JSON, so the page is the only thing that scrolls.
+            rows={json.split('\n').length + 1}
+            width="100%"
             description={tr(t('The JSON Schema used to parse and validate the teacher’s output.', '用于解析和校验教师输出的 JSON Schema。'))}
             status={
               schema

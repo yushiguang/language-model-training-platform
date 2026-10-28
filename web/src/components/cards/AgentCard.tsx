@@ -7,6 +7,7 @@ import {NumberInput} from '@astryxdesign/core/NumberInput';
 import {ProgressBar} from '@astryxdesign/core/ProgressBar';
 import {Selector} from '@astryxdesign/core/Selector';
 import {CircleCheck, CircleHelp, CircleX, ClipboardCheck, Info, Lightbulb, ListChecks, Loader, SlidersHorizontal, Sparkles} from 'lucide-react';
+import {Markdown} from '@astryxdesign/core/Markdown';
 import {BeforeAfter} from '@/components/Change';
 import {measureRows} from '@/components/measures';
 import {PostPreview} from '@/components/PostPreview';
@@ -23,7 +24,7 @@ function useValue() {
   return (v: string | T) => (typeof v === 'string' ? v : tr(v));
 }
 
-function OpenPanelButton({panel}: {panel: PanelId}) {
+function OpenPanelButton({panel, panelRef}: {panel: PanelId; panelRef?: string}) {
   const {tr} = useLocale();
   const {openPanel, isPanelAvailable} = useStory();
   const kind = PANEL_META[panel].kind;
@@ -33,8 +34,8 @@ function OpenPanelButton({panel}: {panel: PanelId}) {
       variant="secondary"
       size="sm"
       icon={<Icon icon={PANEL_META[panel].icon} size="sm" />}
-      isDisabled={!isPanelAvailable(panel)}
-      onClick={() => openPanel(panel)}
+      isDisabled={!isPanelAvailable(panel, panelRef)}
+      onClick={() => openPanel(panel, panelRef)}
     />
   );
 }
@@ -124,7 +125,7 @@ export function AgentCard({card, isReadOnly = false}: {card: Card; isReadOnly?: 
           {card.checks && <CheckList checks={card.checks} />}
           <div className="card-actions">
             {isResolved ? <ResolvedNote card={card} /> : !isReadOnly && <Button label={tr(card.approve)} variant="primary" isDisabled={!isActive} onClick={() => story.resolve(card.id, 'approve')} />}
-            {card.panel && <OpenPanelButton panel={card.panel} />}
+            {card.panel && <OpenPanelButton panel={card.panel} panelRef={card.panelRef} />}
           </div>
         </CardFrame>
       );
@@ -146,35 +147,61 @@ export function AgentCard({card, isReadOnly = false}: {card: Card; isReadOnly?: 
           {card.note && <p className="agent-card-body">{tr(card.note)}</p>}
           {card.panel && (
             <div className="card-actions">
-              <OpenPanelButton panel={card.panel} />
+              <OpenPanelButton panel={card.panel} panelRef={card.panelRef} />
             </div>
           )}
         </CardFrame>
       );
-    case 'advice':
+    case 'advice': {
+      const isSideBySide = card.variants.length > 1;
+      const names = card.variants.map(v => v.to).join(tr(t(' and ', ' 和 ')));
       return (
         <CardFrame icon={Lightbulb} kind={tr(t('Advice · prompt change', '建议 · 修改 Prompt'))} title={tr(card.title)} isActive={isActive}>
-          <p className="agent-card-body">{tr(card.diagnosis)}</p>
-          <PromptDiff removed={card.removed} added={card.added} label={tr(t('Proposed prompt change', '建议的 Prompt 修改'))} />
-          <div className="measured">
-            <div className="measured-title">{tr(t('Measured on the 600-post eval split before proposing', '提出前已在 600 条评估集上实测'))}</div>
-            <FactRows
-              rows={measureRows(card.measures, card.from, card.to).map(r => ({
-                label: tr(r.label),
-                value: <BeforeAfter row={r} />,
-              }))}
-            />
-          </div>
+          <Markdown density="compact">{tr(card.diagnosis)}</Markdown>
+          {card.variants.map(v => (
+            <div key={v.to} className="variant">
+              {isSideBySide && (
+                <div className="variant-head">
+                  <span className="variant-name">Prompt {v.to}</span>
+                  <span className="variant-note">{tr(v.note)}</span>
+                </div>
+              )}
+              <PromptDiff removed={v.removed} added={v.added} label={tr(t(`Proposed change, ${card.from} to ${v.to}`, `建议的修改：${card.from} 到 ${v.to}`))} />
+            </div>
+          ))}
+          {card.measures && (
+            <div className="measured">
+              <div className="measured-title">{tr(t('Measured on the 600-post eval split before proposing', '提出前已在 600 条评估集上实测'))}</div>
+              <FactRows
+                rows={measureRows(card.measures, card.from, card.variants[0].to).map(r => ({
+                  label: tr(r.label),
+                  value: <BeforeAfter row={r} />,
+                }))}
+              />
+            </div>
+          )}
           <div className="card-actions">
             {isResolved ? (
-              <ResolvedNote card={card} label={t(`Adopted as prompt ${card.to}`, `已采纳，生成 Prompt ${card.to}`)} />
+              <ResolvedNote
+                card={card}
+                label={isSideBySide ? t(`Running ${names} side by side`, `${names} 正在同时运行`) : t(`Adopted as prompt ${card.variants[0].to}`, `已采纳，生成 Prompt ${card.variants[0].to}`)}
+              />
             ) : (
-              <Button label={tr(t('Adopt', '采纳'))} variant="primary" isDisabled={!isActive} onClick={() => story.resolve(card.id, 'adopt')} />
+              <Button
+                label={tr(isSideBySide ? t('Run both', '两个都运行') : t('Adopt', '采纳'))}
+                variant="primary"
+                isDisabled={!isActive}
+                onClick={() => story.resolve(card.id, isSideBySide ? 'run' : 'adopt')}
+              />
             )}
-            <OpenPanelButton panel="evalReport" />
+            <OpenPanelButton panel="evalReport" panelRef={card.from} />
           </div>
         </CardFrame>
       );
+    }
+    case 'next':
+      // Suggestions show above the composer, not in the conversation.
+      return null;
     case 'link':
       return (
         <CardFrame icon={ListChecks} kind={tr(t('Task for you', '你的任务'))} title={tr(card.title)} isActive={isActive}>

@@ -1,6 +1,7 @@
 /**
- * The full teacher prompt at each version. v1 is docs/demo/video-tagging-prompt-v1.md; v2 and v3 apply
- * the agent's two advice cards (adv-1, adv-2 in story/videoTags.ts), so keep the three in step.
+ * The full teacher prompt at each version. v1 is docs/demo/video-tagging-prompt-v1.md. v2 applies the
+ * agent's first advice (adv-1 in story/videoTags.ts); v3a and v3b are the two variants of the second
+ * (adv-2), run side by side from v2. Keep them in step with those cards.
  */
 const V1 = `You are a content analyst for a short-video platform. Watch the post and tag it.
 
@@ -51,14 +52,30 @@ Return JSON only:
   "topics": ["..."]
 }`;
 
-const V2 = V1.replace(
-  '"primary_value": "Entertainment | Practical | Discussion | Ecosystem",',
-  '"primary_value": "Entertainment | Practical | Discussion | Ecosystem issue",',
-);
+const V2 = V1.replace('"primary_value": "Entertainment | Practical | Discussion | Ecosystem",', '"primary_value": "Entertainment | Practical | Discussion | Ecosystem issue",');
 
-const V3 = V2.replace(
-  '- Discussion: the poster shares their own view or experience and invites others to respond.',
-  '- Discussion: the poster shares their own view or experience and invites others to respond.\n  First check rule 1: a Clip with no comment from the poster is not Discussion.',
-).replace('### 3. topics (pick 1 to 3)', '### 3. topics (pick 1 to 3; pick 1 unless the post clearly covers more)');
+export const DISCUSSION = '- Discussion: the poster shares their own view or experience and invites others to respond.';
+export const DISCUSSION_FIX = `${DISCUSSION}\n  First check rule 1: a Clip with no comment from the poster is not Discussion.`;
+export const TOPICS = '### 3. topics (pick 1 to 3)';
 
-export const PROMPT_TEXT = {v1: V1, v2: V2, v3: V3} as const;
+export const DISCUSSION_STRICT = '- Discussion: only when the poster gives their own view on camera and invites others to respond.';
+export const TOPICS_FIX = '### 3. topics (pick 1 to 3; pick 1 unless the post clearly covers more)';
+
+// Both variants tag fewer topics; they differ in how they keep guests' views out of Discussion.
+const V3A = V2.replace(DISCUSSION, DISCUSSION_STRICT).replace(TOPICS, TOPICS_FIX);
+const V3B = V2.replace(DISCUSSION, DISCUSSION_FIX).replace(TOPICS, TOPICS_FIX);
+
+export type PromptId = 'v1' | 'v2' | 'v3a' | 'v3b';
+
+export const PROMPT_TEXT: Record<PromptId, string> = {v1: V1, v2: V2, v3a: V3A, v3b: V3B};
+
+/** Prompt versions form a tree: each comes from a parent, and siblings can run side by side. In creation order. */
+export const PROMPT_PARENT: Record<PromptId, PromptId | null> = {v1: null, v2: 'v1', v3a: 'v2', v3b: 'v2'};
+export const PROMPT_ORDER: PromptId[] = ['v1', 'v2', 'v3a', 'v3b'];
+
+/** The versions from the root down to this one. */
+export function promptPath(id: PromptId): PromptId[] {
+  const path: PromptId[] = [];
+  for (let at: PromptId | null = id; at; at = PROMPT_PARENT[at]) path.unshift(at);
+  return path;
+}

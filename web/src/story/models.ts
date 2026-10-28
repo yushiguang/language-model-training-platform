@@ -28,6 +28,16 @@ export interface ModelSummary {
 }
 
 const UPLOADED = t('Uploaded CSV', '上传的 CSV');
+
+const SAMPLE_EVAL = {
+  id: 'sample',
+  label: t('Sample 300 ads for eval and test · about 30 min of review', '抽 300 条广告做评估集和测试集 · 审核约 30 分钟'),
+  text: t('Sample 300 recent ads for eval and test', '抽 300 条近期广告做评估集和测试集'),
+  reply: t(
+    'In the product I’d start now: two reviewers can label 300 ads in about 30 minutes, and training can run at the same time. This demo stops here for Scam ads.',
+    '在正式产品里我会马上开始：两位审核员大约 30 分钟能标完 300 条，训练可以同时进行。演示中诈骗广告模型到此为止。',
+  ),
+};
 const HUMAN = t('Human gold labels', '人工金标');
 
 export const MODELS: ModelSummary[] = [
@@ -56,10 +66,16 @@ export const MODELS: ModelSummary[] = [
     },
     items: [
       {
+        kind: 'file',
+        name: 'scam-ads-br.csv',
+        size: '1.4 MB',
+        detail: t('3,200 rows · ad_text, label', '3,200 行 · ad_text, label'),
+      },
+      {
         kind: 'user',
         text: t(
-          'Scam ads are spiking in Brazil and Trust & Safety needs a classifier today. I uploaded 3,200 ads that reviewers already labeled scam or not scam.',
-          '巴西的诈骗广告激增，信任与安全团队今天就需要一个分类模型。我上传了 3,200 条审核员已标注“诈骗/非诈骗”的广告。',
+          'Scam ads are spiking in Brazil and Trust & Safety needs a classifier today. Here are 3,200 ads that reviewers already labeled scam or not scam.',
+          '巴西的诈骗广告激增，信任与安全团队今天就需要一个分类模型。这是 3,200 条审核员已标注“诈骗/非诈骗”的广告。',
         ),
       },
       {
@@ -77,9 +93,13 @@ export const MODELS: ModelSummary[] = [
           },
         ],
         text: t(
-          'Your file matches the schema: 3,200 rows, 18% scam. I put every row in the training set, so there is no eval or test set yet.\n\nYou can start training now with `/train`, but I don’t recommend it: without eval and test I can’t tell you how often the model is wrong, and the release gate can’t run. **Next, I recommend** that I sample 300 recent ads for eval and test. Two reviewers can label them in about 30 minutes, and training can run at the same time.',
-          '文件符合 Schema：3,200 行，18% 为诈骗。我把所有行都放进了训练集，所以还没有评估集和测试集。\n\n你现在就可以输入 `/train` 开始训练，但我不建议：没有评估集和测试集，我无法告诉你模型错得有多频繁，发布门禁也无法运行。**下一步，我建议**我从近期广告里抽 300 条作为评估集和测试集，两位审核员大约 30 分钟能标完，训练可以同时进行。',
+          'Your file matches the schema: 3,200 rows, 18% scam. I put every row in the training set, so there is no eval or test set yet.\n\nYou can start training now with `/train`, but without eval and test I can’t tell you how often the model is wrong, and the release gate can’t run.',
+          '文件符合 Schema：3,200 行，18% 为诈骗。我把所有行都放进了训练集，所以还没有评估集和测试集。\n\n你现在就可以输入 `/train` 开始训练，但没有评估集和测试集，我无法告诉你模型错得有多频繁，发布门禁也无法运行。',
         ),
+      },
+      {
+        kind: 'card',
+        card: {type: 'next', id: 'scam-next', suggestions: [SAMPLE_EVAL, {id: 'train', label: t('Train now, without eval and test', '现在训练，不带评估集和测试集'), text: t('/train', '/train')}]},
       },
     ],
     afterTrain: [
@@ -103,10 +123,11 @@ export const MODELS: ModelSummary[] = [
       {
         kind: 'agent',
         text: t(
-          'Training started; it takes about 40 minutes. Until there is a test set, I’d use the model to send likely scams to reviewers rather than block them outright.\n\n**Next, I recommend** the 300-ad eval and test sample. I can start it now so the gate is ready when training finishes.',
-          '训练已开始，大约需要 40 分钟。在有测试集之前，建议先用它把疑似诈骗送给审核员，而不是直接拦截。\n\n**下一步，我建议**抽 300 条广告做评估集和测试集。我现在就可以开始，训练结束时门禁就能运行。',
+          'Training started; it takes about 40 minutes. Until there is a test set, I’d use the model to send likely scams to reviewers rather than block them outright.',
+          '训练已开始，大约需要 40 分钟。在有测试集之前，建议先用它把疑似诈骗送给审核员，而不是直接拦截。',
         ),
       },
+      {kind: 'card', card: {type: 'next', id: 'scam-next-2', suggestions: [SAMPLE_EVAL]}},
     ],
   },
   {

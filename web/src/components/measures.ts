@@ -2,6 +2,7 @@ import {t, type T} from '@/i18n/text';
 import {FIELD_BY_ID, valueOf} from '@/mock/fields';
 import {invalidRate, macroF1, PROMPT_RUNS, valueScores, type EvalRun} from '@/mock/metrics';
 import {fmt2, pct} from '@/mock/numbers';
+import type {PromptId} from '@/mock/prompt';
 import type {Measure} from '@/story/types';
 import {trendOf, type Trend} from './trend';
 
@@ -41,7 +42,7 @@ export type MeasureRow = {label: T; before: string; after: string; trend: Trend}
  * One before → after row per measure, for a prompt change measured on the eval split.
  * Trend says whether the change is good news: fewer invalid outputs is better, higher F1 is better.
  */
-export function measureRows(measures: Measure[], from: keyof typeof PROMPT_RUNS, to: keyof typeof PROMPT_RUNS): MeasureRow[] {
+export function measureRows(measures: Measure[], from: PromptId, to: PromptId): MeasureRow[] {
   return measures.map(m => {
     const before = read(m, PROMPT_RUNS[from]);
     const after = read(m, PROMPT_RUNS[to]);

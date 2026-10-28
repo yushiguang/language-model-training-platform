@@ -1,25 +1,26 @@
-import {t} from '@/i18n/text';
+import {t, type T} from '@/i18n/text';
 import {LABEL_BY_ID} from '@/mock/fields';
-import {invalidRate, LEARNING_CURVE, LABELING, macroF1, PROMPT_RUNS, RELEASE_GATE, SPLITS, TEACHER_GATE, TEST_RUNS, TRAINING_SET, valueScores, weakestLabel} from '@/mock/metrics';
+import {invalidRate, LEARNING_CURVE, LABELING, macroF1, passesTeacherGate, PROMPT_RUNS, RELEASE_GATE, SPLITS, TEACHER_GATE, TEST_RUNS, TRAINING_SET, valueScores, weakestLabel} from '@/mock/metrics';
 import {fmt2, pct} from '@/mock/numbers';
 import {CONFLICT_TOTALS} from '@/mock/posts';
-import type {Step} from './types';
+import {DISCUSSION, DISCUSSION_FIX, DISCUSSION_STRICT, TOPICS, TOPICS_FIX, type PromptId} from '@/mock/prompt';
+import type {Item, Step} from './types';
 
-/** Workflow stages shown in the side panel. Training depends on Platform S, which is not integrated yet. */
+/** Workflow stages shown in the side panel. */
 export const STAGES = [
   {name: t('Schema', 'Schema')},
   {name: t('Dataset', '数据集')},
   {name: t('Gold labels', '金标')},
   {name: t('Teacher prompt', '教师 Prompt')},
   {name: t('Training set', '训练集')},
-  {name: t('Training', '训练'), isPlanned: true},
+  {name: t('Training', '训练')},
   {name: t('Release', '发布')},
 ];
 
 export const RELEASED_STAGE = STAGES.length;
 
 // Numbers the agent quotes, computed from src/mock/metrics.ts so the chat and the pages agree.
-const {v1, v2, v3} = PROMPT_RUNS;
+const {v1, v2, v3a, v3b} = PROMPT_RUNS;
 const scoreOf = (run: typeof v1, field: 'primary_value' | 'format' | 'topics', id: string) => valueScores(run, field).find(s => s.id === id)!;
 const v1Weakest = weakestLabel(v1);
 const v1EcoInvalid = v1.primary_value.invalid[3];
@@ -32,7 +33,7 @@ const conflictTotal = CONFLICT_TOTALS.primary_value + CONFLICT_TOTALS.format + C
 const curveEnd = LEARNING_CURVE[LEARNING_CURVE.length - 1];
 const curvePrev = LEARNING_CURVE[LEARNING_CURVE.length - 2];
 const lateGain = Math.max(...(['primary_value', 'format', 'topics'] as const).map(f => curveEnd.f1[f] - curvePrev.f1[f]));
-const studentShare = curveEnd.f1.primary_value / macroF1(v3);
+const studentShare = curveEnd.f1.primary_value / macroF1(v3b);
 const test = {
   student: {
     p: macroF1(TEST_RUNS.student),
@@ -59,6 +60,150 @@ const GOLD = {
   eval: {total: SPLITS.eval, labeled: SPLITS.eval, source: HUMAN_GOLD},
   test: {total: SPLITS.test, labeled: SPLITS.test, source: HUMAN_GOLD},
 };
+
+const GOLD_READY = t(
+  '**Gold labels** are ready for 600 eval posts and 400 test posts. The test split is now sealed, and I only ever see its totals.',
+  '**金标**已就绪：评估集 600 条，测试集 400 条。测试集现已封存，我只能看到汇总指标。',
+);
+
+/** The agent drafts prompt v1 and asks for an auto-labeling task with it; the user can edit the draft first. */
+function draftPrompt(text: T, cardId: string, posts: T, cost: string, time: T, firstTool?: 'derive_gold_labels'): Item[] {
+  return [
+    {
+      kind: 'agent',
+      tools: [
+        ...(firstTool ? [{name: firstTool, target: t('2 labels per post + adjudication', '每条 2 份标注 + 裁决'), duration: '0.3s'}] : []),
+        {name: 'read_prompt', target: t('video-tagging-prompt-v1.md', 'video-tagging-prompt-v1.md'), duration: '0.4s'},
+        {name: 'draft_prompt', target: t('v1 · from your prompt and schema v1', 'v1 · 基于你的 Prompt 和 Schema v1'), duration: '3s'},
+      ],
+      text,
+    },
+    {
+      kind: 'artifact',
+      panel: 'promptDiff',
+      action: 'created',
+      title: t('Prompt', 'Prompt'),
+      version: 'v1',
+      detail: t('Drafted from your team’s prompt · editable', '基于团队的 Prompt 起草 · 可编辑'),
+    },
+    {
+      kind: 'card',
+      card: {
+        type: 'approval',
+        id: cardId,
+        title: t('Create an auto-labeling task with prompt v1', '用 Prompt v1 创建自动标注任务'),
+        rows: [
+          {label: t('Prompt', 'Prompt'), value: 'v1'},
+          {label: t('Posts', '帖子'), value: posts},
+          {label: t('Estimated cost', '预估费用'), value: cost},
+          {label: t('Estimated time', '预计耗时'), value: time},
+        ],
+        approve: t('Create task', '创建任务'),
+        panel: 'promptDiff',
+      },
+    },
+  ];
+}
+
+/** One eval report per prompt version. Each is its own artifact, never updated, tagged with whether it passed the gate. */
+function evalReport(id: PromptId): Item {
+  return {
+    kind: 'artifact',
+    panel: 'evalReport',
+    action: 'created',
+    title: t(`Eval report · prompt ${id}`, `评估报告 · Prompt ${id}`),
+    detail: t('600 eval posts', '600 条评估帖子'),
+    ref: id,
+    gate: passesTeacherGate(PROMPT_RUNS[id]),
+  };
+}
+
+const LABELING_TASK: Item[] = [
+  {
+    kind: 'agent',
+    tools: [
+      {
+        name: 'create_labeling_task',
+        target: t('1,000 posts · 3 fields · 3 labelers', '1,000 条 · 3 个字段 · 3 位标注员'),
+        duration: '0.8s',
+      },
+    ],
+    text: t(
+      'I created a labeling task: **1,000 posts**, each labeled on all three fields by two of Lin, Mei and Ravi.',
+      '我建了标注任务：**1,000 条帖子**，每条由 Lin、Mei、Ravi 中的两人标注全部三个字段。',
+    ),
+  },
+  {
+    kind: 'artifact',
+    panel: 'labeling',
+    action: 'created',
+    title: t('Labeling task', '标注任务'),
+    detail: t('1,000 posts · your share: 5', '1,000 条 · 你的部分：5 条'),
+  },
+  {
+    kind: 'card',
+    card: {
+      type: 'link',
+      id: 'l-label',
+      title: t('Your share: label 5 posts', '你的任务：标注 5 条帖子'),
+      description: t('About 3 minutes. Each post shows frames, title, OCR and ASR, with the field definitions beside it.', '大约 3 分钟。每条帖子展示视频帧、标题、OCR 和 ASR，旁边附有字段定义。'),
+      panel: 'labeling',
+      cta: t('Start labeling', '开始标注'),
+      skip: t('Skip for now', '先跳过'),
+      doneLabel: t('I labeled my 5 posts', '我标完了 5 条'),
+    },
+  },
+];
+
+const V1_RESULTS: Item[] = [
+  evalReport('v1'),
+  {
+    kind: 'card',
+    card: {
+      type: 'result',
+      id: 'r-v1',
+      title: t('Prompt v1 results', 'Prompt v1 结果'),
+      stats: [
+        {
+          label: t('Macro-F1 · primary value', 'macro-F1 · 主要价值'),
+          value: fmt2(macroF1(v1)),
+        },
+        {
+          label: t('Invalid outputs', 'Invalid outputs'),
+          value: pct(invalidRate(v1), 1),
+        },
+        {
+          label: t(`Weakest: ${LABEL_BY_ID[v1Weakest.id].name.en}`, `最弱：${LABEL_BY_ID[v1Weakest.id].name.zh}`),
+          value: fmt2(v1Weakest.f1),
+        },
+      ],
+      panel: 'evalReport',
+      panelRef: 'v1',
+    },
+  },
+  {
+    kind: 'card',
+    card: {
+      type: 'advice',
+      id: 'adv-1',
+      title: t('Name the values exactly in the output section', '在输出部分写准确的取值'),
+      diagnosis: t(
+        `${v1Invalid} outputs (${pct(invalidRate(v1), 1)}) were invalid, and ${v1EcoInvalid} of them wrote “Ecosystem”: that’s how the output section names it, but the field defines “Ecosystem issue”. That is why Ecosystem scores only ${fmt2(v1Weakest.f1)}.`,
+        `${v1Invalid} 条输出（${pct(invalidRate(v1), 1)}）无效，其中 ${v1EcoInvalid} 条写的是“Ecosystem”：输出部分是这么写的，但字段定义的取值是“Ecosystem issue”。这就是生态问题只有 ${fmt2(v1Weakest.f1)} 的原因。`,
+      ),
+      from: 'v1',
+      variants: [
+        {
+          to: 'v2',
+          note: t('Name the values exactly', '写准确的取值'),
+          removed: ['"primary_value": "Entertainment | Practical | Discussion | Ecosystem",'],
+          added: ['"primary_value": "Entertainment | Practical | Discussion | Ecosystem issue",'],
+        },
+      ],
+      measures: [{kind: 'macro', field: 'primary_value'}, {kind: 'value', field: 'primary_value', value: 'ecosystem'}, {kind: 'invalid'}],
+    },
+  },
+];
 
 /**
  * The scripted conversation for the "Video tags" model. Prompt text lives in
@@ -386,8 +531,8 @@ export const VIDEO_TAGS_STEPS: Step[] = [
       {
         kind: 'agent',
         text: t(
-          'The splits are ready; you can follow them under Dataset in the workflow on the left. Training can start once the training set has labels.\n\n**Next, I recommend gold labels for eval and test.** They are how we’ll measure the teacher prompt and the student, so they should come from people.\n\nOne choice first. The labeling page can show the teacher’s answer for a post, but only after a teacher prompt has run on it. You already have a prompt from your ops team, so I can run it on the 1,000 posts first. Labeling stays blind: people see the teacher’s answer only if they ask for it.',
-          '划分已完成，可以在左侧流程的“数据集”里查看。训练集有标签后才能开始训练。\n\n**下一步，我建议给评估集和测试集做金标。** 我们要靠它们衡量教师 Prompt 和学生模型，所以应该由人来标。\n\n先要做个选择。标注页面可以展示教师模型对帖子的答案，但前提是教师 Prompt 已经在这些帖子上运行过。你已经有运营团队的 Prompt，我可以先在这 1,000 条上运行它。标注仍然是盲标的：只有标注员主动查看时才会看到教师的答案。',
+          'The splits are ready; you can follow them under Dataset in the workflow on the left. Training can start once the training set has labels.\n\nEval and test need gold labels from people: they are how we’ll measure the teacher prompt and the student. One choice first. The labeling page can show the teacher’s answer for a post, but only after a teacher prompt has run on it. Labeling stays blind either way: people see the teacher’s answer only if they ask for it.',
+          '划分已完成，可以在左侧流程的“数据集”里查看。训练集有标签后才能开始训练。\n\n评估集和测试集需要人工金标：我们要靠它们衡量教师 Prompt 和学生模型。先要做个选择。标注页面可以展示教师模型对帖子的答案，但前提是教师 Prompt 已经在这些帖子上运行过。无论哪种，标注都是盲标的：只有标注员主动查看时才会看到教师的答案。',
         ),
       },
       {
@@ -401,64 +546,82 @@ export const VIDEO_TAGS_STEPS: Step[] = [
             {id: 'prompt', label: t('Run the prompt first', '先运行 Prompt')},
           ],
           recommended: 'prompt',
-          reason: t('Your prompt already exists, and labelers then can compare with the teacher when they’re stuck.', '你已经有 Prompt，标注员遇到难题时可以对照教师模型的答案。'),
+          reason: t(
+            'Your team already has a prompt, so a first version is quick, and labelers can compare with the teacher when they’re stuck.',
+            '团队已有 Prompt，第一版很快就能起草，标注员遇到难题时也能对照教师模型的答案。',
+          ),
+        },
+      },
+    ],
+  },
+  // Prompt first: draft v1, let the user edit it, then run it on the posts people are about to label.
+  {
+    stage: 3,
+    when: {cardId: 'q-order', choice: 'prompt'},
+    waitFor: 'a-run-v1-early',
+    items: [
+      {kind: 'choice', cardId: 'q-order'},
+      ...draftPrompt(
+        t(
+          'Starting with the prompt. I drafted **prompt v1** from your ops team’s prompt and the confirmed schema, keeping your team’s wording and rules. Read it on the Prompt page and edit it if you like; when it looks right, create an auto-labeling task to run it on the 1,000 eval and test posts.',
+          '先做 Prompt。我根据运营团队的 Prompt 和已确认的 Schema 起草了 **Prompt v1**，保留了团队原有的措辞和规则。你可以在 Prompt 页面查看和修改；确认后，创建自动标注任务，在 1,000 条评估和测试帖子上运行它。',
+        ),
+        'a-run-v1-early',
+        t('1,000 eval and test posts', '1,000 条评估和测试帖子'),
+        '$9',
+        t('about 10 min', '约 10 分钟'),
+      ),
+    ],
+  },
+  {
+    stage: 3,
+    when: {cardId: 'q-order', choice: 'prompt'},
+    waitFor: 'pr-v1-early',
+    items: [
+      {kind: 'choice', cardId: 'a-run-v1-early'},
+      {
+        kind: 'card',
+        card: {
+          type: 'progress',
+          id: 'pr-v1-early',
+          title: t('Auto-labeling · prompt v1 · 1,000 posts', '自动标注 · Prompt v1 · 1,000 条'),
+          total: 1000,
+          unit: t('posts', '条'),
+          durationMs: 3500,
         },
       },
     ],
   },
   {
     stage: 2,
+    when: {cardId: 'q-order', choice: 'prompt'},
+    waitFor: 'l-label',
+    items: [
+      {
+        kind: 'agent',
+        text: t(
+          'The teacher’s answers are in for all 1,000 posts. Its scores come once people have labeled them, so on to gold labels.',
+          '教师模型已给出全部 1,000 条的答案。等人工标完才有分数，所以接下来做金标。',
+        ),
+      },
+      ...LABELING_TASK,
+    ],
+  },
+  // Label first: the labeling page can't show a teacher's answer, and the prompt comes after the gold labels.
+  {
+    stage: 2,
+    when: {cardId: 'q-order', choice: 'label'},
     waitFor: 'l-label',
     items: [
       {kind: 'choice', cardId: 'q-order'},
       {
-        kind: 'reply',
-        cardId: 'q-order',
-        replies: {
-          prompt: t(
-            'I ran your prompt as **v1** on the 1,000 eval and test posts. Its scores come once people have labeled them.',
-            '我已用你的 Prompt 作为 **v1** 在 1,000 条评估和测试帖子上运行。等人工标完后才有它的分数。',
-          ),
-          label: t(
-            'Labeling first, so the labeling page won’t show the teacher’s answer. I’ll run your prompt once the gold labels are in.',
-            '先标注，所以标注页面不会展示教师模型的答案。金标完成后我再运行你的 Prompt。',
-          ),
-        },
-      },
-      {
         kind: 'agent',
-        tools: [
-          {
-            name: 'create_labeling_task',
-            target: t('1,000 posts · 3 fields · 3 labelers', '1,000 条 · 3 个字段 · 3 位标注员'),
-            duration: '0.8s',
-          },
-        ],
         text: t(
-          'I created a labeling task: **1,000 posts**, each labeled on all three fields by two of Lin, Mei and Ravi.',
-          '我建了标注任务：**1,000 条帖子**，每条由 Lin、Mei、Ravi 中的两人标注全部三个字段。',
+          'Labeling first, so the labeling page won’t show the teacher’s answer. I’ll draft the prompt once the gold labels are in.',
+          '先标注，所以标注页面不会展示教师模型的答案。金标完成后我再起草 Prompt。',
         ),
       },
-      {
-        kind: 'artifact',
-        panel: 'labeling',
-        action: 'created',
-        title: t('Labeling task', '标注任务'),
-        detail: t('1,000 posts · your share: 5', '1,000 条 · 你的部分：5 条'),
-      },
-      {
-        kind: 'card',
-        card: {
-          type: 'link',
-          id: 'l-label',
-          title: t('Your share: label 5 posts', '你的任务：标注 5 条帖子'),
-          description: t('About 3 minutes. Each post shows frames, title, OCR and ASR, with the field definitions beside it.', '大约 3 分钟。每条帖子展示视频帧、标题、OCR 和 ASR，旁边附有字段定义。'),
-          panel: 'labeling',
-          cta: t('Start labeling', '开始标注'),
-          skip: t('Skip for now', '先跳过'),
-          doneLabel: t('I labeled my 5 posts', '我标完了 5 条'),
-        },
-      },
+      ...LABELING_TASK,
     ],
   },
   {
@@ -541,7 +704,53 @@ export const VIDEO_TAGS_STEPS: Step[] = [
   },
   {
     stage: 3,
+    when: {cardId: 'q-order', choice: 'label'},
+    waitFor: 'a-run-v1',
+    datasets: GOLD,
+    items: [
+      {kind: 'choice', cardId: 'l-adj'},
+      ...draftPrompt(
+        t(
+          `${GOLD_READY.en}\n\nNow the teacher prompt. I drafted **prompt v1** from your ops team’s prompt and the confirmed schema, keeping your team’s wording and rules. Read it on the Prompt page and edit it if you like; when it looks right, create an auto-labeling task to run it on the 600 eval posts.`,
+          `${GOLD_READY.zh}\n\n接下来是教师 Prompt。我根据运营团队的 Prompt 和已确认的 Schema 起草了 **Prompt v1**，保留了团队原有的措辞和规则。你可以在 Prompt 页面查看和修改；确认后，创建自动标注任务，在 600 条评估帖子上运行它。`,
+        ),
+        'a-run-v1',
+        t('600 eval posts', '600 条评估帖子'),
+        '$6',
+        t('about 6 min', '约 6 分钟'),
+        'derive_gold_labels',
+      ),
+    ],
+  },
+  {
+    stage: 3,
+    when: {cardId: 'q-order', choice: 'label'},
     waitFor: 'pr-v1',
+    items: [
+      {kind: 'choice', cardId: 'a-run-v1'},
+      {
+        kind: 'card',
+        card: {
+          type: 'progress',
+          id: 'pr-v1',
+          title: t('Auto-labeling · prompt v1 · 600 eval posts', '自动标注 · Prompt v1 · 600 条评估帖子'),
+          total: 600,
+          unit: t('posts', '条'),
+          durationMs: 3500,
+        },
+      },
+    ],
+  },
+  {
+    stage: 3,
+    when: {cardId: 'q-order', choice: 'label'},
+    waitFor: 'adv-1',
+    items: V1_RESULTS,
+  },
+  {
+    stage: 3,
+    when: {cardId: 'q-order', choice: 'prompt'},
+    waitFor: 'adv-1',
     datasets: GOLD,
     items: [
       {kind: 'choice', cardId: 'l-adj'},
@@ -553,76 +762,18 @@ export const VIDEO_TAGS_STEPS: Step[] = [
             target: t('2 labels per post + adjudication', '每条 2 份标注 + 裁决'),
             duration: '0.3s',
           },
+          {
+            name: 'score_prompt',
+            target: t('prompt v1 · 600 eval posts', 'Prompt v1 · 600 条评估帖子'),
+            duration: '2s',
+          },
         ],
         text: t(
-          '**Gold labels** are ready for 600 eval posts and 400 test posts. The test split is now sealed, and I only ever see its totals.\n\n**Next, I recommend checking the teacher prompt** on the eval split before it labels 49,000 training posts. I’m running your prompt as **v1**.',
-          '**金标**已就绪：评估集 600 条，测试集 400 条。测试集现已封存，我只能看到汇总指标。\n\n**下一步，我建议先检验教师 Prompt**，再让它标注 49,000 条训练帖子。我正用你的 Prompt 作为 **v1** 在评估集上运行。',
+          `${GOLD_READY.en}\n\nPrompt v1 already ran on these posts, so I scored it against the gold labels of the 600 eval posts.`,
+          `${GOLD_READY.zh}\n\nPrompt v1 已经在这些帖子上运行过，我用 600 条评估帖子的金标为它打了分。`,
         ),
       },
-      {
-        kind: 'card',
-        card: {
-          type: 'progress',
-          id: 'pr-v1',
-          title: t('Teacher on the eval split · prompt v1', '教师模型 · 评估集 · Prompt v1'),
-          total: 600,
-          unit: t('posts', '条'),
-          durationMs: 3500,
-        },
-      },
-    ],
-  },
-  {
-    stage: 3,
-    waitFor: 'adv-1',
-    items: [
-      {
-        kind: 'artifact',
-        panel: 'evalReport',
-        action: 'created',
-        title: t('Eval report', '评估报告'),
-        detail: t('Prompt v1 on 600 eval posts', 'Prompt v1 · 600 条评估帖子'),
-      },
-      {
-        kind: 'card',
-        card: {
-          type: 'result',
-          id: 'r-v1',
-          title: t('Prompt v1 results', 'Prompt v1 结果'),
-          stats: [
-            {
-              label: t('Macro-F1 · primary value', 'macro-F1 · 主要价值'),
-              value: fmt2(macroF1(v1)),
-            },
-            {
-              label: t('Invalid outputs', 'Invalid outputs'),
-              value: pct(invalidRate(v1), 1),
-            },
-            {
-              label: t(`Weakest: ${LABEL_BY_ID[v1Weakest.id].name.en}`, `最弱：${LABEL_BY_ID[v1Weakest.id].name.zh}`),
-              value: fmt2(v1Weakest.f1),
-            },
-          ],
-          panel: 'evalReport',
-        },
-      },
-      {
-        kind: 'card',
-        card: {
-          type: 'advice',
-          id: 'adv-1',
-          title: t('Name the values exactly in the output section', '在输出部分写准确的取值'),
-          diagnosis: t(
-            `${v1Invalid} outputs (${pct(invalidRate(v1), 1)}) were invalid, and ${v1EcoInvalid} of them wrote “Ecosystem”: that’s how the output section names it, but the field defines “Ecosystem issue”. That is why Ecosystem scores only ${fmt2(v1Weakest.f1)}.`,
-            `${v1Invalid} 条输出（${pct(invalidRate(v1), 1)}）无效，其中 ${v1EcoInvalid} 条写的是“Ecosystem”：输出部分是这么写的，但字段定义的取值是“Ecosystem issue”。这就是生态问题只有 ${fmt2(v1Weakest.f1)} 的原因。`,
-          ),
-          removed: ['"primary_value": "Entertainment | Practical | Discussion | Ecosystem",'],
-          added: ['"primary_value": "Entertainment | Practical | Discussion | Ecosystem issue",'],
-          from: 'v1',
-          to: 'v2',
-          measures: [{kind: 'macro', field: 'primary_value'}, {kind: 'value', field: 'primary_value', value: 'ecosystem'}, {kind: 'invalid'}],
-        },
-      },
+      ...V1_RESULTS,
     ],
   },
   {
@@ -635,7 +786,7 @@ export const VIDEO_TAGS_STEPS: Step[] = [
         tools: [
           {
             name: 'create_prompt_version',
-            target: t('v2', 'v2'),
+            target: t('v2 from v1', 'v2，基于 v1'),
             duration: '0.2s',
           },
           {
@@ -652,41 +803,81 @@ export const VIDEO_TAGS_STEPS: Step[] = [
       {
         kind: 'artifact',
         panel: 'promptDiff',
-        action: 'created',
+        action: 'updated',
         title: t('Prompt', 'Prompt'),
         version: 'v2',
-        detail: t('Full prompt, editable', 'Prompt 全文，可编辑'),
+        detail: t('v2 from v1', 'v2，基于 v1'),
       },
-      {
-        kind: 'artifact',
-        panel: 'evalReport',
-        action: 'updated',
-        title: t('Eval report', '评估报告'),
-        detail: t('Prompt v2, re-scored on 600 posts', 'Prompt v2 · 在 600 条上重新评估'),
-      },
+      evalReport('v2'),
       {
         kind: 'card',
         card: {
           type: 'advice',
           id: 'adv-2',
-          title: t('Check the poster’s own view before Discussion, and tag fewer topics', '判断“讨论”前先看发布者自己的观点，并少打话题'),
+          title: t('Try two fixes side by side from v2', '基于 v2 同时试两种修改'),
           diagnosis: t(
-            `Discussion precision is ${fmt2(v2DiscPrecision)}: ${v2EntAsDisc} Entertainment posts were tagged Discussion, mostly clips where only the guests give views. Rule 1 covers this but sits far from the field. Topics has the opposite problem: the teacher adds ${topicTags(v2).toFixed(1)} topics per post where people add ${goldTags.toFixed(1)}.`,
-            `“讨论”的 Precision 只有 ${fmt2(v2DiscPrecision)}：${v2EntAsDisc} 条娱乐被标成了讨论，大多是只有嘉宾在表达观点的片段。第 1 条规则覆盖了这种情况，但离字段定义太远。话题的问题正相反：教师模型平均每条打 ${topicTags(v2).toFixed(1)} 个话题，而人工只打 ${goldTags.toFixed(1)} 个。`,
+            `Discussion precision is ${fmt2(v2DiscPrecision)}: ${v2EntAsDisc} Entertainment posts were tagged Discussion, mostly clips where only the guests give views. Topics has the opposite problem: the teacher adds ${topicTags(v2).toFixed(1)} topics per post where people add ${goldTags.toFixed(1)}.\n\nBoth variants tag fewer topics. They differ in how they keep guests’ views out of Discussion, and I can’t tell which works better without running them, so I suggest an auto-labeling task for each.`,
+            `“讨论”的 Precision 只有 ${fmt2(v2DiscPrecision)}：${v2EntAsDisc} 条娱乐被标成了讨论，大多是只有嘉宾在表达观点的片段。话题的问题正相反：教师模型平均每条打 ${topicTags(v2).toFixed(1)} 个话题，而人工只打 ${goldTags.toFixed(1)} 个。\n\n两个版本都少打话题，区别在于怎样把嘉宾的观点排除在“讨论”之外。不实际运行很难判断哪个更好，所以我建议为每个版本各建一个自动标注任务。`,
           ),
-          removed: ['- Discussion: the poster shares their own view or experience and invites others to respond.', '### 3. topics (pick 1 to 3)'],
-          added: [
-            '- Discussion: the poster shares their own view or experience and invites others to respond.',
-            '  First check rule 1: a Clip with no comment from the poster is not Discussion.',
-            '### 3. topics (pick 1 to 3; pick 1 unless the post clearly covers more)',
-          ],
           from: 'v2',
-          to: 'v3',
-          measures: [
-            {kind: 'macro', field: 'primary_value'},
-            {kind: 'value', field: 'primary_value', value: 'discussion'},
-            {kind: 'macro', field: 'topics'},
+          variants: [
+            {
+              to: 'v3a',
+              note: t('Discussion only when the poster speaks on camera', '只有发布者出镜表达观点才算“讨论”'),
+              removed: [DISCUSSION, TOPICS],
+              added: [DISCUSSION_STRICT, TOPICS_FIX],
+            },
+            {
+              to: 'v3b',
+              note: t('Check rule 1 before Discussion', '判断“讨论”前先看第 1 条规则'),
+              removed: [DISCUSSION, TOPICS],
+              added: [...DISCUSSION_FIX.split('\n'), TOPICS_FIX],
+            },
           ],
+        },
+      },
+    ],
+  },
+  {
+    stage: 3,
+    waitFor: 'pr-v3',
+    items: [
+      {kind: 'choice', cardId: 'adv-2'},
+      {
+        kind: 'agent',
+        tools: [
+          {
+            name: 'create_prompt_version',
+            target: t('v3a and v3b from v2', 'v3a 和 v3b，基于 v2'),
+            duration: '0.3s',
+          },
+          {
+            name: 'create_labeling_task',
+            target: t('auto · 2 prompts × 600 eval posts', '自动 · 2 个 Prompt × 600 条评估帖子'),
+            duration: '0.6s',
+          },
+        ],
+        text: t(
+          'Created **v3a** and **v3b** from v2, with an auto-labeling task for each on the 600 eval posts. They run side by side.',
+          '已基于 v2 创建 **v3a** 和 **v3b**，并为它们各建了一个自动标注任务，在 600 条评估帖子上同时运行。',
+        ),
+      },
+      {
+        kind: 'artifact',
+        panel: 'promptDiff',
+        action: 'updated',
+        title: t('Prompt', 'Prompt'),
+        detail: t('v3a and v3b, both from v2', 'v3a 和 v3b，都基于 v2'),
+      },
+      {
+        kind: 'card',
+        card: {
+          type: 'progress',
+          id: 'pr-v3',
+          title: t('Auto-labeling · prompts v3a and v3b · 600 eval posts each', '自动标注 · Prompt v3a 和 v3b · 各 600 条评估帖子'),
+          total: 1200,
+          unit: t('posts', '条'),
+          durationMs: 4000,
         },
       },
     ],
@@ -695,64 +886,51 @@ export const VIDEO_TAGS_STEPS: Step[] = [
     stage: 3,
     waitFor: 'a-teacher-gate',
     items: [
-      {kind: 'choice', cardId: 'adv-2'},
+      evalReport('v3a'),
+      evalReport('v3b'),
       {
         kind: 'agent',
         text: t(
-          `Adopted as **prompt v3**. Discussion F1 rose from ${fmt2(scoreOf(v2, 'primary_value', 'discussion').f1)} to ${fmt2(scoreOf(v3, 'primary_value', 'discussion').f1)} and topics from ${fmt2(macroF1(v2, 'topics'))} to ${fmt2(macroF1(v3, 'topics'))}. The teacher now passes the quality gate on all three fields.`,
-          `已采纳，生成 **Prompt v3**。“讨论”的 F1 从 ${fmt2(scoreOf(v2, 'primary_value', 'discussion').f1)} 升到 ${fmt2(scoreOf(v3, 'primary_value', 'discussion').f1)}，话题从 ${fmt2(macroF1(v2, 'topics'))} 升到 ${fmt2(macroF1(v3, 'topics'))}。教师模型现在三个字段都通过了质量门禁。`,
+          `**v3b passes** the teacher-quality gate on all three fields: Discussion F1 rose from ${fmt2(scoreOf(v2, 'primary_value', 'discussion').f1)} to ${fmt2(scoreOf(v3b, 'primary_value', 'discussion').f1)} and topics from ${fmt2(macroF1(v2, 'topics'))} to ${fmt2(macroF1(v3b, 'topics'))}.\n\n**v3a** fixed topics too, but its stricter Discussion rule dropped primary value to ${fmt2(macroF1(v3a))}, below v2’s ${fmt2(macroF1(v2))}: real Discussion posts fell to Entertainment and Practical. It stays in the prompt tree, so you can start from it later.`,
+          `**v3b 通过了**三个字段的教师质量门禁：“讨论”的 F1 从 ${fmt2(scoreOf(v2, 'primary_value', 'discussion').f1)} 升到 ${fmt2(scoreOf(v3b, 'primary_value', 'discussion').f1)}，话题从 ${fmt2(macroF1(v2, 'topics'))} 升到 ${fmt2(macroF1(v3b, 'topics'))}。\n\n**v3a** 同样改好了话题，但更严格的“讨论”规则让主要价值降到 ${fmt2(macroF1(v3a))}，比 v2 的 ${fmt2(macroF1(v2))} 还低：真正的讨论帖被分到了娱乐和实用。它会留在 Prompt 版本树里，之后可以从它继续。`,
         ),
-      },
-      {
-        kind: 'artifact',
-        panel: 'promptDiff',
-        action: 'updated',
-        title: t('Prompt', 'Prompt'),
-        version: 'v3',
-        detail: t('3 lines changed', '修改 3 行'),
-      },
-      {
-        kind: 'artifact',
-        panel: 'evalReport',
-        action: 'updated',
-        title: t('Eval report', '评估报告'),
-        detail: t('Prompt v3, re-scored on 600 posts', 'Prompt v3 · 在 600 条上重新评估'),
       },
       {
         kind: 'card',
         card: {
           type: 'approval',
           id: 'a-teacher-gate',
-          title: t('Teacher-quality gate', '教师质量门禁'),
+          title: t('Finish prompt engineering with prompt v3b?', '用 Prompt v3b 结束 Prompt 调优？'),
           checks: [
             {
               label: t(`Primary value macro-F1 ≥ ${TEACHER_GATE.macroF1.primary_value}`, `主要价值 macro-F1 ≥ ${TEACHER_GATE.macroF1.primary_value}`),
-              value: fmt2(macroF1(v3)),
+              value: fmt2(macroF1(v3b)),
               pass: true,
             },
             {
               label: t(`Every primary value ≥ ${fmt2(TEACHER_GATE.labelF1)}`, `每个主要价值 ≥ ${fmt2(TEACHER_GATE.labelF1)}`),
-              value: t(`lowest ${fmt2(weakestLabel(v3).f1)}`, `最低 ${fmt2(weakestLabel(v3).f1)}`),
+              value: t(`lowest ${fmt2(weakestLabel(v3b).f1)}`, `最低 ${fmt2(weakestLabel(v3b).f1)}`),
               pass: true,
             },
             {
               label: t(`Format macro-F1 ≥ ${TEACHER_GATE.macroF1.format}`, `形式 macro-F1 ≥ ${TEACHER_GATE.macroF1.format}`),
-              value: fmt2(macroF1(v3, 'format')),
+              value: fmt2(macroF1(v3b, 'format')),
               pass: true,
             },
             {
               label: t(`Topics macro-F1 ≥ ${fmt2(TEACHER_GATE.macroF1.topics)}`, `话题 macro-F1 ≥ ${fmt2(TEACHER_GATE.macroF1.topics)}`),
-              value: fmt2(macroF1(v3, 'topics')),
+              value: fmt2(macroF1(v3b, 'topics')),
               pass: true,
             },
             {
               label: t('Invalid outputs ≤ 1%', 'Invalid outputs ≤ 1%'),
-              value: pct(invalidRate(v3), 1),
+              value: pct(invalidRate(v3b), 1),
               pass: true,
             },
           ],
-          approve: t('Pass the gate', '通过门禁'),
+          approve: t('Approve', '批准'),
           panel: 'evalReport',
+          panelRef: 'v3b',
         },
       },
     ],
@@ -764,7 +942,15 @@ export const VIDEO_TAGS_STEPS: Step[] = [
       {kind: 'choice', cardId: 'a-teacher-gate'},
       {
         kind: 'system',
-        text: t('Teacher-quality gate passed', '教师质量门禁已通过'),
+        text: t('Prompt engineering finished · prompt v3b', 'Prompt 调优完成 · Prompt v3b'),
+      },
+      {
+        kind: 'artifact',
+        panel: 'promptDiff',
+        action: 'updated',
+        title: t('Prompt', 'Prompt'),
+        version: 'v3b',
+        detail: t('v3b in use', '使用 v3b'),
       },
       {
         kind: 'agent',
@@ -776,8 +962,8 @@ export const VIDEO_TAGS_STEPS: Step[] = [
           },
         ],
         text: t(
-          '**Next, I recommend letting the teacher label the 49,000 training posts.** I ran a 500-post pilot first. It matches your gold labels on primary value **91%** of the time, so the full run is worth paying for.',
-          '**下一步，我建议让教师模型标注 49,000 条训练帖子。** 我先跑了 500 条试点，主要价值与金标的一致率为 **91%**，值得跑全量。',
+          'Before the teacher labels the 49,000 training posts, I ran a 500-post pilot with prompt v3b. It matches your gold labels on primary value **91%** of the time, so the full run is worth paying for.',
+          '在让教师模型标注 49,000 条训练帖子之前，我用 Prompt v3b 跑了 500 条试点，主要价值与金标的一致率为 **91%**，值得跑全量。',
         ),
       },
       {
@@ -797,7 +983,7 @@ export const VIDEO_TAGS_STEPS: Step[] = [
               label: t('Estimated time', '预计耗时'),
               value: t('about 5 h', '约 5 小时'),
             },
-            {label: t('Prompt', 'Prompt'), value: 'v3'},
+            {label: t('Prompt', 'Prompt'), value: 'v3b'},
           ],
           approve: t('Approve cost', '批准费用'),
         },
@@ -814,7 +1000,7 @@ export const VIDEO_TAGS_STEPS: Step[] = [
         card: {
           type: 'progress',
           id: 'pr-batch',
-          title: t('Teacher batch job · prompt v3', '教师模型批量任务 · Prompt v3'),
+          title: t('Teacher batch job · prompt v3b', '教师模型批量任务 · Prompt v3b'),
           total: 49000,
           unit: t('posts', '条'),
           durationMs: 5000,
@@ -830,7 +1016,7 @@ export const VIDEO_TAGS_STEPS: Step[] = [
       train: {
         total: TRAINING_SET.finalRows,
         labeled: TRAINING_SET.finalRows,
-        source: t('Teacher, prompt v3', '教师模型，Prompt v3'),
+        source: t('Teacher, prompt v3b', '教师模型，Prompt v3b'),
       },
     },
     items: [
@@ -854,8 +1040,8 @@ export const VIDEO_TAGS_STEPS: Step[] = [
           },
         ],
         text: t(
-          'The training set is ready: **46,000 rows**. I removed invalid outputs, near-duplicates and posts that overlap eval or test, then capped Entertainment and raised Ecosystem issue to a minimum share.\n\nTrain, eval and test all have labels, so you can train any time with `/train`. **I recommend training now:** three runs on 10k, 30k and 46k rows, to see whether more data still helps. Training runs on Platform S, which isn’t connected yet, so the results from here on are illustrative.',
-          '训练集已就绪：**46,000 行**。我去掉了无效输出、近似重复和与评估/测试集重叠的帖子，并限制了娱乐的占比、把生态问题提到最低占比。\n\n训练、评估、测试集都有了标签，随时可以用 `/train` 开始训练。**我建议现在开始训练：** 分别用 10k、30k、46k 行跑三次，看更多数据是否还有帮助。训练在 Platform S 上进行，目前还没接通，所以接下来的结果是示意数据。',
+          'The training set is ready: **46,000 rows**. I removed invalid outputs, near-duplicates and posts that overlap eval or test, then capped Entertainment and raised Ecosystem issue to a minimum share.\n\nTrain, eval and test all have labels, so training can start. Training runs on Platform S, which isn’t connected yet, so the results from here on are illustrative.',
+          '训练集已就绪：**46,000 行**。我去掉了无效输出、近似重复和与评估/测试集重叠的帖子，并限制了娱乐的占比、把生态问题提到最低占比。\n\n训练、评估、测试集都有了标签，可以开始训练了。训练在 Platform S 上进行，目前还没接通，所以接下来的结果是示意数据。',
         ),
       },
       {
@@ -864,26 +1050,20 @@ export const VIDEO_TAGS_STEPS: Step[] = [
         action: 'created',
         title: t('Training set', '训练集'),
         version: 'v1',
-        detail: t('46,000 rows · prompt v3', '46,000 行 · Prompt v3'),
+        detail: t('46,000 rows · prompt v3b', '46,000 行 · Prompt v3b'),
       },
       {
         kind: 'card',
         card: {
-          type: 'approval',
+          type: 'next',
           id: 'a-train',
-          title: t('Train student 8B', '训练学生模型 8B'),
-          rows: [
+          suggestions: [
             {
-              label: t('Runs', '训练次数'),
-              value: t('10k · 30k · 46k rows', '10k · 30k · 46k 行'),
-            },
-            {
-              label: t('Platform', '平台'),
-              value: t('Platform S (planned)', 'Platform S（规划中）'),
+              id: 'command',
+              label: t('Train student 8B on 10k, 30k and 46k rows', '用 10k、30k、46k 行训练学生模型 8B'),
+              text: t('/train', '/train'),
             },
           ],
-          approve: t('Train model', '训练模型'),
-          panel: 'trainingSet',
         },
       },
     ],

@@ -34,7 +34,7 @@ function useScriptedNotes(datasets: Datasets | null, trainingNote: ReactNode): R
   const story = useStory();
   const done = story.isResolved;
   const line = (text: T) => <p className="step-note">{tr(text)}</p>;
-  const prompt = done('adv-2') ? 'v3' : done('adv-1') ? 'v2' : 'v1';
+  const prompt = done('a-teacher-gate') ? 'v3b' : done('adv-1') ? 'v2' : 'v1';
   const notes: Record<number, ReactNode> = {};
 
   if (story.isPanelAvailable('schema'))
@@ -50,7 +50,10 @@ function useScriptedNotes(datasets: Datasets | null, trainingNote: ReactNode): R
     notes[2] = line(t(`Labeling 1,000 posts · your share ${mine} / 5`, `标注 1,000 条 · 你的部分 ${mine} / 5`));
   }
 
-  if (done('pr-v1')) {
+  const isV1Scored = story.isPanelAvailable('evalReport', 'v1');
+  if (done('adv-2') && !done('pr-v3')) notes[3] = line(t('Running v3a and v3b side by side', 'v3a 和 v3b 正在同时运行'));
+  else if (done('pr-v3') && !done('a-teacher-gate')) notes[3] = line(t('v3b passed the gate · waiting for your approval', 'v3b 已过门禁 · 等待你批准'));
+  else if (isV1Scored) {
     const run = PROMPT_RUNS[prompt];
     notes[3] = (
       <>
@@ -65,9 +68,11 @@ function useScriptedNotes(datasets: Datasets | null, trainingNote: ReactNode): R
         </dl>
       </>
     );
-  } else if (story.isResolved('l-adj')) notes[3] = line(t('Running prompt v1 on the eval set', '正在评估集上运行 Prompt v1'));
+  } else if (done('pr-v1-early')) notes[3] = line(t('Prompt v1 ran on 1,000 posts · scored once gold labels are in', 'Prompt v1 已在 1,000 条上运行 · 金标完成后打分'));
+  else if (done('a-run-v1-early') || done('a-run-v1')) notes[3] = line(t('Running prompt v1', '正在运行 Prompt v1'));
+  else if (story.isPanelAvailable('promptDiff')) notes[3] = line(t('Prompt v1 drafted · editable', 'Prompt v1 已起草 · 可编辑'));
 
-  if (done('pr-batch')) notes[4] = line(t('46,000 rows · teacher, prompt v3', '46,000 行 · 教师模型，Prompt v3'));
+  if (done('pr-batch')) notes[4] = line(t('46,000 rows · teacher, prompt v3b', '46,000 行 · 教师模型，Prompt v3b'));
   else if (done('a-cost')) notes[4] = line(t('Teacher labeling 49,000 posts', '教师模型正在标注 49,000 条'));
 
   notes[5] = trainingNote;
@@ -89,15 +94,19 @@ export function WorkflowPanel({model}: {model: ModelSummary}) {
   const isTrained = model.isScripted ? story.isResolved('pr-train') : false;
   const isTraining = model.isScripted ? story.isResolved('a-train') && !isTrained : story.state.trainedModels.includes(model.id);
   const trainingNote = (
-    <p className="step-note">
-      {isTrained
-        ? tr(t('3 runs · 46k rows is the best', '3 次训练 · 46k 行效果最好'))
-        : isTraining
-          ? tr(t('Training is running.', '正在训练。'))
-          : training.offReason
-            ? tr(training.offReason)
-            : tr(t(`Ready. Type ${TRAIN_COMMAND} or ask the agent.`, `可以开始了。输入 ${TRAIN_COMMAND} 或让智能体开始。`))}
-    </p>
+    <>
+      <p className="step-note">
+        {isTrained
+          ? tr(t('3 runs · 46k rows is the best', '3 次训练 · 46k 行效果最好'))
+          : isTraining
+            ? tr(t('Training is running.', '正在训练。'))
+            : training.offReason
+              ? tr(training.offReason)
+              : tr(t(`Ready. Type ${TRAIN_COMMAND} or ask the agent.`, `可以开始了。输入 ${TRAIN_COMMAND} 或让智能体开始。`))}
+      </p>
+      {/* Training is the one step the demo can't run for real yet. */}
+      <p className="step-note step-note-muted">{tr(t('Runs on Platform S · connection planned', '在 Platform S 上运行 · 接入规划中'))}</p>
+    </>
   );
   const scripted = useScriptedNotes(datasets, trainingNote);
   const notes: Record<number, ReactNode> = model.isScripted
@@ -130,7 +139,6 @@ export function WorkflowPanel({model}: {model: ModelSummary}) {
                 {state === 'done' ? <Icon icon={Check} size="xsm" color="inherit" /> : state === 'skipped' ? '–' : i + 1}
               </span>
               <span className="step-name">{name}</span>
-              {s.isPlanned && <span className="step-tag">{tr(t('planned', '规划中'))}</span>}
               {/* Done and skipped show in the mark; only the current step says so in words. */}
               <span className="step-state">{state === 'current' ? tr(STATE_LABEL[state]) : ''}</span>
               <Icon icon={isOpen ? ChevronDown : ChevronRight} size="sm" color="inherit" />

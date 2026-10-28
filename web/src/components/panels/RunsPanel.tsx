@@ -3,17 +3,15 @@
 import {Badge} from '@astryxdesign/core/Badge';
 import {Banner} from '@astryxdesign/core/Banner';
 import {LineChart} from '@/components/charts/LineChart';
+import {FIELD_COLORS} from '@/components/charts/fieldColors';
 import {useLocale} from '@/i18n/LocaleProvider';
 import {t} from '@/i18n/text';
-import {FIELDS, type FieldId} from '@/mock/fields';
+import {FIELDS} from '@/mock/fields';
 import {LEARNING_CURVE, macroF1, PROMPT_RUNS} from '@/mock/metrics';
 import {useStory} from '@/story/StoryProvider';
 import {PanelSection, fmt2, useNumber} from './parts';
 
 const kilo = (n: number) => `${n / 1000}k`;
-
-// Categorical slots 7, 5 and 6, so the fields never borrow a primary value's color.
-const FIELD_COLORS: Record<FieldId, string> = {primary_value: '#6250d6', format: '#e87ba4', topics: '#008300'};
 
 export function RunsPanel() {
   const {tr} = useLocale();
@@ -30,7 +28,10 @@ export function RunsPanel() {
       />
       <PanelSection
         title={t('Does more data still help?', '更多数据还有帮助吗？')}
-        description={t('Student 8B trained on nested subsets of the training set, scored on the eval split. Macro-F1 per field.', '学生模型 8B 在训练集的嵌套子集上训练，在评估集上打分。每个字段的 macro-F1。')}>
+        description={t(
+          'Student 8B trained on nested subsets of the training set, scored on the eval split. Macro-F1 per field.',
+          '学生模型 8B 在训练集的嵌套子集上训练，在评估集上打分。每个字段的 macro-F1。',
+        )}>
         <LineChart
           xs={LEARNING_CURVE.map(p => p.size)}
           formatX={kilo}
@@ -73,10 +74,10 @@ export function RunsPanel() {
                 </tr>
               ))}
               <tr className="total-row">
-                <th scope="row">{tr(t('Teacher · prompt v3', '教师模型 · Prompt v3'))}</th>
+                <th scope="row">{tr(t('Teacher · prompt v3b', '教师模型 · Prompt v3b'))}</th>
                 <td>—</td>
                 {FIELDS.map(f => (
-                  <td key={f.id}>{fmt2(macroF1(PROMPT_RUNS.v3, f.id))}</td>
+                  <td key={f.id}>{fmt2(macroF1(PROMPT_RUNS.v3b, f.id))}</td>
                 ))}
               </tr>
             </tbody>
