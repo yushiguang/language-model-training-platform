@@ -1,0 +1,52 @@
+# Publishes the frontend demo to GitHub Pages as one HTML file (the same build as the shared artifact).
+name: Deploy demo to GitHub Pages
+
+on:
+  push:
+    branches: [main, web-demo]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit -p .
+      - run: npm run build:artifact
+      - name: Wrap the page in a full HTML document
+        run: |
+          mkdir -p ../site
+          cat scripts/pages-head.html dist-artifact/index.html > ../site/index.html
+          echo '</body></html>' >> ../site/index.html
+          touch ../site/.nojekyll
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
