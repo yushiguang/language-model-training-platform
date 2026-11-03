@@ -1,63 +1,69 @@
-# MVP web app: architecture
+# Architecture: Service-Aligned Monorepo
 
 The MVP produces a labeled **training set** for one task: Setup → Dataset → Gold Labels (optional)
-→ Prompt Engineering → Training Set. It is a fixed-workflow website with agents built into each
-page, not a chat app. Product, UI and tech decisions are in the design docs; this file is a map of
-the code.
+→ Prompt Engineering → Training Set. It is a fixed-workflow website with specialist agents built
+into each step, not a free-form chat app.
 
-## Layers
+## Why the monorepo is partitioned this way
+
+During the MVP, the entire platform is deployed as a single static bundle so the team can validate
+the workflow immediately. After the MVP, the backend orchestration and agent runtime will move to
+standalone backend microservices (written in Go), while the frontend and agent strategies continue
+to be iterated on by coding agents in this repository.
+
+To make that transition zero-rewrite for the frontend, the monorepo is partitioned into **three
+application services (`apps/`)** and **two shared packages (`packages/`)**:
 
 ```
-web/src/
-  app/          pages (Next.js App Router, static export): one folder per workflow step
-  components/   shared page parts: Shell (stepper + assistant), Assistant, SchemaView, ScoreChart, prompt editor
-  ui/           our wrappers around Astryx (Button, Badge, Dialog, Icon…). Pages never import Astryx directly
-  services/     the app's logic: projects, setup, dataset, evaluation, optimiser, agents, training set
-  data/         Postgres schema and the one class that runs SQL (repo.ts)
-  core/         pure rules with no I/O: types, placeholders and checks, metrics, versions, gates
-  platform/     interfaces to everything outside the app, the stand-ins, and config.ts (the integration point)
+language-model-training-platform/
+  packages/
+    contracts/        (@tsp/contracts) Domain types, pure rules, and the 3 service contracts
+    infra/            (@tsp/infra)     Infrastructure stand-ins + config.ts integration point
+  apps/
+    web/                               1. Frontend SPA: pages, components, Astryx wrappers, BFF client
+    agents/           (@tsp/agents)    2. Agent Runtime Service: 5 agent presets + reflection + repair
+    bff/              (@tsp/bff)       3. BFF Service: workflow orchestration + document repository
 ```
 
-Dependencies point downwards only: `app → components → services → data/core/platform`. `core`
-depends on nothing and has unit tests (`npm test`).
+### Dependency graph and ownership
 
-## Key rules and where they live
+```
+apps/web  ──(Contract 1: bff-api)──►  apps/bff  ──(Contract 2: agent-api)──►  apps/agents
+   │                                     │                                        │
+   └──────────────►  packages/contracts  ◄────────────────────────────────────────┘
+                                         ▲
+                                         │ (Contract 3: infra-api)
+                                   packages/infra
+```
 
-| Rule | File |
+| Module | Owner | Responsibility | Future Production Form |
+|---|---|---|---|
+| `packages/contracts` | Shared | Domain entities, pure rules (`template`, `metrics`, `gates`, `versions`, `workflow`), and the 3 service contracts | IDL / OpenAPI specification shared between TS and Go |
+| `apps/web` | External Agent | Next.js pages (`app/`), shared components (`components/`), UI wrappers (`ui/`), and the client boundary (`backend-api/`) | Static frontend hosted on CDN / static hosting |
+| `apps/agents` | External Agent | Stateless Agent Runtime (`runAgentTurn`, `reflectPrompt`), 5 specialist agent prompts, context assembly, and output validation | Standalone Agent Runtime service or Go agent module |
+| `apps/bff` | Internal Team | Workflow state orchestration (`services/`) and document storage repository (`data/repo.ts`) | Go BFF microservice deployed on container infrastructure |
+| `packages/infra` | Internal Team | Default browser stand-ins (`standins/`) and runtime wiring (`config.ts`) | Replaced by internal platform adapters or Go service clients |
+
+## Key domain rules and where they live
+
+| Rule | Location |
 |---|---|
-| `{{Key}}` placeholders; single braces are plain text. Checks: unknown key (with closest match), not ticked, ticked but unused, broken braces; warnings for one type only, image cost, missing values. Quick fixes | `core/template.ts` |
-| Rendering: lines whose placeholders aren't ticked for the example's type are dropped; empty features become "none"; image features and `[Image N]` become image parts | `core/template.ts` |
-| Metrics: macro-F1 per field, per-value F1, accuracy, invalid rate, mix-ups, cost per 1,000. Pass/fail against thresholds | `core/metrics.ts` |
-| Versions are major.minor and never overwritten. Save = next minor in the edited line, Save as = next major | `core/versions.ts` |
-| Gates between steps; Gold Labels is optional | `core/gates.ts` |
-| The code decides the next step; agents only explain it | `services/recommend.ts` |
-| A report is tied to an evaluation context (schema version + eval examples + gold labels). When any of them changes, older reports show as archived and can't be compared | `services/evaluation.ts` |
-| The eval set is split into an optimiser half and a held-out half; reports score the held-out half only | `services/dataset.ts`, `services/evaluation.ts` |
-| Optimiser: GEPA-style loop (best version on the optimiser half → reflection → one targeted change, same placeholders → score). Stops when a version passes, the budget is spent, it runs out of new changes, or the user stops it | `services/optimiser.ts` |
-| Background work: label the newest version on every model, build reports, start the optimiser once per human-made version | `services/work.ts` |
+| `{{Key}}` placeholders; single braces are plain text. Checks: unknown key (with closest match), not ticked, ticked but unused, broken braces; warnings for one type only, image cost, missing values. Quick fixes | `packages/contracts/src/template.ts` |
+| Rendering: lines whose placeholders aren't ticked for the example's type are dropped; empty features become "none"; image features and `[Image N]` become image parts | `packages/contracts/src/template.ts` |
+| Metrics: macro-F1 per field, per-value F1, accuracy, invalid rate, mix-ups, cost per 1,000. Pass/fail against thresholds | `packages/contracts/src/metrics.ts` |
+| Versions are major.minor and never overwritten. Save = next minor in the edited line, Save as = next major | `packages/contracts/src/versions.ts` |
+| Gates between steps; Gold Labels is optional | `packages/contracts/src/gates.ts` |
+| The code decides the next step; agents only explain it | `packages/contracts/src/workflow.ts` |
+| Specialist agent prompts, handoff rules, and context assembly | `apps/agents/src/presets.ts`, `apps/agents/src/runtime.ts` |
+| Evaluation context (schema version + eval examples + gold labels) and held-out scoring | `apps/bff/src/services/evaluation.ts` |
+| Optimiser: GEPA-style loop calling `@tsp/agents` `reflectPrompt` | `apps/bff/src/services/optimiser.ts` |
+| Document repository (`_appId` mapping, snake_case filter translation, deduplication) | `apps/bff/src/data/repo.ts` |
 
 ## Storage
 
-Postgres. Every table has key columns plus `data jsonb` with the whole record (types in
-`core/types.ts`). Most records are insert-only, which keeps history (setup versions, dataset
-snapshots, gold labels, prompt versions, predictions, reports). Generated SQL: `db/schema.sql`.
+Document collections accessed through `DocRuntime` (`packages/contracts/src/infra-api.ts`) and
+encapsulated by `Repo` (`apps/bff/src/data/repo.ts`). Each collection stores JSON records keyed by
+an application ID (`_appId`) mapped to the underlying document-store ID.
 
-Today the app uses PGlite (Postgres compiled to WebAssembly, kept in the browser's IndexedDB) as a
-stand-in for the hosting platform's storage runtime. Because the SQL is plain Postgres, the same
-schema and queries move to the real runtime unchanged. Note that with the stand-in, each browser
-has its own data.
-
-## Running work from the page
-
-The hosting platform has no server of ours, so labeling runs and the optimiser run in the open
-page. Every step is idempotent: predictions are cached per (version, model, settings, example),
-runs left "running" by a closed page show as paused, and Rerun/Resume continue from what is saved.
-The training set uses `BatchJobs` (submit, then poll), so it continues when the page closes.
-
-## Open items
-
-- `MIN_PER_VALUE` (values with fewer train examples get a warning on the finished training set) is
-  a placeholder of 5 in `services/training.ts` until the product decides it.
-- With a small eval set (for example 28 examples, 14 held out) per-value scores are noisy. The
-  report shows example counts next to each value so this is visible.
-- See `docs/handover/integration.md` for what must be confirmed on the hosting platform.
+In the public repository, `localDocRuntime` (`packages/infra/src/standins/local-db.ts`) stores
+collections in the browser's `localStorage` (with an in-memory fallback for Node unit tests).
