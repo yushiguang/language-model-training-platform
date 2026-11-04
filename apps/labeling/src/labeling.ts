@@ -257,12 +257,15 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
      */
     async listTasks(projectId: string) {
       const tasks = await repo.find<LabelingTask>(TASKS, {projectId}, 'createdAt desc');
+      let changed = false;
       for (const t of tasks) {
         if (t.state !== 'running' || (await isRunning(t.id))) continue;
         t.state = 'paused';
         t.stopReason = 'closed';
         await repo.patch<LabelingTask>(TASKS, t.id, {state: 'paused', stopReason: 'closed'});
+        changed = true;
       }
+      if (changed) emit();
       return tasks;
     },
 

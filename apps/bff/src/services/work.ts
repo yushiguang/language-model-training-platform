@@ -37,10 +37,11 @@ export async function tick(state: ProjectState) {
     if (fresh?.state === 'running' && !optimiserActive(o.id)) await catalog.patch('optimisation_runs', o.id, {state: 'paused'});
   }
 
-  // System-started labeling (scoring) resumes by itself after a reload; training sets wait for the user.
+  // System-started labeling (scoring, optimiser candidates) resumes by itself after a reload;
+  // training sets wait for the user to press Resume.
   const tasks = await labeling.listTasks(projectId);
   for (const t of tasks) {
-    if (t.purpose !== 'eval' || !(t.state === 'queued' || (t.state === 'paused' && t.stopReason === 'closed'))) continue;
+    if (t.purpose === 'training' || !(t.state === 'queued' || (t.state === 'paused' && t.stopReason === 'closed'))) continue;
     const v = state.versions.find(x => x.id === t.promptVersionId);
     if (v && state.setup?.models.some(m => m.endpoint === t.endpoint)) void scoreVersion(projectId, v, t.endpoint);
   }

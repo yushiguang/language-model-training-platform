@@ -79,11 +79,18 @@ const sleep = (ms: number, signal?: AbortSignal) =>
     signal?.addEventListener('abort', () => (clearTimeout(t), rej(new DOMException('Stopped', 'AbortError'))));
   });
 
-export function simulatedModels(): LabelingModels {
+/**
+ * Answer time per call, about what a large model takes for a short labeling answer, so progress,
+ * parallel calls and resume can be seen. With 4 calls at once, 100 examples take about 30 s on A.
+ */
+const LATENCY_MS = {A: 1100, B: 650};
+
+export function simulatedModels(latency: {A: number; B: number} = LATENCY_MS): LabelingModels {
   return {
     endpoints: () => ENDPOINTS,
     async chat(req) {
-      await sleep(req.endpoint === 'A' ? 90 : 50, req.signal);
+      const base = req.endpoint === 'A' ? latency.A : latency.B;
+      await sleep(base * (0.7 + Math.random() * 0.6), req.signal);
       return answer(req);
     },
     async *chatStream(req): AsyncGenerator<LlmStreamChunk> {

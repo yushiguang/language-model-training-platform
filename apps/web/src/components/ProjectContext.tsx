@@ -65,6 +65,15 @@ export function ProjectProvider({children}: {children: ReactNode}) {
     };
   }, [refresh]);
 
+  // While anything runs, read again every few seconds: a run in another tab, or one whose tab
+  // closed, changes state without an event in this tab.
+  const running = !!state && (state.runs.some(r => r.state === 'running') || state.trainingSets.some(t => t.state === 'running') || state.optimisation.some(o => o.state === 'running'));
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => void refresh(), 5000);
+    return () => clearInterval(id);
+  }, [running, refresh]);
+
   const href = useCallback((path: string, p?: Record<string, string | undefined>) => hrefFor(projectId, path, p), [projectId]);
   return <ProjectCtx.Provider value={{projectId, state, loading, error, refresh, href}}>{children}</ProjectCtx.Provider>;
 }

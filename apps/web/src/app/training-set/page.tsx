@@ -272,8 +272,10 @@ function Running({state, ts}: {state: ProjectState; ts: TrainingSet}) {
           <Button label="Stop" size="lg" onClick={() => stopTrainingSet(ts.id)} />
         ) : (
           <>
-            <Button label="Resume" variant="primary" size="lg" onClick={resume} />
-            <span className="blocked">Continues from the {num(ts.done)} examples already labeled.</span>
+            <Button label={ts.failed > 0 ? 'Retry failed' : 'Resume'} variant="primary" size="lg" onClick={resume} />
+            <span className="blocked">
+              Continues from the {num(ts.done)} examples already labeled{ts.failed > 0 ? `; tries the ${num(ts.failed)} that failed again` : ''}.
+            </span>
           </>
         )}
       </div>

@@ -108,8 +108,28 @@ export async function getRuntimeInfo(): Promise<RuntimeInfo> {
  * with polling or Server-Sent Events.
  */
 export function subscribeChanges(listener: () => void): () => void {
-  return onChange(listener);
+  const off = onChange(listener);
+  const fromOtherTab = () => listener();
+  tabs?.addEventListener('message', fromOtherTab);
+  return () => {
+    off();
+    tabs?.removeEventListener('message', fromOtherTab);
+  };
 }
+
+/**
+ * Other tabs of the same site hear about writes too, so a second tab shows a run's progress.
+ * (Stand-in for the store's own change feed; the real storage runtime can use `subscribe`.)
+ */
+const tabs = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('tsp-changes') : null;
+let tabNotice: ReturnType<typeof setTimeout> | null = null;
+onChange(() => {
+  if (!tabs || tabNotice) return;
+  tabNotice = setTimeout(() => {
+    tabNotice = null;
+    tabs.postMessage('changed');
+  }, 200);
+});
 
 /**
  * Client-side file boundary for uploading prompt images or assets.

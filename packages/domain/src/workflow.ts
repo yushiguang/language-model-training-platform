@@ -2,6 +2,18 @@ import {renderPrompt} from './template.ts';
 import type {Actor, AgentPreset, EndpointId, EndpointInfo, FeatureSelection, ProjectState, PromptImage, PromptVersion} from '@tsp/contracts';
 import {versionLabel} from './versions.ts';
 import {estimateTokens} from './labels.ts';
+import {judge} from './metrics.ts';
+import type {Metrics, Thresholds} from '@tsp/contracts';
+
+/** Names the check a report fails: the lowest field can be above its bar while another check is not. */
+function whyBelow(m: Metrics, t: Thresholds, evalCount: number): string {
+  const lw = m.lowestField;
+  const failing = judge(m, t, evalCount).checks.find(c => !c.met);
+  if (lw.macroF1 < t.macroF1 || !failing) return ` at ${lw.macroF1.toFixed(2)} on ${lw.field}, below ${t.macroF1.toFixed(2)}.`;
+  if (failing.label === 'Lowest value F1' && m.lowestValue)
+    return `: every field is at ${t.macroF1.toFixed(2)} or higher, but "${m.lowestValue.value}" of ${m.lowestValue.field} is at ${m.lowestValue.f1.toFixed(2)}, below ${t.valueF1!.toFixed(2)}.`;
+  return `: every field is at ${t.macroF1.toFixed(2)} or higher, but ${failing.label.toLowerCase()} is ${failing.actual} (needs ${failing.need}).`;
+}
 
 export const MADE_BY: Record<Actor, string> = {
   user: 'You',
@@ -111,7 +123,7 @@ export function recommend(s: ProjectState, optimiserRunning: EndpointId | null):
     const other = s.setup!.models.find(x => x.endpoint !== cheapest.endpoint);
     if (other) {
       const best = current.filter(r => r.endpoint === other.endpoint).sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1)[0];
-      if (best && !best.passed) reasons.push(`Model ${other.endpoint} is still below on ${best.metrics.lowestField.field} (${best.metrics.lowestField.macroF1.toFixed(2)}).`);
+      if (best && !best.passed) reasons.push(`Model ${other.endpoint} is not there yet: its best${whyBelow(best.metrics, t, evalSize)}`);
       else if (best?.passed) reasons.push(`Model ${cheapest.endpoint} costs less per 1,000 examples.`);
     }
     return {
@@ -137,7 +149,7 @@ export function recommend(s: ProjectState, optimiserRunning: EndpointId | null):
     kind: 'keep_improving',
     title: 'Keep improving the prompt',
     reasons: [
-      `Best so far is ${name(best.promptVersionId)} at ${best.metrics.lowestField.macroF1.toFixed(2)} on ${best.metrics.lowestField.field}, below ${t.macroF1.toFixed(2)}.`,
+      `Best so far is ${name(best.promptVersionId)}${whyBelow(best.metrics, t, evalSize)}`,
       ...(mu
         ? [`The most common mix-up: ${mu.kind === 'confused' ? `${mu.gold} tagged as ${mu.predicted}` : mu.kind === 'extra' ? `${mu.predicted} added when not needed` : `${mu.gold} missed`} (${mu.count}).`]
         : []),
