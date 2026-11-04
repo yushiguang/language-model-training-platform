@@ -47,11 +47,13 @@ export interface LabelingTask {
   /** Examples labeled at once. */
   parallel: number;
   /**
-   * Examples whose saved answer for this version, model and settings is invalid, saved before
-   * this task was created, are labeled once more (the final run: such a test example has no
-   * label yet). A valid answer wins. Invalid answers this task saves itself are its results.
+   * Examples whose only saved answer for this version, model and settings is invalid when the
+   * task first starts are labeled once more (the final run: such a test example has no label
+   * yet). A valid answer wins. Invalid answers this task saves itself are its results.
    */
   relabelInvalid?: boolean;
+  /** Set by the first run under `relabelInvalid`: the examples that get one more try. */
+  relabelExampleIds?: string[];
   state: TaskState;
   stopReason: TaskStopReason;
   /** Set by Stop from any tab; the runner checks it every few seconds. */

@@ -19,8 +19,10 @@ example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts
   - Stop: aborts locally, or sets `stopRequested` and `stopRequestedAt`; the runner reads them on
     a 2 s timer and aborts calls in flight. A Stop pressed before the run started is ignored.
   - `listTasks` reports a `running` task whose lock nobody holds as `paused` / `closed`.
-  - `relabelInvalid` (the final run): an example whose only saved answer is invalid is labeled
-    once more; `predictions` returns the first valid answer per example, else the first.
+  - `relabelInvalid` (the final run): an example whose only saved answer is invalid when the task
+    first starts is labeled once more. The first run stores which ones in `relabelExampleIds`, so
+    a resumed task never relabels its own answers (no clock comparison). `predictions` returns the
+    first valid answer per example, else the first.
   - `runTask(id, trigger, {auto, budgetUsd})`: an automatic run adds its cost to `autoCostUsd`
     and pauses (stopReason `budget`) once its own cost passes 120% of `budgetUsd`.
   - `tryTemplate` labels a few examples with an unsaved template (the prompt agent's

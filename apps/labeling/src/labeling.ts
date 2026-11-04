@@ -140,12 +140,16 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     // Counters are rebuilt from saved predictions, so a crash never leaves them wrong.
     const all = await allPredictions(task.promptVersionId, task.endpoint, task.settingsHash);
     const best = (id: string) => all.get(id)?.find(p => p.answer) ?? all.get(id)?.[0];
-    // Under relabelInvalid, an example whose only answer is invalid and older than this task is
-    // labeled once more. An answer this task saved (before a pause) is its result, like any other.
-    const again = (id: string) => {
+    // Under relabelInvalid, an example whose only answer is invalid when the task first starts is
+    // labeled once more. The first run records which ones, so an answer this task saves itself
+    // (before a pause) is its result on a later run, like any other. No clocks are compared.
+    const onlyInvalid = (id: string) => {
       const ps = all.get(id);
-      return !!task.relabelInvalid && ps?.length === 1 && !ps[0].answer && ps[0].createdAt < task.createdAt;
+      return ps?.length === 1 && !ps[0].answer;
     };
+    const relabelIds = task.relabelInvalid ? (task.startedAt ? (task.relabelExampleIds ?? []) : task.exampleIds.filter(onlyInvalid)) : [];
+    const relabelSet = new Set(relabelIds);
+    const again = (id: string) => relabelSet.has(id) && onlyInvalid(id);
     const mine = task.exampleIds.filter(id => best(id) && !again(id)).map(id => best(id)!);
     // An example another run saved since it failed here is done, not failed.
     const failedSet = new Set(task.failedExampleIds.filter(id => !mine.some(p => p.exampleId === id)));
@@ -160,7 +164,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     // The user chose to continue after a budget pause: the budget grows by the share still to label.
     let budgetUsd = task.budgetUsd;
     if (opts.extendBudget && budgetUsd != null && task.stopReason === 'budget') budgetUsd = counts.costUsd + (budgetUsd * pending.length) / Math.max(1, task.total);
-    await repo.patch<LabelingTask>(TASKS, taskId, {...counts, failedExampleIds: [...failedSet], budgetUsd, state: 'running', stopReason: null, error: null, startedAt: task.startedAt ?? now(), finishedAt: null});
+    await repo.patch<LabelingTask>(TASKS, taskId, {...counts, failedExampleIds: [...failedSet], budgetUsd, ...(task.relabelInvalid ? {relabelExampleIds: relabelIds} : {}), state: 'running', stopReason: null, error: null, startedAt: task.startedAt ?? now(), finishedAt: null});
     emit();
 
     const examples = new Map((await deps.catalog.findByIds('examples', pending)).map(e => [e.id, e] as [string, Example]));
