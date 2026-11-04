@@ -182,3 +182,102 @@ test('relabelInvalid: an example whose only answer is invalid is labeled once mo
   await lab.runTask(third.id);
   assert.equal(seen.get('1'), 2);
 });
+
+test('Retry failed on a task that is running changes nothing and returns null', async () => {
+  const {db, catalog, v, ids} = await setup(40, 'lab-retry-lock');
+  let calls = 0;
+  const gateway = fakeGateway(async req => {
+    calls++;
+    if (req.traceId === '0') throw new Error('model did not answer');
+    await new Promise(r => setTimeout(r, 3));
+    return '{"format": "Vlog"}';
+  });
+  const lab = createLabeling({db, catalog, gateway, locks: memoryLocks()});
+  const t = await lab.createTask(input(ids, v));
+  const running = lab.runTask(t.id);
+  await new Promise(r => setTimeout(r, 15));
+  assert.equal(await lab.retryFailed(t.id), null);
+  const r = await running;
+  assert.equal(r?.state, 'needs_attention');
+  assert.deepEqual([r?.failed, r?.failedExampleIds], [1, [ids[0]]], 'the running run kept its failure');
+  assert.equal(calls, 40);
+});
+
+test('two tasks for the same version, model and settings never pay twice for an example', async () => {
+  const {db, catalog, v, ids} = await setup(12, 'lab-dedupe');
+  const stats = {inFlight: 0, maxInFlight: 0, calls: 0};
+  const lab = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": "Vlog"}', stats), locks: memoryLocks()});
+  const a = await lab.createTask(input(ids, v));
+  const b = await lab.createTask(input(ids, v));
+  const [ra, rb] = await Promise.all([lab.runTask(a.id), lab.runTask(b.id)]);
+  assert.equal(stats.calls, 12, 'each example labeled once');
+  assert.deepEqual([ra?.done, rb?.done], [12, 12]);
+  const {DocRepo} = await import('@tsp/platform');
+  const docs = await new DocRepo(db).find('predictions', {promptVersionId: v.id});
+  assert.equal(docs.length, 12, 'one saved prediction per example');
+});
+
+test('a Stop from another tab is seen during a long model call, and an old Stop is ignored', async () => {
+  const {db, catalog, v, ids} = await setup(4, 'lab-stop');
+  // A call that only ends when it is aborted.
+  const gateway: LlmGatewayContract = {
+    ...fakeGateway(async () => '{"format": "Vlog"}'),
+    label: req =>
+      new Promise((_, reject) => {
+        const open = setTimeout(() => reject(new Error('never stopped')), 10_000); // like an open request
+        req.signal?.addEventListener('abort', () => (clearTimeout(open), reject(new DOMException('Stopped', 'AbortError'))), {once: true});
+      }),
+  };
+  const tab1 = createLabeling({db, catalog, gateway, locks: memoryLocks()});
+  const tab2 = createLabeling({db, catalog, gateway, locks: memoryLocks()});
+  const t = await tab1.createTask(input(ids, v));
+  // A Stop pressed before this run started is not for it.
+  await tab2.stopTask(t.id);
+  const {DocRepo} = await import('@tsp/platform');
+  await new DocRepo(db).patch('labeling_tasks', t.id, {stopRequestedAt: '2000-01-01T00:00:00.000Z'});
+  const run = tab1.runTask(t.id);
+  await new Promise(r => setTimeout(r, 2300));
+  assert.equal((await tab1.getTask(t.id))?.state, 'running', 'the old Stop was ignored');
+  const pressed = Date.now();
+  await tab2.stopTask(t.id);
+  const r = await run;
+  assert.equal(r?.state, 'stopped');
+  assert.ok(Date.now() - pressed < 2600, `seen after ${Date.now() - pressed} ms`);
+});
+
+test('a resumed task over its budget makes no call; continuing after the pause grows the budget', async () => {
+  const {db, catalog, v, ids} = await setup(20, 'lab-budget-resume');
+  const stats = {inFlight: 0, maxInFlight: 0, calls: 0};
+  const lab = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": "Vlog"}', stats), locks: memoryLocks()});
+  const t = await lab.createTask(input(ids, v, {budgetUsd: 0.15, parallel: 1}));
+  const paused = await lab.runTask(t.id);
+  assert.equal(paused?.stopReason, 'budget');
+  const calls = stats.calls;
+  const again = await lab.runTask(t.id);
+  assert.equal(again?.stopReason, 'budget');
+  assert.equal(stats.calls, calls, 'no new paid call');
+  const go = await lab.runTask(t.id, 'user', {extendBudget: true});
+  assert.equal(go?.state, 'done');
+  assert.ok((go?.budgetUsd ?? 0) > 0.15);
+});
+
+test('an example that failed in one run and was saved by another counts as done, not failed', async () => {
+  const {db, catalog, v, ids} = await setup(3, 'lab-failed-saved');
+  let broken = true;
+  const lab = createLabeling({
+    db,
+    catalog,
+    gateway: fakeGateway(async req => {
+      if (broken && req.traceId === '0') throw new Error('down');
+      return '{"format": "Vlog"}';
+    }),
+    locks: memoryLocks(),
+  });
+  const a = await lab.createTask(input(ids, v));
+  assert.equal((await lab.runTask(a.id))?.state, 'needs_attention');
+  broken = false;
+  // Another task labels example 0.
+  await lab.runTask((await lab.createTask(input([ids[0]], v))).id);
+  const r = await lab.runTask(a.id);
+  assert.deepEqual([r?.state, r?.done, r?.failed], ['done', 3, 0]);
+});

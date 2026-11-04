@@ -30,7 +30,8 @@ export async function labelTestSet(projectId: string, version: PromptVersion, en
   );
   const u = await user();
   if (same) {
-    if (same.state !== 'done' && same.state !== 'running') void (same.failed ? labeling.retryFailed(same.id, 'user') : labeling.runTask(same.id, 'user'));
+    // Running it again after a budget pause is the user's choice to go on (the budget grows).
+    if (same.state !== 'done' && same.state !== 'running') void (same.failed ? labeling.retryFailed(same.id, 'user', {extendBudget: true}) : labeling.runTask(same.id, 'user', {extendBudget: true}));
     return same;
   }
   const task = await labeling.createTask({projectId, purpose: 'test', promptVersionId: version.id, setupVersionId: setup.id, endpoint, settings, exampleIds, budgetUsd: estimateUsd, createdBy: u.name});
@@ -61,7 +62,8 @@ export async function startTrainingSet(
   const {catalog, labeling, user} = getApp();
   const {existing} = opts;
   if (existing) {
-    void labeling.retryFailed(existing.taskId, 'user');
+    // Resume after a budget pause is the user's choice to go on: the budget grows by the share left.
+    void labeling.retryFailed(existing.taskId, 'user', {extendBudget: true});
     tm().event('final_run_resumed', {after: existing.state, done: existing.done, total: existing.total});
     emitChange();
     return existing;

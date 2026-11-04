@@ -51,6 +51,9 @@ const now = () => new Date().toISOString();
 const lockName = (taskId: string) => `labeling:${taskId}`;
 const FINISHED: TaskState[] = ['done'];
 
+/** A run's options, plus Retry failed (clears the failed examples once the lock is held). */
+type ExecOptions = RunOptions & {retry?: boolean};
+
 export function toMessages(parts: Part[], resolveUrl: (u: string) => string = u => u): ModelMessage[] {
   const content: ContentPart[] = parts.map(p => (p.type === 'text' ? {type: 'text', text: p.text} : {type: 'image', url: resolveUrl(p.url)}));
   return [{role: 'user', content}];
@@ -80,7 +83,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
   const defaultTrigger = (t: LabelingTask) => (t.purpose === 'eval' || t.purpose === 'optimiser' ? 'system' : 'user');
 
   /** Runs a task under its lock; a second tab asking for the same task gets null. */
-  async function run(taskId: string, trigger?: 'system' | 'user', opts: RunOptions = {}) {
+  async function run(taskId: string, trigger?: 'system' | 'user', opts: ExecOptions = {}) {
     const r = await locks.run(lockName(taskId), () => execute(taskId, trigger, opts));
     if (r === null) {
       const t = await getTask(taskId);
@@ -109,14 +112,23 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     return active.has(taskId) || (await locks.isHeld(lockName(taskId)));
   }
 
-  async function execute(taskId: string, trigger: 'system' | 'user' | undefined, opts: RunOptions): Promise<LabelingTask | null> {
-    const task = await getTask(taskId);
-    if (!task || FINISHED.includes(task.state)) return task;
+  async function execute(taskId: string, trigger: 'system' | 'user' | undefined, opts: ExecOptions): Promise<LabelingTask | null> {
+    // Retry failed clears the failed examples here, under the lock: a second tab asking while
+    // this task runs gets null and changes nothing.
+    let found = await getTask(taskId);
+    if (found && opts.retry && !FINISHED.includes(found.state)) {
+      await repo.patch<LabelingTask>(TASKS, taskId, {failedExampleIds: [], failed: 0, state: 'queued', error: null, stopReason: null});
+      found = await getTask(taskId);
+    }
+    if (!found || FINISHED.includes(found.state)) return found;
+    const task = found;
     const purpose = task.purpose;
     const how = trigger ?? defaultTrigger(task);
     tm.counter('tsp_labeling_tasks_started_total', {task_purpose: purpose, trigger: how});
     if (task.startedAt) tm.counter('tsp_labeling_resumes_total', {task_purpose: purpose, trigger: how});
     const runStarted = Date.now();
+    // A Stop pressed in another tab after this moment is for this run (older ones are ignored).
+    const runStartedIso = now();
     const [version, setup] = await Promise.all([deps.catalog.get('prompt_versions', task.promptVersionId), deps.catalog.get('setup_versions', task.setupVersionId)]);
     if (!version || !setup?.schema) {
       await repo.patch<LabelingTask>(TASKS, taskId, {state: 'failed', error: 'The prompt version or schema of this task no longer exists.', finishedAt: now()});
@@ -131,7 +143,8 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     // Under relabelInvalid, an example whose only answer is invalid is labeled once more.
     const again = (id: string) => !!task.relabelInvalid && all.get(id)?.length === 1 && !all.get(id)![0].answer;
     const mine = task.exampleIds.filter(id => best(id) && !again(id)).map(id => best(id)!);
-    const failedSet = new Set(task.failedExampleIds);
+    // An example another run saved since it failed here is done, not failed.
+    const failedSet = new Set(task.failedExampleIds.filter(id => !mine.some(p => p.exampleId === id)));
     const pending = task.exampleIds.filter(id => (!all.has(id) || again(id)) && !failedSet.has(id));
     const counts = {
       done: mine.length,
@@ -140,7 +153,10 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       failed: failedSet.size,
       costUsd: mine.reduce((n, p) => n + p.costUsd, 0),
     };
-    await repo.patch<LabelingTask>(TASKS, taskId, {...counts, state: 'running', stopReason: null, stopRequested: false, error: null, startedAt: task.startedAt ?? now(), finishedAt: null});
+    // The user chose to continue after a budget pause: the budget grows by the share still to label.
+    let budgetUsd = task.budgetUsd;
+    if (opts.extendBudget && budgetUsd != null && task.stopReason === 'budget') budgetUsd = counts.costUsd + (budgetUsd * pending.length) / Math.max(1, task.total);
+    await repo.patch<LabelingTask>(TASKS, taskId, {...counts, failedExampleIds: [...failedSet], budgetUsd, state: 'running', stopReason: null, error: null, startedAt: task.startedAt ?? now(), finishedAt: null});
     emit();
 
     const examples = new Map((await deps.catalog.findByIds('examples', pending)).map(e => [e.id, e] as [string, Example]));
@@ -150,64 +166,97 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     let stopReason: LabelingTask['stopReason'] = null;
     let inARow = 0;
     let lastError: string | null = null;
-    let lastStopCheck = Date.now();
     let next = 0;
     /** This run's own cost, for `opts.budgetUsd`. */
     let runCostUsd = 0;
 
-    const checkStop = async () => {
-      if (Date.now() - lastStopCheck < STOP_CHECK_MS) return;
-      lastStopCheck = Date.now();
-      const fresh = await getTask(taskId);
-      if (fresh?.stopRequested) {
-        if (!stopPressed.has(taskId)) stopPressed.set(taskId, Date.now() - STOP_CHECK_MS / 2);
-        ctrl.abort();
-      }
+    // Checked before every example, so a resumed task that is already over a limit makes no call.
+    const overLimit = (): LabelingTask['stopReason'] => {
+      if (budgetUsd != null && counts.costUsd > budgetUsd * BUDGET_MARGIN) return 'budget';
+      if (opts.budgetUsd != null && runCostUsd > opts.budgetUsd * BUDGET_MARGIN) return 'budget';
+      if (counts.failed / task.total > MAX_FAILED_SHARE || inARow >= MAX_FAILED_IN_A_ROW) return 'failures';
+      return null;
+    };
+
+    // A Stop from another tab: read on a timer, so it is seen even while calls wait in the
+    // limiter, in retry sleeps or in a long model call (the abort cancels them).
+    const stopTimer = setInterval(() => {
+      void getTask(taskId).then(fresh => {
+        if (fresh?.stopRequested && (fresh.stopRequestedAt ?? '') >= runStartedIso) {
+          if (!stopPressed.has(taskId)) stopPressed.set(taskId, Date.parse(fresh.stopRequestedAt!));
+          ctrl.abort();
+        }
+      });
+    }, STOP_CHECK_MS);
+    (stopTimer as {unref?: () => void}).unref?.();
+
+    /**
+     * Labels one example under a lock on its prediction, so two tasks for the same version,
+     * model and settings in this browser never pay for the same example: the second one waits
+     * and then reuses the saved answer. Returns false when the lock is busy (try again later).
+     */
+    const labelOne = async (exampleId: string, ex: Example | undefined): Promise<boolean> => {
+      const id = predictionId(task.promptVersionId, task.endpoint, task.settingsHash, exampleId, again(exampleId) ? 2 : 1);
+      const r = await locks.run(`labeling:prediction:${id}`, async () => {
+        const saved = await repo.get<Prediction>(PREDICTIONS, id);
+        if (saved) return {pred: saved, paid: false};
+        if (!ex) throw new Error('The example no longer exists.');
+        const parts = renderPrompt(version.template, ex, version.features, version.images);
+        const res = await deps.gateway.label({
+          slot: task.endpoint,
+          messages: toMessages(parts, deps.resolveUrl),
+          maxOutputTokens: task.settings.maxOutputTokens,
+          temperature: task.settings.temperature,
+          traceId: ex.externalId,
+          signal: ctrl.signal,
+        });
+        const parsed = parseOutput(res.text, schema);
+        const pred: Prediction = {
+          id,
+          promptVersionId: task.promptVersionId,
+          endpoint: task.endpoint,
+          settingsHash: task.settingsHash,
+          exampleId,
+          output: res.text,
+          answer: parsed.answer,
+          invalidReason: parsed.reason,
+          costUsd: res.costUsd,
+          createdAt: now(),
+        };
+        await repo.insert(PREDICTIONS, pred);
+        return {pred, paid: true};
+      });
+      if (!r) return false;
+      const {pred, paid} = r;
+      // Prediction first, counters after: a crash in between undercounts, and the next run recounts.
+      await repo.patch<LabelingTask>(TASKS, taskId, {
+        done: DocFieldValue.increment(1),
+        [pred.answer ? 'valid' : 'invalid']: DocFieldValue.increment(1),
+        costUsd: DocFieldValue.increment(pred.costUsd),
+        ...(opts.auto && paid ? {autoCostUsd: DocFieldValue.increment(pred.costUsd)} : {}),
+      });
+      counts.done++;
+      counts.costUsd += pred.costUsd;
+      if (paid) runCostUsd += pred.costUsd;
+      tm.counter('tsp_labeling_examples_total', {task_purpose: purpose, result: pred.answer ? 'valid' : 'invalid'});
+      if (paid) tm.counter('tsp_labeling_cost_usd_total', {task_purpose: purpose}, pred.costUsd);
+      return true;
     };
 
     const worker = async () => {
       while (next < pending.length && !stopReason && !ctrl.signal.aborted) {
+        stopReason = overLimit();
+        if (stopReason) break;
         const exampleId = pending[next++];
-        const ex = examples.get(exampleId);
         const exStarted = Date.now();
         try {
-          if (!ex) throw new Error('The example no longer exists.');
-          const parts = renderPrompt(version.template, ex, version.features, version.images);
-          const res = await deps.gateway.label({
-            slot: task.endpoint,
-            messages: toMessages(parts, deps.resolveUrl),
-            maxOutputTokens: task.settings.maxOutputTokens,
-            temperature: task.settings.temperature,
-            traceId: ex.externalId,
-            signal: ctrl.signal,
-          });
-          const parsed = parseOutput(res.text, schema);
-          const pred: Prediction = {
-            id: predictionId(task.promptVersionId, task.endpoint, task.settingsHash, exampleId, again(exampleId) ? 2 : 1),
-            promptVersionId: task.promptVersionId,
-            endpoint: task.endpoint,
-            settingsHash: task.settingsHash,
-            exampleId,
-            output: res.text,
-            answer: parsed.answer,
-            invalidReason: parsed.reason,
-            costUsd: res.costUsd,
-            createdAt: now(),
-          };
-          // Prediction first, counters after: a crash in between undercounts, and the next run recounts.
-          await repo.insert(PREDICTIONS, pred);
-          await repo.patch<LabelingTask>(TASKS, taskId, {
-            done: DocFieldValue.increment(1),
-            [parsed.answer ? 'valid' : 'invalid']: DocFieldValue.increment(1),
-            costUsd: DocFieldValue.increment(res.costUsd),
-            ...(opts.auto ? {autoCostUsd: DocFieldValue.increment(res.costUsd)} : {}),
-          });
-          counts.done++;
-          counts.costUsd += res.costUsd;
-          runCostUsd += res.costUsd;
+          if (!(await labelOne(exampleId, examples.get(exampleId)))) {
+            // Another task in this browser is labeling the same example: come back to it.
+            pending.push(exampleId);
+            await new Promise(r => setTimeout(r, 200));
+            continue;
+          }
           inARow = 0;
-          tm.counter('tsp_labeling_examples_total', {task_purpose: purpose, result: parsed.answer ? 'valid' : 'invalid'});
-          tm.counter('tsp_labeling_cost_usd_total', {task_purpose: purpose}, res.costUsd);
           tm.histogram('tsp_labeling_example_duration_seconds', (Date.now() - exStarted) / 1000, {task_purpose: purpose});
         } catch (e) {
           if (errorKindOf(e) === 'aborted') break;
@@ -216,18 +265,16 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           counts.failed++;
           lastError = (e as Error).message ?? String(e);
           await repo.patch<LabelingTask>(TASKS, taskId, {failed: DocFieldValue.increment(1), failedExampleIds: DocFieldValue.arrayUnion(exampleId), error: lastError});
-          if (counts.failed / task.total > MAX_FAILED_SHARE || inARow >= MAX_FAILED_IN_A_ROW) stopReason = 'failures';
         }
-        if (task.budgetUsd != null && counts.costUsd > task.budgetUsd * BUDGET_MARGIN) stopReason = 'budget';
-        if (opts.budgetUsd != null && runCostUsd > opts.budgetUsd * BUDGET_MARGIN) stopReason = 'budget';
+        stopReason = overLimit();
         emit();
-        await checkStop();
       }
     };
 
     try {
       await Promise.all(Array.from({length: Math.max(1, task.parallel)}, worker));
     } finally {
+      clearInterval(stopTimer);
       active.delete(taskId);
       setRunning(purpose, -1);
     }
@@ -241,7 +288,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     } else if (stopReason === 'budget') {
       state = 'paused';
       error =
-        task.budgetUsd != null && counts.costUsd > task.budgetUsd * BUDGET_MARGIN
+        budgetUsd != null && counts.costUsd > budgetUsd * BUDGET_MARGIN
           ? `Paused: the cost passed ${Math.round(BUDGET_MARGIN * 100)}% of the approved estimate.`
           : `Paused: this automatic start cost more than ${Math.round(BUDGET_MARGIN * 100)}% of its estimate.`;
     } else if (stopReason === 'failures' || counts.failed > 0) {
@@ -252,12 +299,12 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       state = 'done';
       error = null;
     }
-    await repo.patch<LabelingTask>(TASKS, taskId, {state, stopReason, error, finishedAt: now()});
+    await repo.patch<LabelingTask>(TASKS, taskId, {state, stopReason, error, stopRequested: false, finishedAt: now()});
     emit();
     tm.counter('tsp_labeling_tasks_ended_total', {task_purpose: purpose, state, reason: stopReason ?? 'none'});
     if (state === 'needs_attention') tm.event('run_needs_attention', {task_purpose: purpose, failed: counts.failed, total: task.total});
     tm.histogram('tsp_labeling_task_duration_seconds', (Date.now() - runStarted) / 1000, {task_purpose: purpose});
-    if (state === 'done' && task.budgetUsd) tm.histogram('tsp_labeling_cost_vs_estimate_ratio', counts.costUsd / task.budgetUsd, {task_purpose: purpose});
+    if (state === 'done' && budgetUsd) tm.histogram('tsp_labeling_cost_vs_estimate_ratio', counts.costUsd / budgetUsd, {task_purpose: purpose});
     const pressed = stopPressed.get(taskId);
     if (state === 'stopped' && pressed) tm.histogram('tsp_labeling_stop_latency_seconds', (Date.now() - pressed) / 1000, {task_purpose: purpose});
     stopPressed.delete(taskId);
@@ -305,15 +352,11 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     async stopTask(taskId: string) {
       stopPressed.set(taskId, Date.now());
       active.get(taskId)?.abort();
-      if (!active.has(taskId)) await repo.patch<LabelingTask>(TASKS, taskId, {stopRequested: true});
+      if (!active.has(taskId)) await repo.patch<LabelingTask>(TASKS, taskId, {stopRequested: true, stopRequestedAt: now()});
       emit();
     },
 
-    async retryFailed(taskId: string, trigger?: 'system' | 'user', opts: RunOptions = {}) {
-      await repo.patch<LabelingTask>(TASKS, taskId, {failedExampleIds: [], failed: 0, state: 'queued', error: null, stopReason: null});
-      emit();
-      return run(taskId, trigger, opts);
-    },
+    retryFailed: (taskId: string, trigger?: 'system' | 'user', opts: RunOptions = {}) => run(taskId, trigger, {...opts, retry: true}),
 
     getTask,
 

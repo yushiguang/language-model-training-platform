@@ -6,10 +6,14 @@ Contract: `LlmGatewayContract` in `packages/contracts/src/gateway-api.ts`.
 - `registry.ts`: registered endpoints from the platform, plus assumed limits per model for
   anything not registered. Assumed values are conservative and marked `assumed`.
 - `limiter.ts`: per endpoint, a 60 s sliding window for QPM and TPM, a cap on calls in flight and a
-  FIFO queue. Calls wait; they are never sent over the limit. Halves its rate after a 429.
+  FIFO queue. Calls wait; they are never sent over the limit. Halves its rate after a 429 and
+  holds calls for the time asked. The earliest wakeup wins (a later pending timer is replaced);
+  an aborted waiter lets the next one go.
 - `gateway.ts`: picks the endpoint (labeling by slot A/B; chat by model, else an active reasoning
   endpoint), estimates tokens, retries busy/server/timeout errors (2, 4, 8, 16 s), and corrects the
-  token count with real usage. Reasoning tokens count toward TPM.
+  token count with real usage. Reasoning tokens count toward TPM. On a 429 the limiter slows down
+  before the slot is given back (also on the last try), so no queued call goes out during the
+  hold. `chatStream` retries the same way until its first chunk, never after.
 
 Rules: stateless apart from the in-memory limiter; no storage; no knowledge of tasks or projects.
 Per-example failure handling belongs to labeling, not here. Imports: contracts, domain.

@@ -55,6 +55,8 @@ export interface LabelingTask {
   stopReason: TaskStopReason;
   /** Set by Stop from any tab; the runner checks it every few seconds. */
   stopRequested: boolean;
+  /** When Stop was pressed: a run only obeys a Stop pressed after it started. */
+  stopRequestedAt?: string | null;
   error: string | null;
   createdAt: string;
   createdBy: string;
@@ -85,6 +87,11 @@ export interface RunOptions {
    * pauses with stopReason 'budget' once its own cost passes 120% of it.
    */
   budgetUsd?: number;
+  /**
+   * The user chose to continue a task paused for its budget: the budget grows by the share of
+   * examples still to label (at the same estimate per example), so the run can go on.
+   */
+  extendBudget?: boolean;
 }
 
 export interface LabelingContract {

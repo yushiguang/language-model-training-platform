@@ -124,3 +124,81 @@ test('limiter halves concurrency after a 429 and holds new calls', async () => {
   (await lim.acquire(1)).release();
   assert.ok(Date.now() - t0 >= 50);
 });
+
+test('after a 429 no queued call goes out during the hold, and a 429 on the last try still slows the endpoint', async () => {
+  const sent: number[] = [];
+  let calls = 0;
+  const t0 = Date.now();
+  const gw = createGateway(
+    fakePlatform(
+      async () => {
+        calls++;
+        sent.push(Date.now() - t0);
+        if (calls === 1) {
+          await new Promise(r => setTimeout(r, 5));
+          throw new LlmCallError('rate_limited', 'slow down', {status: 429, retryAfterMs: 80});
+        }
+        return {text: '{}', inputTokens: 1, outputTokens: 1};
+      },
+      [{id: 'ep-a', purpose: 'labeling', slot: 'A', model: 'gpt-5.6-terra', tier: 'reasoning', qpm: 100, tpm: 1_000_000, maxConcurrency: 1, priceIn: 1, priceOut: 4, supportsTemperature: false, active: true, assumed: false}],
+    ),
+    {retryDelaysMs: [0]},
+  );
+  const req = {slot: 'A' as const, messages: msg, maxOutputTokens: 10, temperature: null};
+  await Promise.all([gw.label(req), gw.label(req)]);
+  // Call 1 (the 429) went out at once; nothing else before its 80 ms hold ended.
+  assert.ok(sent.slice(1).every(t => t >= 80), `sent at ${sent.join(', ')} ms`);
+
+  const last = createGateway(
+    fakePlatform(async () => {
+      throw new LlmCallError('rate_limited', 'slow down', {status: 429, retryAfterMs: 60});
+    }),
+    {retryDelaysMs: [], sleep: noWait},
+  );
+  await assert.rejects(last.label({...req, slot: 'B'}), /after 1 tries/);
+  const t1 = Date.now();
+  await assert.rejects(last.label({...req, slot: 'B'}));
+  assert.ok(Date.now() - t1 >= 50, 'the next call waited for the hold');
+});
+
+test('limiter: a shorter wakeup replaces a pending later timer', async () => {
+  const lim = new EndpointLimiter({qpm: 100, tpm: 100, maxConcurrency: 4, windowMs: 1000});
+  const a = await lim.acquire(60);
+  const t0 = Date.now();
+  // b does not fit (60 + 60 > 100): the limiter wakes when a's window entry expires, in 1 s.
+  const b = lim.acquire(60);
+  lim.onRateLimited(30);
+  a.release(5); // the real usage was small: b fits once the 30 ms hold ends
+  (await b).release();
+  assert.ok(Date.now() - t0 < 500, `b waited ${Date.now() - t0} ms`);
+});
+
+test('limiter: aborting a queued call lets the one behind it go', async () => {
+  const lim = new EndpointLimiter({qpm: 100, tpm: 100, maxConcurrency: 4, windowMs: 1000});
+  const a = await lim.acquire(60);
+  const ctrl = new AbortController();
+  const big = lim.acquire(60, ctrl.signal);
+  const t0 = Date.now();
+  const small = lim.acquire(10);
+  ctrl.abort();
+  await assert.rejects(big);
+  (await small).release();
+  assert.ok(Date.now() - t0 < 500, `small waited ${Date.now() - t0} ms`);
+  a.release();
+});
+
+test('chatStream retries a 429 before the first chunk and slows the endpoint down', async () => {
+  let tries = 0;
+  const p = fakePlatform(async () => ({text: '', inputTokens: 0, outputTokens: 0}));
+  p.agent.chatStream = async function* () {
+    tries++;
+    if (tries === 1) throw new LlmCallError('rate_limited', 'slow down', {status: 429, retryAfterMs: 5});
+    yield {type: 'delta' as const, text: 'hi'};
+    yield {type: 'done' as const, createdAt: ''};
+  };
+  const gw = createGateway(p, {sleep: noWait});
+  const out: string[] = [];
+  for await (const c of gw.agentModel().chatStream(msg)) if (c.type === 'delta') out.push(c.text);
+  assert.deepEqual(out, ['hi']);
+  assert.equal(tries, 2);
+});

@@ -47,6 +47,8 @@ export class EndpointLimiter {
   private lastPenalty = 0;
   private queue: Waiter[] = [];
   private timer: ReturnType<typeof setTimeout> | null = null;
+  /** When the pending timer fires. */
+  private timerAt = 0;
 
   constructor(o: LimiterOptions) {
     this.qpm = o.qpm;
@@ -77,6 +79,8 @@ export class EndpointLimiter {
         w.onAbort = () => {
           this.queue = this.queue.filter(x => x !== w);
           reject(new DOMException('Stopped', 'AbortError'));
+          // The waiter behind it may fit now.
+          this.pump();
         };
         signal.addEventListener('abort', w.onAbort, {once: true});
       }
@@ -143,8 +147,14 @@ export class EndpointLimiter {
     }
   }
 
+  /** Wakes the queue in `ms`. An earlier wakeup wins: a pending later timer is replaced. */
   private schedule(ms: number) {
-    if (this.timer) return;
+    const at = this.now() + Math.max(1, ms);
+    if (this.timer) {
+      if (this.timerAt <= at) return;
+      clearTimeout(this.timer);
+    }
+    this.timerAt = at;
     this.timer = setTimeout(() => {
       this.timer = null;
       this.pump();

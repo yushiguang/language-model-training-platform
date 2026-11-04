@@ -110,9 +110,13 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
         done('ok');
         return {value, attempts: attempt + 1};
       } catch (e) {
+        const kind = errorKindOf(e);
+        // Slow down before giving the slot back: releasing first would let a queued call go out
+        // during the hold. Also on the last attempt, so the next caller waits too.
+        const retryAfter = e instanceof LlmCallError ? e.retryAfterMs : undefined;
+        if (kind === 'rate_limited') limiter.onRateLimited(retryAfter ?? delays[Math.min(attempt, delays.length - 1)] ?? 1000);
         permit.release();
         sample(ep, limiter);
-        const kind = errorKindOf(e);
         tm.counter('tsp_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose, outcome: kind});
         tm.histogram('tsp_llm_request_duration_seconds', (Date.now() - sent) / 1000, {endpoint: ep.id, model: ep.model, purpose});
         if (kind === 'aborted') {
@@ -126,8 +130,6 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
         last = e;
         if (attempt === delays.length) break;
         tm.counter('tsp_llm_retries_total', {endpoint: ep.id, purpose, reason: kind});
-        const retryAfter = e instanceof LlmCallError ? e.retryAfterMs : undefined;
-        if (kind === 'rate_limited') limiter.onRateLimited(retryAfter ?? delays[attempt]);
         await sleep(Math.max(delays[attempt], retryAfter ?? 0), signal);
       }
     }
@@ -170,14 +172,38 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
     chat: async (messages, o) => (await complete(messages, o)).text,
     complete,
     async *chatStream(messages: ModelMessage[], o: AgentChatOptions = {}): AsyncGenerator<LlmStreamChunk> {
-      // A stream holds one slot for its whole length; it is not retried once it has started.
+      // A stream holds one slot for its whole length. A busy or broken reply before the first
+      // chunk is retried like any call (a 429 slows the endpoint down); once text has come
+      // back it is not, so nothing is shown twice. The slot's tokens are corrected to what the
+      // stream returned (about 4 characters a token; streams carry no usage).
       const ep = chatEndpointFor(o.model);
+      const limiter = limiterFor(ep);
       const estimate = estimateTokens(textOfMessages(messages)) + (o.maxOutputTokens ?? opts.defaultChatOutputTokens ?? 2000);
-      const permit = await limiterFor(ep).acquire(estimate, o.signal);
-      try {
-        yield* platform.agent.chatStream(messages, {...o, model: ep.model as AgentChatOptions['model']});
-      } finally {
-        permit.release();
+      const input = estimateTokens(textOfMessages(messages));
+      for (let attempt = 0; ; attempt++) {
+        const permit = await limiter.acquire(estimate, o.signal);
+        let chars = 0;
+        let started = false;
+        try {
+          for await (const chunk of platform.agent.chatStream(messages, {...o, model: ep.model as AgentChatOptions['model']})) {
+            started = true;
+            if (chunk.type === 'delta') chars += chunk.text.length;
+            if (chunk.type === 'thinking') chars += chunk.thinking.length;
+            yield chunk;
+          }
+          permit.release(input + Math.ceil(chars / 4));
+          tm.counter('tsp_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose: ep.purpose, outcome: 'ok'});
+          return;
+        } catch (e) {
+          const kind = errorKindOf(e);
+          const retryAfter = e instanceof LlmCallError ? e.retryAfterMs : undefined;
+          if (kind === 'rate_limited') limiter.onRateLimited(retryAfter ?? delays[Math.min(attempt, delays.length - 1)] ?? 1000);
+          permit.release(started ? input + Math.ceil(chars / 4) : undefined);
+          tm.counter('tsp_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose: ep.purpose, outcome: kind});
+          if (started || kind === 'aborted' || kind === 'rejected' || attempt >= delays.length) throw e;
+          tm.counter('tsp_llm_retries_total', {endpoint: ep.id, purpose: ep.purpose, reason: kind});
+          await sleep(Math.max(delays[attempt], retryAfter ?? 0), o.signal);
+        }
       }
     },
   };
