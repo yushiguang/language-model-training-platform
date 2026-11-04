@@ -69,8 +69,15 @@ export async function runOptimiser(projectId: string, endpoint: EndpointId, budg
       if (!parentMetrics) {
         // The parent is not labeled yet (or another tab is labeling it): label it, then look again.
         const t = await labelEvalSet(projectId, setup, parent, endpoint, state.examples, 'optimiser');
-        if (!t) await wait(1000);
-        else if (t.state !== 'done') throw new Error(t.error ?? 'Labeling stopped');
+        if (!t) {
+          await wait(1000);
+          continue;
+        }
+        if (t.state !== 'done') throw new Error(t.error ?? 'Labeling stopped');
+        // Labeled, but still nothing to score: the optimiser half of the eval set has no
+        // gold labels. Stop with a reason instead of labeling the same task forever.
+        const rescored = await scoreOnOptimiserHalf(setup, parent, endpoint, state.examples, state.gold);
+        if (!rescored.n) throw new Error('No version can be scored yet: the optimiser half of the eval set has no gold labels. Add gold labels, then run the optimiser again.');
         continue;
       }
       const out = await agents.reflectPrompt(
