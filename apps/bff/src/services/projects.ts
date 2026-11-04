@@ -36,7 +36,7 @@ export async function loadProjectState(projectId: string): Promise<ProjectState 
     project.snapshotId ? catalog.get('dataset_snapshots', project.snapshotId) : null,
   ]);
   const schemaVersion = setup?.schemaVersion ?? 0;
-  const [examples, {current: gold, stale: staleGold}, rawVersions, rawReports, tasks, optimisation, rawTrainingSets] = await Promise.all([
+  const [examples, {current: gold, stale: staleGold}, rawVersions, rawReports, tasks, optimisation, rawTrainingSets, autoSpend] = await Promise.all([
     snapshot ? catalog.find('examples', {snapshotId: snapshot.id}, 'externalId') : [],
     latestGold(projectId, schemaVersion),
     catalog.find('prompt_versions', {projectId}),
@@ -44,6 +44,7 @@ export async function loadProjectState(projectId: string): Promise<ProjectState 
     labeling.listTasks(projectId),
     catalog.find('optimisation_runs', {projectId}, 'startedAt desc'),
     catalog.find('training_sets', {projectId}, 'startedAt desc'),
+    catalog.find('audit_log', {projectId, action: 'auto_spend'}),
   ]);
   const versions = rawVersions.sort((a, b) => compareVersions(b, a));
   const evalExamples = examples.filter(e => e.split === 'eval');
@@ -85,6 +86,7 @@ export async function loadProjectState(projectId: string): Promise<ProjectState 
     contextId,
     endpoints: gateway.labelingEndpoints(),
     samplingTask: getSamplingTask(projectId),
+    otherAutoSpendUsd: autoSpend.reduce((n, a) => n + Number((a.data as {costUsd?: number}).costUsd ?? 0), 0),
   };
 }
 

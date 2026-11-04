@@ -9,7 +9,7 @@ import {costForTokens} from './workflow.ts';
  * it on or off; these fixed caps always ask, whatever the switch says.
  */
 export const AUTO_START_SINGLE_CAP_USD = 1;
-/** Once automatic starts in a project have spent this much, every further one asks. */
+/** Automatic starts in a project may spend this much in all; a start that would pass it asks. */
 export const AUTO_START_PROJECT_CAP_USD = 5;
 /** Optimiser candidates per run. */
 export const OPTIMISER_CANDIDATES = 6;
@@ -33,18 +33,25 @@ export function optimiserEstimate(state: ProjectState, endpoint: EndpointId, can
   return v ? evalEstimate(state, v, endpoint) * candidates : 0;
 }
 
-/** What automatic starts have spent in this project (scoring started by code, optimiser runs started by code). */
+/**
+ * What automatic starts have spent in this project: every labeling run started by code (scoring,
+ * resumes, optimiser parents and candidates; counted per run, so an automatic resume of a task a
+ * user started counts too) plus try_template runs, which leave no task.
+ */
 export function autoSpendUsd(state: ProjectState): number {
-  return state.runs.filter(r => r.auto).reduce((n, r) => n + r.costUsd, 0) + state.optimisation.filter(o => o.auto).reduce((n, o) => n + o.costUsd, 0);
+  return state.runs.reduce((n, r) => n + (r.autoCostUsd ?? 0), 0) + (state.otherAutoSpendUsd ?? 0);
 }
 
-export type AutoStartReason = 'off' | 'over_single_cap' | 'over_project_cap';
+export type AutoStartReason = 'off' | 'over_single_cap' | 'over_project_cap' | 'paused_over_budget';
 
-/** May this start go ahead without asking? */
-export function autoStartCheck(state: ProjectState, estimateUsd: number): {allowed: boolean; reason: AutoStartReason | null} {
+/**
+ * May this start go ahead without asking? `reservedUsd`: estimates of automatic starts already
+ * going whose cost is not saved yet, so starts made one after another can't pass the $5 together.
+ */
+export function autoStartCheck(state: ProjectState, estimateUsd: number, reservedUsd = 0): {allowed: boolean; reason: AutoStartReason | null} {
   if (state.setup?.autoStart === false) return {allowed: false, reason: 'off'};
   if (estimateUsd > AUTO_START_SINGLE_CAP_USD) return {allowed: false, reason: 'over_single_cap'};
-  if (autoSpendUsd(state) >= AUTO_START_PROJECT_CAP_USD) return {allowed: false, reason: 'over_project_cap'};
+  if (autoSpendUsd(state) + reservedUsd + estimateUsd > AUTO_START_PROJECT_CAP_USD) return {allowed: false, reason: 'over_project_cap'};
   return {allowed: true, reason: null};
 }
 
@@ -55,6 +62,14 @@ export interface DueStart {
   estimateUsd: number;
   /** Stable key, for "asked once" bookkeeping. */
   key: string;
+  /** A resume of scoring that paused because it cost more than 120% of its estimate. */
+  overBudget?: boolean;
+}
+
+/** `autoStartCheck` for a due start: a resume after an over-budget pause always asks. */
+export function dueStartCheck(state: ProjectState, d: DueStart, reservedUsd = 0): {allowed: boolean; reason: AutoStartReason | null} {
+  if (d.overBudget) return {allowed: false, reason: 'paused_over_budget'};
+  return autoStartCheck(state, d.estimateUsd, reservedUsd);
 }
 
 /**
@@ -74,7 +89,7 @@ export function dueStarts(state: ProjectState, opts: {optimiserBusy?: boolean} =
     const v = state.versions.find(x => x.id === r.promptVersionId);
     if (!v) continue;
     const left = Math.max(0, r.total - r.done);
-    out.push({what: 'resume', versionId: v.id, endpoint: r.endpoint, estimateUsd: evalEstimate(state, v, r.endpoint, left), key: `resume:${r.id}`});
+    out.push({what: 'resume', versionId: v.id, endpoint: r.endpoint, estimateUsd: evalEstimate(state, v, r.endpoint, left), key: `resume:${r.id}`, ...(r.overBudget ? {overBudget: true} : {})});
   }
 
   const latest = state.versions[0];

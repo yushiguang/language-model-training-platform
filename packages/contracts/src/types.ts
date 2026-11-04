@@ -176,8 +176,12 @@ export interface LabelingRun {
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
-  /** Started by code without a click (counts toward the automatic-spend cap). */
+  /** Created by code without a click. */
   auto?: boolean;
+  /** What runs started by code spent on it (counts toward the automatic-spend cap). */
+  autoCostUsd?: number;
+  /** Paused because a run's cost passed 120% of its estimate: resuming always asks. */
+  overBudget?: boolean;
 }
 
 export interface ValueMetrics {
@@ -486,5 +490,10 @@ export interface ProjectState {
   endpoints: EndpointInfo[];
   /** Active or recently finished sampling task, if any. */
   samplingTask: SamplingTask | null;
+  /**
+   * Automatic spend that left no labeling task: the prompt agent's try_template runs started
+   * within the caps (from `auto_spend` audit records).
+   */
+  otherAutoSpendUsd?: number;
 }
 

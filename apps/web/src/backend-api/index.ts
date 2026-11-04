@@ -217,6 +217,7 @@ export const saveGold = timed('saveGold', bff.saveGold);
 export const importBundledGold = timed('importBundledGold', bff.importBundledGold);
 export const createVersion = timed('createVersion', bff.createVersion);
 export const scoreVersion = timed('scoreVersion', bff.scoreVersion);
+export const scoreNewVersion = timed('scoreNewVersion', bff.scoreNewVersion);
 export const tick = timed('tick', bff.tick);
 export const stopRun = timed('stopRun', bff.stopRun);
 export const startOptimiser = timed('startOptimiser', bff.startOptimiser);

@@ -13,6 +13,10 @@ it reads and writes through the catalog, starts labeling tasks, and asks the age
   `dueStarts` lists (score the latest version, resume scoring left by a closed page, the
   optimiser) when `autoStartCheck` allows it, writing an `auto_start` audit record.
   `waitingStarts` is what waits for a click, with its cost, for the page's buttons.
+  `scoreNewVersion` (Save and Create) runs the same check for a new version. Automatic starts
+  reserve their estimate (`reserve`, `reservedUsd`) while they run, and pass `{auto, budgetUsd}`
+  to labeling so the run's cost counts toward the $5 and pauses past 120% of its estimate.
+  Tests: `work.test.ts` (real catalog and labeling over the stand-in store, fake model).
 - `optimiser.ts`: GEPA-style loop; each candidate is labeled as an optimiser task.
 - `training.ts`: `labelTestSet` ("Get model answers" on Gold Labels, user-started) and the final
   run: one labeling task over the train split plus, when the user ticked it, the test examples

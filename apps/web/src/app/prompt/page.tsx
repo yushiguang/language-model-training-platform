@@ -14,6 +14,7 @@ import {estimateLabeling, MADE_BY, minutesFor, recommend} from '@tsp/domain';
 import {
   approveNode,
   createVersion,
+  scoreNewVersion,
   scoreVersion,
   waitingStarts,
   startOptimiser,
@@ -71,8 +72,8 @@ function Start({state, setPage}: {state: ProjectState; setPage: (p: PageContext)
     setBusy(true);
     setErr(null);
     try {
-      const v = await createVersion(state.project.id, {...draft, parent: null, madeBy: 'user', change: 'Starting prompt', kind: 'minor', schema: state.setup!.schema!, schemaVersion: state.setup!.schemaVersion});
-      void scoreVersion(state.project.id, v);
+      await createVersion(state.project.id, {...draft, parent: null, madeBy: 'user', change: 'Starting prompt', kind: 'minor', schema: state.setup!.schema!, schemaVersion: state.setup!.schemaVersion});
+      void scoreNewVersion(state.project.id);
     } catch (e) {
       setErr((e as Error).message);
       setBusy(false);
@@ -391,5 +392,6 @@ function reportBrief(state: ProjectState, vId: string, ep: EndpointId) {
 const WHY = {
   off: 'Automatic paid starts are off in Setup, so scoring and the optimiser wait for you.',
   over_single_cap: 'This costs more than $1, so it waits for you.',
-  over_project_cap: 'Automatic work in this project has spent $5, so each start waits for you.',
+  over_project_cap: 'This would take automatic work in this project past $5, so it waits for you.',
+  paused_over_budget: 'Scoring paused because it cost more than 120% of its estimate, so resuming waits for you.',
 };

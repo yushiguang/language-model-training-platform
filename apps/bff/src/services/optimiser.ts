@@ -1,5 +1,5 @@
 import type {EndpointId, OptimisationRun, PromptVersion} from '@tsp/contracts';
-import {checkTemplate, newId, placeholderKeys} from '@tsp/domain';
+import {checkTemplate, evalEstimate, newId, placeholderKeys} from '@tsp/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {buildReport, labelEvalSet, scoreOnOptimiserHalf} from './evaluation.ts';
 import {loadProjectState} from './projects.ts';
@@ -46,6 +46,8 @@ export async function runOptimiser(projectId: string, endpoint: EndpointId, budg
   tm().event('optimiser_started', {slot: endpoint, trigger: opts.auto ? 'auto' : 'user', resumed: !!resume});
   let wasted = 0;
   let kept = 0;
+  // An automatic run labels each version as an automatic start with its own estimate as budget.
+  const labelOpts = (v: PromptVersion) => (opts.auto ? {auto: true, budgetUsd: evalEstimate(state, v, endpoint)} : {});
   try {
     while (run.calls < run.budgetCalls) {
       if (wasted >= 3) {
@@ -68,11 +70,14 @@ export async function runOptimiser(projectId: string, endpoint: EndpointId, budg
       }
       if (!parentMetrics) {
         // The parent is not labeled yet (or another tab is labeling it): label it, then look again.
-        const t = await labelEvalSet(projectId, setup, parent, endpoint, state.examples, 'optimiser');
+        const t = await labelEvalSet(projectId, setup, parent, endpoint, state.examples, 'optimiser', labelOpts(parent));
         if (!t) {
           await wait(1000);
           continue;
         }
+        // The parent's labeling is part of what this run cost.
+        run.costUsd += t.costUsd;
+        await catalog.patch('optimisation_runs', run.id, {costUsd: run.costUsd});
         if (t.state !== 'done') throw new Error(t.error ?? 'Labeling stopped');
         // Labeled, but still nothing to score: the optimiser half of the eval set has no
         // gold labels. Stop with a reason instead of labeling the same task forever.
@@ -111,7 +116,7 @@ export async function runOptimiser(projectId: string, endpoint: EndpointId, budg
         schemaVersion: setup.schemaVersion,
       });
       run.candidates++;
-      const task = await labelEvalSet(projectId, setup, cand, endpoint, state.examples, 'optimiser');
+      const task = await labelEvalSet(projectId, setup, cand, endpoint, state.examples, 'optimiser', labelOpts(cand));
       if (!task) throw new Error('Another tab is labeling this candidate.');
       run.calls += task.total;
       run.costUsd += task.costUsd;

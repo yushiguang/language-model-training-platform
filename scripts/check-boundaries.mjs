@@ -12,23 +12,23 @@ import {fileURLToPath} from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-/** Folder -> workspace packages it may import. `*` = anything. */
+/**
+ * Folder -> workspace packages it may import. `*` = anything. `tests`: what its tests may import
+ * on top, to build fixtures from the stand-ins and the apps it talks to.
+ */
 const RULES = [
   {dir: 'packages/contracts/src', allow: []},
   {dir: 'packages/domain/src', allow: ['@tsp/contracts']},
   {dir: 'packages/platform/src', allow: ['@tsp/contracts', '@tsp/domain']},
   {dir: 'apps/llm-gateway/src', allow: ['@tsp/contracts', '@tsp/domain']},
   {dir: 'apps/catalog/src', allow: ['@tsp/contracts', '@tsp/domain', '@tsp/platform']},
-  {dir: 'apps/labeling/src', allow: ['@tsp/contracts', '@tsp/domain', '@tsp/platform']},
-  {dir: 'apps/agents/src', allow: ['@tsp/contracts', '@tsp/domain']},
-  {dir: 'apps/bff/src', allow: ['@tsp/contracts', '@tsp/domain']},
+  {dir: 'apps/labeling/src', allow: ['@tsp/contracts', '@tsp/domain', '@tsp/platform'], tests: ['@tsp/catalog']},
+  {dir: 'apps/agents/src', allow: ['@tsp/contracts', '@tsp/domain'], tests: ['@tsp/platform']},
+  {dir: 'apps/bff/src', allow: ['@tsp/contracts', '@tsp/domain'], tests: ['@tsp/platform', '@tsp/catalog', '@tsp/labeling']},
   {dir: 'apps/telemetry/src', allow: ['@tsp/contracts']},
   {dir: 'apps/web/src/backend-api', allow: '*'},
   {dir: 'apps/web/src', allow: ['@tsp/contracts', '@tsp/domain', '@/backend-api', '@/components', '@/ui', '@/app']},
 ];
-
-/** Tests may also use the stand-ins and the app under test's neighbours to build fixtures. */
-const TEST_EXTRA = ['@tsp/platform', '@tsp/catalog'];
 
 const IMPORT_RE = /(?:^|\n)\s*(?:import|export)\s[^'"`;]*?from\s+['"]([^'"]+)['"]|import\(\s*['"]([^'"]+)['"]\s*\)/g;
 
@@ -70,7 +70,7 @@ for (const rule of RULES) {
       }
       if (!spec.startsWith('@tsp/') && !spec.startsWith('@/')) continue; // npm packages and node: builtins
       const base = spec.startsWith('@/') ? '@/' + spec.slice(2).split('/')[0] : spec.split('/').slice(0, 2).join('/');
-      const allowed = rule.allow.includes(base) || (isTest && TEST_EXTRA.includes(base));
+      const allowed = rule.allow.includes(base) || (isTest && (rule.tests ?? []).includes(base));
       if (!allowed) problems.push(`${rel}: may not import "${spec}" (allowed: ${rule.allow.join(', ') || 'nothing'})`);
     }
   }

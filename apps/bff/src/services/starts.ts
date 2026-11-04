@@ -3,7 +3,7 @@ import {autoSpendUsd, autoStartCheck, evalEstimate, newId, optimiserEstimate, TR
 import {emitChange, getApp, now, tm} from './app.ts';
 import {asModel, findVersion} from './page-views.ts';
 import {loadProjectState} from './projects.ts';
-import {scoreVersion, startOptimiser} from './work.ts';
+import {reserve, reservedUsd, scoreVersion, startOptimiser} from './work.ts';
 
 /**
  * Start-work agent tools: try_template, score_version, start_optimiser. They spend money, so
@@ -50,12 +50,17 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
         estimateUsd: evalEstimate(state, draft, endpoint, examples.length),
         run: async () => {
           const settings = models.find(m => m.endpoint === endpoint)!;
-          const rows = await getApp().labeling.tryTemplate({...draft, schema: state.setup!.schema!, settings, examples});
+          const trying = getApp().labeling.tryTemplate({...draft, schema: state.setup!.schema!, settings, examples});
+          if (auto) reserve(`try:${newId('rs')}`, evalEstimate(state, draft, endpoint, examples.length), trying);
+          const rows = await trying;
           const byId = new Map(examples.map(e => [e.id, e]));
+          const costUsd = rows.reduce((a, r) => a + r.costUsd, 0);
+          // No task is saved, so an automatic try's spend is recorded here for the $5 cap.
+          if (auto && costUsd > 0) await getApp().catalog.audit(projectId, 'system', 'auto_spend', {what: 'try_template', costUsd});
           return {
             model: endpoint,
             rows: rows.map(r => ({id: byId.get(r.exampleId)?.externalId, title: byId.get(r.exampleId)?.title, model: r.answer, invalid: r.invalidReason, error: r.error, gold: state.gold.get(r.exampleId)?.answer ?? null})),
-            costUsd: rows.reduce((a, r) => a + r.costUsd, 0),
+            costUsd,
             saved: false,
           };
         },
@@ -72,7 +77,8 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
         label: `Score ${versionLabel(v)} on Model ${endpoint}`,
         estimateUsd: evalEstimate(state, v, endpoint),
         run: async () => {
-          void scoreVersion(projectId, v, endpoint, {auto});
+          const scoring = scoreVersion(projectId, v, endpoint, {auto});
+          if (auto) reserve(`score:${newId('rs')}`, evalEstimate(state, v, endpoint), scoring);
           return {started: true, note: 'Scoring runs on the eval set; the report appears when it finishes.'};
         },
       };
@@ -84,7 +90,8 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
         label: `Run the optimiser on Model ${endpoint}`,
         estimateUsd: optimiserEstimate(state, endpoint),
         run: async () => {
-          startOptimiser(projectId, endpoint, {auto});
+          const running = startOptimiser(projectId, endpoint, {auto});
+          if (auto) reserve(`optimiser:${newId('rs')}`, optimiserEstimate(state, endpoint), running);
           return {started: true, note: 'The optimiser tries up to 6 changes; new versions appear on Prompt Engineering.'};
         },
       };
@@ -100,7 +107,7 @@ export async function agentStart(projectId: string, agent: AgentPreset, tool: St
   const state = await loadProjectState(projectId);
   if (!state) throw new Error('The project was not found.');
   const p = plan(state, tool, args, true);
-  const check = autoStartCheck(state, p.estimateUsd);
+  const check = autoStartCheck(state, p.estimateUsd, reservedUsd());
   if (check.allowed || p.estimateUsd === 0) {
     const spent = autoSpendUsd(state);
     const result = await p.run();
@@ -112,7 +119,7 @@ export async function agentStart(projectId: string, agent: AgentPreset, tool: St
     return result;
   }
   if (cards.length) return {error: 'You already asked the user to approve one start in this turn.'};
-  cards.push({tool, agent, label: p.label, estimateUsd: p.estimateUsd, args, reason: check.reason!, state: 'open'});
+  cards.push({tool, agent, label: p.label, estimateUsd: p.estimateUsd, args, reason: check.reason as StartCard['reason'], state: 'open'});
   tm().counter('tsp_cost_confirms_total', {what: tool, outcome: 'shown'});
   tm().event('start_card_shown', {tool, estimate_usd: p.estimateUsd});
   return {asked_user: true, label: p.label, estimate_usd: Number(p.estimateUsd.toFixed(2))};
@@ -122,36 +129,66 @@ export async function agentStart(projectId: string, agent: AgentPreset, tool: St
 export function cardReason(c: StartCard): string {
   if (c.reason === 'off') return 'Automatic paid starts are off in Setup.';
   if (c.reason === 'over_single_cap') return 'Starts above $1 always ask.';
-  return 'Automatic starts in this project have spent $5, so each one asks now.';
+  if (c.reason === 'over_project_cap') return 'This would take automatic starts in this project past $5, so it asks.';
+  return 'This asks before it starts.';
 }
 
-/** Approve or Cancel on a start card. Approve runs it as the user's start and posts the result. */
+/** Cards being answered in this page, so a double click runs the start once. */
+const answering = new Set<string>();
+
+/**
+ * Approve or Cancel on a start card. Approve works out the start again from fresh state (its
+ * cost may have changed), runs it as the user's start and posts the result. When it can't be
+ * worked out, the card stays open with the reason posted, so it can be approved again later.
+ */
 export async function answerStartCard(projectId: string, messageId: string, approve: boolean): Promise<void> {
+  if (answering.has(messageId)) return;
+  answering.add(messageId);
+  try {
+    await answer(projectId, messageId, approve);
+  } finally {
+    answering.delete(messageId);
+  }
+}
+
+async function answer(projectId: string, messageId: string, approve: boolean): Promise<void> {
   const {catalog, user} = getApp();
   const msg = await catalog.get('chat_messages', messageId);
   const card = msg?.startCard;
   if (!msg || !card || card.state !== 'open') return;
-  await catalog.patch('chat_messages', messageId, {startCard: {...card, state: approve ? 'approved' : 'cancelled'}});
   const u = await user();
-  tm().counter('tsp_cost_confirms_total', {what: card.tool, outcome: approve ? 'accepted' : 'cancelled'});
-  tm().event(approve ? 'start_card_accepted' : 'start_card_cancelled', {tool: card.tool, estimate_usd: card.estimateUsd});
   // Short outcomes are an event line; try_template's answers come back as the agent's message.
   const post = async (text: string, asAgent = false) => {
     const m: ChatMessage = {id: newId('cm'), projectId, role: asAgent ? 'agent' : 'event', agent: asAgent ? card.agent : null, text, page: msg.page, createdAt: now()};
     await catalog.insert('chat_messages', m);
   };
   if (!approve) {
+    await catalog.patch('chat_messages', messageId, {startCard: {...card, state: 'cancelled'}});
+    tm().counter('tsp_cost_confirms_total', {what: card.tool, outcome: 'cancelled'});
+    tm().event('start_card_cancelled', {tool: card.tool, estimate_usd: card.estimateUsd});
     await catalog.audit(projectId, u.name, 'start_card.cancel', {what: card.tool});
     await post(`You cancelled: ${card.label}.`);
     emitChange();
     return;
   }
-  await catalog.audit(projectId, u.name, 'start_card.approve', {what: card.tool, estimateUsd: card.estimateUsd});
-  const state = await loadProjectState(projectId);
+  let p: Planned;
   try {
+    const state = await loadProjectState(projectId);
     if (!state) throw new Error('The project was not found.');
-    const result = (await plan(state, card.tool, card.args, false).run()) as Record<string, unknown>;
-    await post(resultText(card, result), card.tool === 'try_template' && typeof result.already !== 'string');
+    p = plan(state, card.tool, card.args, false);
+  } catch (e) {
+    await post(`Couldn't start: ${(e as Error).message}`);
+    emitChange();
+    return;
+  }
+  const approved: StartCard = {...card, state: 'approved', estimateUsd: p.estimateUsd};
+  await catalog.patch('chat_messages', messageId, {startCard: approved});
+  tm().counter('tsp_cost_confirms_total', {what: card.tool, outcome: 'accepted'});
+  tm().event('start_card_accepted', {tool: card.tool, estimate_usd: p.estimateUsd});
+  await catalog.audit(projectId, u.name, 'start_card.approve', {what: card.tool, estimateUsd: p.estimateUsd, shownUsd: card.estimateUsd});
+  try {
+    const result = (await p.run()) as Record<string, unknown>;
+    await post(resultText(approved, result), card.tool === 'try_template' && typeof result.already !== 'string');
   } catch (e) {
     await post(`Couldn't start: ${(e as Error).message}`);
   }

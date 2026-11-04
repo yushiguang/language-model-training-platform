@@ -13,6 +13,7 @@ import {
   type LlmGatewayContract,
   type ModelMessage,
   type Prediction,
+  type RunOptions,
   type TaskState,
   type TelemetryPort,
   type TryTemplateRow,
@@ -78,8 +79,8 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
   const defaultTrigger = (t: LabelingTask) => (t.purpose === 'eval' || t.purpose === 'optimiser' ? 'system' : 'user');
 
   /** Runs a task under its lock; a second tab asking for the same task gets null. */
-  async function run(taskId: string, trigger?: 'system' | 'user') {
-    const r = await locks.run(lockName(taskId), () => execute(taskId, trigger));
+  async function run(taskId: string, trigger?: 'system' | 'user', opts: RunOptions = {}) {
+    const r = await locks.run(lockName(taskId), () => execute(taskId, trigger, opts));
     if (r === null) {
       const t = await getTask(taskId);
       if (t) tm.counter('tsp_labeling_lock_conflicts_total', {task_purpose: t.purpose});
@@ -100,7 +101,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     return active.has(taskId) || (await locks.isHeld(lockName(taskId)));
   }
 
-  async function execute(taskId: string, trigger?: 'system' | 'user'): Promise<LabelingTask | null> {
+  async function execute(taskId: string, trigger: 'system' | 'user' | undefined, opts: RunOptions): Promise<LabelingTask | null> {
     const task = await getTask(taskId);
     if (!task || FINISHED.includes(task.state)) return task;
     const purpose = task.purpose;
@@ -140,6 +141,8 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     let lastError: string | null = null;
     let lastStopCheck = Date.now();
     let next = 0;
+    /** This run's own cost, for `opts.budgetUsd`. */
+    let runCostUsd = 0;
 
     const checkStop = async () => {
       if (Date.now() - lastStopCheck < STOP_CHECK_MS) return;
@@ -186,9 +189,11 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
             done: DocFieldValue.increment(1),
             [parsed.answer ? 'valid' : 'invalid']: DocFieldValue.increment(1),
             costUsd: DocFieldValue.increment(res.costUsd),
+            ...(opts.auto ? {autoCostUsd: DocFieldValue.increment(res.costUsd)} : {}),
           });
           counts.done++;
           counts.costUsd += res.costUsd;
+          runCostUsd += res.costUsd;
           inARow = 0;
           tm.counter('tsp_labeling_examples_total', {task_purpose: purpose, result: parsed.answer ? 'valid' : 'invalid'});
           tm.counter('tsp_labeling_cost_usd_total', {task_purpose: purpose}, res.costUsd);
@@ -203,6 +208,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           if (counts.failed / task.total > MAX_FAILED_SHARE || inARow >= MAX_FAILED_IN_A_ROW) stopReason = 'failures';
         }
         if (task.budgetUsd != null && counts.costUsd > task.budgetUsd * BUDGET_MARGIN) stopReason = 'budget';
+        if (opts.budgetUsd != null && runCostUsd > opts.budgetUsd * BUDGET_MARGIN) stopReason = 'budget';
         emit();
         await checkStop();
       }
@@ -223,7 +229,10 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       error = null;
     } else if (stopReason === 'budget') {
       state = 'paused';
-      error = `Paused: the cost passed ${Math.round(BUDGET_MARGIN * 100)}% of the approved estimate.`;
+      error =
+        task.budgetUsd != null && counts.costUsd > task.budgetUsd * BUDGET_MARGIN
+          ? `Paused: the cost passed ${Math.round(BUDGET_MARGIN * 100)}% of the approved estimate.`
+          : `Paused: this automatic start cost more than ${Math.round(BUDGET_MARGIN * 100)}% of its estimate.`;
     } else if (stopReason === 'failures' || counts.failed > 0) {
       state = 'needs_attention';
       stopReason = 'failures';
@@ -288,10 +297,10 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       emit();
     },
 
-    async retryFailed(taskId: string, trigger?: 'system' | 'user') {
+    async retryFailed(taskId: string, trigger?: 'system' | 'user', opts: RunOptions = {}) {
       await repo.patch<LabelingTask>(TASKS, taskId, {failedExampleIds: [], failed: 0, state: 'queued', error: null, stopReason: null});
       emit();
-      return run(taskId, trigger);
+      return run(taskId, trigger, opts);
     },
 
     getTask,

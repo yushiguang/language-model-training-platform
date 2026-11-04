@@ -1,8 +1,9 @@
 import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion, StartCard} from '@tsp/contracts';
 import {agentStart, isStartTool} from './starts.ts';
-import {AUTO_START_PROJECT_CAP_USD, AUTO_START_SINGLE_CAP_USD, autoSpendUsd, autoStartCheck, checkTemplate, defaultOutputPick, dueStarts, pageFromPath, estimate, isImageKey, judge, MADE_BY, recommend, settingsHash, versionLabel} from '@tsp/domain';
+import {AUTO_START_PROJECT_CAP_USD, AUTO_START_SINGLE_CAP_USD, autoSpendUsd, checkTemplate, defaultOutputPick, pageFromPath, estimate, isImageKey, judge, MADE_BY, recommend, settingsHash, versionLabel} from '@tsp/domain';
 import {getApp} from './app.ts';
 import {loadProjectState} from './projects.ts';
+import {waitingStarts} from './work.ts';
 
 /**
  * Page views: each page as the agent sees it, built from the same saved data the page shows.
@@ -118,7 +119,7 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
       const step = params.step ?? '1';
       return base(
         step === '1' ? 'Setup step 1: the task and the labels (schema).' : step === '2' ? 'Setup step 2: how prompts are evaluated (thresholds).' : 'Setup step 3: which labeling models to use.',
-        {step, task: s?.task ?? '', schema: s?.schema ?? null, thresholds: s?.thresholds ?? null, models: s?.models ?? [], availableModels: state.endpoints.map(e => ({id: e.id, name: e.name, cost: e.cost, speed: e.speed}))},
+        {step, task: s?.task ?? '', schema: s?.schema ?? null, thresholds: s?.thresholds ?? null, models: s?.models ?? [], startPaidLabelingAutomatically: s?.autoStart !== false, availableModels: state.endpoints.map(e => ({id: e.id, name: e.name, cost: e.cost, speed: e.speed}))},
       );
     }
     case 'dataset': {
@@ -197,10 +198,7 @@ function paidStarts(state: ProjectState) {
   return {
     automatic: state.setup?.autoStart !== false,
     caps: {singleUsd: AUTO_START_SINGLE_CAP_USD, projectUsd: AUTO_START_PROJECT_CAP_USD, spentAutomaticallyUsd: r2(autoSpendUsd(state))},
-    waitingForUser: dueStarts(state)
-      .map(d => ({...d, check: autoStartCheck(state, d.estimateUsd)}))
-      .filter(d => !d.check.allowed)
-      .map(d => ({what: d.what, version: d.versionId ? versionLabel(state.versions.find(v => v.id === d.versionId)!) : null, model: d.endpoint, estimateUsd: r2(d.estimateUsd), why: d.check.reason})),
+    waitingForUser: waitingStarts(state).map(d => ({what: d.what, version: d.versionId ? versionLabel(state.versions.find(v => v.id === d.versionId)!) : null, model: d.endpoint, estimateUsd: r2(d.estimateUsd), why: d.reason})),
   };
 }
 

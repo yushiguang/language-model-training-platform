@@ -85,7 +85,13 @@ export interface BffContract {
   // Prompts, evaluation & optimiser
   /** Version numbers are assigned by the catalog, never by the browser. */
   createVersion(projectId: string, v: NewVersion): Promise<PromptVersion>;
+  /** A click on Score, Resume or Rerun: always starts (the user's start). */
   scoreVersion(projectId: string, version: PromptVersion, only?: EndpointId): Promise<void>;
+  /**
+   * After Save or Create: scores the new version on each model where an automatic start is
+   * allowed (Setup's switch and the caps); the others wait for a click.
+   */
+  scoreNewVersion(projectId: string): Promise<{started: EndpointId[]; waiting: EndpointId[]}>;
   tick(state: ProjectState): Promise<void>;
   stopRun(runId: string): void;
   startOptimiser(projectId: string, endpoint: EndpointId): void;

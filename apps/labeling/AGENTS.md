@@ -13,6 +13,8 @@ example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts
   - Budget: pauses when cost passes 120% of `budgetUsd`.
   - Stop: aborts locally, or sets `stopRequested`, which the runner checks every 2 s.
   - `listTasks` reports a `running` task whose lock nobody holds as `paused` / `closed`.
+  - `runTask(id, trigger, {auto, budgetUsd})`: an automatic run adds its cost to `autoCostUsd`
+    and pauses (stopReason `budget`) once its own cost passes 120% of `budgetUsd`.
   - `tryTemplate` labels a few examples with an unsaved template (the prompt agent's
     try_template tool) and saves nothing.
   - Metrics: `tsp_labeling_*` (runs started and ended, resumes, examples, durations, cost,

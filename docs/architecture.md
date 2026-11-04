@@ -70,9 +70,17 @@ came from (gold or model).
 `SetupVersion.autoStart`). It covers scoring a new version, the optimiser, resuming scoring after
 a closed page, and the agents' start tools. `dueStarts` (`packages/domain/src/auto-start.ts`) says
 what the workflow would start; `autoStartCheck` allows it when the switch is on, the start costs
-at most $1, and automatic starts in the project have spent less than $5. Otherwise the page shows
+at most $1, and it would not take automatic spend in the project past $5. Otherwise the page shows
 a button with the cost ("Score on Model A · about $0.03"). Test answers and the final run always
-ask. Every automatic start writes an `auto_start` audit record.
+ask. Every automatic start writes an `auto_start` audit record. Save and Create on Prompt
+Engineering go the same way (`scoreNewVersion`).
+
+Automatic spend is counted per labeling run, not per task: a run started by code adds its cost to
+the task's `autoCostUsd`, so an automatic resume of a task the user started counts too, and so do
+the optimiser's own labeling runs. try_template saves no task, so it writes an `auto_spend` audit
+record with its cost. Starts still going hold their estimate as a reservation until they end, so
+starts made one after another can't pass $5 together. Each automatic run also has its estimate as
+a budget: past 120% it pauses, and resuming it asks.
 
 ```
 createTask ──► runTask (browser lock "labeling:<task>"; a second tab gets null)

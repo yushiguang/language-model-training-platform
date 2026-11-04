@@ -37,6 +37,11 @@ export interface LabelingTask {
   failed: number;
   failedExampleIds: string[];
   costUsd: number;
+  /**
+   * The part of `costUsd` spent by runs started automatically (`RunOptions.auto`): it counts
+   * toward the project's automatic-spend cap, whoever created the task.
+   */
+  autoCostUsd?: number;
   /** Pause when cost passes 120% of this. null = no budget check. */
   budgetUsd: number | null;
   /** Examples labeled at once. */
@@ -65,6 +70,17 @@ export interface CreateTaskInput {
   createdBy: string;
 }
 
+/** How one run of a task was started. */
+export interface RunOptions {
+  /** Started by code without a click: this run's cost is added to `autoCostUsd`. */
+  auto?: boolean;
+  /**
+   * Budget for this run alone (the estimate an automatic start was checked against): the run
+   * pauses with stopReason 'budget' once its own cost passes 120% of it.
+   */
+  budgetUsd?: number;
+}
+
 export interface LabelingContract {
   createTask(input: CreateTaskInput): Promise<LabelingTask>;
   /**
@@ -72,10 +88,13 @@ export interface LabelingContract {
    * null when another tab already runs it. `trigger` is only for metrics: who started this run
    * (default: system for eval/optimiser tasks, user otherwise).
    */
-  runTask(taskId: string, trigger?: 'system' | 'user'): Promise<LabelingTask | null>;
+  runTask(taskId: string, trigger?: 'system' | 'user', opts?: RunOptions): Promise<LabelingTask | null>;
   stopTask(taskId: string): Promise<void>;
-  /** Clears the failed examples and runs the task again for them. */
-  retryFailed(taskId: string, trigger?: 'system' | 'user'): Promise<LabelingTask | null>;
+  /**
+   * Runs the task again for its failed examples. Returns null, changing nothing, when another
+   * run holds the task.
+   */
+  retryFailed(taskId: string, trigger?: 'system' | 'user', opts?: RunOptions): Promise<LabelingTask | null>;
   getTask(taskId: string): Promise<LabelingTask | null>;
   listTasks(projectId: string): Promise<LabelingTask[]>;
   /** True when some tab of this browser currently runs the task. */
