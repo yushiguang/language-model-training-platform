@@ -85,7 +85,7 @@ function Start({state, setPage}: {state: ProjectState; setPage: (p: PageContext)
         <h1>Where should the prompt start?</h1>
         <p className="muted">This becomes v1.0. The platform improves it from here, so it doesn&apos;t need to be perfect.</p>
       </div>
-      <Workbench draft={draft} onChange={setDraft} check={check} />
+      <Workbench draft={draft} onChange={setDraft} check={check} state={state} />
       <div className="next">
         <Button label="Create" variant="primary" size="lg" disabled={!!blocked} loading={busy} onClick={create} />
         <span className="blocked">{blocked ?? `About ${est.minutes} minute${est.minutes > 1 ? 's' : ''} · ${money(est.costUsd)} to label the ${num(est.count)} eval examples`}</span>

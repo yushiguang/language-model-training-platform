@@ -118,7 +118,7 @@ function Edit({state, version, setPage}: {state: ProjectState; version: PromptVe
           })}
       </div>
       {version.change && <p className="small muted">What changed: {version.change}</p>}
-      <Workbench draft={draft} onChange={setDraft} check={check} hint={dirty ? <span className="small" style={{fontWeight: 500}}>Unsaved changes · {sum.removed} line{sum.removed === 1 ? '' : 's'} removed, {sum.added} added</span> : undefined} />
+      <Workbench draft={draft} onChange={setDraft} check={check} state={state} hint={dirty ? <span className="small" style={{fontWeight: 500}}>Unsaved changes · {sum.removed} line{sum.removed === 1 ? '' : 's'} removed, {sum.added} added</span> : undefined} />
       {dirty && sum.added + sum.removed > 0 && (
         <div className="col">
           <h3>Changes from {versionLabel(version)}</h3>

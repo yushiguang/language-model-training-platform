@@ -1,4 +1,4 @@
-import {ALL_KEYS, FEATURES, ITEM_ROWS, featureDef, isImageKey} from './catalogue.ts';
+import {ALL_KEYS, FEATURES, ITEM_ROWS, featureDef, isImageKey, labelOf} from './catalogue.ts';
 import type {Example, ExampleType, FeatureSelection, PromptImage, Schema} from '@tsp/contracts';
 
 /**
@@ -199,7 +199,14 @@ function insertionPoint(template: string): number {
   return nl === -1 ? template.length : nl + 1;
 }
 
-export type Part = {type: 'text'; text: string} | {type: 'image'; url: string; label: string};
+/**
+ * One piece of a rendered prompt. The model gets the parts in order as one message's content
+ * list, so each image sits exactly where its placeholder was. `caption` and `source` are for the
+ * UI preview only and are never sent to the model.
+ */
+export type Part =
+  | {type: 'text'; text: string}
+  | {type: 'image'; url: string; caption: string; source: 'example' | 'prompt'; key: string};
 
 /**
  * Renders a template for one example. A line whose placeholder isn't ticked for the example's
@@ -228,7 +235,7 @@ export function renderPrompt(template: string, example: Pick<Example, 'type' | '
       const img = images[Number(m[2]) - 1];
       if (img) {
         flush();
-        parts.push({type: 'image', url: img.url, label: `Image ${m[2]}`});
+        parts.push({type: 'image', url: img.url, caption: `Image ${m[2]} · part of the prompt`, source: 'prompt', key: `Image ${m[2]}`});
       } else buf += m[0];
       continue;
     }
@@ -239,7 +246,7 @@ export function renderPrompt(template: string, example: Pick<Example, 'type' | '
       if (!urls.length) buf += 'none';
       else {
         flush();
-        urls.forEach((url, i) => parts.push({type: 'image', url, label: `${key} ${i + 1}`}));
+        urls.forEach((url, i) => parts.push({type: 'image', url, caption: `${labelOf(key)} ${i + 1} of ${urls.length} · from the example`, source: 'example', key}));
       }
     } else {
       const s = Array.isArray(value) ? value.join(', ') : (value ?? '');
@@ -251,8 +258,9 @@ export function renderPrompt(template: string, example: Pick<Example, 'type' | '
   return parts;
 }
 
+/** Text of a rendered prompt with each image shown as its UI caption, for logs and tests. */
 export function partsToText(parts: Part[]): string {
-  return parts.map(p => (p.type === 'text' ? p.text : `[${p.label}]`)).join('');
+  return parts.map(p => (p.type === 'text' ? p.text : `[${p.caption}]`)).join('');
 }
 
 export function hashString(s: string): string {

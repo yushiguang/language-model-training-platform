@@ -7,6 +7,8 @@ import {uploadAsset} from '@/backend-api';
 import {Icon} from '@/ui';
 import {FeaturesPanel} from './FeaturesPanel';
 import {PromptEditor} from './PromptEditor';
+import {PromptPreview} from './PromptPreview';
+import type {ProjectState} from '@/backend-api';
 
 export interface Draft {
   template: string;
@@ -19,7 +21,7 @@ export function useChecks(draft: Draft, schema: Schema | null | undefined, types
 }
 
 /** Editor + prompt images + checks on the left, features on the right. Used by "start" and "edit". */
-export function Workbench({draft, onChange, check, readOnly, hint}: {draft: Draft; onChange: (d: Draft) => void; check: CheckResult; readOnly?: boolean; hint?: React.ReactNode}) {
+export function Workbench({draft, onChange, check, readOnly, hint, state}: {draft: Draft; onChange: (d: Draft) => void; check: CheckResult; readOnly?: boolean; hint?: React.ReactNode; state?: ProjectState}) {
   const fix = (f: Fix) => onChange({...draft, ...applyFix(draft.template, draft.features, f)});
   const addImage = async (file: File) => {
     const {url} = await uploadAsset(file);
@@ -32,7 +34,9 @@ export function Workbench({draft, onChange, check, readOnly, hint}: {draft: Draf
         <div className="col">
           <div className="row">
             <span style={{fontWeight: 500}}>Prompt template</span>
-            <span className="small muted">Type {'{{'} to pick a feature.</span>
+            <span className="small muted">
+              Type {'{{'} to pick a feature. <span className="ph img">Image</span> placeholders put images at that spot.
+            </span>
             {hint}
             {!readOnly && (
               <label className="right row" style={{gap: 6, cursor: 'pointer', fontWeight: 500}}>
@@ -63,6 +67,7 @@ export function Workbench({draft, onChange, check, readOnly, hint}: {draft: Draf
             </div>
           )}
         </div>
+        {state && <PromptPreview draft={draft} state={state} />}
         <Checks check={check} onFix={readOnly ? undefined : fix} />
       </div>
       <FeaturesPanel features={draft.features} onChange={features => onChange({...draft, features})} readOnly={readOnly} />

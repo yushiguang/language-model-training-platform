@@ -34,6 +34,21 @@ test('render drops lines not ticked for the example type and fills empty with no
   assert.equal(parts.filter(p => p.type === 'image').length, 2);
 });
 
+test('images sit where their placeholders were, and captions stay out of the text', () => {
+  const t = 'Desc: {{Description}}\nFrames: {{Frame}}\nLogo: [Image 1]\nEnd';
+  const parts = renderPrompt(t, {type: 'video', features: {Description: 'hi', Title: '', Language: '', Frame: ['f1.jpg', 'f2.jpg']}}, sel, [{url: 'logo.png', name: 'logo.png', size: 1}]);
+  assert.deepEqual(
+    parts.map(p => (p.type === 'text' ? p.text : p.url)),
+    ['Desc: hi\nFrames: ', 'f1.jpg', 'f2.jpg', '\nLogo: ', 'logo.png', '\nEnd'],
+  );
+  const images = parts.filter(p => p.type === 'image');
+  assert.deepEqual(images.map(p => p.source), ['example', 'example', 'prompt']);
+  assert.match(images[1].caption, /2 of 2 · from the example/);
+  assert.match(images[2].caption, /Image 1 · part of the prompt/);
+  const text = parts.filter(p => p.type === 'text').map(p => p.text).join('');
+  assert.ok(!text.includes('[Frame') && !text.includes('of 2'));
+});
+
 test('macro-F1 and pass judgement', () => {
   const schema: Schema = {policy: '', fields: [{name: 'f', kind: 'single', values: [{name: 'a', definition: ''}, {name: 'b', definition: ''}]}]};
   const items = [
