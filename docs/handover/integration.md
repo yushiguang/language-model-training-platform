@@ -46,11 +46,11 @@ Replace the stand-ins in `packages/infra/src/config.ts` with adapters implementi
 
 | Interface | Purpose | Public Stand-in |
 |---|---|---|
-| `DocRuntime` | Document collections (`projects`, `examples`, `prompt_versions`, `predictions`, etc.) | `localDocRuntime` (`localStorage` + in-memory fallback) |
-| `LabelingModels` | Online labeling calls for evaluation, optimiser, and training sets (`A` and `B`) | `simulatedModels` |
-| `AgentModel` | LLM chat completions for `@tsp/agents` (`{json?: boolean}`) | `scriptedAgent` |
-| `Identity` | Display user in header and audit logs | `localIdentity` |
-| `FileStore` | Prompt and chat image uploads | `browserFiles` (data URLs) |
+| `DocRuntime` | Document collections (`add`, `get`, `set`, partial `update` with `DocFieldValue`, `delete`, `find`, paginated `query` with 11 `DocFilter` ops & `AND`/`OR`, `subscribe`, and `batch()`) | `localDocRuntime` (`localStorage` + in-memory fallback) |
+| `LabelingModels` | Online and streaming labeling calls for evaluation, optimiser, and training sets (`chat`, `chatStream`) | `simulatedModels` |
+| `AgentModel` | LLM completions (`chat`, `complete` with `thinking`/`usage`, `chatStream`, and `models()`) for `@tsp/agents` | `scriptedAgent` |
+| `Identity` | Display user (`id`, `name`, `email`, `organization`) in header and audit logs | `localIdentity` |
+| `FileStore` | Prompt and chat file uploads with progress reporting (`upload(file, name, {mimeType, onProgress})`) | `browserFiles` (data URLs) |
 | `ExampleSource` | Example pool for Dataset sampling and ID lookup | `sampleExamples` (`public/sample-data/examples.json`) |
 
 ## Migrating to Standalone Go Microservices

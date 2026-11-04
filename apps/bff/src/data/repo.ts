@@ -1,4 +1,14 @@
-import type {DocOrder, DocRuntime} from '../../../../packages/contracts/src/infra-api';
+import {
+  DocFieldValue,
+  DocFilter,
+  type DocFilterExpression,
+  type DocOrder,
+  type DocRuntime,
+  type DocSubscriptionHandlers,
+  type DocUpdatePatch,
+} from '../../../../packages/contracts/src/infra-api.ts';
+
+export {DocFieldValue, DocFilter};
 
 /**
  * Collection names managed by the BFF repository.
@@ -42,13 +52,41 @@ const COLUMN_MAP: Record<string, string> = {
 
 const mapField = (col: string): string => COLUMN_MAP[col] ?? col;
 
-function parseOrder(order: string): DocOrder | undefined {
+function isFilterExpression(val: unknown): val is DocFilterExpression {
+  return (
+    typeof val === 'object' &&
+    val !== null &&
+    'type' in val &&
+    ((val as any).type === 'field' || (val as any).type === 'and' || (val as any).type === 'or')
+  );
+}
+
+function mapFilterExpression(expr: DocFilterExpression): DocFilterExpression {
+  if (expr.type === 'field') {
+    return {type: 'field', field: mapField(expr.field), op: expr.op, value: expr.value};
+  }
+  return {type: expr.type, filters: expr.filters.map(mapFilterExpression)};
+}
+
+function mapWhereInput(where?: Record<string, unknown> | DocFilterExpression): Record<string, unknown> | DocFilterExpression | undefined {
+  if (!where) return undefined;
+  if (isFilterExpression(where)) return mapFilterExpression(where);
+  const mapped: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(where)) {
+    mapped[mapField(k)] = v;
+  }
+  return mapped;
+}
+
+function parseOrders(order: string): DocOrder[] | undefined {
   const trimmed = order.trim();
   if (!trimmed) return undefined;
-  const parts = trimmed.split(/\s+/);
-  const field = mapField(parts[0]);
-  const dir = parts[1]?.toLowerCase() === 'desc' ? 'desc' : 'asc';
-  return {field, dir};
+  return trimmed.split(',').map(clause => {
+    const parts = clause.trim().split(/\s+/);
+    const field = mapField(parts[0]);
+    const dir = parts[1]?.toLowerCase() === 'desc' ? 'desc' : 'asc';
+    return {field, dir};
+  });
 }
 
 type StoredRecord<T> = T & {_appId: string};
@@ -97,6 +135,28 @@ export class Repo {
     return rec;
   }
 
+  /**
+   * Partial update of an existing record by application `id`.
+   * Only specified fields are modified; values may use `DocFieldValue.increment`,
+   * `DocFieldValue.arrayUnion`, `DocFieldValue.arrayRemove`, or `DocFieldValue.delete`.
+   */
+  async patch<T extends {id: string}>(kind: Kind, id: string, patch: DocUpdatePatch<T>): Promise<void> {
+    const docId = await this.resolveDocId<T>(kind, id);
+    const mappedPatch: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      if (k === '_appId') continue;
+      mappedPatch[mapField(k)] = v;
+    }
+    await this.db.collection<StoredRecord<T>>(kind).update(docId, mappedPatch as DocUpdatePatch<StoredRecord<T>>);
+  }
+
+  /** Deletes a record by application `id`. */
+  async delete(kind: Kind, id: string): Promise<void> {
+    const docId = await this.resolveDocId<{id: string}>(kind, id);
+    await this.db.collection(kind).delete(docId);
+    this.docIds.delete(this.cacheKey(kind, id));
+  }
+
   async get<T>(kind: Kind, id: string): Promise<T | null> {
     const docs = await this.db.collection<StoredRecord<T & object>>(kind).find({_appId: id});
     if (!docs[0]) return null;
@@ -104,17 +164,68 @@ export class Repo {
     return stripInternal(docs[0].data);
   }
 
-  async find<T>(kind: Kind, where: Record<string, unknown> = {}, order = ''): Promise<T[]> {
-    const mappedWhere: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(where)) {
-      mappedWhere[mapField(k)] = v;
-    }
-    const docs = await this.db.collection<StoredRecord<T & object>>(kind).find(mappedWhere, parseOrder(order));
+  /**
+   * Finds all records matching `where` (supports both plain `{field: value}` equality maps and
+   * rich `DocFilter` expressions with `!=`, `<`, `<=`, `>`, `>=`, `in`, `not-in`,
+   * `array-contains`, `array-contains-any`, `contains`, `and`, `or`).
+   */
+  async find<T>(kind: Kind, where: Record<string, unknown> | DocFilterExpression = {}, order = ''): Promise<T[]> {
+    const docs = await this.db.collection<StoredRecord<T & object>>(kind).find(mapWhereInput(where), parseOrders(order));
     return docs.map(d => {
       const appId = (d.data as {id?: string; _appId?: string})._appId ?? (d.data as {id?: string}).id;
       if (appId) this.docIds.set(this.cacheKey(kind, appId), d.docId);
       return stripInternal(d.data);
     });
+  }
+
+  /**
+   * Executes a paginated query returning `{items, total}`, supporting `limit`, `offset`,
+   * multi-column `order`, and composite `DocFilter` expressions.
+   */
+  async query<T>(
+    kind: Kind,
+    opts: {where?: Record<string, unknown> | DocFilterExpression; order?: string; limit?: number; offset?: number} = {},
+  ): Promise<{items: T[]; total: number}> {
+    const page = await this.db.collection<StoredRecord<T & object>>(kind).query({
+      where: mapWhereInput(opts.where),
+      orderBy: opts.order ? parseOrders(opts.order) : undefined,
+      limit: opts.limit,
+      offset: opts.offset,
+    });
+    const items = page.documents.map(d => {
+      const appId = (d.data as {id?: string; _appId?: string})._appId ?? (d.data as {id?: string}).id;
+      if (appId) this.docIds.set(this.cacheKey(kind, appId), d.docId);
+      return stripInternal(d.data);
+    });
+    return {items, total: page.total};
+  }
+
+  /** Subscribes to changes in a collection via polling. */
+  subscribe<T extends object>(
+    kind: Kind,
+    handlers: {
+      intervalMs?: number;
+      onSnapshot?: (items: T[]) => void;
+      onCreate?: (item: T) => void;
+      onUpdate?: (item: T) => void;
+      onDelete?: (docId: string) => void;
+      onError?: (error: unknown) => void;
+    },
+  ): {unsubscribe(): void} {
+    const unwrap = (doc: {docId: string; data: StoredRecord<T>}): T => {
+      const appId = (doc.data as {id?: string; _appId?: string})._appId ?? (doc.data as {id?: string}).id;
+      if (appId) this.docIds.set(this.cacheKey(kind, appId), doc.docId);
+      return stripInternal(doc.data);
+    };
+    const subHandlers: DocSubscriptionHandlers<StoredRecord<T>> = {
+      intervalMs: handlers.intervalMs,
+      onSnapshot: handlers.onSnapshot ? docs => handlers.onSnapshot!(docs.map(unwrap)) : undefined,
+      onCreate: handlers.onCreate ? doc => handlers.onCreate!(unwrap(doc)) : undefined,
+      onUpdate: handlers.onUpdate ? doc => handlers.onUpdate!(unwrap(doc)) : undefined,
+      onDelete: handlers.onDelete,
+      onError: handlers.onError,
+    };
+    return this.db.collection<StoredRecord<T>>(kind).subscribe(subHandlers);
   }
 
   async insertTrainingRows(rows: {trainingSetId: string; exampleId: string}[]): Promise<void> {
@@ -143,6 +254,19 @@ export class Repo {
   async setSplit(exampleId: string, split: string | null, data: object): Promise<void> {
     const docId = await this.resolveDocId<{id: string}>('examples', exampleId);
     await this.db.collection<Record<string, unknown>>('examples').set(docId, {...data, id: exampleId, split, _appId: exampleId});
+  }
+
+  /**
+   * Updates the `split` and `optimiserHalf` fields of multiple examples in a single batch request.
+   */
+  async setSplitsBatch(examples: {id: string; split: string | null; optimiserHalf: boolean}[]): Promise<void> {
+    if (!examples.length) return;
+    const batch = this.db.batch();
+    for (const ex of examples) {
+      const docId = await this.resolveDocId<{id: string}>('examples', ex.id);
+      batch.update('examples', docId, {split: ex.split, optimiserHalf: ex.optimiserHalf});
+    }
+    await batch.commit();
   }
 
   async audit(projectId: string | null, actor: string, action: string, data: object = {}): Promise<void> {

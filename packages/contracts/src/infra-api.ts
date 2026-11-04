@@ -5,7 +5,7 @@ export type {EndpointInfo};
 /**
  * Contract 3: Infrastructure Runtime API (`@tsp/contracts/infra-api`).
  *
- * Defines everything the BFF and Agent services need from external infrastructure
+ * Defines the complete set of capabilities exposed by the underlying infrastructure runtime
  * (document database, online labeling models, agent LLM gateway, SSO identity, file storage,
  * and example pools).
  *
@@ -82,33 +82,180 @@ export const AVAILABLE_LLM_MODELS: LlmModelInfo[] = [
 ];
 
 // ---------------------------------------------------------------------------------------------
-// Storage: a document-collection runtime. Records are plain JSON objects stored in named collections.
+// Storage: a schemaless document-collection runtime supporting structured queries, atomic field
+// transforms, partial updates, polling subscriptions, and non-atomic batch writes.
 
 export interface StoredDoc<T = Record<string, unknown>> {
   docId: string;
   data: T;
+  createdAt?: string;
 }
+
+/**
+ * Comparison operators supported by structured queries:
+ * - `'=='`, `'!='`, `'<'`, `'<='`, `'>'`, `'>='`: standard scalar comparisons
+ * - `'in'`, `'not-in'`: value is in (or not in) the given array (up to 30 entries)
+ * - `'array-contains'`: array field contains the given element
+ * - `'array-contains-any'`: array field contains any element from the given array (up to 30 entries)
+ * - `'contains'`: case-insensitive substring match on a string field
+ */
+export type DocWhereOp =
+  | '=='
+  | '!='
+  | '<'
+  | '<='
+  | '>'
+  | '>='
+  | 'array-contains'
+  | 'array-contains-any'
+  | 'in'
+  | 'not-in'
+  | 'contains';
+
+export interface DocFieldFilter {
+  type: 'field';
+  field: string;
+  op: DocWhereOp;
+  value: unknown;
+}
+
+export interface DocCompositeFilter {
+  type: 'and' | 'or';
+  filters: DocFilterExpression[];
+}
+
+export type DocFilterExpression = DocFieldFilter | DocCompositeFilter;
+
+/** Helper for constructing structured field and composite (`AND` / `OR`) filter expressions. */
+export const DocFilter = {
+  where(field: string, op: DocWhereOp, value: unknown): DocFieldFilter {
+    return {type: 'field', field, op, value};
+  },
+  and(...filters: DocFilterExpression[]): DocCompositeFilter {
+    return {type: 'and', filters};
+  },
+  or(...filters: DocFilterExpression[]): DocCompositeFilter {
+    return {type: 'or', filters};
+  },
+};
 
 export interface DocOrder {
   field: string;
   dir: 'asc' | 'desc';
 }
 
+export interface DocStructuredQuery {
+  where?: DocFilterExpression | DocFilterExpression[] | Record<string, unknown>;
+  orderBy?: DocOrder | DocOrder[];
+  limit?: number;
+  offset?: number;
+}
+
+export interface DocPage<T = Record<string, unknown>> {
+  documents: StoredDoc<T>[];
+  /** Total number of documents matching the filter (ignoring limit and offset). */
+  total: number;
+}
+
+/**
+ * Sentinel value representing an atomic field transform inside `DocCollection.update` or
+ * `DocWriteBatch.update` patches (`$inc`, `$addToSet`, `$pull`, `$unset`).
+ */
+export interface DocFieldValueSentinel {
+  __docFieldValue: 'increment' | 'arrayUnion' | 'arrayRemove' | 'delete';
+  value?: unknown;
+}
+
+/** Factory helpers for atomic field updates inside `update()` patches. */
+export const DocFieldValue = {
+  /** Atomically increments (or decrements, when negative) a numeric field. */
+  increment(value: number): DocFieldValueSentinel {
+    return {__docFieldValue: 'increment', value};
+  },
+  /** Atomically adds values to an array field using set-union semantics (no duplicates). */
+  arrayUnion(...values: unknown[]): DocFieldValueSentinel {
+    return {__docFieldValue: 'arrayUnion', value: values};
+  },
+  /** Atomically removes all occurrences of the given values from an array field. */
+  arrayRemove(...values: unknown[]): DocFieldValueSentinel {
+    return {__docFieldValue: 'arrayRemove', value: values};
+  },
+  /** Deletes the field from the document. */
+  delete(): DocFieldValueSentinel {
+    return {__docFieldValue: 'delete'};
+  },
+};
+
+export type DocUpdatePatch<T extends object> = {
+  [K in keyof T]?: T[K] | DocFieldValueSentinel;
+} & Record<string, unknown>;
+
+export interface DocSubscriptionHandlers<T extends object> {
+  intervalMs?: number;
+  onSnapshot?: (documents: StoredDoc<T>[]) => void;
+  onCreate?: (document: StoredDoc<T>) => void;
+  onUpdate?: (document: StoredDoc<T>) => void;
+  onDelete?: (docId: string) => void;
+  onError?: (error: unknown) => void;
+}
+
 export interface DocCollection<T extends object = Record<string, unknown>> {
+  readonly name: string;
   /** Inserts a new document and returns its server-assigned document ID. */
   add(data: T): Promise<{docId: string}>;
-  /** Replaces an existing document at docId. */
+  /** Reads a single document by its server-assigned `docId`, or returns `null` if not found. */
+  get(docId: string): Promise<StoredDoc<T> | null>;
+  /** Full replacement of an existing document at `docId`. Fails if the document does not exist. */
   set(docId: string, data: T): Promise<void>;
-  /** Returns all documents matching equality filters in `where`, optionally ordered. */
-  find(where?: Record<string, unknown>, order?: DocOrder): Promise<StoredDoc<T>[]>;
+  /**
+   * Partial update of an existing document at `docId`. Only the specified fields are modified;
+   * field values may be `DocFieldValue` sentinels for atomic increment/array/delete transforms.
+   */
+  update(docId: string, patch: DocUpdatePatch<T>): Promise<void>;
+  /** Deletes an existing document at `docId`. */
+  delete(docId: string): Promise<void>;
+  /**
+   * Fetches all documents matching `where` (accepts either a plain equality map `{field: value}`
+   * or a `DocFilterExpression` built with `DocFilter`), ordered by `order`, automatically
+   * paging through the collection.
+   */
+  find(where?: Record<string, unknown> | DocFilterExpression, order?: DocOrder | DocOrder[]): Promise<StoredDoc<T>[]>;
+  /**
+   * Executes a single paginated structured query with full support for `DocFilterExpression`,
+   * multiple `orderBy` clauses, `limit`, and `offset`, returning `{documents, total}`.
+   */
+  query(q: DocStructuredQuery): Promise<DocPage<T>>;
+  /** Subscribes to collection changes via client-side polling. Returns an `{unsubscribe}` handle. */
+  subscribe(handlers: DocSubscriptionHandlers<T>): {unsubscribe(): void};
+}
+
+export type DocBatchOpResult =
+  | {index: number; status: 'ok'; docId?: string}
+  | {index: number; status: 'error'; error: string};
+
+/**
+ * Groups multiple `set` / `update` / `delete` operations across one or more collections into a
+ * single network round-trip.
+ *
+ * Note: Operations execute sequentially on a standalone document node and are not transactional
+ * (a failure partway through does not roll back earlier operations). Inspect the returned
+ * `results` array for per-operation status.
+ */
+export interface DocWriteBatch {
+  set<T extends object>(collectionName: string, docId: string, data: T): DocWriteBatch;
+  update<T extends object>(collectionName: string, docId: string, patch: DocUpdatePatch<T>): DocWriteBatch;
+  delete(collectionName: string, docId: string): DocWriteBatch;
+  commit(): Promise<{results: DocBatchOpResult[]}>;
 }
 
 export interface DocRuntime {
   collection<T extends object = Record<string, unknown>>(name: string): DocCollection<T>;
+  /** Creates a batch writer for grouping multiple document mutations into one request. */
+  batch(): DocWriteBatch;
 }
 
 // ---------------------------------------------------------------------------------------------
-// Labeling models: the two preset endpoints on the model platform.
+// Labeling models & Agent LLM runtime (non-streaming and SSE streaming).
 
 export type ContentPart = {type: 'text'; text: string} | {type: 'image'; url: string};
 
@@ -116,6 +263,19 @@ export interface ModelMessage {
   role: 'system' | 'user' | 'assistant';
   content: string | ContentPart[];
 }
+
+/**
+ * Streaming event yielded by `chatStream`:
+ * - `delta`: incremental text fragment
+ * - `thinking`: incremental reasoning/thinking fragment (when the model emits thinking blocks)
+ * - `done`: stream completed
+ * - `error`: stream failed with `message`
+ */
+export type LlmStreamChunk =
+  | {type: 'delta'; text: string}
+  | {type: 'thinking'; thinking: string}
+  | {type: 'done'; createdAt: string}
+  | {type: 'error'; message: string};
 
 export interface ChatRequest {
   endpoint: 'A' | 'B';
@@ -129,6 +289,7 @@ export interface ChatRequest {
 
 export interface ChatResult {
   text: string;
+  thinking?: string;
   inputTokens: number;
   outputTokens: number;
 }
@@ -137,10 +298,9 @@ export interface LabelingModels {
   endpoints(): EndpointInfo[];
   /** One online call (eval runs, optimiser runs, training set runs). Throw on failure; the caller retries. */
   chat(req: ChatRequest): Promise<ChatResult>;
+  /** Streaming variant of `chat()` yielding incremental `LlmStreamChunk` events. */
+  chatStream(req: ChatRequest): AsyncGenerator<LlmStreamChunk>;
 }
-
-// ---------------------------------------------------------------------------------------------
-// Agent model: the managed LLM the agents and the optimiser's reflection step use.
 
 export interface AgentChatOptions {
   /**
@@ -155,25 +315,54 @@ export interface AgentChatOptions {
   signal?: AbortSignal;
 }
 
+export interface AgentCompletionResult {
+  text: string;
+  /** Concatenated reasoning/thinking content, if returned by the model. */
+  thinking?: string;
+  model: string;
+  id?: string;
+  stopReason?: string;
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+  };
+}
+
 export interface AgentModel {
   /** Returns the catalog of LLM models supported by the runtime. */
   models(): LlmModelInfo[];
   /** Returns the model's text. With json: true the model is asked for one JSON object. */
   chat(messages: ModelMessage[], opts?: AgentChatOptions): Promise<string>;
+  /** Full completion call returning `text`, `thinking`, `model`, `stopReason`, and token `usage`. */
+  complete(messages: ModelMessage[], opts?: AgentChatOptions): Promise<AgentCompletionResult>;
+  /** Streaming chat call yielding `LlmStreamChunk` (`delta`, `thinking`, `done`, `error`) events. */
+  chatStream(messages: ModelMessage[], opts?: AgentChatOptions): AsyncGenerator<LlmStreamChunk>;
 }
 
 // ---------------------------------------------------------------------------------------------
 // Identity: who is using the page (identification only, not access control).
 
 export interface Identity {
-  currentUser(): Promise<{id: string; name: string}>;
+  currentUser(): Promise<{id: string; name: string; email?: string; organization?: string}>;
 }
 
 // ---------------------------------------------------------------------------------------------
-// Files: prompt images, uploaded label files and exports.
+// Files: prompt images, uploaded label files and exports (supports chunked progress reporting).
+
+export interface FileUploadOptions {
+  mimeType?: string;
+  onProgress?: (progress: {uploadedBytes: number; totalBytes: number}) => void;
+}
+
+export interface UploadedFileInfo {
+  url: string;
+  key?: string;
+  size?: number;
+  mimeType?: string;
+}
 
 export interface FileStore {
-  upload(file: Blob, name: string): Promise<{url: string}>;
+  upload(file: Blob | string, name: string, options?: FileUploadOptions): Promise<UploadedFileInfo>;
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -13,9 +13,17 @@ in the monorepo (`apps/web`, `apps/agents`, `apps/bff`, and `packages/infra`).
 - `src/agent-api.ts`: **Contract 2 (BFF <-> Agent Runtime)** — Pure JSON request/response types
   (`AgentTurnInput`, `AgentTurnOutput`, `OptimiserReflectInput`, `OptimiserReflectOutput`) between
   `apps/bff` and `apps/agents`.
-- `src/infra-api.ts`: **Contract 3 (Services <-> Infrastructure)** — Runtime interfaces
-  (`DocRuntime`, `LabelingModels`, `AgentModel`, `Identity`, `FileStore`, `ExampleSource`)
-  implemented by `packages/infra` stand-ins and internal platform adapters.
+- `src/infra-api.ts`: **Contract 3 (Services <-> Infrastructure)** — Complete runtime interfaces
+  implemented by `packages/infra` stand-ins and internal platform adapters:
+  - `DocRuntime` & `DocCollection`: `add`, `get`, `set`, `update` (partial updates + atomic
+    `DocFieldValue.increment`, `arrayUnion`, `arrayRemove`, `delete`), `delete`, `find`
+    (auto-paginated), `query` (paginated `{documents, total}` with `limit`/`offset`, multi-field
+    `orderBy`, and 11 filter operators via `DocFilter.where`, `DocFilter.and`, `DocFilter.or`),
+    polling `subscribe`, and cross-collection `batch()` writes.
+  - `AgentModel` & `LabelingModels`: `models()` (returns `AVAILABLE_LLM_MODELS`), `chat()`,
+    `complete()` (returns `text`, `thinking`, `stopReason`, and token `usage`), and `chatStream()`
+    (SSE streaming generator yielding `delta`, `thinking`, `done`, `error` chunks).
+  - `FileStore`, `Identity`, and `ExampleSource`.
 - Pure domain rules (`catalogue.ts`, `drafts.ts`, `gates.ts`, `metrics.ts`, `template.ts`,
   `versions.ts`, `workflow.ts`) and their unit tests (`core.test.ts`).
 

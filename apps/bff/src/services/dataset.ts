@@ -149,7 +149,7 @@ export async function applySplit(projectId: string, snapshotId: string, evalSize
     ex.split = i < evalSize ? 'eval' : i < evalSize + testSize ? 'test' : 'train';
     ex.optimiserHalf = ex.split === 'eval' && i % 2 === 0;
   });
-  for (const ex of ordered) await repo.setSplit(ex.id, ex.split, ex);
+  await repo.setSplitsBatch(ordered);
   await repo.update('dataset_snapshots', {...snap, split: {eval: evalSize, test: testSize, train: examples.length - evalSize - testSize}});
   emitChange();
   void projectId;

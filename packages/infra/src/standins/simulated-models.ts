@@ -1,5 +1,5 @@
-import type {ChatRequest, ChatResult, EndpointInfo, LabelingModels, ModelMessage} from '../../../contracts/src/infra-api';
-import {loadSampleFile} from './sample-examples';
+import type {ChatRequest, ChatResult, EndpointInfo, LabelingModels, LlmStreamChunk, ModelMessage} from '../../../contracts/src/infra-api.ts';
+import {loadSampleFile} from './sample-examples.ts';
 
 /**
  * Stand-in labeling models. They answer like a model would (JSON text), using the answers
@@ -85,6 +85,11 @@ export function simulatedModels(): LabelingModels {
     async chat(req) {
       await sleep(req.endpoint === 'A' ? 90 : 50, req.signal);
       return answer(req);
+    },
+    async *chatStream(req): AsyncGenerator<LlmStreamChunk> {
+      const res = await this.chat(req);
+      yield {type: 'delta', text: res.text};
+      yield {type: 'done', createdAt: new Date().toISOString()};
     },
   };
 }

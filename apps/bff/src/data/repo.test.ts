@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {localDocRuntime} from '../../../../packages/infra/src/standins/local-db.ts';
-import {Repo} from './repo.ts';
+import {DocFieldValue, DocFilter, Repo} from './repo.ts';
 
 test('Repo inserts, gets, and updates records while preserving _appId', async () => {
   const repo = new Repo(localDocRuntime('test-1'));
@@ -72,33 +72,40 @@ test('Repo translates snake_case filter keys and order clauses', async () => {
   );
 });
 
-test('Repo deduplicates training rows and updates example split', async () => {
+test('Repo deduplicates training rows and updates example splits via batch', async () => {
   const repo = new Repo(localDocRuntime('test-3'));
   await repo.insert('examples', {
     id: 'ex_1',
     snapshotId: 'ds_1',
     externalId: '100',
     type: 'video',
-    title: 'Sample',
+    title: 'Sample 1',
+    features: {},
+    split: null,
+    optimiserHalf: false,
+  });
+  await repo.insert('examples', {
+    id: 'ex_2',
+    snapshotId: 'ds_1',
+    externalId: '101',
+    type: 'video',
+    title: 'Sample 2',
     features: {},
     split: null,
     optimiserHalf: false,
   });
 
-  await repo.setSplit('ex_1', 'eval', {
-    id: 'ex_1',
-    snapshotId: 'ds_1',
-    externalId: '100',
-    type: 'video',
-    title: 'Sample',
-    features: {},
-    split: 'eval',
-    optimiserHalf: true,
-  });
+  await repo.setSplitsBatch([
+    {id: 'ex_1', split: 'eval', optimiserHalf: true},
+    {id: 'ex_2', split: 'train', optimiserHalf: false},
+  ]);
 
-  const ex = await repo.get<{id: string; split: string; optimiserHalf: boolean}>('examples', 'ex_1');
-  assert.equal(ex?.split, 'eval');
-  assert.equal(ex?.optimiserHalf, true);
+  const ex1 = await repo.get<{id: string; split: string; optimiserHalf: boolean}>('examples', 'ex_1');
+  const ex2 = await repo.get<{id: string; split: string; optimiserHalf: boolean}>('examples', 'ex_2');
+  assert.equal(ex1?.split, 'eval');
+  assert.equal(ex1?.optimiserHalf, true);
+  assert.equal(ex2?.split, 'train');
+  assert.equal(ex2?.optimiserHalf, false);
 
   await repo.insertTrainingRows([
     {trainingSetId: 'ts_1', exampleId: 'ex_1'},
@@ -107,4 +114,63 @@ test('Repo deduplicates training rows and updates example split', async () => {
   ]);
   const rows = await repo.trainingRows<{trainingSetId: string; exampleId: string}>('ts_1');
   assert.equal(rows.length, 2);
+});
+
+test('Repo supports DocFilter (OR/contains/in/comparisons), DocFieldValue atomic patch, pagination, and delete', async () => {
+  const repo = new Repo(localDocRuntime('test-4'));
+  await repo.insert('labeling_runs', {
+    id: 'lr_1',
+    projectId: 'pr_1',
+    endpoint: 'A',
+    state: 'running',
+    done: 2,
+    tags: ['initial'],
+    startedAt: '2026-01-01T00:00:00Z',
+  });
+  await repo.insert('labeling_runs', {
+    id: 'lr_2',
+    projectId: 'pr_1',
+    endpoint: 'B',
+    state: 'paused',
+    done: 10,
+    tags: ['fast', 'retry'],
+    startedAt: '2026-01-02T00:00:00Z',
+  });
+  await repo.insert('labeling_runs', {
+    id: 'lr_3',
+    projectId: 'pr_1',
+    endpoint: 'A',
+    state: 'done',
+    done: 20,
+    tags: ['final'],
+    startedAt: '2026-01-03T00:00:00Z',
+  });
+
+  // Atomic partial update via DocFieldValue
+  await repo.patch<{id: string; done: number; tags: string[]}>('labeling_runs', 'lr_1', {
+    done: DocFieldValue.increment(3),
+    tags: DocFieldValue.arrayUnion('initial', 'boosted'),
+  });
+  const patched = await repo.get<{id: string; done: number; tags: string[]}>('labeling_runs', 'lr_1');
+  assert.equal(patched?.done, 5);
+  assert.deepEqual(patched?.tags, ['initial', 'boosted']);
+
+  // Composite OR + comparison filter + pagination
+  const page = await repo.query<{id: string; state: string; done: number}>('labeling_runs', {
+    where: DocFilter.and(
+      DocFilter.where('project_id', '==', 'pr_1'),
+      DocFilter.or(DocFilter.where('state', '==', 'paused'), DocFilter.where('done', '>=', 15)),
+    ),
+    order: 'started_at desc',
+    limit: 1,
+    offset: 0,
+  });
+  assert.equal(page.total, 2);
+  assert.equal(page.items.length, 1);
+  assert.equal(page.items[0].id, 'lr_3');
+
+  // Delete record
+  await repo.delete('labeling_runs', 'lr_2');
+  const deleted = await repo.get('labeling_runs', 'lr_2');
+  assert.equal(deleted, null);
 });

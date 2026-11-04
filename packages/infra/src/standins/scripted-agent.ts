@@ -1,4 +1,11 @@
-import {AVAILABLE_LLM_MODELS, type AgentModel, type ModelMessage} from '../../../contracts/src/infra-api.ts';
+import {
+  AVAILABLE_LLM_MODELS,
+  type AgentChatOptions,
+  type AgentCompletionResult,
+  type AgentModel,
+  type LlmStreamChunk,
+  type ModelMessage,
+} from '../../../contracts/src/infra-api.ts';
 import {SAMPLE_SCHEMA, draftTemplate, insertRule, ruleFor} from '../../../contracts/src/drafts.ts';
 import type {MixUp, Schema} from '../../../contracts/src/types.ts';
 
@@ -98,22 +105,38 @@ function reflect(r: Req) {
 }
 
 export function scriptedAgent(): AgentModel {
+  const runText = async (messages: ModelMessage[]) => {
+    await new Promise(res => setTimeout(res, 450));
+    const req = JSON.parse(lastUser(messages)) as Req;
+    const out =
+      req.preset === 'front_desk'
+        ? frontDesk(req)
+        : req.preset === 'schema_agent'
+          ? schemaAgent(req)
+          : req.preset === 'prompt_agent'
+            ? promptAgent(req)
+            : req.preset === 'optimiser'
+              ? reflect(req)
+              : evaluationAgent(req);
+    return JSON.stringify(out);
+  };
+
   return {
     models: () => AVAILABLE_LLM_MODELS,
-    async chat(messages) {
-      await new Promise(res => setTimeout(res, 450));
-      const req = JSON.parse(lastUser(messages)) as Req;
-      const out =
-        req.preset === 'front_desk'
-          ? frontDesk(req)
-          : req.preset === 'schema_agent'
-            ? schemaAgent(req)
-            : req.preset === 'prompt_agent'
-              ? promptAgent(req)
-              : req.preset === 'optimiser'
-                ? reflect(req)
-                : evaluationAgent(req);
-      return JSON.stringify(out);
+    chat: (messages: ModelMessage[], _opts?: AgentChatOptions) => runText(messages),
+    async complete(messages: ModelMessage[], opts?: AgentChatOptions): Promise<AgentCompletionResult> {
+      const text = await runText(messages);
+      return {
+        text,
+        model: opts?.model ?? 'gpt-5.4',
+        stopReason: 'end_turn',
+        usage: {inputTokens: 120, outputTokens: Math.max(1, Math.round(text.length / 4))},
+      };
+    },
+    async *chatStream(messages: ModelMessage[], _opts?: AgentChatOptions): AsyncGenerator<LlmStreamChunk> {
+      const text = await runText(messages);
+      yield {type: 'delta', text};
+      yield {type: 'done', createdAt: new Date().toISOString()};
     },
   };
 }

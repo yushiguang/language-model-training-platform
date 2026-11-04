@@ -33,9 +33,12 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
   and all side effects (messages to append, proposals to save) are returned in `AgentTurnOutput`
   for the BFF to persist.
 - **LLM Agnostic & Model Selection**: Call the model exclusively through the `llm: AgentModel`
-  parameter (`llm.chat(messages, {model, json: true, maxOutputTokens})`). The full catalog of
-  models supported by the runtime is exported from `@tsp/contracts` as `AVAILABLE_LLM_MODELS`
-  (and returned by `llm.models()`):
+  parameter:
+  - `llm.chat(messages, {model, json, maxOutputTokens, signal})`: returns plain text.
+  - `llm.complete(messages, {model, json, maxOutputTokens, signal})`: returns `{text, thinking, model, stopReason, usage}` including reasoning traces.
+  - `llm.chatStream(messages, {model, json, maxOutputTokens, signal})`: yields incremental `LlmStreamChunk` events (`delta`, `thinking`, `done`, `error`).
+  The full catalog of models supported by the runtime is exported from `@tsp/contracts` as
+  `AVAILABLE_LLM_MODELS` (and returned by `llm.models()`):
   - `'gpt-5.6-terra'` (`reasoning` tier, active): highest-quality reasoning model for complex schema design, prompt drafting, and optimiser reflection.
   - `'gpt-5.6-luna'` (`balanced` tier, active): balanced quality and latency model for multi-turn agent tasks and evaluation analysis.
   - `'gpt-5.4'` (`fast` tier, active): fast, lower-cost model suitable for front-desk routing and quick turns.
