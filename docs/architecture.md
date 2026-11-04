@@ -1,7 +1,7 @@
 # Architecture
 
-The MVP produces a labeled training set for one task: Setup → Dataset → Gold Labels (optional) →
-Prompt Engineering → Training Set. It is a fixed-workflow website with agents built into each step.
+The MVP produces a labeled training set and a labeled test set for one task: Setup → Dataset →
+Gold Labels (optional) → Prompt Engineering → Training Set (the final run labels train and test). It is a fixed-workflow website with agents built into each step.
 Code decides the next step; agents explain and propose, people approve.
 
 ## Seven apps, three packages
@@ -51,9 +51,10 @@ composition root is the only place that knows which implementation sits behind e
 ## Labeling: tasks
 
 A labeling task runs one prompt version on one model (with fixed settings) over a list of
-examples and stores one prediction per example. The bff creates tasks for three reasons: scoring a
-new version on the eval set (system), labeling an optimiser candidate (system), and generating the
-training set over the train split (the user approves the cost).
+examples and stores one prediction per example. The bff creates tasks for four reasons: scoring a
+new version on the eval set (system), labeling an optimiser candidate (system), "Get model answers"
+for the test set on Gold Labels (the user approves the cost), and the final run over the train and
+test splits (the user approves the cost). Code starts only the cheap work the workflow needs.
 
 ```
 createTask ──► runTask (browser lock "labeling:<task>"; a second tab gets null)
@@ -73,12 +74,29 @@ createTask ──► runTask (browser lock "labeling:<task>"; a second tab gets 
 - **Resume.** The MVP runner is the open page (datasets are 50 to 100 examples). Closing the page
   stops the runner; the task stays `running` with no lock held, and the next read reports it as
   `paused` with reason `closed`. Scoring and optimiser tasks resume by themselves on the next page
-  tick; a training set waits for the user's Resume. Retry failed clears the failed list and runs
+  tick; user-started tasks (test answers, the final run) wait for the user's Resume. Retry failed clears the failed list and runs
   again.
 - **Other tabs.** Writes are announced to other tabs of the site, and pages re-read every 5 s
   while something runs, so a second tab follows a run and sees it pause.
 - **Later (not in the MVP):** a worker outside the browser, ordered claims with heartbeats so
   several runners can share a task, and shared quota records across runners.
+
+## Agents: the page is the workspace
+
+Agents never read the DOM. When the user sends a message, the assistant panel says where the user
+is (path and URL parameters), and the bff builds that page's **page view** from the same saved data
+the page shows (`apps/bff/src/services/page-views.ts`). The view goes with every turn, together
+with the page's unsaved edits. To see more, an agent calls **read tools** (other pages, versions,
+reports, examples, gold labels, predictions, template checks), like a coding agent reading files in
+a repo: up to 4 calls per turn, each one logged, nothing changed. Changes stay proposals the user
+approves on the page. All presets use the reasoning model.
+
+## Prompts with images
+
+A labeling request is one user message whose content lists text and image parts in order; each
+image sits where its placeholder was, and no caption text is added. The editor marks image
+placeholders, and "Preview with an example" shows the parts in order with UI-only captions and the
+token and cost estimate. Preview and labeling use the same `renderPrompt`.
 
 ## Storage
 
@@ -98,10 +116,11 @@ application `id` to the store's document id.
 | Versions are major.minor and never overwritten; the catalog assigns the numbers | `packages/domain/src/versions.ts`, `apps/catalog/src/catalog.ts` |
 | Gates between steps; Gold Labels is optional | `packages/domain/src/gates.ts` |
 | The recommended next step and cost/time estimates | `packages/domain/src/workflow.ts` |
-| Agent prompts, handoffs (to known specialists only) and context | `apps/agents/src/presets.ts`, `apps/agents/src/runtime.ts` |
+| Agent prompts, handoffs (to known specialists only), read tools per preset | `apps/agents/src/presets.ts`, `apps/agents/src/runtime.ts` |
+| What an agent sees of each page (page views) and the read tools' implementation | `apps/bff/src/services/page-views.ts` |
 | When labeling starts, reports scored on the held-out half of the eval set | `apps/bff/src/services/evaluation.ts`, `work.ts` |
 | Optimiser: GEPA-style loop; candidates are labeled as optimiser tasks | `apps/bff/src/services/optimiser.ts` |
-| Training set as a labeling task with a budget | `apps/bff/src/services/training.ts` |
+| Test answers and the final run (train + test) as labeling tasks with a budget | `apps/bff/src/services/training.ts` |
 
 ## Known limits of this version
 

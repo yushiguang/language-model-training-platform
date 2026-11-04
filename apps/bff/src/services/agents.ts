@@ -9,6 +9,7 @@ import type {
 } from '@tsp/contracts';
 import {newId} from '@tsp/domain';
 import {emitChange, getApp, now} from './app.ts';
+import {agentTools, getPageView} from './page-views.ts';
 
 export type {PageContext};
 
@@ -59,10 +60,14 @@ async function loadWorkspaceSnapshot(
     }
   }
 
+  // The page's unsaved edits go to the agent as the page's `context`; the view holds saved data.
+  const pageView = await getPageView(projectId, page.where ?? {page: 'projects', params: {}});
+
   return {
     projectId,
     task,
     schema,
+    pageView,
     history: history.map(({role, agent, text, page: p, createdAt}) => ({role, agent, text, page: p, createdAt})),
     attachedExamples,
   };
@@ -71,7 +76,8 @@ async function loadWorkspaceSnapshot(
 /**
  * BFF dispatcher for assistant turns:
  * 1. Persists the user's message and loads the project's workspace snapshot from the catalog.
- * 2. Calls the stateless Agent Runtime service (`@tsp/agents`) with `AgentTurnInput`.
+ * 2. Calls the stateless Agent Runtime service (`@tsp/agents`) with `AgentTurnInput`, which
+ *    includes the view of the page the user is on, and lends it the read tools.
  * 3. Persists start requests, emitted agent/event messages, and any new proposal to the catalog.
  */
 export async function sendUserMessage(
@@ -93,7 +99,7 @@ export async function sendUserMessage(
   try {
     const {catalog, agents, gateway} = getApp();
     const workspace = await loadWorkspaceSnapshot(projectId, page, attachments);
-    const turnOut = await agents.runAgentTurn({userText: text, page, attachments, workspace}, gateway.agentModel());
+    const turnOut = await agents.runAgentTurn({userText: text, page, attachments, workspace}, gateway.agentModel(), agentTools(projectId));
 
     for (const inv of turnOut.invocations) {
       const start: StartRequest = {

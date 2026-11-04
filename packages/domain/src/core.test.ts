@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {applyFix, checkTemplate, diffLines, renderPrompt} from './template.ts';
+import {pageFromPath} from './pages.ts';
 import {computeMetrics, judge, DEFAULT_THRESHOLDS} from './metrics.ts';
 import {nextVersion} from './versions.ts';
 import type {Schema} from '@tsp/contracts';
@@ -47,6 +48,13 @@ test('images sit where their placeholders were, and captions stay out of the tex
   assert.match(images[2].caption, /Image 1 · part of the prompt/);
   const text = parts.filter(p => p.type === 'text').map(p => p.text).join('');
   assert.ok(!text.includes('[Frame') && !text.includes('of 2'));
+});
+
+test('pages are found from the URL path, with or without a base path', () => {
+  assert.equal(pageFromPath('/report/'), 'report');
+  assert.equal(pageFromPath('/language-model-training-platform/prompt/edit/'), 'prompt_edit');
+  assert.equal(pageFromPath('/training-set.html'), 'training');
+  assert.equal(pageFromPath('/'), 'projects');
 });
 
 test('macro-F1 and pass judgement', () => {

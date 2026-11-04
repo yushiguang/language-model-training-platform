@@ -12,8 +12,13 @@ it reads and writes through the catalog, starts labeling tasks, and asks the age
 - `work.ts`: `tick`, called by open pages: scores the latest version, builds missing reports,
   resumes scoring and optimiser tasks left by a closed page, starts the optimiser.
 - `optimiser.ts`: GEPA-style loop; each candidate is labeled as an optimiser task.
-- `training.ts`: the training set is a labeling task over the train split with the approved
-  estimate as its budget; rows come from its predictions.
+- `training.ts`: `labelTestSet` ("Get model answers" on Gold Labels, user-started) and the final
+  run, one labeling task over the train and test splits with the approved estimate as its budget;
+  rows come from its predictions (test rows carry gold where it exists). User-started tasks don't
+  resume by themselves after a reload.
+- `page-views.ts`: `getPageView(projectId, where)` builds each page as the agent sees it from saved
+  data, and `agentTools(projectId)` runs the agents' read tools (each call goes to the audit log).
+  `agents.ts` sends the view of the user's page with every turn and lends the tools.
 - `views.ts`: task → page views (`LabelingRun`, training set counters).
 
 Rules: imports contracts and domain only; everything else arrives through `configureBff`.

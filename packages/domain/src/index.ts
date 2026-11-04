@@ -7,3 +7,4 @@ export * from './template.ts';
 export * from './versions.ts';
 export * from './workflow.ts';
 export * from './ids.ts';
+export * from './pages.ts';

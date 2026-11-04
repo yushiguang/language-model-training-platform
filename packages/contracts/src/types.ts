@@ -369,8 +369,34 @@ export interface PageContext {
   /** The intent the page's agent gets for a plain message. */
   intent: string;
   hint?: string;
-  /** IDs and small facts the agent may read. */
+  /**
+   * What the page holds that isn't saved yet (an unsaved draft, a selected item). Saved data is
+   * not passed here: the bff builds the page view from `where`.
+   */
   context: Record<string, unknown>;
+  /** Where the user is: set by the assistant panel from the URL, so pages can't forget it. */
+  where?: PageLocation;
+}
+
+/** The pages an agent can see. */
+export type PageId = 'projects' | 'setup' | 'dataset' | 'gold' | 'prompt' | 'prompt_edit' | 'compare' | 'report' | 'training';
+
+export interface PageLocation {
+  page: PageId;
+  /** URL parameters other than the project, e.g. {v: version id, m: 'A'} on the Eval report. */
+  params: Record<string, string>;
+}
+
+/**
+ * A page as the agent sees it: built by the bff from the same saved data the page shows (plus
+ * the page's unsaved edits). The page is the agent's workspace, like a repo for a coding agent.
+ */
+export interface PageView {
+  page: PageId;
+  title: string;
+  /** One or two plain sentences: what is on the page right now. */
+  summary: string;
+  data: Record<string, unknown>;
 }
 
 export interface SamplingTask {

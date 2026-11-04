@@ -19,12 +19,25 @@ interface Req {
   intent: string;
   userText?: string;
   context: Record<string, any>;
+  /** Results of read tools called earlier in this turn, by tool name. */
+  results: Record<string, any>;
 }
 
-const lastUser = (messages: ModelMessage[]) => {
-  const m = [...messages].reverse().find(x => x.role === 'user');
-  return typeof m?.content === 'string' ? m.content : '';
-};
+/** The request is the first user message; later user messages carry tool results. */
+function readRequest(messages: ModelMessage[]): Req {
+  const users = messages.filter(x => x.role === 'user').map(m => (typeof m.content === 'string' ? m.content : ''));
+  const req = JSON.parse(users[0] ?? '{}') as Req;
+  req.results = {};
+  for (const u of users.slice(1)) {
+    try {
+      const r = JSON.parse(u).tool_result;
+      if (r) req.results[r.name] = r.result;
+    } catch {
+      // not a tool result
+    }
+  }
+  return req;
+}
 
 function frontDesk(r: Req) {
   const t = (r.userText ?? '').toLowerCase();
@@ -38,6 +51,8 @@ function frontDesk(r: Req) {
     return {reply: 'If your training set will be large, pick both: a cheaper model with similar quality saves real money on the full run. If you only need a quick result, Model A alone is simpler.'};
   if (/strict|0\.\d+|default/.test(t))
     return {reply: 'Multi-select fields usually score lower than single-select ones. The default of 0.80 is a common bar for almost perfect agreement. You can change it later without losing any scores.'};
+  const view = r.context.pageView;
+  if (view?.summary) return {reply: `${view.summary} ${r.context.pageHint ?? 'Ask me about anything you see, or tell me what to change.'}`};
   return {reply: `On this page you can ${r.context.pageHint ?? 'follow the steps on the left'}. Ask me about anything you see, or tell me what to change.`};
 }
 
@@ -81,12 +96,34 @@ function promptAgent(r: Req) {
   return {reply: "I drafted that change in the editor. Save it to make a new version; it's scored on your models right away.", template, change: rule};
 }
 
+/** Reads the report from the page view; off the report page it asks for one with get_report. */
 function evaluationAgent(r: Req) {
-  const c = r.context;
-  if (!c.report) return {reply: 'There is no report yet. Scores start when the eval set has gold labels and a version has been labeled.'};
-  const lv = c.report.lowestValue;
+  const fromView = r.context.pageView?.page === 'report' ? r.context.pageView.data : null;
+  const found = fromView?.report ? fromView : r.results.get_report;
+  if (!found && !('get_report' in r.results)) {
+    const v = (r.userText ?? '').match(/\bv\d+\.\d+\b/i)?.[0];
+    return {tool: {name: 'get_report', args: v ? {version: v} : {}}};
+  }
+  const rep = found?.report;
+  if (!rep) return {reply: `${found?.why ?? 'There is no report yet.'} Scores start when the eval set has gold labels and a version has been labeled.`};
+  const lv = rep.lowestValue;
+  const mix = rep.topMixUps?.[0];
+  const failing = (rep.checks ?? []).filter((c: any) => !c.met);
+  const verdict = rep.passed
+    ? 'It passes every check, so it is ready for the training and test sets.'
+    : failing.length
+      ? `It is below the bar on ${failing.map((c: any) => `${c.label.toLowerCase()} (${c.actual}, needs ${c.need.replace('≥ ', 'at least ')})`).join(' and ')}.`
+      : '';
   return {
-    reply: `${c.report.label} on Model ${c.report.endpoint} has a lowest field macro-F1 of ${c.report.lowestField.macroF1.toFixed(2)} (${c.report.lowestField.field}).${lv ? ` The weakest value is ${lv.value} at ${lv.f1.toFixed(2)}.` : ''} ${c.report.topMixUp ? `The most common mix-up is ${c.report.topMixUp}.` : ''}`.trim(),
+    reply: [
+      `${rep.version} on Model ${rep.model} has a lowest field macro-F1 of ${rep.lowestField.macroF1.toFixed(2)} (${rep.lowestField.field}).`,
+      verdict,
+      lv ? `The weakest value is ${lv.value} at ${lv.f1.toFixed(2)}.` : '',
+      mix ? `The most common mix-up: ${mix.gold ?? 'nothing'} labeled as ${mix.predicted ?? 'nothing'} in ${mix.field}, ${mix.count} time${mix.count === 1 ? '' : 's'}.` : '',
+      fromView?.advice?.nextStep ? `Next step: ${fromView.advice.nextStep}.` : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
   };
 }
 
@@ -107,7 +144,7 @@ function reflect(r: Req) {
 export function scriptedAgent(): AgentModel {
   const runText = async (messages: ModelMessage[]) => {
     await new Promise(res => setTimeout(res, 450));
-    const req = JSON.parse(lastUser(messages)) as Req;
+    const req = readRequest(messages);
     const out =
       req.preset === 'front_desk'
         ? frontDesk(req)

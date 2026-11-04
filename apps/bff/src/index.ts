@@ -9,3 +9,4 @@ export * from './services/setup.ts';
 export * from './services/training.ts';
 export * from './services/views.ts';
 export * from './services/work.ts';
+export * from './services/page-views.ts';

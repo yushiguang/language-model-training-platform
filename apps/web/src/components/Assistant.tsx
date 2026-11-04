@@ -2,7 +2,7 @@
 
 import {useEffect, useRef, useState} from 'react';
 import type {ChatAttachment, ChatMessage, PageContext} from '@tsp/contracts';
-import {agentName} from '@tsp/domain';
+import {agentName, pageFromPath} from '@tsp/domain';
 import {chatHistory, isAgentBusy, prepareChatAttachment, sendUserMessage, subscribeChanges} from '@/backend-api';
 import {Icon} from '@/ui';
 import {useProject} from './ProjectContext';
@@ -29,7 +29,9 @@ export function Assistant({page, onMinimise, placeholder = 'Message the assistan
   const send = async (text: string, attachments?: ChatAttachment[]) => {
     setBusy(true);
     try {
-      await sendUserMessage(projectId, text, page, attachments);
+      // The agent sees the page through the backend's page view; the page only says where it is.
+      const params = Object.fromEntries([...new URLSearchParams(location.search)].filter(([k]) => k !== 'p'));
+      await sendUserMessage(projectId, text, {...page, where: {page: pageFromPath(location.pathname), params}}, attachments);
     } finally {
       setBusy(isAgentBusy(projectId));
     }
