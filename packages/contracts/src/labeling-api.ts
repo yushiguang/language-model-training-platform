@@ -5,14 +5,15 @@ import type {EndpointId, ModelSettings, Prediction} from './types.ts';
  *
  * A labeling task runs one prompt version on one model over a list of examples and stores one
  * prediction per example. The bff decides when a task starts (system triggers: scoring a new
- * version, optimiser candidates; user triggers: Generate training set, Retry failed). The labeling
+ * version, optimiser candidates; user triggers: Get model answers for the test set, Generate training and test sets, Retry failed). The labeling
  * app runs it: up to `parallel` examples at once, each call through the llm-gateway.
  *
  * MVP: the runner lives in the open page, under a browser lock per task. Closing the page pauses
  * the task; running it again resumes from the predictions already saved.
  */
 
-export type TaskPurpose = 'eval' | 'optimiser' | 'training';
+/** eval and optimiser tasks are started by code; test and training tasks by the user, with a cost confirm. */
+export type TaskPurpose = 'eval' | 'optimiser' | 'test' | 'training';
 export type TaskState = 'queued' | 'running' | 'paused' | 'needs_attention' | 'done' | 'stopped' | 'failed';
 export type TaskStopReason = 'user' | 'budget' | 'failures' | 'closed' | null;
 

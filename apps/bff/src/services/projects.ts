@@ -52,7 +52,8 @@ export async function loadProjectState(projectId: string): Promise<ProjectState 
     archivedNow: r.contextId !== contextId,
     passed: !!t && r.contextId === contextId && judge(r.metrics, t, evalExamples.length).passed,
   }));
-  const runs = tasks.filter(x => x.purpose !== 'training').map(runView);
+  const runs = tasks.filter(x => x.purpose === 'eval' || x.purpose === 'optimiser').map(runView);
+  const testRuns = tasks.filter(x => x.purpose === 'test').map(runView);
   const byTask = new Map(tasks.map(x => [x.id, x]));
   const trainingSets = rawTrainingSets.map(ts => trainingView(ts, byTask.get(ts.taskId)));
   const facts: WorkflowFacts = {
@@ -75,6 +76,7 @@ export async function loadProjectState(projectId: string): Promise<ProjectState 
     versions,
     reports,
     runs,
+    testRuns,
     optimisation,
     trainingSets,
     facts,

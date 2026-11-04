@@ -38,10 +38,10 @@ export async function tick(state: ProjectState) {
   }
 
   // System-started labeling (scoring, optimiser candidates) resumes by itself after a reload;
-  // training sets wait for the user to press Resume.
+  // user-started labeling (test answers, the final run) waits for the user to press Resume.
   const tasks = await labeling.listTasks(projectId);
   for (const t of tasks) {
-    if (t.purpose === 'training' || !(t.state === 'queued' || (t.state === 'paused' && t.stopReason === 'closed'))) continue;
+    if ((t.purpose !== 'eval' && t.purpose !== 'optimiser') || !(t.state === 'queued' || (t.state === 'paused' && t.stopReason === 'closed'))) continue;
     const v = state.versions.find(x => x.id === t.promptVersionId);
     if (v && state.setup?.models.some(m => m.endpoint === t.endpoint)) void scoreVersion(projectId, v, t.endpoint);
   }

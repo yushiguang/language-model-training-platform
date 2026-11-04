@@ -250,7 +250,11 @@ export interface TrainingSet {
   /** Setup version whose schema the answers are checked against. */
   setupVersionId: string;
   state: JobState;
+  /** Train plus test examples: the final run labels both. */
   total: number;
+  /** How many of `total` are train and test examples (missing on records made before the test set was added: all train). */
+  trainTotal?: number;
+  testTotal?: number;
   done: number;
   labeled: number;
   invalid: number;
@@ -263,11 +267,15 @@ export interface TrainingSet {
   finishedAt: string | null;
 }
 
+/** One row of the output: a train or test example with the model's label (and, for test, the gold label if any). */
 export interface TrainingRow {
   trainingSetId: string;
   exampleId: string;
+  split: 'train' | 'test';
   answer: Answer | null;
   invalidReason: string | null;
+  /** Test rows only: the gold label for the current schema, when someone gave one. */
+  gold: Answer | null;
 }
 
 export interface GateApproval {
@@ -402,7 +410,10 @@ export interface ProjectState {
   staleGold: Map<string, GoldLabel>;
   versions: PromptVersion[];
   reports: (EvalReport & {passed: boolean; archivedNow: boolean})[];
+  /** Eval and optimiser labeling (started by code). */
   runs: LabelingRun[];
+  /** "Get model answers" runs on the test set (started by the user), newest first. */
+  testRuns: LabelingRun[];
   optimisation: OptimisationRun[];
   trainingSets: TrainingSet[];
   facts: WorkflowFacts;

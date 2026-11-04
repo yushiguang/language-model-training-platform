@@ -62,20 +62,45 @@ export function estimateLabeling(state: ProjectState, draft: {template: string; 
   return {count: evalEx.length, costUsd, minutes: minutesFor(evalEx.length)};
 }
 
-/** Cost and time estimate for generating a training set on one model. */
-export function estimate(state: ProjectState, version: PromptVersion, endpoint: EndpointId) {
-  const train = state.examples.filter(e => e.split === 'train');
+/**
+ * Cost and time estimate for labeling splits with a version on one model. The final run labels
+ * train and test together; "Get model answers" on Gold Labels labels test only. Test examples
+ * that already have a prediction for this version, model and settings are free (`reused`).
+ */
+export function estimate(state: ProjectState, version: PromptVersion, endpoint: EndpointId, splits: ('train' | 'test')[] = ['train', 'test'], alreadyLabeled: ReadonlySet<string> = new Set()) {
+  const all = state.examples.filter(e => (splits as string[]).includes(e.split ?? ''));
+  const todo = all.filter(e => !alreadyLabeled.has(e.id));
+  const train = all.filter(e => e.split === 'train').length;
+  const test = all.length - train;
   const report = state.reports.find(r => r.promptVersionId === version.id && r.endpoint === endpoint && !r.archivedNow);
   let per1000 = report?.metrics.costPer1000;
   if (!per1000) {
-    const sample = train.slice(0, 20);
+    const sample = all.slice(0, 20);
     const tokens = sample.map(ex => {
       const parts = renderPrompt(version.template, ex, version.features, version.images);
       return estimateTokens(parts);
     });
     per1000 = sample.length ? costForTokens(state.endpoints, endpoint, tokens.reduce((a, b) => a + b, 0) / sample.length, 150) * 1000 : 0;
   }
-  return {count: train.length, costUsd: (per1000 * train.length) / 1000, minutes: minutesFor(train.length), per1000, report: report ?? null};
+  return {count: all.length, train, test, reused: all.length - todo.length, costUsd: (per1000 * todo.length) / 1000, minutes: todo.length ? minutesFor(todo.length) : 0, per1000, report: report ?? null};
+}
+
+/** Per chosen model: its best passing version (else its best scored, else the newest version). */
+export function outputCandidates(state: ProjectState) {
+  return (state.setup?.models ?? []).map(m => {
+    const mine = state.reports.filter(r => r.endpoint === m.endpoint && !r.archivedNow);
+    const passing = mine.filter(r => r.passed).sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1)[0];
+    const best = [...mine].sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1)[0];
+    const version = state.versions.find(v => v.id === (passing ?? best)?.promptVersionId) ?? state.versions[0];
+    return {endpoint: m.endpoint, version, passing: passing ?? null, best: best ?? null};
+  });
+}
+
+/** The version and model the outputs would use now: the first passing candidate, else the first model's. */
+export function defaultOutputPick(state: ProjectState): {endpoint: EndpointId; version: PromptVersion} | null {
+  const cands = outputCandidates(state).filter(c => c.version);
+  const c = cands.find(x => x.passing) ?? cands[0];
+  return c ? {endpoint: c.endpoint, version: c.version!} : null;
 }
 
 export interface Advice {

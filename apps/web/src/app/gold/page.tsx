@@ -3,22 +3,25 @@
 import {useRouter} from 'next/navigation';
 import {useEffect, useMemo, useState} from 'react';
 import type {Answer, Example, Prediction} from '@tsp/contracts';
-import {versionLabel} from '@tsp/domain';
+import {defaultOutputPick, estimate, versionLabel} from '@tsp/domain';
 import {ExampleView} from '@/components/ExampleView';
 import {NotYet} from '@/components/NotYet';
 import {ProjectPage} from '@/components/Shell';
 import {FieldCard} from '@/components/SchemaView';
 import {useProject} from '@/components/ProjectContext';
+import {useLabeledTest} from '@/components/useLabeledTest';
 import {
   getRuntimeInfo,
   importBundledGold,
+  labelTestSet,
   predictionsFor,
   saveGold,
   skipGold,
+  stopRun,
   uploadGoldFile,
   type ProjectState,
 } from '@/backend-api';
-import {Badge, Button, Icon, Note, num, Progress} from '@/ui';
+import {Badge, Button, Dialog, Icon, money, Note, num, Progress} from '@/ui';
 
 export default function GoldPage() {
   return (
@@ -57,7 +60,7 @@ function Gold({state}: {state: ProjectState}) {
       )}
       <div className="page-head">
         <h1>Gold Labels</h1>
-        <p className="muted">Give the correct answer for each example. Prompt scores start once the eval set is done. The test set can be labeled any time.</p>
+        <p className="muted">Give the correct answer for each example. Prompt scores start once the eval set is done. Gold labels on the test set are optional: without them, the test set keeps the model&apos;s labels.</p>
       </div>
       <div className="row" role="tablist">
         <Button label="Label here" variant={tab === 'label' ? 'primary' : 'ghost'} onClick={() => setTab('label')} />
@@ -80,7 +83,7 @@ function Gold({state}: {state: ProjectState}) {
         <div className="card" style={{gap: 6}}>
           <span className="row" style={{gap: 6}}>
             <b>Test set</b>
-            <span className="small muted">any time · for testing the model you train</span>
+            <span className="small muted">optional · for testing the model you train</span>
           </span>
           <span className="row">
             <Progress value={state.facts.goldTestDone} max={testEx.length} />
@@ -88,6 +91,7 @@ function Gold({state}: {state: ProjectState}) {
               {state.facts.goldTestDone} / {testEx.length}
             </span>
           </span>
+          <TestAnswers state={state} />
         </div>
       </div>
       {tab === 'upload' ? (
@@ -101,6 +105,71 @@ function Gold({state}: {state: ProjectState}) {
         <Button label={evalDone === evalEx.length ? 'Next step: Prompt Engineering' : 'Skip for now: Prompt Engineering'} variant={evalDone === evalEx.length ? 'primary' : 'secondary'} size="lg" icon={<Icon name="arrow" />} onClick={skip} />
         <span className="blocked">{evalDone === evalEx.length ? 'Scores can start now.' : 'Scores start when the eval set is labeled. You can come back any time.'}</span>
       </div>
+    </>
+  );
+}
+
+/**
+ * "Get model answers" for the test set: optional, user-started, with a cost confirm. The answers
+ * show behind "Show model answer" while labeling, and the final run reuses them for free.
+ */
+function TestAnswers({state}: {state: ProjectState}) {
+  const pick = defaultOutputPick(state);
+  const labeled = useLabeledTest(state, pick?.version, pick?.endpoint);
+  const [confirm, setConfirm] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const run = pick ? state.testRuns.find(r => r.promptVersionId === pick.version.id && r.endpoint === pick.endpoint) : undefined;
+  const nTest = state.examples.filter(e => e.split === 'test').length;
+  if (!pick || !nTest) return <span className="small muted">Model answers for the test set can be fetched once there is a prompt version.</span>;
+  const est = estimate(state, pick.version, pick.endpoint, ['test'], labeled);
+  const go = async () => {
+    setErr(null);
+    try {
+      await labelTestSet(state.project.id, pick.version, pick.endpoint, est.costUsd);
+      setConfirm(false);
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  };
+  return (
+    <>
+      {run?.state === 'running' ? (
+        <span className="row small" style={{gap: 8}}>
+          Getting model answers: {num(run.done)} of {num(run.total)}
+          <Button label="Stop" variant="ghost" size="sm" onClick={() => stopRun(run.id)} />
+        </span>
+      ) : labeled.size >= nTest ? (
+        <span className="small muted">
+          Model answers ready from Model {pick.endpoint} · {versionLabel(pick.version)}. Use &quot;Show model answer&quot; while labeling.
+        </span>
+      ) : (
+        <span className="row small" style={{gap: 8}}>
+          <Button label={labeled.size ? 'Get the rest of the model answers' : 'Get model answers'} size="sm" onClick={() => setConfirm(true)} />
+          <span className="muted">Optional. Lets you label with the model&apos;s answer as a hint.{run && run.state !== 'done' ? ` ${num(run.done)} of ${num(run.total)} done so far.` : ''}</span>
+        </span>
+      )}
+      {err && <Note tone="error">{err}</Note>}
+      <Dialog open={confirm} onClose={() => setConfirm(false)} title="Get model answers for the test set?" subtitle={`Model ${pick.endpoint} labels ${num(est.count - est.reused)} test examples with prompt ${versionLabel(pick.version)}.`}>
+        <div className="col">
+          <div className="stats">
+            <div className="stat">
+              <span className="small muted">Estimated cost</span>
+              <b>{money(est.costUsd)}</b>
+            </div>
+            <div className="stat">
+              <span className="small muted">Estimated time</span>
+              <b>{est.minutes} min</b>
+            </div>
+          </div>
+          <p className="small muted">
+            The answers stay hidden until you press &quot;Show model answer&quot;. Gold labels on the test set are optional either way. When you generate the training and test sets with the same prompt and model, these answers are reused, so you don&apos;t pay twice.
+          </p>
+          <div className="row" style={{justifyContent: 'flex-end'}}>
+            <Button label="Cancel" variant="ghost" onClick={() => setConfirm(false)} />
+            <Button label={`Approve ${money(est.costUsd)} and start`} variant="primary" onClick={go} />
+          </div>
+        </div>
+      </Dialog>
     </>
   );
 }
@@ -174,7 +243,7 @@ function Labeler({state, ex, position, queue, onMove}: {state: ProjectState; ex:
         ) : model === undefined ? (
           <p className="small muted">Loading…</p>
         ) : model === null ? (
-          <p className="small muted">No model answer yet. It appears after a prompt version is labeled on the eval set.</p>
+          <p className="small muted">{inEval ? 'No model answer yet. It appears after a prompt version is labeled on the eval set.' : 'No model answer yet. Press "Get model answers" on the test set card above.'}</p>
         ) : model.pred.answer ? (
           <div className="col">
             <div className="row" style={{gap: 6}}>

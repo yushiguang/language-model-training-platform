@@ -24,6 +24,7 @@ import type {
   TrainingRow,
   TrainingSet,
 } from './types.ts';
+import type {LabelingTask} from './labeling-api.ts';
 
 /**
  * Contract 1: Frontend Web App <-> BFF Service (`@tsp/contracts/bff-api`).
@@ -91,7 +92,8 @@ export interface BffContract {
   stopOptimiser(runId: string): void;
   predictionsFor(versionId: string, endpoint: EndpointId, settings: ModelSettings): Promise<Map<string, Prediction>>;
 
-  // Training set
+  // Test set answers (Gold Labels) and the final run (train + test)
+  labelTestSet(projectId: string, version: PromptVersion, endpoint: EndpointId, estimateUsd: number): Promise<LabelingTask>;
   startTrainingSet(projectId: string, version: PromptVersion, endpoint: EndpointId, report: EvalReport | null, estimateUsd: number, existing?: TrainingSet): Promise<TrainingSet>;
   stopTrainingSet(tsId: string): void;
   trainingRows(tsId: string): Promise<TrainingRow[]>;
