@@ -122,7 +122,7 @@ export function recommend(s: ProjectState, optimiserRunning: EndpointId | null):
   if (!t)
     return {
       kind: 'no_eval',
-      title: `Make the training set with ${versionLabel(latest)}`,
+      title: `Make the training and test sets with ${versionLabel(latest)}`,
       reasons: ['Evaluation is off, so versions are not scored. The training set will be marked Not evaluated.'],
       versionId: latest.id,
       endpoint: s.setup!.models[0]?.endpoint ?? null,
@@ -153,7 +153,7 @@ export function recommend(s: ProjectState, optimiserRunning: EndpointId | null):
     }
     return {
       kind: 'make_training_set',
-      title: `Make the training set with ${name(cheapest.promptVersionId)}${s.setup!.models.length > 1 ? ` on Model ${cheapest.endpoint}` : ''}`,
+      title: `Make the training and test sets with ${name(cheapest.promptVersionId)}${s.setup!.models.length > 1 ? ` on Model ${cheapest.endpoint}` : ''}`,
       reasons,
       versionId: cheapest.promptVersionId,
       endpoint: cheapest.endpoint,

@@ -5,6 +5,7 @@ import {costForTokens, estimateTokens, renderPrompt, TYPE_LABEL} from '@tsp/doma
 import type {Example} from '@tsp/contracts';
 import type {ProjectState} from '@/backend-api';
 import {Button, money, num} from '@/ui';
+import {src} from '../ExampleView';
 import type {Draft} from './Workbench';
 
 /**
@@ -61,17 +62,17 @@ export function PromptPreview({draft, state}: {draft: Draft; state: ProjectState
                   {p.text}
                 </span>
               ) : (
-                <figure key={i} className={`preview-img ${p.source}`}>
-                  <img src={p.url} alt="" />
-                  <figcaption>{p.caption}</figcaption>
-                </figure>
+                <span key={i} className={`preview-img from-${p.source}`}>
+                  <img src={src(p.url)} alt="" />
+                  <span className="cap">{p.caption}</span>
+                </span>
               ),
             )}
           </div>
           <p className="small muted">
             About {num(tokens)} input tokens for this example ({images} image{images === 1 ? '' : 's'}
             {images ? ' count for most of them' : ''})
-            {(state.setup?.models ?? []).map(m => ` · Model ${m.endpoint} about ${money(costForTokens(state.endpoints, m.endpoint, tokens, 150))} per call`).join('')}. The captions under the images are only shown here; the model gets the images where they sit, with no added text.
+            {(state.setup?.models ?? []).map(m => ` · Model ${m.endpoint} about ${money(costForTokens(state.endpoints, m.endpoint, tokens, 150) * 1000)} per 1,000 examples like this`).join('')}. The captions under the images are only shown here; the model gets the images where they sit, with no added text.
           </p>
         </>
       )}

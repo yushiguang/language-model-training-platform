@@ -220,7 +220,7 @@ function Overview({state, setPage}: {state: ProjectState; setPage: (p: PageConte
         {(advice.kind === 'make_training_set' || advice.kind === 'no_eval' || advice.kind === 'label_gold' || (advice.kind === 'keep_improving' && !running)) && (
           <div>
             <Button
-              label={advice.kind === 'label_gold' ? 'Go to Gold Labels' : advice.kind === 'keep_improving' ? `Run the optimiser for Model ${advice.endpoint}` : advice.title.replace('Make the training set', 'Make training set')}
+              label={advice.kind === 'label_gold' ? 'Go to Gold Labels' : advice.kind === 'keep_improving' ? `Run the optimiser for Model ${advice.endpoint}` : advice.title.replace('Make the training and test sets', 'Make training and test sets')}
               variant="primary"
               size="lg"
               onClick={act}

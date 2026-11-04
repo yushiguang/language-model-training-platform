@@ -22,7 +22,8 @@ const TITLES: Record<PageId, string> = {
   training: 'Training and test sets',
 };
 
-const r2 = (x: number) => Math.round(x * 100) / 100;
+/** Two decimals, the same way the pages print them (toFixed), so the agent quotes what people see. */
+const r2 = (x: number) => Number(x.toFixed(2));
 
 function findVersion(state: ProjectState, ref: unknown): PromptVersion | undefined {
   if (typeof ref !== 'string' || !ref) return undefined;

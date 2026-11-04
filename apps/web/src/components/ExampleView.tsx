@@ -5,7 +5,8 @@ import type {Example} from '@tsp/contracts';
 import {Badge} from '@/ui';
 
 const base = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
-const src = (u: string) => (/^(https?:|data:|\/)/.test(u) ? u : `${base}/${u}`);
+/** Example image URLs are relative to the site root (base path aware). */
+export const src = (u: string) => (/^(https?:|data:|\/)/.test(u) ? u : `${base}/${u}`);
 
 /** One example with the features of its own type: video and photo&text show different rows. */
 export function ExampleView({ex}: {ex: Example}) {

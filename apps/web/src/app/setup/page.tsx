@@ -252,7 +252,7 @@ function Evaluation() {
       <div className="page-head">
         <span className="eyebrow">Setup · step 2 of 3</span>
         <h1>How good must the labels be?</h1>
-        <p className="muted">The platform checks every prompt version against this before you can make the training set.</p>
+        <p className="muted">The platform checks every prompt version against this before you can make the training and test sets.</p>
       </div>
       <fieldset style={{border: 0, margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 10}}>
         <legend className="sr-only">Evaluation threshold</legend>

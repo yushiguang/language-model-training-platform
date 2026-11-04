@@ -112,7 +112,7 @@ function evaluationAgent(r: Req) {
   const verdict = rep.passed
     ? 'It passes every check, so it is ready for the training and test sets.'
     : failing.length
-      ? `It is below the bar on ${failing.map((c: any) => `${c.label.toLowerCase()} (${c.actual}, needs ${c.need.replace('≥ ', 'at least ')})`).join(' and ')}.`
+      ? `It is below the bar on ${failing.map((c: any) => `${c.label} (${c.actual}, needs ${c.need.replace('≥ ', 'at least ')})`).join(' and ')}.`
       : '';
   return {
     reply: [

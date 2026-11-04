@@ -64,6 +64,10 @@ export async function startTrainingSet(
   const u = await user();
   const train = state.examples.filter(e => e.split === 'train');
   const test = state.examples.filter(e => e.split === 'test');
+  // Answers already saved (test answers from Gold Labels) are reused for free. The task's cost
+  // counts them, so the budget adds what they cost: the 120% check then applies to new calls.
+  const saved = await labeling.predictions(version.id, endpoint, settingsHash(settings));
+  const reusedUsd = [...train, ...test].reduce((n, e) => n + (saved.get(e.id)?.costUsd ?? 0), 0);
   const task = await labeling.createTask({
     projectId,
     purpose: 'training',
@@ -72,7 +76,7 @@ export async function startTrainingSet(
     endpoint,
     settings,
     exampleIds: [...train, ...test].map(e => e.id),
-    budgetUsd: estimateUsd,
+    budgetUsd: estimateUsd + reusedUsd,
     createdBy: u.name,
   });
   const ts: TrainingSet = {
