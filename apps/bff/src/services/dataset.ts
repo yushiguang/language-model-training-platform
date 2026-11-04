@@ -1,9 +1,6 @@
-import type {RawExample} from '../../../../packages/contracts/src/infra-api';
-import {hashString} from '../../../../packages/contracts/src/template';
-import type {Answer, DatasetSnapshot, Example, GoldLabel, SamplingTask, Schema} from '../../../../packages/contracts/src/types';
-import {newId} from '../data/repo';
-import {emitChange, getApp, now} from './app';
-import {getProject, updateProject} from './projects';
+import type {Answer, DatasetSnapshot, Example, GoldLabel, RawExample, SamplingTask, Schema} from '@tsp/contracts';
+import {hashString, newId} from '@tsp/domain';
+import {emitChange, getApp, now} from './app.ts';
 
 const activeSampling = new Map<string, {task: SamplingTask; ctrl: AbortController}>();
 
@@ -21,9 +18,8 @@ export function stopSampleDataset(projectId: string): void {
 }
 
 async function saveSnapshot(projectId: string, raws: RawExample[], source: DatasetSnapshot['source'], sourceName: string, invalid = 0): Promise<DatasetSnapshot> {
-  const {repo, user} = getApp();
-  const project = (await getProject(projectId))!;
-  const prev = await repo.find<DatasetSnapshot>('dataset_snapshots', {project_id: projectId});
+  const {catalog, user} = getApp();
+  const prev = await catalog.find('dataset_snapshots', {projectId});
   const snap: DatasetSnapshot = {
     id: newId('ds'),
     projectId,
@@ -40,13 +36,14 @@ async function saveSnapshot(projectId: string, raws: RawExample[], source: Datas
     },
     split: null,
   };
-  await repo.insert('dataset_snapshots', snap);
-  for (const r of raws) {
-    const ex: Example = {id: newId('ex'), snapshotId: snap.id, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: null, optimiserHalf: false};
-    await repo.insert('examples', ex);
-  }
-  await updateProject({...project, snapshotId: snap.id});
-  await repo.audit(projectId, (await user()).name, 'dataset.create', {source, rows: raws.length});
+  await catalog.insertMany(
+    'examples',
+    raws.map((r): Example => ({id: newId('ex'), snapshotId: snap.id, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: null, optimiserHalf: false})),
+  );
+  // The snapshot is saved after its examples, so a half-saved upload is never picked up.
+  await catalog.insert('dataset_snapshots', snap);
+  await catalog.patch('projects', projectId, {snapshotId: snap.id});
+  await catalog.audit(projectId, (await user()).name, 'dataset.create', {source, rows: raws.length});
   emitChange();
   return snap;
 }
@@ -70,7 +67,7 @@ export async function startSampleDataset(projectId: string, n: number): Promise<
   activeSampling.set(projectId, {task, ctrl});
   emitChange();
   try {
-    const raws = await getApp().platform.examples.sample(
+    const raws = await getApp().examples.sample(
       n,
       fetched => {
         task.fetched = fetched;
@@ -91,11 +88,11 @@ export async function startSampleDataset(projectId: string, n: number): Promise<
 }
 
 export async function getSamplePoolSize(): Promise<number> {
-  return getApp().platform.examples.available();
+  return getApp().examples.available();
 }
 
 export function hasBundledGold(): boolean {
-  return typeof getApp().platform.examples.bundledLabels === 'function';
+  return typeof getApp().examples.bundledLabels === 'function';
 }
 
 /** Upload: JSONL of full examples, or CSV/JSONL of ids looked up in the example source. */
@@ -131,7 +128,7 @@ export async function uploadDatasetText(projectId: string, name: string, text: s
     }
   }
   if (ids.length) {
-    const found = await getApp().platform.examples.lookup(ids);
+    const found = await getApp().examples.lookup(ids);
     invalid += ids.length - found.length;
     raws.push(...found);
   }
@@ -141,24 +138,23 @@ export async function uploadDatasetText(projectId: string, name: string, text: s
 
 /** Order is fixed by a hash of the ids, so the same snapshot always splits the same way. */
 export async function applySplit(projectId: string, snapshotId: string, evalSize: number, testSize: number): Promise<void> {
-  const {repo} = getApp();
-  const snap = (await repo.get<DatasetSnapshot>('dataset_snapshots', snapshotId))!;
-  const examples = await repo.find<Example>('examples', {snapshot_id: snapshotId});
+  const {catalog} = getApp();
+  const examples = await catalog.find('examples', {snapshotId});
   const ordered = [...examples].sort((a, b) => hashString(a.externalId).localeCompare(hashString(b.externalId)));
-  ordered.forEach((ex, i) => {
-    ex.split = i < evalSize ? 'eval' : i < evalSize + testSize ? 'test' : 'train';
-    ex.optimiserHalf = ex.split === 'eval' && i % 2 === 0;
+  const patches = ordered.map((ex, i) => {
+    const split = i < evalSize ? ('eval' as const) : i < evalSize + testSize ? ('test' as const) : ('train' as const);
+    return {id: ex.id, patch: {split, optimiserHalf: split === 'eval' && i % 2 === 0}};
   });
-  await repo.setSplitsBatch(ordered);
-  await repo.update('dataset_snapshots', {...snap, split: {eval: evalSize, test: testSize, train: examples.length - evalSize - testSize}});
+  await catalog.patchMany('examples', patches);
+  await catalog.patch('dataset_snapshots', snapshotId, {split: {eval: evalSize, test: testSize, train: examples.length - evalSize - testSize}});
   emitChange();
   void projectId;
 }
 
 export async function saveGold(projectId: string, exampleId: string, schemaVersion: number, answer: Answer, revealed: boolean, source: GoldLabel['source'] = 'labeled'): Promise<GoldLabel> {
-  const {repo, user} = getApp();
+  const {catalog, user} = getApp();
   const g: GoldLabel = {id: newId('gl'), projectId, exampleId, schemaVersion, answer, source, revealed, createdAt: now(), createdBy: (await user()).name};
-  await repo.insert('gold_labels', g);
+  await catalog.insert('gold_labels', g);
   emitChange();
   return g;
 }
@@ -188,7 +184,7 @@ export async function uploadGold(
 }
 
 export async function importBundledGold(projectId: string, schema: Schema, schemaVersion: number, examples: Example[]): Promise<{saved: number; skipped: number}> {
-  const bundled = getApp().platform.examples.bundledLabels;
+  const bundled = getApp().examples.bundledLabels;
   if (!bundled) return {saved: 0, skipped: 0};
   const lines = await bundled();
   return uploadGold(projectId, schema, schemaVersion, examples, lines);

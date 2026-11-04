@@ -1,7 +1,7 @@
 'use client';
 
 import {useEffect} from 'react';
-import type {FeatureSelection} from '@/core/types';
+import type {FeatureSelection} from '@tsp/contracts';
 import {closeProposal, openProposals, subscribeChanges, type ProjectState} from '@/backend-api';
 
 /** Loads the prompt agent's latest open draft into the editor, where the user reviews and saves it. */

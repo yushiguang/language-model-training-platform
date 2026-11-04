@@ -1,13 +1,12 @@
-import type {LlmModelId} from '../../../packages/contracts/src/infra-api.ts';
-import type {AgentPreset} from '../../../packages/contracts/src/types.ts';
-import {agentName} from '../../../packages/contracts/src/workflow.ts';
+import type {AgentPreset, LlmModelId} from '@tsp/contracts';
+import {agentName} from '@tsp/domain';
 
 export {agentName};
 
 /**
  * Agent presets = model selection + system prompt + what the agent may observe + the intents it supports.
  *
- * Available runtime models (defined in `@tsp/contracts` `AVAILABLE_LLM_MODELS`):
+ * Available runtime models (defined in `@tsp/contracts` `AVAILABLE_LLM_MODELS`; limits live in `@tsp/llm-gateway`):
  * - `'gpt-5.6-terra'`: highest-quality reasoning model
  * - `'gpt-5.6-luna'`: balanced quality and latency model
  * - `'gpt-5.4'`: fast, lower-cost model

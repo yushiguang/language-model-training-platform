@@ -3,14 +3,14 @@
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {useEffect, useMemo, useState} from 'react';
-import type {EndpointId, PromptVersion} from '@/core/types';
-import {versionLabel} from '@/core/versions';
+import type {EndpointId, PromptVersion} from '@tsp/contracts';
+import {versionLabel} from '@tsp/domain';
 import {NotYet} from '@/components/NotYet';
 import {ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {MODEL_COLOR, ScoreChart} from '@/components/ScoreChart';
 import {useChecks, Workbench, type Draft} from '@/components/prompt/Workbench';
-import {estimateLabeling, MADE_BY, minutesFor, recommend} from '@/core/workflow';
+import {estimateLabeling, MADE_BY, minutesFor, recommend} from '@tsp/domain';
 import {
   approveNode,
   createVersion,
@@ -70,7 +70,7 @@ function Start({state, setPage}: {state: ProjectState; setPage: (p: PageContext)
     setBusy(true);
     setErr(null);
     try {
-      const v = await createVersion(state.project.id, state.versions, {...draft, parent: null, madeBy: 'user', change: 'Starting prompt', kind: 'minor', schema: state.setup!.schema!, schemaVersion: state.setup!.schemaVersion});
+      const v = await createVersion(state.project.id, {...draft, parent: null, madeBy: 'user', change: 'Starting prompt', kind: 'minor', schema: state.setup!.schema!, schemaVersion: state.setup!.schemaVersion});
       void scoreVersion(state.project.id, v);
     } catch (e) {
       setErr((e as Error).message);

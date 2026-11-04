@@ -1,6 +1,6 @@
 'use client';
 
-import type {LabelField, Schema} from '@/core/types';
+import type {LabelField, Schema} from '@tsp/contracts';
 import {Badge} from '@/ui';
 
 /** Same field type = same format everywhere: Setup, Gold Labels and reports. */

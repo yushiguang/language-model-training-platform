@@ -1,24 +1,23 @@
-import {reflectPrompt} from '../../../agents/src/runtime';
-import {checkTemplate, placeholderKeys} from '../../../../packages/contracts/src/template';
-import type {EndpointId, OptimisationRun, PromptVersion} from '../../../../packages/contracts/src/types';
-import {newId} from '../data/repo';
-import {emitChange, getApp, now} from './app';
-import {buildReport, runLabeling, scoreOnOptimiserHalf} from './evaluation';
-import {once} from './locks';
-import {loadProjectState} from './projects';
-import {createVersion} from './prompts';
+import type {EndpointId, OptimisationRun, PromptVersion} from '@tsp/contracts';
+import {checkTemplate, newId, placeholderKeys} from '@tsp/domain';
+import {emitChange, getApp, now} from './app.ts';
+import {buildReport, labelEvalSet, scoreOnOptimiserHalf} from './evaluation.ts';
+import {loadProjectState} from './projects.ts';
+import {createVersion} from './prompts.ts';
 
 const active = new Map<string, AbortController>();
 export const optimiserActive = (id: string) => active.has(id);
 export const stopOptimiser = (id: string) => active.get(id)?.abort();
 
+const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
+
 /**
  * A GEPA-style loop that runs from the open page: take the best version on the optimiser's
- * half of the eval set, ask the Agent Runtime (`@tsp/agents`) reflection endpoint for one
- * targeted change, keep the placeholders as they are, save it as a minor version and score it.
+ * half of the eval set, ask the agent runtime for one targeted change, keep the placeholders
+ * as they are, save it as a minor version and label it as an optimiser labeling task.
  */
 export async function runOptimiser(projectId: string, endpoint: EndpointId, budgetCandidates = 6, resume?: OptimisationRun): Promise<OptimisationRun> {
-  const {repo, platform} = getApp();
+  const {catalog, agents, gateway} = getApp();
   let state = (await loadProjectState(projectId))!;
   const evalCount = state.examples.filter(e => e.split === 'eval').length;
   const run: OptimisationRun = resume
@@ -38,8 +37,8 @@ export async function runOptimiser(projectId: string, endpoint: EndpointId, budg
         startedAt: now(),
         finishedAt: null,
       };
-  if (resume) await repo.update('optimisation_runs', run);
-  else await repo.insert('optimisation_runs', run);
+  if (resume) await catalog.patch('optimisation_runs', run.id, {state: 'running', error: null});
+  else await catalog.insert('optimisation_runs', run);
   const ctrl = new AbortController();
   active.set(run.id, ctrl);
   emitChange();
@@ -65,20 +64,13 @@ export async function runOptimiser(projectId: string, endpoint: EndpointId, budg
         if (m.n && m.lowestField.macroF1 > parentScore) [parent, parentScore, parentMetrics] = [v, m.lowestField.macroF1, m];
       }
       if (!parentMetrics) {
-        const r = await once(`label:${parent.id}:${endpoint}`, () =>
-          runLabeling(
-            projectId,
-            setup,
-            parent,
-            endpoint,
-            state.examples,
-            state.runs.find(x => x.promptVersionId === parent.id && x.endpoint === endpoint),
-          ),
-        );
-        if (!r) await new Promise(res => setTimeout(res, 1000));
+        // The parent is not labeled yet (or another tab is labeling it): label it, then look again.
+        const t = await labelEvalSet(projectId, setup, parent, endpoint, state.examples, 'optimiser');
+        if (!t) await wait(1000);
+        else if (t.state !== 'done') throw new Error(t.error ?? 'Labeling stopped');
         continue;
       }
-      const out = await reflectPrompt(
+      const out = await agents.reflectPrompt(
         {
           template: parent.template,
           schema: setup.schema!,
@@ -88,16 +80,15 @@ export async function runOptimiser(projectId: string, endpoint: EndpointId, budg
           lowestValue: parentMetrics.lowestValue,
           signal: ctrl.signal,
         },
-        platform.agent,
+        gateway.agentModel(),
       );
       const same = [...placeholderKeys(out.template)].sort().join() === [...placeholderKeys(parent.template)].sort().join();
-      const all = (await loadProjectState(projectId))!.versions;
-      if (!same || checkTemplate(out.template, parent.features).errors.length || all.some(v => v.template === out.template)) {
+      if (!same || checkTemplate(out.template, parent.features).errors.length || state.versions.some(v => v.template === out.template)) {
         run.candidates++;
         wasted++;
         continue;
       }
-      const cand = await createVersion(projectId, all, {
+      const cand = await createVersion(projectId, {
         template: out.template,
         features: parent.features,
         images: parent.images,
@@ -109,12 +100,13 @@ export async function runOptimiser(projectId: string, endpoint: EndpointId, budg
         schemaVersion: setup.schemaVersion,
       });
       run.candidates++;
-      const lr = (await once(`label:${cand.id}:${endpoint}`, () => runLabeling(projectId, setup, cand, endpoint, state.examples)))!;
-      run.calls += lr.total;
-      run.costUsd += lr.costUsd;
-      await repo.update('optimisation_runs', run);
+      const task = await labelEvalSet(projectId, setup, cand, endpoint, state.examples, 'optimiser');
+      if (!task) throw new Error('Another tab is labeling this candidate.');
+      run.calls += task.total;
+      run.costUsd += task.costUsd;
+      await catalog.patch('optimisation_runs', run.id, {calls: run.calls, candidates: run.candidates, costUsd: run.costUsd});
       emitChange();
-      if (lr.state !== 'done') throw new Error(lr.error ?? 'Labeling stopped');
+      if (task.state !== 'done') throw new Error(task.error ?? 'Labeling stopped');
       const fresh = (await loadProjectState(projectId))!;
       await buildReport(projectId, setup, cand, endpoint, fresh.examples, fresh.gold, fresh.contextId);
     }
@@ -127,7 +119,8 @@ export async function runOptimiser(projectId: string, endpoint: EndpointId, budg
     run.error = stopped ? null : `Last error: ${(e as Error).message}. Versions kept so far are saved.`;
   } finally {
     run.finishedAt = now();
-    await repo.update('optimisation_runs', run);
+    const {id: _id, ...rest} = run;
+    await catalog.patch('optimisation_runs', run.id, rest);
     active.delete(run.id);
     emitChange();
   }

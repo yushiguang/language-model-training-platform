@@ -1,17 +1,14 @@
-import {runAgentTurn} from '../../../agents/src/runtime';
-import type {AgentWorkspaceSnapshot} from '../../../../packages/contracts/src/agent-api';
 import type {
   AgentProposal,
+  AgentWorkspaceSnapshot,
   ChatAttachment,
   ChatMessage,
   PageContext,
-  Project,
   Schema,
-  SetupVersion,
   StartRequest,
-} from '../../../../packages/contracts/src/types';
-import {newId} from '../data/repo';
-import {emitChange, getApp, now} from './app';
+} from '@tsp/contracts';
+import {newId} from '@tsp/domain';
+import {emitChange, getApp, now} from './app.ts';
 
 export type {PageContext};
 
@@ -19,12 +16,12 @@ const busyProjects = new Set<string>();
 export const isAgentBusy = (projectId: string): boolean => busyProjects.has(projectId);
 
 export async function chatHistory(projectId: string): Promise<ChatMessage[]> {
-  return getApp().repo.find<ChatMessage>('chat_messages', {project_id: projectId}, 'created_at');
+  return getApp().catalog.find('chat_messages', {projectId}, 'createdAt');
 }
 
 async function post(projectId: string, m: Omit<ChatMessage, 'id' | 'projectId' | 'createdAt'>): Promise<ChatMessage> {
   const msg: ChatMessage = {id: newId('cm'), projectId, createdAt: now(), ...m};
-  await getApp().repo.insert('chat_messages', msg);
+  await getApp().catalog.insert('chat_messages', msg);
   emitChange();
   return msg;
 }
@@ -34,9 +31,9 @@ async function loadWorkspaceSnapshot(
   page: PageContext,
   attachments?: ChatAttachment[],
 ): Promise<AgentWorkspaceSnapshot> {
-  const {repo, platform} = getApp();
-  const project = await repo.get<Project>('projects', projectId);
-  const setup = project?.setupVersionId ? await repo.get<SetupVersion>('setup_versions', project.setupVersionId) : null;
+  const {catalog, examples} = getApp();
+  const project = await catalog.get('projects', projectId);
+  const setup = project?.setupVersionId ? await catalog.get('setup_versions', project.setupVersionId) : null;
   const openSchemas = await openProposals(projectId, 'schema');
   const history = await chatHistory(projectId);
 
@@ -57,7 +54,7 @@ async function loadWorkspaceSnapshot(
       }
     }
     if (idCandidates.size > 0) {
-      const found = await platform.examples.lookup([...idCandidates].slice(0, 10));
+      const found = await examples.lookup([...idCandidates].slice(0, 10));
       if (found.length > 0) attachedExamples = found;
     }
   }
@@ -73,9 +70,9 @@ async function loadWorkspaceSnapshot(
 
 /**
  * BFF dispatcher for assistant turns:
- * 1. Persists the user's message and loads the project's workspace snapshot from `Repo`.
+ * 1. Persists the user's message and loads the project's workspace snapshot from the catalog.
  * 2. Calls the stateless Agent Runtime service (`@tsp/agents`) with `AgentTurnInput`.
- * 3. Persists start requests, emitted agent/event messages, and any new proposal back to `Repo`.
+ * 3. Persists start requests, emitted agent/event messages, and any new proposal to the catalog.
  */
 export async function sendUserMessage(
   projectId: string,
@@ -94,9 +91,9 @@ export async function sendUserMessage(
   });
 
   try {
-    const {repo, platform} = getApp();
+    const {catalog, agents, gateway} = getApp();
     const workspace = await loadWorkspaceSnapshot(projectId, page, attachments);
-    const turnOut = await runAgentTurn({userText: text, page, attachments, workspace}, platform.agent);
+    const turnOut = await agents.runAgentTurn({userText: text, page, attachments, workspace}, gateway.agentModel());
 
     for (const inv of turnOut.invocations) {
       const start: StartRequest = {
@@ -110,7 +107,7 @@ export async function sendUserMessage(
         userRequest: text,
         note: inv.note,
       };
-      await repo.insert('start_requests', start);
+      await catalog.insert('start_requests', start);
     }
 
     for (const msg of turnOut.messages) {
@@ -126,7 +123,7 @@ export async function sendUserMessage(
     if (turnOut.proposal) {
       const previousOpen = await openProposals(projectId, turnOut.proposal.kind);
       for (const prev of previousOpen) {
-        await repo.update('agent_proposals', {...prev, state: 'discarded'});
+        await catalog.patch('agent_proposals', prev.id, {state: 'discarded'});
       }
       const proposal: AgentProposal = {
         id: newId('ap'),
@@ -138,7 +135,7 @@ export async function sendUserMessage(
         state: 'open',
         createdAt: now(),
       };
-      await repo.insert('agent_proposals', proposal);
+      await catalog.insert('agent_proposals', proposal);
       emitChange();
       return proposal;
     }
@@ -150,10 +147,10 @@ export async function sendUserMessage(
 }
 
 export async function openProposals(projectId: string, kind: AgentProposal['kind']): Promise<AgentProposal[]> {
-  return getApp().repo.find<AgentProposal>('agent_proposals', {project_id: projectId, kind, state: 'open'}, 'created_at desc');
+  return getApp().catalog.find('agent_proposals', {projectId, kind, state: 'open'}, 'createdAt desc');
 }
 
 export async function closeProposal(p: AgentProposal, state: 'approved' | 'discarded') {
-  await getApp().repo.update('agent_proposals', {...p, state});
+  await getApp().catalog.patch('agent_proposals', p.id, {state});
   emitChange();
 }

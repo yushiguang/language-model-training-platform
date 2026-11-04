@@ -2,11 +2,11 @@
 
 import {useRouter, useSearchParams} from 'next/navigation';
 import {Suspense, useEffect, useMemo, useState} from 'react';
-import type {EndpointId, PromptVersion, TrainingRow, TrainingSet} from '@/core/types';
-import {versionLabel} from '@/core/versions';
+import type {EndpointId, PromptVersion, TrainingRow, TrainingSet} from '@tsp/contracts';
+import {versionLabel} from '@tsp/domain';
 import {ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
-import {estimate, MIN_PER_VALUE} from '@/core/workflow';
+import {estimate, MIN_PER_VALUE} from '@tsp/domain';
 import {
   approveNode,
   startTrainingSet,

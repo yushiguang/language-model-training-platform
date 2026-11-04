@@ -2,7 +2,7 @@
 
 import {useRouter} from 'next/navigation';
 import {useEffect, useState} from 'react';
-import {gate} from '@/core/gates';
+import {gate} from '@tsp/domain';
 import {ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {

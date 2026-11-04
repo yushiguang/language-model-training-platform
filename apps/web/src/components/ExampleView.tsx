@@ -1,7 +1,7 @@
 'use client';
 
-import {FEATURES, TYPE_LABEL} from '@/core/catalogue';
-import type {Example} from '@/core/types';
+import {FEATURES, TYPE_LABEL} from '@tsp/domain';
+import type {Example} from '@tsp/contracts';
 import {Badge} from '@/ui';
 
 const base = process.env.NEXT_PUBLIC_BASE_PATH ?? '';

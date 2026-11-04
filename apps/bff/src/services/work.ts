@@ -1,14 +1,12 @@
-import type {EndpointId, PromptVersion} from '../../../../packages/contracts/src/types';
-import type {ProjectState} from '../../../../packages/contracts/src/workflow';
-import {getApp} from './app';
-import {buildReport, isActive, runLabeling} from './evaluation';
-import {busy, once} from './locks';
-import {optimiserActive, runOptimiser} from './optimiser';
-import {loadProjectState} from './projects';
-import {isTrainingActive} from './training';
+import type {EndpointId, ProjectState, PromptVersion} from '@tsp/contracts';
+import {busy, getApp, once} from './app.ts';
+import {buildReport, labelEvalSet} from './evaluation.ts';
+import {optimiserActive, runOptimiser} from './optimiser.ts';
+import {loadProjectState} from './projects.ts';
 
 /**
- * Background work that runs from the open page: labeling runs, reports, optimiser and training set runs.
+ * Background work that runs from the open page. The bff decides when labeling starts (system
+ * triggers: a new version is scored, optimiser candidates); the labeling app runs the tasks.
  * Every step is idempotent, so calling `tick` again after a reload picks up where it was.
  */
 
@@ -19,8 +17,8 @@ export async function scoreVersion(projectId: string, version: PromptVersion, on
   await Promise.all(
     models.map(m =>
       once(`label:${version.id}:${m.endpoint}`, async () => {
-        const existing = state.runs.find(r => r.promptVersionId === version.id && r.endpoint === m.endpoint);
-        await runLabeling(projectId, state.setup!, version, m.endpoint, state.examples, existing);
+        const task = await labelEvalSet(projectId, state.setup!, version, m.endpoint, state.examples);
+        if (task?.state !== 'done') return;
         const fresh = (await loadProjectState(projectId))!;
         await buildReport(projectId, fresh.setup!, version, m.endpoint, fresh.examples, fresh.gold, fresh.contextId);
       }),
@@ -29,32 +27,33 @@ export async function scoreVersion(projectId: string, version: PromptVersion, on
 }
 
 export async function tick(state: ProjectState) {
-  const {repo} = getApp();
-  for (const r of state.runs) {
-    if (r.state !== 'running' || isActive(r.id) || busy(`label:${r.promptVersionId}:${r.endpoint}`)) continue;
-    const now = await repo.get<typeof r>('labeling_runs', r.id);
-    if (now?.state === 'running' && !isActive(r.id)) await repo.update('labeling_runs', {...now, state: 'paused'});
-  }
+  const {catalog, labeling} = getApp();
+  const projectId = state.project.id;
+
+  // An optimiser loop left "running" by a closed page shows as paused.
   for (const o of state.optimisation) {
-    if (o.state !== 'running' || optimiserActive(o.id)) continue;
-    const now = await repo.get<typeof o>('optimisation_runs', o.id);
-    if (now?.state === 'running' && !optimiserActive(o.id)) await repo.update('optimisation_runs', {...now, state: 'paused'});
+    if (o.state !== 'running' || optimiserActive(o.id) || busy('optimiser')) continue;
+    const fresh = await catalog.get('optimisation_runs', o.id);
+    if (fresh?.state === 'running' && !optimiserActive(o.id)) await catalog.patch('optimisation_runs', o.id, {state: 'paused'});
   }
-  for (const ts of state.trainingSets) {
-    if (ts.state !== 'running' || isTrainingActive(ts.id) || busy(`training:${ts.id}`)) continue;
-    const now = await repo.get<typeof ts>('training_sets', ts.id);
-    if (now?.state === 'running' && !isTrainingActive(ts.id)) await repo.update('training_sets', {...now, state: 'paused'});
+
+  // System-started labeling (scoring) resumes by itself after a reload; training sets wait for the user.
+  const tasks = await labeling.listTasks(projectId);
+  for (const t of tasks) {
+    if (t.purpose !== 'eval' || !(t.state === 'queued' || (t.state === 'paused' && t.stopReason === 'closed'))) continue;
+    const v = state.versions.find(x => x.id === t.promptVersionId);
+    if (v && state.setup?.models.some(m => m.endpoint === t.endpoint)) void scoreVersion(projectId, v, t.endpoint);
   }
 
   const latest = state.versions[0];
   if (!latest || !state.setup?.schema) return;
   for (const m of state.setup.models) {
-    if (!state.runs.some(r => r.promptVersionId === latest.id && r.endpoint === m.endpoint)) void scoreVersion(state.project.id, latest, m.endpoint);
+    if (!state.runs.some(r => r.promptVersionId === latest.id && r.endpoint === m.endpoint)) void scoreVersion(projectId, latest, m.endpoint);
   }
   for (const r of state.runs.filter(r => r.state === 'done')) {
     if (state.reports.some(x => x.promptVersionId === r.promptVersionId && x.endpoint === r.endpoint && !x.archivedNow)) continue;
     const v = state.versions.find(v => v.id === r.promptVersionId);
-    if (v) void once(`report:${v.id}:${r.endpoint}`, () => buildReport(state.project.id, state.setup!, v, r.endpoint, state.examples, state.gold, state.contextId));
+    if (v) void once(`report:${v.id}:${r.endpoint}`, () => buildReport(projectId, state.setup!, v, r.endpoint, state.examples, state.gold, state.contextId));
   }
   if (!state.setup.thresholds) return;
   const evalSize = state.snapshot?.split?.eval ?? 0;
@@ -69,7 +68,7 @@ export async function tick(state: ProjectState) {
     if (already || state.optimisation.some(o => o.state === 'running')) continue;
     const paused = state.optimisation.find(o => o.endpoint === m.endpoint && (o.state === 'paused' || o.state === 'failed'));
     if (paused) continue;
-    void once('optimiser', () => runOptimiser(state.project.id, m.endpoint));
+    void once('optimiser', () => runOptimiser(projectId, m.endpoint));
     return;
   }
 }

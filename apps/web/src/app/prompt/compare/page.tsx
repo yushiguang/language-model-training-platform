@@ -2,9 +2,9 @@
 
 import {useSearchParams} from 'next/navigation';
 import {Suspense} from 'react';
-import {diffLines, diffSummary} from '@/core/template';
-import type {EndpointId} from '@/core/types';
-import {versionLabel} from '@/core/versions';
+import {diffLines, diffSummary} from '@tsp/domain';
+import type {EndpointId} from '@tsp/contracts';
+import {versionLabel} from '@tsp/domain';
 import {mixUpKey, mixUpText, signed} from '@/components/mixups';
 import {ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';

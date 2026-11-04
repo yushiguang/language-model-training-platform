@@ -1,8 +1,8 @@
 'use client';
 
 import {useMemo} from 'react';
-import {applyFix, checkTemplate, type CheckResult, type Fix} from '@/core/template';
-import type {FeatureSelection, PromptImage, Schema} from '@/core/types';
+import {applyFix, checkTemplate, type CheckResult, type Fix} from '@tsp/domain';
+import type {FeatureSelection, PromptImage, Schema} from '@tsp/contracts';
 import {uploadAsset} from '@/backend-api';
 import {Icon} from '@/ui';
 import {FeaturesPanel} from './FeaturesPanel';

@@ -2,8 +2,8 @@
 
 import {useRouter, useSearchParams} from 'next/navigation';
 import {Suspense, useEffect, useState} from 'react';
-import {DEFAULT_THRESHOLDS} from '@/core/metrics';
-import type {AgentProposal, ChatAttachment, ModelSettings, Schema, Thresholds} from '@/core/types';
+import {DEFAULT_THRESHOLDS} from '@tsp/domain';
+import type {AgentProposal, ChatAttachment, ModelSettings, Schema, Thresholds} from '@tsp/contracts';
 import {Composer} from '@/components/Assistant';
 import {ProjectPage} from '@/components/Shell';
 import {SchemaView} from '@/components/SchemaView';

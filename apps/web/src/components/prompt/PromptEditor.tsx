@@ -1,8 +1,8 @@
 'use client';
 
 import {useMemo, useRef, useState, type ReactNode} from 'react';
-import {ALL_KEYS, FEATURES, ITEM_ROWS} from '@/core/catalogue';
-import type {FeatureSelection} from '@/core/types';
+import {ALL_KEYS, FEATURES, ITEM_ROWS} from '@tsp/domain';
+import type {FeatureSelection} from '@tsp/contracts';
 
 interface Suggest {
   start: number;

@@ -1,24 +1,16 @@
-import {renderPrompt} from '../../../../packages/contracts/src/template';
-import type {EndpointId, EvalReport, PromptVersion, TrainingRow, TrainingSet} from '../../../../packages/contracts/src/types';
-import {estimate, MIN_PER_VALUE, minutesFor} from '../../../../packages/contracts/src/workflow';
-import {newId} from '../data/repo';
-import {emitChange, getApp, now} from './app';
-import {costOf, parseOutput, toMessages, withRetry} from './evaluation';
-import {once} from './locks';
-import {loadProjectState} from './projects';
+import type {EndpointId, EvalReport, PromptVersion, TrainingRow, TrainingSet} from '@tsp/contracts';
+import {estimate, MIN_PER_VALUE, minutesFor, newId} from '@tsp/domain';
+import {emitChange, getApp, now} from './app.ts';
+import {loadProjectState} from './projects.ts';
+import {trainingView} from './views.ts';
 
 export {estimate, MIN_PER_VALUE, minutesFor};
 
-const active = new Map<string, AbortController>();
-export const isTrainingActive = (tsId: string) => active.has(tsId);
-export function stopTrainingSet(tsId: string) {
-  active.get(tsId)?.abort();
-}
-
 /**
- * Generates the training set using sequential online calls from the open page (MVP has no batch API).
- * Completed rows are saved incrementally in `training_rows`, so a paused or stopped run can resume
- * without re-labeling examples that already finished.
+ * Generates the training set as a labeling task over the train split (no batch job: the labeling
+ * app runs it from the open page, 4 examples at a time). The task pauses if the cost passes 120%
+ * of the estimate the user accepted. Passing `existing` resumes it: examples already labeled are
+ * kept, and examples that failed are tried again.
  */
 export async function startTrainingSet(
   projectId: string,
@@ -28,99 +20,81 @@ export async function startTrainingSet(
   estimateUsd: number,
   existing?: TrainingSet,
 ): Promise<TrainingSet> {
-  const {repo, platform, user} = getApp();
-  const state = (await loadProjectState(projectId))!;
-  const settings = state.setup!.models.find(m => m.endpoint === endpoint)!;
-  const train = state.examples.filter(e => e.split === 'train');
-  const existingRows = existing ? await repo.trainingRows<TrainingRow>(existing.id) : [];
-  const doneIds = new Set(existingRows.map(r => r.exampleId));
-
-  const ts: TrainingSet = existing
-    ? {
-        ...existing,
-        state: 'running',
-        error: null,
-        done: existingRows.length,
-        labeled: existingRows.filter(r => r.answer).length,
-        invalid: existingRows.filter(r => !r.answer).length,
-        finishedAt: null,
-      }
-    : {
-        id: newId('ts'),
-        projectId,
-        promptVersionId: version.id,
-        endpoint,
-        snapshotId: state.snapshot!.id,
-        evaluated: !!report,
-        reportId: report?.id ?? null,
-        batchJobId: null,
-        state: 'running',
-        total: train.length,
-        done: 0,
-        labeled: 0,
-        invalid: 0,
-        costUsd: 0,
-        estimateUsd,
-        error: null,
-        startedAt: now(),
-        finishedAt: null,
-      };
-
-  if (existing) await repo.update('training_sets', ts);
-  else {
-    await repo.insert('training_sets', ts);
-    await repo.audit(projectId, (await user()).name, 'training_set.start', {version: version.id, endpoint, estimateUsd});
+  const {catalog, labeling, user} = getApp();
+  if (existing) {
+    void labeling.retryFailed(existing.taskId);
+    emitChange();
+    return existing;
   }
-  emitChange();
-
-  void once(`training:${ts.id}`, async () => {
-    const ctrl = new AbortController();
-    active.set(ts.id, ctrl);
-    try {
-      for (const ex of train) {
-        if (doneIds.has(ex.id)) continue;
-        const parts = renderPrompt(version.template, ex, version.features, version.images);
-        const res = await withRetry(
-          () =>
-            platform.models.chat({
-              endpoint,
-              messages: toMessages(parts),
-              maxOutputTokens: settings.maxOutputTokens,
-              temperature: settings.temperature,
-              traceId: ex.externalId,
-              signal: ctrl.signal,
-            }),
-          ctrl.signal,
-        );
-        const parsed = parseOutput(res.text, state.setup!.schema!);
-        const cost = costOf(endpoint, res.inputTokens, res.outputTokens);
-        const row: TrainingRow = {trainingSetId: ts.id, exampleId: ex.id, answer: parsed.answer, invalidReason: parsed.reason};
-        await repo.insertTrainingRows([row]);
-        doneIds.add(ex.id);
-        ts.done++;
-        if (parsed.answer) ts.labeled++;
-        else ts.invalid++;
-        ts.costUsd += cost;
-        await repo.update('training_sets', ts);
-        emitChange();
-      }
-      ts.state = 'done';
-      ts.finishedAt = now();
-    } catch (e) {
-      const stopped = (e as Error).name === 'AbortError';
-      ts.state = stopped ? 'stopped' : 'failed';
-      ts.error = stopped ? null : `Model ${endpoint} failed after 3 tries: ${(e as Error).message}`;
-      ts.finishedAt = now();
-    } finally {
-      await repo.update('training_sets', ts);
-      active.delete(ts.id);
-      emitChange();
-    }
+  const state = (await loadProjectState(projectId))!;
+  const setup = state.setup!;
+  const settings = setup.models.find(m => m.endpoint === endpoint);
+  if (!settings) throw new Error(`Model ${endpoint} is not chosen in Setup.`);
+  const u = await user();
+  const train = state.examples.filter(e => e.split === 'train');
+  const task = await labeling.createTask({
+    projectId,
+    purpose: 'training',
+    promptVersionId: version.id,
+    setupVersionId: setup.id,
+    endpoint,
+    settings,
+    exampleIds: train.map(e => e.id),
+    budgetUsd: estimateUsd,
+    createdBy: u.name,
   });
-
+  const ts: TrainingSet = {
+    id: newId('ts'),
+    projectId,
+    promptVersionId: version.id,
+    endpoint,
+    snapshotId: state.snapshot!.id,
+    evaluated: !!report,
+    reportId: report?.id ?? null,
+    taskId: task.id,
+    setupVersionId: setup.id,
+    state: 'running',
+    total: train.length,
+    done: 0,
+    labeled: 0,
+    invalid: 0,
+    failed: 0,
+    costUsd: 0,
+    estimateUsd,
+    error: null,
+    startedAt: now(),
+    finishedAt: null,
+  };
+  await catalog.insert('training_sets', ts);
+  await catalog.audit(projectId, u.name, 'training_set.start', {version: version.id, endpoint, estimateUsd});
+  void labeling.runTask(task.id);
+  emitChange();
   return ts;
 }
 
+export async function stopTrainingSet(tsId: string): Promise<void> {
+  const {catalog, labeling} = getApp();
+  const ts = await catalog.get('training_sets', tsId);
+  if (ts) await labeling.stopTask(ts.taskId);
+}
+
+/** The training set's rows: one saved prediction per train example. */
 export async function trainingRows(tsId: string): Promise<TrainingRow[]> {
-  return getApp().repo.trainingRows<TrainingRow>(tsId);
+  const {catalog, labeling} = getApp();
+  const ts = await catalog.get('training_sets', tsId);
+  if (!ts) return [];
+  const task = await labeling.getTask(ts.taskId);
+  if (!task) return [];
+  const preds = await labeling.predictions(task.promptVersionId, task.endpoint, task.settingsHash);
+  return task.exampleIds.flatMap(id => {
+    const p = preds.get(id);
+    return p ? [{trainingSetId: ts.id, exampleId: id, answer: p.answer, invalidReason: p.invalidReason}] : [];
+  });
+}
+
+export async function getTrainingSet(tsId: string): Promise<TrainingSet | null> {
+  const {catalog, labeling} = getApp();
+  const ts = await catalog.get('training_sets', tsId);
+  if (!ts) return null;
+  return trainingView(ts, (await labeling.getTask(ts.taskId)) ?? undefined);
 }

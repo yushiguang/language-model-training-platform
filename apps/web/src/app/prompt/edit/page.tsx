@@ -2,14 +2,14 @@
 
 import {useRouter, useSearchParams} from 'next/navigation';
 import {Suspense, useEffect, useMemo, useState} from 'react';
-import {diffLines, diffSummary} from '@/core/template';
-import {nextVersion, versionLabel} from '@/core/versions';
-import type {PromptVersion} from '@/core/types';
+import {diffLines, diffSummary} from '@tsp/domain';
+import {nextVersion, versionLabel} from '@tsp/domain';
+import type {PromptVersion} from '@tsp/contracts';
 import {ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {useChecks, Workbench, type Draft} from '@/components/prompt/Workbench';
 import {useAgentDrafts} from '@/components/prompt/useAgentDrafts';
-import {MADE_BY} from '@/core/workflow';
+import {MADE_BY} from '@tsp/domain';
 import {createVersion, scoreVersion, type PageContext, type ProjectState} from '@/backend-api';
 import {Button, Icon, Note, StatusBadge, timeOf} from '@/ui';
 
@@ -73,7 +73,7 @@ function Edit({state, version, setPage}: {state: ProjectState; version: PromptVe
     setErr(null);
     try {
       const summary = change || (sum.added || sum.removed ? `${sum.added} line${sum.added === 1 ? '' : 's'} added, ${sum.removed} removed` : 'Features changed');
-      const v = await createVersion(state.project.id, state.versions, {...draft, parent: version, madeBy, change: summary, kind, schema: state.setup!.schema!, schemaVersion: state.setup!.schemaVersion});
+      const v = await createVersion(state.project.id, {...draft, parent: version, madeBy, change: summary, kind, schema: state.setup!.schema!, schemaVersion: state.setup!.schemaVersion});
       void scoreVersion(state.project.id, v);
       setSaved(`Saved as ${versionLabel(v)} · scoring on ${state.setup!.models.length > 1 ? 'both models' : `Model ${state.setup!.models[0].endpoint}`}`);
       setTimeout(() => router.push(href('/prompt')), 900);

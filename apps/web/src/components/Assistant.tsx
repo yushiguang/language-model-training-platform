@@ -1,8 +1,8 @@
 'use client';
 
 import {useEffect, useRef, useState} from 'react';
-import type {ChatAttachment, ChatMessage, PageContext} from '@/core/types';
-import {agentName} from '@/core/workflow';
+import type {ChatAttachment, ChatMessage, PageContext} from '@tsp/contracts';
+import {agentName} from '@tsp/domain';
 import {chatHistory, isAgentBusy, prepareChatAttachment, sendUserMessage, subscribeChanges} from '@/backend-api';
 import {Icon} from '@/ui';
 import {useProject} from './ProjectContext';

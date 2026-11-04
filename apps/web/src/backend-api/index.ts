@@ -24,14 +24,20 @@ import type {
   TrainingRow,
   TrainingSet,
 } from '@tsp/contracts';
+import {createCatalog} from '@tsp/catalog';
+import {createGateway} from '@tsp/llm-gateway';
+import {browserLocks, createLabeling} from '@tsp/labeling';
+import {agentRuntime} from '@tsp/agents';
+import {createPlatform} from '@tsp/platform-impl';
 import {
   applySplit,
   approveNode,
   chatHistory,
   closeProposal,
+  configureBff,
   createProject,
   createVersion,
-  getApp,
+  emitChange,
   getProject,
   getSamplePoolSize,
   hasBundledGold,
@@ -56,12 +62,28 @@ import {
   stopTrainingSet,
   tick,
   trainingRows,
-  updateProject,
   uploadDatasetText,
   uploadGold,
 } from '@tsp/bff';
 
 export type {NewVersion, PageContext, ProjectState, RuntimeInfo, SetupPatch};
+
+/**
+ * Composition root. The only place that knows which implementation sits behind each contract:
+ * `@tsp/platform-impl` is the stand-ins by default and the internal adapters when the build sets
+ * TSP_PLATFORM_IMPL (see docs/handover/integration.md).
+ */
+const platform = createPlatform();
+const gateway = createGateway(platform);
+const catalog = createCatalog(platform.db);
+const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: emitChange});
+configureBff({catalog, labeling, gateway, agents: agentRuntime, identity: platform.identity, files: platform.files, examples: platform.examples, standIns: platform.standIns});
+
+/** Image URLs in prompts are relative to the site; the model needs absolute ones. */
+function absoluteUrl(url: string): string {
+  if (/^(https?:|data:)/.test(url) || typeof location === 'undefined') return url;
+  return new URL(url, location.origin + (process.env.NEXT_PUBLIC_BASE_PATH ?? '') + '/').toString();
+}
 
 /**
  * The HTTP-friendly contract client between the frontend UI (`apps/web`) and the BFF (`apps/bff`).
@@ -71,12 +93,11 @@ export type {NewVersion, PageContext, ProjectState, RuntimeInfo, SetupPatch};
  * calls (and polling/SSE for `subscribeChanges`) without modifying any page component.
  */
 export async function getRuntimeInfo(): Promise<RuntimeInfo> {
-  const {platform, user} = getApp();
-  const u = await user();
+  const u = await platform.identity.currentUser();
   return {
     user: u,
     standIns: platform.standIns,
-    endpoints: platform.models.endpoints(),
+    endpoints: gateway.labelingEndpoints(),
     hasBundledGold: hasBundledGold(),
   };
 }
@@ -95,7 +116,7 @@ export function subscribeChanges(listener: () => void): () => void {
  * In HTTP mode, this sends `multipart/form-data` or uploads directly to object storage.
  */
 export async function uploadAsset(file: File): Promise<{url: string}> {
-  return getApp().platform.files.upload(file, file.name);
+  return platform.files.upload(file, file.name);
 }
 
 /**
@@ -154,7 +175,6 @@ export {
   listProjects,
   createProject,
   getProject,
-  updateProject,
   loadProjectState,
   approveNode,
   skipGold,

@@ -2,8 +2,8 @@
 
 import {useRouter} from 'next/navigation';
 import {useEffect, useMemo, useState} from 'react';
-import type {Answer, Example, Prediction} from '@/core/types';
-import {versionLabel} from '@/core/versions';
+import type {Answer, Example, Prediction} from '@tsp/contracts';
+import {versionLabel} from '@tsp/domain';
 import {ExampleView} from '@/components/ExampleView';
 import {NotYet} from '@/components/NotYet';
 import {ProjectPage} from '@/components/Shell';

@@ -5,11 +5,16 @@ import type {
   AgentTurnOutput,
   OptimiserReflectInput,
   OptimiserReflectOutput,
-} from '../../../packages/contracts/src/agent-api.ts';
-import {FEATURES} from '../../../packages/contracts/src/catalogue.ts';
-import type {AgentModel} from '../../../packages/contracts/src/infra-api.ts';
-import type {AgentPreset, FeatureSelection, Schema} from '../../../packages/contracts/src/types.ts';
+  AgentModel,
+  AgentPreset,
+  FeatureSelection,
+  Schema,
+} from '@tsp/contracts';
+import {FEATURES} from '@tsp/domain';
 import {agentName, presetModel, PRESETS, systemPrompt} from './presets.ts';
+
+/** The front desk may only hand off to these specialists; anything else is ignored (no handoff). */
+const HANDOFF_TARGETS: AgentPreset[] = ['schema_agent', 'prompt_agent', 'evaluation_agent'];
 
 interface RawAgentReply {
   reply?: string;
@@ -111,7 +116,7 @@ export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel): Prom
   invocations.push({from: 'user', to: agent, intent, note: ''});
   let out = await invokePreset(llm, agent, intent, input);
 
-  if (out.handoff && agent === 'front_desk') {
+  if (out.handoff && agent === 'front_desk' && HANDOFF_TARGETS.includes(out.handoff.to) && PRESETS[out.handoff.to].intents[out.handoff.intent]) {
     if (out.reply) {
       messages.push({role: 'agent', agent, text: out.reply});
     }

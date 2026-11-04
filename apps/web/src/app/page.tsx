@@ -3,8 +3,8 @@
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {useEffect, useState} from 'react';
-import {NODES, nodeStatuses} from '@/core/gates';
-import type {Project} from '@/core/types';
+import {NODES, nodeStatuses} from '@tsp/domain';
+import type {Project} from '@tsp/contracts';
 import {hrefFor} from '@/components/ProjectContext';
 import {createProject, listProjects, loadProjectState} from '@/backend-api';
 import {Button, timeOf} from '@/ui';
