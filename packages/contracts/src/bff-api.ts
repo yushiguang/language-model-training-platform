@@ -16,14 +16,14 @@ import type {
   PageContext,
   Prediction,
   Project,
+  ProjectState,
   PromptImage,
   PromptVersion,
   Schema,
   SetupVersion,
   TrainingRow,
   TrainingSet,
-} from './types';
-import type {ProjectState} from './workflow';
+} from './types.ts';
 
 /**
  * Contract 1: Frontend Web App <-> BFF Service (`@tsp/contracts/bff-api`).
@@ -40,6 +40,7 @@ export interface NewVersion {
   template: string;
   features: FeatureSelection;
   images: PromptImage[];
+  /** The version this one was edited from; null for the first version. */
   parent: PromptVersion | null;
   madeBy: Actor;
   change: string;
@@ -63,7 +64,6 @@ export interface BffContract {
   listProjects(): Promise<Project[]>;
   createProject(name: string): Promise<Project>;
   getProject(id: string): Promise<Project | null>;
-  updateProject(p: Project): Promise<Project>;
   loadProjectState(projectId: string): Promise<ProjectState | null>;
   approveNode(projectId: string, node: NodeId): Promise<void>;
   skipGold(projectId: string): Promise<void>;
@@ -82,7 +82,8 @@ export interface BffContract {
   importBundledGold(projectId: string, schema: Schema, schemaVersion: number, examples: Example[]): Promise<{saved: number; skipped: number}>;
 
   // Prompts, evaluation & optimiser
-  createVersion(projectId: string, all: PromptVersion[], v: NewVersion): Promise<PromptVersion>;
+  /** Version numbers are assigned by the catalog, never by the browser. */
+  createVersion(projectId: string, v: NewVersion): Promise<PromptVersion>;
   scoreVersion(projectId: string, version: PromptVersion, only?: EndpointId): Promise<void>;
   tick(state: ProjectState): Promise<void>;
   stopRun(runId: string): void;

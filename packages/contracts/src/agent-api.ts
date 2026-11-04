@@ -1,4 +1,4 @@
-import type { RawExample } from './infra-api';
+import type {AgentModel, RawExample} from './platform-api.ts';
 import type {
   AgentPreset,
   ChatAttachment,
@@ -8,7 +8,7 @@ import type {
   MixUp,
   PageContext,
   Schema,
-} from './types';
+} from './types.ts';
 
 /**
  * Contract 2: BFF <-> Agent Runtime Service (`@tsp/contracts/agent-api`).
@@ -92,4 +92,10 @@ export interface OptimiserReflectInput {
 export interface OptimiserReflectOutput {
   template: string;
   change: string;
+}
+
+/** The agent runtime as the bff sees it (implemented by `apps/agents`). */
+export interface AgentRuntimeContract {
+  runAgentTurn(input: AgentTurnInput, llm: AgentModel): Promise<AgentTurnOutput>;
+  reflectPrompt(input: OptimiserReflectInput, llm: AgentModel): Promise<OptimiserReflectOutput>;
 }

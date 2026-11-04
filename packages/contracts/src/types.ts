@@ -157,6 +157,7 @@ export interface Prediction {
 
 export type JobState = 'running' | 'paused' | 'done' | 'failed' | 'stopped';
 
+/** Page view of one eval or optimiser labeling task (see `@tsp/contracts` labeling-api). */
 export interface LabelingRun {
   id: string;
   projectId: string;
@@ -244,12 +245,17 @@ export interface TrainingSet {
   snapshotId: string;
   evaluated: boolean;
   reportId: string | null;
-  batchJobId: string | null;
+  /** The labeling task that produces this training set's predictions. */
+  taskId: string;
+  /** Setup version whose schema the answers are checked against. */
+  setupVersionId: string;
   state: JobState;
   total: number;
   done: number;
   labeled: number;
   invalid: number;
+  /** Examples whose model call failed after all retries ("Retry failed" re-runs them). */
+  failed: number;
   costUsd: number;
   estimateUsd: number;
   error: string | null;
@@ -367,5 +373,43 @@ export interface SamplingTask {
   startedAt: string;
   state: 'running' | 'done' | 'stopped' | 'failed';
   error: string | null;
+}
+
+
+// ---------------------------------------------------------------------------------------------
+// Views shared by the bff and the web app.
+
+/** The facts the gate checks read (see `@tsp/domain` gates). */
+export interface WorkflowFacts {
+  setup: SetupVersion | null;
+  snapshot: DatasetSnapshot | null;
+  goldEvalDone: number;
+  goldTestDone: number;
+  versions: number;
+  /** Versions with a report that passes the current thresholds, per model. */
+  passing: {promptVersionId: string; endpoint: EndpointId}[];
+  trainingSet: TrainingSet | null;
+  approved: NodeId[];
+}
+
+/** Everything a page needs about one project, read in one go. */
+export interface ProjectState {
+  project: Project;
+  setup: SetupVersion | null;
+  snapshot: DatasetSnapshot | null;
+  examples: Example[];
+  gold: Map<string, GoldLabel>;
+  staleGold: Map<string, GoldLabel>;
+  versions: PromptVersion[];
+  reports: (EvalReport & {passed: boolean; archivedNow: boolean})[];
+  runs: LabelingRun[];
+  optimisation: OptimisationRun[];
+  trainingSets: TrainingSet[];
+  facts: WorkflowFacts;
+  contextId: string;
+  /** Available preset endpoints from the model runtime. */
+  endpoints: EndpointInfo[];
+  /** Active or recently finished sampling task, if any. */
+  samplingTask: SamplingTask | null;
 }
 
