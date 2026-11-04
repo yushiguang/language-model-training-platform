@@ -98,7 +98,7 @@ export async function runOptimiser(projectId: string, endpoint: EndpointId, budg
         gateway.agentModel(),
       );
       const same = [...placeholderKeys(out.template)].sort().join() === [...placeholderKeys(parent.template)].sort().join();
-      if (!same || checkTemplate(out.template, parent.features).errors.length || state.versions.some(v => v.template === out.template)) {
+      if (!same || checkTemplate(out.template, parent.features, {images: parent.images}).errors.length || state.versions.some(v => v.template === out.template)) {
         run.candidates++;
         wasted++;
         tm().counter('tsp_optimiser_candidates_total', {slot: endpoint, result: !same ? 'placeholders_changed' : 'rejected'});

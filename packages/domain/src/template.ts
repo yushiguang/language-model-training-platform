@@ -36,7 +36,7 @@ export type Fix =
 
 export interface Issue {
   severity: 'error' | 'warning';
-  code: 'unknown_key' | 'not_ticked' | 'unused_feature' | 'broken_braces' | 'one_type_only' | 'image_cost' | 'value_missing';
+  code: 'unknown_key' | 'not_ticked' | 'unused_feature' | 'broken_braces' | 'missing_image' | 'one_type_only' | 'image_cost' | 'value_missing';
   message: string;
   key?: string;
   line?: number;
@@ -88,7 +88,7 @@ const tickedAnywhere = (sel: FeatureSelection, key: string) => sel.video.include
  * The one check function. The editor calls it live, Save runs it again and refuses a version
  * with errors, and the optimiser runs it on every candidate.
  */
-export function checkTemplate(template: string, sel: FeatureSelection, opts: {schema?: Schema | null; types?: ExampleType[]; costNote?: string} = {}): CheckResult {
+export function checkTemplate(template: string, sel: FeatureSelection, opts: {schema?: Schema | null; types?: ExampleType[]; costNote?: string; images?: PromptImage[]} = {}): CheckResult {
   const errors: Issue[] = [];
   const warnings: Issue[] = [];
   const used = placeholders(template);
@@ -140,6 +140,21 @@ export function checkTemplate(template: string, sel: FeatureSelection, opts: {sc
 
   for (const b of brokenBraces(template)) {
     errors.push({severity: 'error', code: 'broken_braces', line: b.line, message: `Line ${b.line} has an unmatched {{ or }}: "${b.text.slice(0, 48)}"`, fixes: []});
+  }
+
+  // [Image N] needs prompt image N; otherwise the text "[Image N]" would go to the model.
+  if (opts.images) {
+    for (const n of new Set(fixedImageRefs(template))) {
+      if (n >= 1 && n <= opts.images.length) continue;
+      const line = template.slice(0, template.indexOf(`[Image ${n}]`)).split('\n').length;
+      errors.push({
+        severity: 'error',
+        code: 'missing_image',
+        line,
+        message: `[Image ${n}] is in the prompt, but the prompt has ${opts.images.length ? `only ${opts.images.length} image${opts.images.length === 1 ? '' : 's'}` : 'no images'}.`,
+        fixes: [],
+      });
+    }
   }
 
   const types = opts.types ?? ['video', 'photo_text'];

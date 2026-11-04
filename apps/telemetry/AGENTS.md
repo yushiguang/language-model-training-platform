@@ -9,12 +9,17 @@ Metrics and product events. Contract: `TelemetryPort` and the catalogues `METRIC
   `TelemetryPort`.
   - Metrics are Prometheus style (`tsp_*`): counters, gauges and cumulative histograms kept in
     memory; `render()` gives the text exposition. The port adds `app` (from the name prefix) and
-    `env`. Only declared labels are kept; a value that looks like an id, is empty or is longer
-    than 48 characters becomes `other`, so label sets stay small.
+    `env`. Only declared labels are kept, and only values listed for that label in
+    `LABEL_VALUES`; anything else becomes `other`, so label sets stay small and an id or email
+    can never be a label value. Values known only at startup are added with
+    `allowLabelValues` (endpoints and models by the llm-gateway, catalog ops, bff methods); ids,
+    emails and text are refused there too. A counter ignores negative, NaN and infinite amounts.
   - Events carry an envelope: event, ts, event_id, session_id (renewed after 30 min idle),
-    user_id, project_id, page, app_version, props. The newest 500 are buffered while the sink is
-    slow.
-  - `flush()` runs every 10 s, when the page hides, and on demand; it never throws.
+    user_id, project_id, page, app_version, props. Props are checked against `EVENT_PROP_KEYS`:
+    other keys are dropped, a string must be a short token (no spaces, no `@`) or it becomes
+    `other`, numbers must be finite. The newest 500 are buffered while the sink is slow.
+  - `flush()` runs every 10 s, when the page hides, and on demand; it never throws. A flush asked
+    for during another one runs after it, so what it awaits includes everything buffered.
 - The browser cannot be scraped, so metrics are pushed with events. A server-side app later
   exposes `render()` on `/metrics` instead.
 

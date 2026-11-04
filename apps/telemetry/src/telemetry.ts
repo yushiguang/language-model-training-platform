@@ -1,4 +1,4 @@
-import {METRICS, type EventName, type EventProps, type Labels, type MetricName, type TelemetryContext, type TelemetryEvent, type TelemetryPort, type TelemetrySink} from '@tsp/contracts';
+import {EVENT_PROP_KEYS, LABEL_VALUES, METRICS, type EventName, type EventProps, type Labels, type MetricName, type TelemetryContext, type TelemetryEvent, type TelemetryPort, type TelemetrySink} from '@tsp/contracts';
 
 export interface TelemetryOptions {
   sink: TelemetrySink;
@@ -22,12 +22,24 @@ function appOf(name: string): string {
   return 'bff';
 }
 
-/** Ids and free text never become label values (they would make a series per project or user). */
-const ID_LIKE = /^[a-z]{2,3}_[0-9a-f]{6,}$|^[0-9a-f-]{16,}$|\s/;
-const labelValue = (v: string | number | boolean) => {
-  const s = String(v);
-  return !s || s.length > 48 || ID_LIKE.test(s) ? 'other' : s;
-};
+/** Never allowed as a label value, even when an app declares it: ids, emails, free text. */
+const NOT_A_LABEL = /^[a-z]{2,3}_[0-9a-z]+$|^[0-9a-f-]{16,}$|[\s@]/;
+/** A string event prop: a short token (id, enum, page, language), never text. */
+const TOKEN = /^[A-Za-z0-9_.:\/-]{0,64}$/;
+
+/** Keeps only the props declared for the event; strings must be tokens, numbers finite. */
+function cleanProps(name: EventName, props: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const given = (props ?? {}) as Record<string, unknown>;
+  for (const k of EVENT_PROP_KEYS[name] ?? []) {
+    const v = given[k];
+    if (v === undefined) continue;
+    if (v === null || typeof v === 'boolean') out[k] = v;
+    else if (typeof v === 'number') out[k] = Number.isFinite(v) ? v : null;
+    else if (typeof v === 'string') out[k] = TOKEN.test(v) ? v : 'other';
+  }
+  return out;
+}
 const escape = (s: string) => s.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/"/g, '\\"');
 
 interface Hist {
@@ -53,11 +65,17 @@ export function createTelemetry(opts: TelemetryOptions): TelemetryPort & {stop()
   let session = rand();
   let lastEventAt = now();
   let flushing: Promise<void> | null = null;
+  // Each label's allowed values; anything else is counted as `other`.
+  const allowed = new Map(Object.entries(LABEL_VALUES).map(([k, v]) => [k, new Set(v)]));
+  const labelValue = (label: string, v: string | number | boolean) => {
+    const s = String(v);
+    return allowed.get(label)?.has(s) ? s : 'other';
+  };
 
   const keyOf = (name: MetricName, labels: Labels = {}) => {
     const spec = METRICS[name];
     const clean: Record<string, string> = {app: appOf(name), env};
-    for (const l of spec.labels) if (labels[l] !== undefined) clean[l] = labelValue(labels[l]);
+    for (const l of spec.labels) if (labels[l] !== undefined) clean[l] = labelValue(l, labels[l]);
     const key = Object.entries(clean)
       .map(([k, v]) => `${k}=${v}`)
       .join(',');
@@ -77,7 +95,7 @@ export function createTelemetry(opts: TelemetryOptions): TelemetryPort & {stop()
   const port: TelemetryPort & {stop(): void} = {
     counter: (name, labels, by = 1) =>
       safe(() => {
-        if (!(by >= 0)) return;
+        if (!(by >= 0) || !Number.isFinite(by)) return;
         const {m, key, clean} = keyOf(name, labels);
         const s = m.get(key);
         if (s) (s.value as number) += by;
@@ -106,12 +124,20 @@ export function createTelemetry(opts: TelemetryOptions): TelemetryPort & {stop()
         const t = now();
         if (t - lastEventAt > SESSION_IDLE_MS) session = rand();
         lastEventAt = t;
-        events.push({event: name, ts: new Date(t).toISOString(), event_id: rand(), session_id: session, user_id: ctx.userId, project_id: ctx.projectId, page: ctx.page, app_version: opts.appVersion ?? 'dev', props});
+        if (!(name in EVENT_PROP_KEYS)) return;
+        const clean = cleanProps(name, props) as EventProps[E];
+        events.push({event: name, ts: new Date(t).toISOString(), event_id: rand(), session_id: session, user_id: ctx.userId, project_id: ctx.projectId, page: ctx.page, app_version: opts.appVersion ?? 'dev', props: clean});
         if (events.length > max) events = events.slice(events.length - max);
       }),
     setContext: c => {
       ctx = {...ctx, ...c} as Required<TelemetryContext>;
     },
+    allowLabelValues: (label, values) =>
+      safe(() => {
+        let set = allowed.get(label);
+        if (!set) allowed.set(label, (set = new Set()));
+        for (const v of values) if (v && v.length <= 48 && !NOT_A_LABEL.test(v)) set.add(v);
+      }),
     render() {
       const out: string[] = [];
       for (const name of Object.keys(METRICS) as MetricName[]) {
@@ -137,20 +163,23 @@ export function createTelemetry(opts: TelemetryOptions): TelemetryPort & {stop()
       return out.join('\n') + (out.length ? '\n' : '');
     },
     flush() {
-      if (flushing) return flushing;
-      const batch = events;
-      events = [];
-      flushing = (async () => {
+      // A flush asked for while one is sending runs after it, so events buffered meanwhile are
+      // sent too (a caller on page hide can rely on what it awaited).
+      const prev = flushing ?? Promise.resolve();
+      const mine: Promise<void> = prev.then(async () => {
+        const batch = events;
+        events = [];
         try {
           if (batch.length) await opts.sink.pushEvents(batch);
           await opts.sink.pushMetrics(port.render());
         } catch {
           // lost: telemetry may drop data, the audit log is the record
         } finally {
-          flushing = null;
+          if (flushing === mine) flushing = null;
         }
-      })();
-      return flushing;
+      });
+      flushing = mine;
+      return mine;
     },
     stop: () => {
       if (timer) clearInterval(timer);

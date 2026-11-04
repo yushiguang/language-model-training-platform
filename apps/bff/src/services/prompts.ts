@@ -8,7 +8,7 @@ export type {NewVersion};
 /** Saves a new version. Versions are never overwritten, a template with check errors is refused, and the catalog picks the number. */
 export async function createVersion(projectId: string, v: NewVersion): Promise<PromptVersion> {
   const {catalog, user} = getApp();
-  const check = checkTemplate(v.template, v.features, {schema: v.schema});
+  const check = checkTemplate(v.template, v.features, {schema: v.schema, images: v.images});
   if (check.errors.length) throw new Error(`Fix ${check.errors.length} error${check.errors.length > 1 ? 's' : ''} in Checks first.`);
   const version = await catalog.createPromptVersion({
     projectId,

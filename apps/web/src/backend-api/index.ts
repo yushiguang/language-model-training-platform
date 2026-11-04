@@ -64,6 +64,7 @@ export const track = web.track;
  * a failed call also counts as a backend error on the page.
  */
 function timed<A extends unknown[], R>(method: string, fn: (...a: A) => R): (...a: A) => R {
+  telemetry.allowLabelValues('method', [method]);
   return (...a: A): R => {
     const started = Date.now();
     const end = (outcome: 'ok' | 'error') => {

@@ -90,6 +90,7 @@ const KIND_OF: Partial<Record<keyof CatalogContract, CatalogKind>> = {createProm
 /** Counts and times every catalog operation (`tsp_catalog_*`), without changing what it does. */
 function instrument(c: CatalogContract, tm: TelemetryPort): CatalogContract {
   if (tm === NO_TELEMETRY) return c;
+  tm.allowLabelValues('op', Object.keys(c));
   const out = {} as Record<string, unknown>;
   for (const [op, fn] of Object.entries(c) as [keyof CatalogContract, (...a: unknown[]) => Promise<unknown>][]) {
     out[op] = async (...args: unknown[]) => {

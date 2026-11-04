@@ -84,3 +84,18 @@ test('diff', () => {
   const d = diffLines('a\nb\nc', 'a\nx\nc\nd');
   assert.deepEqual(d.map(l => l.kind), ['same', 'del', 'add', 'same', 'add']);
 });
+
+test('[Image N] without prompt image N is an error, so deleting an image used in the prompt is caught at Save', () => {
+  const t = 'Look at [Image 1] and [Image 2].\nDesc: {{Description}}\nF {{Frame}} T {{Title}} L {{Language}}';
+  const one = [{id: 'im_1', url: 'a.png', name: 'a'}] as never[];
+  const r = checkTemplate(t, sel, {images: one});
+  assert.deepEqual(r.errors.map(e => e.code), ['missing_image']);
+  assert.match(r.errors[0].message, /\[Image 2\].*only 1 image/);
+  assert.equal(checkTemplate(t, sel, {images: [...one, ...one]}).errors.length, 0);
+});
+
+test('a multi-select answer with the same value twice keeps it once', async () => {
+  const {parseOutput} = await import('./labels.ts');
+  const schema: Schema = {policy: '', fields: [{name: 'topic', kind: 'multi', values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}]}]};
+  assert.deepEqual(parseOutput('{"topic": ["Food", "Food", "Travel"]}', schema).answer, {topic: ['Food', 'Travel']});
+});

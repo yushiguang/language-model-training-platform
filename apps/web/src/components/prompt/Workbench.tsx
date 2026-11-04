@@ -17,7 +17,10 @@ export interface Draft {
 }
 
 export function useChecks(draft: Draft, schema: Schema | null | undefined, types: ('video' | 'photo_text')[]): CheckResult {
-  return useMemo(() => checkTemplate(draft.template, draft.features, {schema, types, costNote: 'Image features make up most of the cost of each call; the estimate under the button counts them.'}), [draft.template, draft.features, schema, types]);
+  return useMemo(
+    () => checkTemplate(draft.template, draft.features, {schema, types, images: draft.images, costNote: 'Image features make up most of the cost of each call; the estimate under the button counts them.'}),
+    [draft.template, draft.features, draft.images, schema, types],
+  );
 }
 
 /** Editor + prompt images + checks on the left, features on the right. Used by "start" and "edit". */

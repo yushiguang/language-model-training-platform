@@ -90,6 +90,42 @@ export const METRICS = {
 } as const satisfies Record<string, Spec>;
 
 export type MetricName = keyof typeof METRICS;
+
+/**
+ * Allowed values for each metric label. A value that is not listed becomes `other`, so an id, an
+ * email or free text can never become a label value. Labels whose values are only known at
+ * startup start empty and are filled by the app that owns them (`TelemetryPort.allowLabelValues`):
+ * `endpoint` and `model` by the llm-gateway (its registry), `op` by the catalog, `method` by the
+ * web composition root (the bff calls it wraps).
+ */
+export const LABEL_VALUES: Record<string, readonly string[]> = {
+  purpose: ['labeling', 'chat'],
+  outcome: ['ok', 'error', 'rate_limited', 'server', 'timeout', 'rejected', 'aborted', 'gave_up', 'shown', 'accepted', 'cancelled', 'approved', 'discarded', 'joined', 'passes', 'no_new_ideas', 'budget', 'stopped', 'failed'],
+  reason: ['rate_limited', 'server', 'timeout', 'user', 'budget', 'failures', 'closed', 'none'],
+  kind: ['input', 'output', 'reasoning', 'qpm', 'tpm', 'concurrency', 'script', 'asset', 'backend', 'image', 'schema', 'prompt', 'other'],
+  assumed: ['true', 'false'],
+  task_purpose: ['eval', 'optimiser', 'test', 'training'],
+  trigger: ['system', 'user'],
+  state: ['queued', 'running', 'paused', 'needs_attention', 'done', 'stopped', 'failed'],
+  result: ['valid', 'invalid', 'failed', 'kept', 'rejected', 'placeholders_changed'],
+  agent: ['front_desk', 'schema_agent', 'prompt_agent', 'evaluation_agent'],
+  from: ['front_desk'],
+  to: ['schema_agent', 'prompt_agent', 'evaluation_agent'],
+  intent: ['answer', 'propose_schema', 'revise_schema', 'draft_prompt', 'revise_prompt', 'explain_version', 'explain_report', 'reflect'],
+  tool: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions', 'check_template', 'try_template', 'score_version', 'start_optimiser'],
+  page: ['projects', 'setup', 'dataset', 'gold', 'prompt', 'prompt_edit', 'compare', 'report', 'training', 'other'],
+  slot: ['A', 'B'],
+  what: ['score', 'resume', 'optimiser', 'try_template', 'score_version', 'start_optimiser', 'final_run', 'test_answers'],
+  decision: ['started', 'asked_off', 'asked_over_single_cap', 'asked_over_project_cap', 'asked_paused_over_budget'],
+  node: ['setup', 'dataset', 'gold', 'prompt', 'training'],
+  action: ['approve', 'refused', 'skip'],
+  collection: ['projects', 'setup_versions', 'dataset_snapshots', 'examples', 'gold_labels', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'training_sets', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'recommendations', 'audit_log'],
+  // Filled at startup (see above).
+  endpoint: [],
+  model: [],
+  op: [],
+  method: [],
+};
 type OfType<T extends Spec['type']> = {[K in MetricName]: (typeof METRICS)[K]['type'] extends T ? K : never}[MetricName];
 export type CounterName = OfType<'counter'>;
 export type GaugeName = OfType<'gauge'>;
@@ -176,6 +212,84 @@ export interface EventProps {
 
 export type EventName = keyof EventProps;
 
+/**
+ * The props each event may carry, checked when the event is recorded: other keys are dropped,
+ * and a string prop must be a short token (an id, an enum, a page), never text. Keep in step with
+ * `EventProps` (the type below makes a missing event or an unknown prop name a compile error).
+ */
+export const EVENT_PROP_KEYS: {[E in EventName]: readonly (keyof EventProps[E] & string)[]} = {
+  // Session and navigation
+  session_started: ['viewport', 'language'],
+  page_viewed: ['from_page', 'version_id', 'slot'],
+  page_left: ['seconds_visible', 'seconds_idle'],
+  step_reached: ['node', 'minutes_since_project_created'],
+  project_created: [],
+  project_opened: ['node', 'days_since_last_open'],
+  project_finished: ['minutes_since_created', 'total_cost_usd', 'versions', 'gold_labels'],
+  // Setup
+  task_described: ['chars', 'attachments', 'example_ids'],
+  schema_proposal_shown: ['agent', 'fields', 'values', 'revision'],
+  schema_approved: ['fields', 'values', 'schema_version', 'revisions_before', 'edited_before_approve'],
+  schema_discarded: ['revision'],
+  schema_changed_after_labels: ['gold_labels_needing_recheck', 'reports_archived'],
+  thresholds_saved: ['mode', 'changed'],
+  models_saved: ['slots', 'temperature_changed'],
+  auto_start_switched: ['on'],
+  // Dataset
+  sample_started: ['requested'],
+  sample_finished: ['fetched', 'seconds', 'outcome'],
+  dataset_uploaded: ['rows', 'valid', 'invalid', 'video', 'photo_text'],
+  dataset_upload_failed: ['reason'],
+  split_applied: ['eval', 'test', 'train', 'used_recommended'],
+  // Gold Labels
+  model_answer_revealed: ['split', 'had_answer'],
+  gold_label_saved: ['split', 'revealed', 'seconds_on_example', 'matches_model', 'was_recheck'],
+  gold_labels_uploaded: ['source', 'saved', 'skipped'],
+  gold_skipped: ['eval_done', 'eval_total'],
+  test_answers_requested: ['estimate_usd', 'examples'],
+  // Prompt Engineering
+  prompt_draft_requested: [],
+  template_fix_applied: ['code', 'fix'],
+  feature_toggled: ['group', 'key', 'on'],
+  prompt_image_added: ['images_now'],
+  prompt_preview_opened: ['example_type'],
+  version_created: ['made_by', 'kind', 'from_version_id', 'warnings', 'lines_added', 'lines_removed'],
+  version_scored: ['version_id', 'slot', 'lowest_field_macro_f1', 'passed', 'cost_usd', 'trigger'],
+  report_opened: ['version_id', 'slot', 'from_page'],
+  compare_opened: [],
+  advice_shown: ['kind'],
+  advice_followed: ['kind', 'seconds_after_shown'],
+  optimiser_started: ['slot', 'trigger', 'resumed'],
+  optimiser_stopped_by_user: ['slot', 'candidates', 'cost_usd'],
+  optimiser_ended: ['slot', 'outcome', 'candidates', 'kept', 'cost_usd', 'best_lowest_field_macro_f1'],
+  rerun_requested: ['version_id', 'slot'],
+  // Training and test sets
+  final_run_confirm_shown: ['train', 'test_to_label', 'test_with_gold', 'test_with_answers', 'estimate_usd', 'evaluated'],
+  final_run_started: ['version_id', 'slot', 'label_test', 'estimate_usd'],
+  final_run_resumed: ['after', 'done', 'total'],
+  final_run_stopped_by_user: ['done', 'total'],
+  final_run_ended: ['state', 'train_rows', 'test_rows', 'invalid_rate', 'cost_usd', 'estimate_usd', 'minutes'],
+  low_count_warning_shown: ['values_below_min'],
+  export_downloaded: ['set', 'format', 'rows'],
+  // Assistant and agents
+  assistant_opened: [],
+  assistant_minimised: [],
+  chat_message_sent: ['entry_agent', 'chars', 'attachments'],
+  agent_replied: ['agent', 'seconds', 'handoff_to', 'tool_calls', 'proposal_kind'],
+  agent_tool_called: ['agent', 'tool', 'ok', 'ms'],
+  prompt_proposal_shown: ['agent'],
+  prompt_proposal_approved: ['agent', 'edited_before_approve'],
+  prompt_proposal_discarded: ['agent'],
+  start_card_shown: ['tool', 'estimate_usd'],
+  start_card_accepted: ['tool', 'estimate_usd'],
+  start_card_cancelled: ['tool', 'estimate_usd'],
+  auto_started: ['what', 'estimate_usd', 'project_auto_spend_usd'],
+  // Problems
+  error_shown: ['code', 'where'],
+  stale_page_made_read_only: ['reason'],
+  run_needs_attention: ['task_purpose', 'failed', 'total'],
+};
+
 /** One product event as the sink receives it. */
 export interface TelemetryEvent<E extends EventName = EventName> {
   event: E;
@@ -202,6 +316,8 @@ export interface TelemetryPort {
   histogram(m: HistogramName, value: number, labels?: Labels): void;
   event<E extends EventName>(name: E, props: EventProps[E]): void;
   setContext(ctx: TelemetryContext): void;
+  /** Adds values a label may take that are only known at startup (see `LABEL_VALUES`). */
+  allowLabelValues(label: string, values: readonly string[]): void;
   /** Prometheus text exposition of everything counted so far. */
   render(): string;
   /** Sends what is buffered now (also runs on a timer and when the page hides). */
@@ -222,6 +338,7 @@ export const NO_TELEMETRY: TelemetryPort = {
   histogram() {},
   event() {},
   setContext() {},
+  allowLabelValues() {},
   render: () => '',
   flush: async () => {},
 };

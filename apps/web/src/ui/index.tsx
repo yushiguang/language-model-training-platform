@@ -4,6 +4,10 @@
  * Our component layer. Astryx is a 0.x beta, so screens import from here, never from Astryx
  * directly; a breaking Astryx release then only touches this file.
  */
+import Link from 'next/link';
+import {Theme} from '@astryxdesign/core/theme';
+import {LinkProvider} from '@astryxdesign/core/Link';
+import {neutralTheme} from '@astryxdesign/theme-neutral/built';
 import {Button as AxButton} from '@astryxdesign/core/Button';
 import {Badge as AxBadge} from '@astryxdesign/core/Badge';
 import {Dialog as AxDialog, DialogHeader} from '@astryxdesign/core/Dialog';
@@ -21,6 +25,15 @@ type BtnProps = {
   end?: ReactNode;
   className?: string;
 };
+
+/** Theme and link handling for every component below; mounted once around the whole app. */
+export function UiProvider({children}: {children: ReactNode}) {
+  return (
+    <Theme theme={neutralTheme} mode="light">
+      <LinkProvider component={Link}>{children}</LinkProvider>
+    </Theme>
+  );
+}
 
 export function Button({label, variant = 'secondary', size = 'md', onClick, href, disabled, loading, icon, end, className}: BtnProps) {
   return (

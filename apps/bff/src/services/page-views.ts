@@ -287,7 +287,7 @@ export function agentTools(projectId: string, cards: StartCard[] = []): AgentToo
           const template = typeof args.template === 'string' ? args.template : '';
           const v = state.versions[0];
           const features = (args.features as PromptVersion['features'] | undefined) ?? v?.features ?? {video: [], photo_text: [], metadata: []};
-          const r = checkTemplate(template, features, {schema: state.setup?.schema, types: [...new Set(state.examples.map(e => e.type))]});
+          const r = checkTemplate(template, features, {schema: state.setup?.schema, types: [...new Set(state.examples.map(e => e.type))], images: v?.images ?? []});
           return {errors: r.errors.map(e => e.message), warnings: r.warnings.map(w => w.message)};
         }
         default:

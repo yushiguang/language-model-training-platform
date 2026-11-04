@@ -51,6 +51,9 @@ const costOf = (ep: EndpointConfig, inputTokens: number, outputTokens: number) =
 export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'endpoints'>, opts: GatewayOptions = {}): LlmGatewayContract {
   const registry = buildRegistry(platform);
   const tm = opts.telemetry ?? NO_TELEMETRY;
+  // Endpoint ids and models are label values; only the registry's own may appear.
+  tm.allowLabelValues('endpoint', registry.map(e => e.id));
+  tm.allowLabelValues('model', registry.map(e => e.model));
   for (const ep of registry)
     for (const [kind, v] of [['qpm', ep.qpm], ['tpm', ep.tpm], ['concurrency', ep.maxConcurrency]] as const) tm.gauge('tsp_llm_endpoint_limit', v, {endpoint: ep.id, kind, assumed: ep.assumed});
   const delays = opts.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;

@@ -13,11 +13,14 @@ changing, because apps only talk through the contracts in `@tsp/contracts`.
 - **No real examples.** Real data is loaded from `NEXT_PUBLIC_EXAMPLES_URL`; only the made-up
   sample in `apps/web/public/sample-data/` lives here.
 - **Stay inside your boundary.** `npm run check:boundaries` fails when a package imports something
-  it may not (table below). Apps never import each other.
+  it may not (table below), in any source file of an app or package (scripts and config too;
+  static, side-effect and dynamic imports and `require`), or when an alias in a tsconfig or
+  `next.config.mjs` points somewhere else. Apps never import each other.
 - **A contract change is its own change.** Changing a type in `packages/contracts` affects the
   internal adapters too: say so in the PR title and description (see the handover guide).
 - **No content in telemetry.** Metrics and events carry counts, ids, enums and durations only
   (`packages/contracts/src/telemetry.ts`); never prompt or chat text, features, names or emails.
+  The telemetry app enforces it: label values and event props are allowlisted there.
 - **Check before pushing:** `npm run check && npm run build`. For changes to labeling, the
   bff or pages, also run the browser check: `node apps/web/scripts/e2e-check.cjs` against a
   served build (needs Playwright with Chromium).

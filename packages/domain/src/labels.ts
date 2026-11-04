@@ -14,7 +14,8 @@ export function parseOutput(text: string, schema: Schema): {answer: Answer | nul
   const answer: Answer = {};
   for (const f of schema.fields) {
     const raw = obj[f.name];
-    const list = (Array.isArray(raw) ? raw : raw == null ? [] : [raw]).map(String);
+    // The same value twice counts once.
+    const list = [...new Set((Array.isArray(raw) ? raw : raw == null ? [] : [raw]).map(String))];
     const names = f.values.map(v => v.name);
     const bad = list.find(v => !names.includes(v));
     if (bad) return {answer: null, reason: `"${bad}" isn't a value of ${f.name}`};
