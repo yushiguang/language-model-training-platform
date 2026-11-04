@@ -47,8 +47,9 @@ export interface LabelingTask {
   /** Examples labeled at once. */
   parallel: number;
   /**
-   * Examples whose saved answer for this version, model and settings is invalid are labeled once
-   * more (the final run: such a test example has no label yet). A valid answer wins.
+   * Examples whose saved answer for this version, model and settings is invalid, saved before
+   * this task was created, are labeled once more (the final run: such a test example has no
+   * label yet). A valid answer wins. Invalid answers this task saves itself are its results.
    */
   relabelInvalid?: boolean;
   state: TaskState;

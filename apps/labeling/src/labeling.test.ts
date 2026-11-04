@@ -281,3 +281,16 @@ test('an example that failed in one run and was saved by another counts as done,
   const r = await lab.runTask(a.id);
   assert.deepEqual([r?.state, r?.done, r?.failed], ['done', 3, 0]);
 });
+
+test('relabelInvalid does not try again an invalid answer the same task saved before a pause', async () => {
+  const {db, catalog, v, ids} = await setup(6, 'lab-relabel-own');
+  const stats = {inFlight: 0, maxInFlight: 0, calls: 0};
+  const lab = createLabeling({db, catalog, gateway: fakeGateway(async () => 'not json', stats), locks: memoryLocks()});
+  const t = await lab.createTask(input(ids, v, {relabelInvalid: true, budgetUsd: 0.02, parallel: 1}));
+  const paused = await lab.runTask(t.id);
+  assert.equal(paused?.stopReason, 'budget');
+  let done: Awaited<ReturnType<typeof lab.runTask>> = paused;
+  for (let i = 0; i < 5 && done?.state !== 'done'; i++) done = await lab.runTask(t.id, 'user', {extendBudget: true});
+  assert.deepEqual([done?.state, done?.done, done?.invalid], ['done', 6, 6]);
+  assert.equal(stats.calls, 6, 'each example called once: its own invalid answers are results');
+});

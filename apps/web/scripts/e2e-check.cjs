@@ -225,7 +225,9 @@ const errors = [];
     const leaks = ev.filter(e => /Short-video tagging|Tag short videos/.test(JSON.stringify(e))).length;
     const text = globalThis.__tspMetrics || '';
     const series = [...new Set(text.split('\n').filter(l => l && !l.startsWith('#')).map(l => l.split(/[{ ]/)[0].replace(/_(bucket|sum|count)$/, '')))];
-    return {events: ev.length, names, leaks, metricNames: series.length, sample: series.filter(s => /tsp_(llm_requests|labeling_examples|agent_turns|bff_calls|web_page_views|auto_starts|cost_confirms)/.test(s))};
+    // Labels whose values come from the running apps: none should fall back to "other".
+    const undeclared = [...new Set([...text.matchAll(/\b(endpoint|model|method|op|collection)="other"/g)].map(m => m[1]))];
+    return {events: ev.length, names, leaks, undeclared, metricNames: series.length, sample: series.filter(s => /tsp_(llm_requests|labeling_examples|agent_turns|bff_calls|web_page_views|auto_starts|cost_confirms)/.test(s))};
   });
   log('telemetry:', JSON.stringify(tel));
   log('console errors:', errors.length ? errors : 'none');
@@ -247,6 +249,7 @@ const errors = [];
     facts.cardsApproved === 1 &&
     tel.events > 0 &&
     tel.leaks === 0 &&
+    tel.undeclared.length === 0 &&
     tel.sample.length >= 4 &&
     preview.images > 0 &&
     !errors.length;

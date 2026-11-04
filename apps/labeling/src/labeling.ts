@@ -140,8 +140,12 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     // Counters are rebuilt from saved predictions, so a crash never leaves them wrong.
     const all = await allPredictions(task.promptVersionId, task.endpoint, task.settingsHash);
     const best = (id: string) => all.get(id)?.find(p => p.answer) ?? all.get(id)?.[0];
-    // Under relabelInvalid, an example whose only answer is invalid is labeled once more.
-    const again = (id: string) => !!task.relabelInvalid && all.get(id)?.length === 1 && !all.get(id)![0].answer;
+    // Under relabelInvalid, an example whose only answer is invalid and older than this task is
+    // labeled once more. An answer this task saved (before a pause) is its result, like any other.
+    const again = (id: string) => {
+      const ps = all.get(id);
+      return !!task.relabelInvalid && ps?.length === 1 && !ps[0].answer && ps[0].createdAt < task.createdAt;
+    };
     const mine = task.exampleIds.filter(id => best(id) && !again(id)).map(id => best(id)!);
     // An example another run saved since it failed here is done, not failed.
     const failedSet = new Set(task.failedExampleIds.filter(id => !mine.some(p => p.exampleId === id)));
