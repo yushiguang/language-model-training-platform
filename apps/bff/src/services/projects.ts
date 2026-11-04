@@ -1,6 +1,6 @@
 import {DocFieldValue, type GateApproval, type NodeId, type Project, type ProjectState, type WorkflowFacts} from '@tsp/contracts';
 import {compareVersions, contextIdFor, gate, judge, newId} from '@tsp/domain';
-import {emitChange, getApp, now} from './app.ts';
+import {emitChange, getApp, now, tm} from './app.ts';
 import {getSamplingTask} from './dataset.ts';
 import {latestGold} from './evaluation.ts';
 import {runView, trainingView} from './views.ts';
@@ -17,6 +17,8 @@ export async function createProject(name: string): Promise<Project> {
   const p: Project = {id: newId('pr'), name, createdAt: now(), createdBy: u.name, setupVersionId: null, snapshotId: null, approvedNodes: []};
   await catalog.insert('projects', p);
   await catalog.audit(p.id, u.name, 'project.create', {name});
+  tm().setContext({projectId: p.id});
+  tm().event('project_created', {});
   emitChange();
   return p;
 }
@@ -92,12 +94,22 @@ export async function approveNode(projectId: string, node: NodeId): Promise<void
   const state = await loadProjectState(projectId);
   if (!state) throw new Error('Project not found');
   const g = gate(node, state.facts);
-  if (!g.ready) throw new Error(g.reason ?? 'Not ready');
+  if (!g.ready) {
+    tm().counter('tsp_gate_actions_total', {node, action: 'refused'});
+    throw new Error(g.reason ?? 'Not ready');
+  }
   const u = await user();
   const approval: GateApproval = {id: newId('ga'), projectId, node, status: 'ready', createdAt: now(), createdBy: u.name};
   await catalog.insert('gate_approvals', approval);
   await catalog.patch('projects', projectId, {approvedNodes: DocFieldValue.arrayUnion(node)});
   await catalog.audit(projectId, u.name, 'gate.approve', {node});
+  tm().counter('tsp_gate_actions_total', {node, action: 'approve'});
+  const project = await catalog.get('projects', projectId);
+  if (project) tm().event('step_reached', {node, minutes_since_project_created: Math.round((Date.now() - Date.parse(project.createdAt)) / 60000)});
+  if (project && node === 'training') {
+    const ts = state.trainingSets[0];
+    tm().event('project_finished', {minutes_since_created: Math.round((Date.now() - Date.parse(project.createdAt)) / 60000), total_cost_usd: Number((state.runs.reduce((n, r) => n + r.costUsd, 0) + state.testRuns.reduce((n, r) => n + r.costUsd, 0) + (ts?.costUsd ?? 0)).toFixed(4)), versions: state.versions.length, gold_labels: state.gold.size});
+  }
   emitChange();
 }
 
@@ -108,5 +120,6 @@ export async function skipGold(projectId: string): Promise<void> {
   await catalog.insert('gate_approvals', {id: newId('ga'), projectId, node: 'gold', status: 'skipped', createdAt: now(), createdBy: u.name});
   await catalog.patch('projects', projectId, {approvedNodes: DocFieldValue.arrayUnion('gold')});
   await catalog.audit(projectId, u.name, 'gate.skip', {node: 'gold'});
+  tm().counter('tsp_gate_actions_total', {node: 'gold', action: 'skip'});
   emitChange();
 }

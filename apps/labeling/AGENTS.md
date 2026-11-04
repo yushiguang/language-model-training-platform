@@ -4,7 +4,7 @@ Runs labeling tasks: one prompt version on one model over a list of examples, on
 example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts`. Owns the
 `labeling_tasks` and `predictions` collections; nothing else writes them.
 
-- `labeling.ts`: `createLabeling({db, catalog, gateway, locks, resolveUrl, onChange})`.
+- `labeling.ts`: `createLabeling({db, catalog, gateway, locks, resolveUrl, onChange, telemetry})`.
   - `runTask` takes the task's lock, rebuilds counters from saved predictions, and runs `parallel`
     (default 4) workers. Each example: render, `gateway.label`, parse, save the prediction, then
     increment counters with `DocFieldValue.increment`.
@@ -13,6 +13,10 @@ example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts
   - Budget: pauses when cost passes 120% of `budgetUsd`.
   - Stop: aborts locally, or sets `stopRequested`, which the runner checks every 2 s.
   - `listTasks` reports a `running` task whose lock nobody holds as `paused` / `closed`.
+  - `tryTemplate` labels a few examples with an unsaved template (the prompt agent's
+    try_template tool) and saves nothing.
+  - Metrics: `tsp_labeling_*` (runs started and ended, resumes, examples, durations, cost,
+    cost against the estimate, lock conflicts, stop latency).
 - `locks.ts`: browser Web Locks per task; an in-memory version for tests and Node.
 
 Rules: the bff decides when a task starts; this app only runs it. Prediction ids are deterministic

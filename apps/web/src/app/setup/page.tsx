@@ -340,6 +340,7 @@ function Models() {
   const s = state!.setup;
   const eps = state!.endpoints;
   const [models, setModels] = useState<ModelSettings[]>(s?.models.length ? s.models : eps.map(e => ({endpoint: e.id, maxOutputTokens: 1024, temperature: e.supportsTemperature ? 0 : null})));
+  const [autoStart, setAutoStart] = useState(s?.autoStart ?? true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   if (!s?.steps.evaluation) return <NotYet text="Choose how good the labels must be first." to={href('/setup', {step: s?.steps.schema ? '2' : '1'})} />;
@@ -352,7 +353,7 @@ function Models() {
     setBusy(true);
     setErr(null);
     try {
-      await saveSetup(state!.project.id, {models, steps: {...s.steps, models: true}});
+      await saveSetup(state!.project.id, {models, autoStart, steps: {...s.steps, models: true}});
       await approveNode(state!.project.id, 'setup');
       router.push(href('/dataset'));
     } catch (e) {
@@ -420,6 +421,16 @@ function Models() {
         })}
       </fieldset>
       {models.length > 1 && <Note>Every prompt runs on both so you can compare. Optimisation also runs for each, so it costs about twice as much. You pick one model before making the training set.</Note>}
+      <label className="card switch-row">
+        <span className="col grow" style={{gap: 4}}>
+          <b>Start paid labeling automatically</b>
+          <span className="small muted">
+            On: new prompt versions are scored, the optimiser runs, work left by a closed page resumes, and the assistant can start small runs, without asking. Off: each one shows a button with its cost first.
+            Anything above $1, or once automatic work in this project has spent $5, always asks. The test set answers and the final run always ask.
+          </span>
+        </span>
+        <input type="checkbox" role="switch" checked={autoStart} onChange={e => setAutoStart(e.target.checked)} aria-label="Start paid labeling automatically" />
+      </label>
       <div className="next">
         <Button label="Next step: Dataset" variant="primary" size="lg" icon={<Icon name="arrow" />} onClick={next} disabled={!models.length} loading={busy} />
         <span className="blocked">{models.length ? 'You can edit any step later.' : 'Pick at least one model.'}</span>

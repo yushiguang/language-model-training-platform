@@ -25,47 +25,14 @@ import type {
   TrainingSet,
 } from '@tsp/contracts';
 import {createCatalog} from '@tsp/catalog';
+import {createTelemetry} from '@tsp/telemetry';
+import {webTelemetry} from './web-telemetry';
 import {createGateway} from '@tsp/llm-gateway';
 import {browserLocks, createLabeling} from '@tsp/labeling';
 import {agentRuntime} from '@tsp/agents';
 import {createPlatform} from '@tsp/platform-impl';
-import {
-  applySplit,
-  approveNode,
-  chatHistory,
-  closeProposal,
-  configureBff,
-  createProject,
-  createVersion,
-  emitChange,
-  getProject,
-  getSamplePoolSize,
-  hasBundledGold,
-  importBundledGold,
-  isAgentBusy,
-  labelTestSet,
-  listProjects,
-  loadProjectState,
-  onChange,
-  openProposals,
-  predictionsFor,
-  saveGold,
-  saveSetup,
-  scoreVersion,
-  sendUserMessage,
-  skipGold,
-  startOptimiser,
-  startSampleDataset,
-  startTrainingSet,
-  stopOptimiser,
-  stopRun,
-  stopSampleDataset,
-  stopTrainingSet,
-  tick,
-  trainingRows,
-  uploadDatasetText,
-  uploadGold,
-} from '@tsp/bff';
+import * as bff from '@tsp/bff';
+import {configureBff, emitChange, hasBundledGold, onChange} from '@tsp/bff';
 
 export type {NewVersion, PageContext, ProjectState, RuntimeInfo, SetupPatch};
 
@@ -75,10 +42,49 @@ export type {NewVersion, PageContext, ProjectState, RuntimeInfo, SetupPatch};
  * TSP_PLATFORM_IMPL (see docs/handover/integration.md).
  */
 const platform = createPlatform();
-const gateway = createGateway(platform);
-const catalog = createCatalog(platform.db);
-const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: emitChange});
-configureBff({catalog, labeling, gateway, agents: agentRuntime, identity: platform.identity, files: platform.files, examples: platform.examples, standIns: platform.standIns});
+/** Metrics and product events go to the platform's sink; with none, they stay in memory. */
+const telemetry = createTelemetry({
+  sink: platform.telemetry ?? {pushMetrics: async () => {}, pushEvents: async () => {}},
+  appVersion: process.env.NEXT_PUBLIC_APP_VERSION ?? '0.1.0',
+  env: process.env.NEXT_PUBLIC_TSP_ENV ?? 'dev',
+});
+const gateway = createGateway(platform, {telemetry});
+const catalog = createCatalog(platform.db, {telemetry});
+const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: emitChange, telemetry});
+configureBff({catalog, labeling, gateway, agents: agentRuntime, identity: platform.identity, files: platform.files, examples: platform.examples, standIns: platform.standIns, telemetry});
+const web = webTelemetry(telemetry);
+void platform.identity.currentUser().then(u => telemetry.setContext({userId: u.id}));
+
+/** Pages report route changes and product events through these. */
+export const pageViewed = web.pageViewed;
+export const track = web.track;
+
+/**
+ * Every bff call is counted and timed (`tsp_bff_calls_total`, `tsp_bff_call_duration_seconds`);
+ * a failed call also counts as a backend error on the page.
+ */
+function timed<A extends unknown[], R>(method: string, fn: (...a: A) => R): (...a: A) => R {
+  return (...a: A): R => {
+    const started = Date.now();
+    const end = (outcome: 'ok' | 'error') => {
+      const seconds = (Date.now() - started) / 1000;
+      telemetry.counter('tsp_bff_calls_total', {method, outcome});
+      telemetry.histogram('tsp_bff_call_duration_seconds', seconds, {method});
+      if (method === 'loadProjectState') telemetry.histogram('tsp_bff_project_state_load_seconds', seconds);
+      if (outcome === 'error') web.backendError();
+    };
+    try {
+      const r = fn(...a);
+      if (r instanceof Promise) {
+        r.then(() => end('ok'), () => end('error'));
+      } else end('ok');
+      return r;
+    } catch (e) {
+      end('error');
+      throw e;
+    }
+  };
+}
 
 /** Image URLs in prompts are relative to the site; the model needs absolute ones. */
 function absoluteUrl(url: string): string {
@@ -110,7 +116,10 @@ export async function getRuntimeInfo(): Promise<RuntimeInfo> {
  */
 export function subscribeChanges(listener: () => void): () => void {
   const off = onChange(listener);
-  const fromOtherTab = () => listener();
+  const fromOtherTab = () => {
+    web.crossTab();
+    listener();
+  };
   tabs?.addEventListener('message', fromOtherTab);
   return () => {
     off();
@@ -137,6 +146,7 @@ onChange(() => {
  * In HTTP mode, this sends `multipart/form-data` or uploads directly to object storage.
  */
 export async function uploadAsset(file: File): Promise<{url: string}> {
+  telemetry.histogram('tsp_files_upload_bytes', file.size, {kind: file.type.startsWith('image/') ? 'image' : 'other'});
   return platform.files.upload(file, file.name);
 }
 
@@ -192,38 +202,40 @@ export async function uploadGoldFile(
   return uploadGold(projectId, schema, schemaVersion, examples, lines);
 }
 
-export {
-  listProjects,
-  createProject,
-  getProject,
-  loadProjectState,
-  approveNode,
-  skipGold,
-  saveSetup,
-  getSamplePoolSize,
-  startSampleDataset,
-  stopSampleDataset,
-  applySplit,
-  saveGold,
-  uploadGold,
-  importBundledGold,
-  createVersion,
-  scoreVersion,
-  tick,
-  stopRun,
-  startOptimiser,
-  stopOptimiser,
-  predictionsFor,
-  labelTestSet,
-  startTrainingSet,
-  stopTrainingSet,
-  trainingRows,
-  chatHistory,
-  isAgentBusy,
-  sendUserMessage,
-  openProposals,
-  closeProposal,
-};
+export const listProjects = timed('listProjects', bff.listProjects);
+export const createProject = timed('createProject', bff.createProject);
+export const getProject = timed('getProject', bff.getProject);
+export const loadProjectState = timed('loadProjectState', bff.loadProjectState);
+export const approveNode = timed('approveNode', bff.approveNode);
+export const skipGold = timed('skipGold', bff.skipGold);
+export const saveSetup = timed('saveSetup', bff.saveSetup);
+export const getSamplePoolSize = timed('getSamplePoolSize', bff.getSamplePoolSize);
+export const startSampleDataset = timed('startSampleDataset', bff.startSampleDataset);
+export const stopSampleDataset = timed('stopSampleDataset', bff.stopSampleDataset);
+export const applySplit = timed('applySplit', bff.applySplit);
+export const saveGold = timed('saveGold', bff.saveGold);
+export const importBundledGold = timed('importBundledGold', bff.importBundledGold);
+export const createVersion = timed('createVersion', bff.createVersion);
+export const scoreVersion = timed('scoreVersion', bff.scoreVersion);
+export const tick = timed('tick', bff.tick);
+export const stopRun = timed('stopRun', bff.stopRun);
+export const startOptimiser = timed('startOptimiser', bff.startOptimiser);
+export const stopOptimiser = timed('stopOptimiser', bff.stopOptimiser);
+export const predictionsFor = timed('predictionsFor', bff.predictionsFor);
+export const labelTestSet = timed('labelTestSet', bff.labelTestSet);
+export const startTrainingSet = timed('startTrainingSet', bff.startTrainingSet);
+export const stopTrainingSet = timed('stopTrainingSet', bff.stopTrainingSet);
+export const trainingRows = timed('trainingRows', bff.trainingRows);
+export const chatHistory = timed('chatHistory', bff.chatHistory);
+export const sendUserMessage = timed('sendUserMessage', bff.sendUserMessage);
+export const openProposals = timed('openProposals', bff.openProposals);
+export const closeProposal = timed('closeProposal', bff.closeProposal);
+const uploadDatasetText = timed('uploadDatasetText', bff.uploadDatasetText);
+export const uploadGold = timed('uploadGold', bff.uploadGold);
+export const isAgentBusy = bff.isAgentBusy;
+export const answerStartCard = timed('answerStartCard', bff.answerStartCard);
+/** Paid starts waiting for a click, with their cost (Setup's switch is off, or a cap applies). */
+export const waitingStarts = bff.waitingStarts;
 
 export type {
   AgentProposal,

@@ -22,6 +22,7 @@ const RULES = [
   {dir: 'apps/labeling/src', allow: ['@tsp/contracts', '@tsp/domain', '@tsp/platform']},
   {dir: 'apps/agents/src', allow: ['@tsp/contracts', '@tsp/domain']},
   {dir: 'apps/bff/src', allow: ['@tsp/contracts', '@tsp/domain']},
+  {dir: 'apps/telemetry/src', allow: ['@tsp/contracts']},
   {dir: 'apps/web/src/backend-api', allow: '*'},
   {dir: 'apps/web/src', allow: ['@tsp/contracts', '@tsp/domain', '@/backend-api', '@/components', '@/ui', '@/app']},
 ];

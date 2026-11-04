@@ -61,6 +61,12 @@ export interface SetupVersion {
   thresholds: Thresholds | null;
   models: ModelSettings[];
   steps: {schema: boolean; evaluation: boolean; models: boolean};
+  /**
+   * "Start paid labeling automatically" (Setup step 3). On: scoring new versions, the optimiser,
+   * resuming after a closed page and agent start tools start by themselves, within the fixed caps.
+   * Off: each asks first. Missing on older records = on.
+   */
+  autoStart?: boolean;
   createdAt: string;
   createdBy: string;
 }
@@ -170,6 +176,8 @@ export interface LabelingRun {
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
+  /** Started by code without a click (counts toward the automatic-spend cap). */
+  auto?: boolean;
 }
 
 export interface ValueMetrics {
@@ -235,6 +243,8 @@ export interface OptimisationRun {
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
+  /** Started by code without a click (counts toward the automatic-spend cap). */
+  auto?: boolean;
 }
 
 export interface TrainingSet {
@@ -250,11 +260,17 @@ export interface TrainingSet {
   /** Setup version whose schema the answers are checked against. */
   setupVersionId: string;
   state: JobState;
-  /** Train plus test examples: the final run labels both. */
+  /** Examples the run labels: every train example, plus the test examples with no label when `labelTest`. */
   total: number;
-  /** How many of `total` are train and test examples (missing on records made before the test set was added: all train). */
+  /** Train and test examples in the snapshot (missing on records made before the test set was added: all train). */
   trainTotal?: number;
   testTotal?: number;
+  /** The user's choice in the confirm: label test examples that have neither a gold label nor an answer. */
+  labelTest?: boolean;
+  /** Test examples by where their label comes from, when the run started. */
+  testWithGold?: number;
+  testWithAnswers?: number;
+  testToLabel?: number;
   done: number;
   labeled: number;
   invalid: number;
@@ -267,12 +283,19 @@ export interface TrainingSet {
   finishedAt: string | null;
 }
 
-/** One row of the output: a train or test example with the model's label (and, for test, the gold label if any). */
+/**
+ * One row of the output. Train rows: the model's label. Test rows: the gold label when someone
+ * gave one, else the chosen version's answer; `labelSource` says which (null = no label yet).
+ */
 export interface TrainingRow {
   trainingSetId: string;
   exampleId: string;
   split: 'train' | 'test';
+  /** The row's label: for test rows, gold if given, else the model's answer. */
   answer: Answer | null;
+  labelSource: 'gold' | 'model' | null;
+  /** The model's answer, when there is one (also shown next to gold on test rows). */
+  model: Answer | null;
   invalidReason: string | null;
   /** Test rows only: the gold label for the current schema, when someone gave one. */
   gold: Answer | null;
@@ -307,8 +330,23 @@ export interface ChatMessage {
   choices?: string[];
   /** Files attached to this message. */
   attachments?: ChatAttachment[];
+  /** An agent asked to start paid work and needs the user's approval (Approve / Cancel). */
+  startCard?: StartCard;
   page: string;
   createdAt: string;
+}
+
+/** A paid start an agent asked for, waiting for the user's approval in the chat. */
+export interface StartCard {
+  tool: 'try_template' | 'score_version' | 'start_optimiser';
+  agent: AgentPreset;
+  /** What the buttons say, e.g. "Score v1.3 on Model A". */
+  label: string;
+  estimateUsd: number;
+  args: Record<string, unknown>;
+  /** Why it asks: the switch is off, or a fixed cap applies. */
+  reason: 'off' | 'over_single_cap' | 'over_project_cap';
+  state: 'open' | 'approved' | 'cancelled';
 }
 
 export interface AgentProposal {

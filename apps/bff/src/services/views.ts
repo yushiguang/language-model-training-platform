@@ -31,6 +31,7 @@ export const runView = (t: LabelingTask): LabelingRun => ({
   error: t.error,
   startedAt: t.startedAt ?? t.createdAt,
   finishedAt: t.finishedAt,
+  auto: t.createdBy === 'auto',
 });
 
 /** A training set record with its task's live counters. */

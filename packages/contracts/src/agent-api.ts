@@ -49,7 +49,12 @@ export type AgentToolName =
   | 'get_examples'
   | 'get_gold_labels'
   | 'get_predictions'
-  | 'check_template';
+  | 'check_template'
+  // Start-work tools: paid. They run at once when automatic starts are allowed, else they ask
+  // the user with a card in the chat and the turn ends.
+  | 'try_template'
+  | 'score_version'
+  | 'start_optimiser';
 
 export interface AgentToolCall {
   agent: AgentPreset;
@@ -108,7 +113,10 @@ export interface AgentTurnOutput {
   /** Optional schema or prompt proposal produced by the specialist agent. */
   proposal: AgentProposalDraft | null;
   /** Read tools the agents called during this turn, in order (also written to the audit log by the host). */
-  toolCalls: {agent: AgentPreset; name: string; args: Record<string, unknown>; ok: boolean}[];
+  toolCalls: {agent: AgentPreset; name: string; args: Record<string, unknown>; ok: boolean; ms: number}[];
+  /** Model calls in this turn (tool loops included), and answers that weren't the asked JSON. For metrics. */
+  modelCalls: {agent: AgentPreset; model: string}[];
+  parseFailures: {agent: AgentPreset; intent: string}[];
 }
 
 export interface OptimiserReflectInput {

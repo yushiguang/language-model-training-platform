@@ -230,3 +230,28 @@ kbd { font-family: inherit; font-size: 11px; padding: 0 4px; border: 1px solid #
 .kv dd { margin: 0; }
 .chart { width: 100%; height: 260px; }
 .layer .ph { font-weight: inherit; }
+
+/* Tabs (results page) */
+.tabs { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+.tabs [role='tab'] { font: inherit; background: none; border: 0; border-bottom: 2px solid transparent; padding: 10px 14px; cursor: pointer; color: var(--ink-2); display: inline-flex; gap: 6px; align-items: baseline; }
+.tabs [role='tab'].on { color: var(--ink); border-bottom-color: var(--accent); font-weight: 600; }
+.tabs .right { margin-left: auto; }
+
+/* Cost confirm with one line per output */
+.confirm-lines { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 12px; }
+.confirm-line { display: flex; gap: 12px; padding: 12px 14px; align-items: flex-start; }
+.confirm-line + .confirm-line { border-top: 1px solid var(--line); }
+.confirm-line > b { width: 92px; flex: none; }
+
+/* Setup switch: "Start paid labeling automatically" */
+.switch-row { display: flex; gap: 16px; align-items: center; cursor: pointer; }
+.switch-row input[role='switch'] { appearance: none; width: 40px; height: 22px; border-radius: 11px; background: var(--line-2); position: relative; flex: none; cursor: pointer; transition: background 0.15s; }
+.switch-row input[role='switch']::after { content: ''; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left 0.15s; }
+.switch-row input[role='switch']:checked { background: var(--accent); }
+.switch-row input[role='switch']:checked::after { left: 20px; }
+.switch-row input[role='switch']:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Paid starts waiting for a click */
+.waiting { display: flex; flex-direction: column; gap: 8px; }
+.waiting .row { gap: 8px; }
+.start-card { margin-top: 6px; }

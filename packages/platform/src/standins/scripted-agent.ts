@@ -39,8 +39,41 @@ function readRequest(messages: ModelMessage[]): Req {
   return req;
 }
 
+/** Paid starts the user asked for in words: "try the prompt", "score v1.2 on model A", "run the optimiser". */
+function startRequest(t: string) {
+  const model = t.match(/\bmodel ([ab])\b/i)?.[1]?.toUpperCase();
+  const v = t.match(/\bv\d+\.\d+\b/i)?.[0];
+  if (/\btry\b/i.test(t)) return {name: 'try_template', model};
+  if (/\bscore\b/i.test(t) && v) return {name: 'score_version', version: v, model};
+  if (/\boptimi[sz]er\b/i.test(t) && /\b(run|start)\b/i.test(t)) return {name: 'start_optimiser', model: model ?? 'A'};
+  return null;
+}
+
+/** The prompt agent's start tools: asks for the tool once, then reports what happened. */
+function promptAgentStart(r: Req) {
+  const s = startRequest(r.userText ?? '');
+  if (!s) return null;
+  const res = r.results[s.name];
+  if (!(s.name in r.results)) {
+    const template = r.context.pageView?.data?.version?.template ?? r.context.template ?? r.context.pageView?.data?.current?.template;
+    const args: Record<string, unknown> =
+      s.name === 'try_template' ? {template: template ?? '', n: 3, ...(s.model ? {model: s.model} : {})} : s.name === 'score_version' ? {version: s.version, ...(s.model ? {model: s.model} : {})} : {model: s.model};
+    return {tool: {name: s.name, args}};
+  }
+  if (res?.asked_user) return {reply: `I asked for your approval: ${res.label}, about $${Number(res.estimate_usd).toFixed(2)}.`};
+  if (res?.error) return {reply: `I couldn't start that: ${res.error}`};
+  if (res?.already) return {reply: res.already};
+  if (s.name === 'try_template') {
+    const rows = (res?.rows ?? []) as {gold: unknown; model: unknown}[];
+    const same = rows.filter(x => x.gold && JSON.stringify(x.gold) === JSON.stringify(x.model)).length;
+    return {reply: `I tried it on ${rows.length} eval examples (nothing saved): ${same} of ${rows.filter(x => x.gold).length} match the gold labels.`};
+  }
+  return {reply: `Started. ${res?.note ?? ''}`.trim()};
+}
+
 function frontDesk(r: Req) {
   const t = (r.userText ?? '').toLowerCase();
+  if (startRequest(t)) return {reply: "I'll bring in the prompt agent for that.", handoff: {to: 'prompt_agent', intent: 'explain_version'}};
   if (/\b(value|field|label|schema|policy)\b/.test(t) && /\b(add|rename|change|remove|new|split)\b/.test(t))
     return {reply: "That's a change to the labels, so I'll bring in the schema agent.", handoff: {to: 'schema_agent', intent: 'revise_schema'}};
   if (/\b(prompt|rule|wording|version|draft)\b/.test(t) && /\b(change|fix|add|draft|write|improve|what)\b/.test(t))
@@ -83,6 +116,8 @@ function schemaAgent(r: Req) {
 }
 
 function promptAgent(r: Req) {
+  const start = promptAgentStart(r);
+  if (start) return start;
   if (r.intent === 'draft_prompt') {
     const d = draftTemplate(r.context.schema, r.context.task ?? '');
     return {reply: 'I drafted a starting prompt from your schema and ticked the features it uses. Edit anything, then press Create.', ...d};

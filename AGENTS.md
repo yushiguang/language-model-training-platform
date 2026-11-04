@@ -16,6 +16,8 @@ changing, because apps only talk through the contracts in `@tsp/contracts`.
   it may not (table below). Apps never import each other.
 - **A contract change is its own change.** Changing a type in `packages/contracts` affects the
   internal adapters too: say so in the PR title and description (see the handover guide).
+- **No content in telemetry.** Metrics and events carry counts, ids, enums and durations only
+  (`packages/contracts/src/telemetry.ts`); never prompt or chat text, features, names or emails.
 - **Check before pushing:** `npm run check && npm run build`. For changes to labeling, the
   bff or pages, also run the browser check: `node apps/web/scripts/e2e-check.cjs` against a
   served build (needs Playwright with Chromium).
@@ -32,6 +34,7 @@ changing, because apps only talk through the contracts in `@tsp/contracts`.
 | `apps/labeling` | `@tsp/labeling` | Labeling tasks and predictions: runs, failures, resume | contracts, domain, platform |
 | `apps/agents` | `@tsp/agents` | Agent presets and runtime, hand-written, no framework | contracts, domain |
 | `apps/bff` | `@tsp/bff` | What pages call: workflow, decides when labeling starts, builds reports | contracts, domain |
+| `apps/telemetry` | `@tsp/telemetry` | Prometheus-style metrics and product events, sent to the platform's sink | contracts |
 | `apps/web` | `@tsp/web` | Next.js static site. Pages call `@/backend-api` only | contracts, domain, `@/backend-api`, `@/ui`, `@/components` |
 | `apps/web/src/backend-api` | | The composition root: builds every app and wires them | anything |
 

@@ -1,6 +1,6 @@
 import type {EndpointId, OptimisationRun, PromptVersion} from '@tsp/contracts';
 import {checkTemplate, newId, placeholderKeys} from '@tsp/domain';
-import {emitChange, getApp, now} from './app.ts';
+import {emitChange, getApp, now, tm} from './app.ts';
 import {buildReport, labelEvalSet, scoreOnOptimiserHalf} from './evaluation.ts';
 import {loadProjectState} from './projects.ts';
 import {createVersion} from './prompts.ts';
@@ -16,7 +16,7 @@ const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
  * half of the eval set, ask the agent runtime for one targeted change, keep the placeholders
  * as they are, save it as a minor version and label it as an optimiser labeling task.
  */
-export async function runOptimiser(projectId: string, endpoint: EndpointId, budgetCandidates = 6, resume?: OptimisationRun): Promise<OptimisationRun> {
+export async function runOptimiser(projectId: string, endpoint: EndpointId, budgetCandidates = 6, resume?: OptimisationRun, opts: {auto?: boolean} = {}): Promise<OptimisationRun> {
   const {catalog, agents, gateway} = getApp();
   let state = (await loadProjectState(projectId))!;
   const evalCount = state.examples.filter(e => e.split === 'eval').length;
@@ -36,13 +36,16 @@ export async function runOptimiser(projectId: string, endpoint: EndpointId, budg
         error: null,
         startedAt: now(),
         finishedAt: null,
+        auto: !!opts.auto,
       };
   if (resume) await catalog.patch('optimisation_runs', run.id, {state: 'running', error: null});
   else await catalog.insert('optimisation_runs', run);
   const ctrl = new AbortController();
   active.set(run.id, ctrl);
   emitChange();
+  tm().event('optimiser_started', {slot: endpoint, trigger: opts.auto ? 'auto' : 'user', resumed: !!resume});
   let wasted = 0;
+  let kept = 0;
   try {
     while (run.calls < run.budgetCalls) {
       if (wasted >= 3) {
@@ -86,6 +89,7 @@ export async function runOptimiser(projectId: string, endpoint: EndpointId, budg
       if (!same || checkTemplate(out.template, parent.features).errors.length || state.versions.some(v => v.template === out.template)) {
         run.candidates++;
         wasted++;
+        tm().counter('tsp_optimiser_candidates_total', {slot: endpoint, result: !same ? 'placeholders_changed' : 'rejected'});
         continue;
       }
       const cand = await createVersion(projectId, {
@@ -109,6 +113,8 @@ export async function runOptimiser(projectId: string, endpoint: EndpointId, budg
       if (task.state !== 'done') throw new Error(task.error ?? 'Labeling stopped');
       const fresh = (await loadProjectState(projectId))!;
       await buildReport(projectId, setup, cand, endpoint, fresh.examples, fresh.gold, fresh.contextId);
+      kept++;
+      tm().counter('tsp_optimiser_candidates_total', {slot: endpoint, result: 'kept'});
     }
     run.state = 'done';
     run.stopReason ??= 'budget';
@@ -123,6 +129,10 @@ export async function runOptimiser(projectId: string, endpoint: EndpointId, budg
     await catalog.patch('optimisation_runs', run.id, rest);
     active.delete(run.id);
     emitChange();
+    const outcome = run.state === 'done' ? (run.stopReason ?? 'budget') : run.state;
+    tm().counter('tsp_optimiser_runs_total', {slot: endpoint, outcome});
+    if (run.state === 'stopped') tm().event('optimiser_stopped_by_user', {slot: endpoint, candidates: run.candidates, cost_usd: run.costUsd});
+    tm().event('optimiser_ended', {slot: endpoint, outcome, candidates: run.candidates, kept, cost_usd: run.costUsd, best_lowest_field_macro_f1: null});
   }
   return run;
 }

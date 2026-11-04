@@ -1,4 +1,4 @@
-import type {EndpointId, ModelSettings, Prediction} from './types.ts';
+import type {Answer, EndpointId, Example, FeatureSelection, ModelSettings, Prediction, PromptImage, Schema} from './types.ts';
 
 /**
  * Contract: labeling (`apps/labeling`).
@@ -69,16 +69,40 @@ export interface LabelingContract {
   createTask(input: CreateTaskInput): Promise<LabelingTask>;
   /**
    * Runs the task in this page until it is done, stopped or paused. Returns the final task, or
-   * null when another tab already runs it.
+   * null when another tab already runs it. `trigger` is only for metrics: who started this run
+   * (default: system for eval/optimiser tasks, user otherwise).
    */
-  runTask(taskId: string): Promise<LabelingTask | null>;
+  runTask(taskId: string, trigger?: 'system' | 'user'): Promise<LabelingTask | null>;
   stopTask(taskId: string): Promise<void>;
   /** Clears the failed examples and runs the task again for them. */
-  retryFailed(taskId: string): Promise<LabelingTask | null>;
+  retryFailed(taskId: string, trigger?: 'system' | 'user'): Promise<LabelingTask | null>;
   getTask(taskId: string): Promise<LabelingTask | null>;
   listTasks(projectId: string): Promise<LabelingTask[]>;
   /** True when some tab of this browser currently runs the task. */
   isRunning(taskId: string): Promise<boolean>;
   /** Saved predictions for one version, model and settings (first one per example wins). */
   predictions(promptVersionId: string, endpoint: EndpointId, settingsHash: string): Promise<Map<string, Prediction>>;
+  /**
+   * Labels a few examples with an unsaved template (the prompt agent's try_template). Nothing is
+   * saved: no task, no predictions. Each example is one call through the gateway.
+   */
+  tryTemplate(input: TryTemplateInput): Promise<TryTemplateRow[]>;
+}
+
+export interface TryTemplateInput {
+  template: string;
+  features: FeatureSelection;
+  images: PromptImage[];
+  schema: Schema;
+  settings: ModelSettings;
+  examples: Example[];
+  signal?: AbortSignal;
+}
+
+export interface TryTemplateRow {
+  exampleId: string;
+  answer: Answer | null;
+  invalidReason: string | null;
+  costUsd: number;
+  error: string | null;
 }

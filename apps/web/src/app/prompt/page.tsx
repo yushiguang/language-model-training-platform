@@ -15,6 +15,7 @@ import {
   approveNode,
   createVersion,
   scoreVersion,
+  waitingStarts,
   startOptimiser,
   stopOptimiser,
   stopRun,
@@ -108,6 +109,11 @@ function Overview({state, setPage}: {state: ProjectState; setPage: (p: PageConte
   const running = state.optimisation.find(o => o.state === 'running');
   const lastOpt = state.optimisation[0];
   const advice = recommend(state, running?.endpoint ?? null);
+  // Paid work that waits for a click: Setup's automatic switch is off, or a cost cap applies.
+  const waiting = waitingStarts(state);
+  const waitFor = (vId: string, ep: EndpointId) => waiting.find(w => (w.what === 'score' || w.what === 'resume') && w.versionId === vId && w.endpoint === ep);
+  const optWait = waiting.find(w => w.what === 'optimiser' && w.endpoint === advice.endpoint);
+  const why = waiting[0] ? WHY[waiting[0].reason as keyof typeof WHY] : null;
 
   useEffect(() => {
     void tick(state);
@@ -188,12 +194,24 @@ function Overview({state, setPage}: {state: ProjectState; setPage: (p: PageConte
                   ) : null}
                 </span>
                 <span className="row" style={{gap: 6}}>
-                  {run?.state === 'running' ? <Button label="Stop" size="sm" variant="ghost" onClick={() => stopRun(run.id)} /> : <Button label="Rerun" size="sm" onClick={() => scoreVersion(state.project.id, current, m.endpoint)} disabled={run?.state === 'done'} />}
+                  {run?.state === 'running' ? (
+                    <Button label="Stop" size="sm" variant="ghost" onClick={() => stopRun(run.id)} />
+                  ) : waitFor(current.id, m.endpoint) ? (
+                    <Button
+                      label={`${waitFor(current.id, m.endpoint)!.what === 'resume' ? 'Resume' : 'Score'} on Model ${m.endpoint} · about ${money(waitFor(current.id, m.endpoint)!.estimateUsd)}`}
+                      size="sm"
+                      variant="primary"
+                      onClick={() => scoreVersion(state.project.id, current, m.endpoint)}
+                    />
+                  ) : (
+                    <Button label="Rerun" size="sm" onClick={() => scoreVersion(state.project.id, current, m.endpoint)} disabled={run?.state === 'done'} />
+                  )}
                   {rep && <Button label="Report" size="sm" variant="ghost" href={href('/report', {v: current.id, m: m.endpoint})} />}
                 </span>
               </div>
             );
           })}
+          {why && models.some(m => waitFor(current.id, m.endpoint)) && <span className="small muted">{why}</span>}
           {state.runs.find(r => r.promptVersionId === current.id && r.state === 'failed')?.error && <Note tone="error">{state.runs.find(r => r.promptVersionId === current.id && r.state === 'failed')!.error}</Note>}
         </div>
       </div>
@@ -220,7 +238,13 @@ function Overview({state, setPage}: {state: ProjectState; setPage: (p: PageConte
         {(advice.kind === 'make_training_set' || advice.kind === 'no_eval' || advice.kind === 'label_gold' || (advice.kind === 'keep_improving' && !running)) && (
           <div>
             <Button
-              label={advice.kind === 'label_gold' ? 'Go to Gold Labels' : advice.kind === 'keep_improving' ? `Run the optimiser for Model ${advice.endpoint}` : advice.title.replace('Make the training and test sets', 'Make training and test sets')}
+              label={
+                advice.kind === 'label_gold'
+                  ? 'Go to Gold Labels'
+                  : advice.kind === 'keep_improving'
+                    ? `Run the optimiser for Model ${advice.endpoint}${optWait ? ` · about ${money(optWait.estimateUsd)}` : ''}`
+                    : advice.title.replace('Make the training and test sets', 'Make training and test sets')
+              }
               variant="primary"
               size="lg"
               onClick={act}
@@ -362,3 +386,10 @@ function reportBrief(state: ProjectState, vId: string, ep: EndpointId) {
     topMixUp: mu ? (mu.kind === 'confused' ? `${mu.gold} tagged as ${mu.predicted} (${mu.count})` : `${mu.predicted ?? mu.gold} ${mu.kind} (${mu.count})`) : null,
   };
 }
+
+/** Why paid work waits for a click, in plain words. */
+const WHY = {
+  off: 'Automatic paid starts are off in Setup, so scoring and the optimiser wait for you.',
+  over_single_cap: 'This costs more than $1, so it waits for you.',
+  over_project_cap: 'Automatic work in this project has spent $5, so each start waits for you.',
+};

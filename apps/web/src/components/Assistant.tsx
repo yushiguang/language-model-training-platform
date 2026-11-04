@@ -3,8 +3,8 @@
 import {useEffect, useRef, useState} from 'react';
 import type {ChatAttachment, ChatMessage, PageContext} from '@tsp/contracts';
 import {agentName, pageFromPath} from '@tsp/domain';
-import {chatHistory, isAgentBusy, prepareChatAttachment, sendUserMessage, subscribeChanges} from '@/backend-api';
-import {Icon} from '@/ui';
+import {answerStartCard, chatHistory, isAgentBusy, prepareChatAttachment, sendUserMessage, subscribeChanges} from '@/backend-api';
+import {Button, Icon} from '@/ui';
 import {useProject} from './ProjectContext';
 
 /** The assistant panel: one chat per project, answered by the page's agent. */
@@ -92,7 +92,8 @@ function Message({m, onChoice}: {m: ChatMessage; onChoice: (t: string) => void})
   return (
     <div className="agent-msg">
       <span className="agent-name">{m.agent ? agentName(m.agent) : 'Assistant'}</span>
-      <span>{m.text}</span>
+      <span style={{whiteSpace: 'pre-line'}}>{m.text}</span>
+      {m.startCard && <StartCardView m={m} />}
       {m.choices && (
         <div className="row" style={{gap: 6}}>
           {m.choices.map(c => (
@@ -102,6 +103,29 @@ function Message({m, onChoice}: {m: ChatMessage; onChoice: (t: string) => void})
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/** A paid start an agent asked for. Nothing is spent until Approve. */
+function StartCardView({m}: {m: ChatMessage}) {
+  const {projectId} = useProject();
+  const [busy, setBusy] = useState<'approve' | 'cancel' | null>(null);
+  const c = m.startCard!;
+  if (c.state !== 'open') return <span className="small muted">{c.state === 'approved' ? 'Approved' : 'Cancelled'}</span>;
+  const answer = async (approve: boolean) => {
+    setBusy(approve ? 'approve' : 'cancel');
+    try {
+      await answerStartCard(projectId, m.id, approve);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const price = '$' + c.estimateUsd.toFixed(2);
+  return (
+    <div className="row start-card" style={{gap: 6}}>
+      <Button label={`Approve about ${price}`} variant="primary" size="sm" loading={busy === 'approve'} disabled={!!busy} onClick={() => void answer(true)} />
+      <Button label="Cancel" variant="ghost" size="sm" loading={busy === 'cancel'} disabled={!!busy} onClick={() => void answer(false)} />
     </div>
   );
 }

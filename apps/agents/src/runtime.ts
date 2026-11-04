@@ -14,7 +14,7 @@ import type {
   Schema,
 } from '@tsp/contracts';
 import {FEATURES} from '@tsp/domain';
-import {agentName, presetModel, PRESETS, systemPrompt, TOOL_SPECS} from './presets.ts';
+import {agentName, presetModel, PRESETS, START_TOOLS, systemPrompt, TOOL_SPECS} from './presets.ts';
 
 /** Read-tool calls allowed in one turn, across the agents in it. */
 export const MAX_TOOL_CALLS = 4;
@@ -87,13 +87,18 @@ function buildAgentContext(input: AgentTurnInput, targetAgent: AgentPreset): Rec
 interface TurnTools {
   host?: AgentToolHost;
   used: AgentTurnOutput['toolCalls'];
+  modelCalls: AgentTurnOutput['modelCalls'];
+  parseFailures: AgentTurnOutput['parseFailures'];
 }
 
 function toolBlurb(to: AgentPreset, host?: AgentToolHost): string {
   const names = host ? PRESETS[to].tools : [];
   if (!names.length) return '';
   const list = names.map(n => `- ${n} ${TOOL_SPECS[n].args}: ${TOOL_SPECS[n].returns}`).join('\n');
-  return `\nIf the page view doesn't have what you need, read more with a tool: answer {"tool": {"name": string, "args": object}} instead, and the result comes back as the next message. Tools only read; at most ${MAX_TOOL_CALLS} calls per turn. Your tools:\n${list}`;
+  const paid = names.some(n => START_TOOLS.includes(n))
+    ? ' Tools marked PAID spend money: use them only when the user asks for that work or clearly agrees. If a PAID tool answers {"asked_user": true}, the user sees an Approve button; say in one short line what you asked for and stop.'
+    : ' Tools only read.';
+  return `\nIf the page view doesn't have what you need, use a tool: answer {"tool": {"name": string, "args": object}} instead, and the result comes back as the next message.${paid} At most ${MAX_TOOL_CALLS} calls per turn. Your tools:\n${list}`;
 }
 
 /** One agent's part of a turn: calls the model, runs the read tools it asks for, until it answers. */
@@ -112,10 +117,19 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
     {role: 'user', content: JSON.stringify(body)},
   ];
   // A refused or extra call still counts as a step, so a model that keeps asking can't loop.
+  let asked = false;
   for (let step = 0; ; step++) {
     const raw = await llm.chat(messages, {model: presetModel(to), json: true});
-    const out = parseJsonObject<RawAgentReply>(raw, {reply: raw});
+    tools.modelCalls.push({agent: to, model: presetModel(to)});
+    const notJson = {};
+    const out = parseJsonObject<RawAgentReply>(raw, notJson as RawAgentReply);
+    if (out === notJson) {
+      tools.parseFailures.push({agent: to, intent});
+      return {reply: raw};
+    }
     if (!out.tool) return out;
+    // After a paid start asked the user, the turn ends: no more tools.
+    if (asked) return {reply: 'I asked for your approval in the card below.'};
     if (step >= MAX_TOOL_CALLS + 1) return {reply: "I couldn't find what I needed. Could you say a bit more about what you're asking?"};
     const name = out.tool.name;
     const args = out.tool.args && typeof out.tool.args === 'object' ? out.tool.args : {};
@@ -123,12 +137,14 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
     if (!tools.host || !PRESETS[to].tools.includes(name)) result = {error: `${name} is not one of your tools.`};
     else if (tools.used.length >= MAX_TOOL_CALLS) result = {error: 'No more tool calls in this turn. Answer now with what you have.'};
     else {
+      const started = Date.now();
       try {
         result = await tools.host.call({agent: to, name, args});
-        tools.used.push({agent: to, name, args, ok: true});
+        if (result && typeof result === 'object' && (result as {asked_user?: boolean}).asked_user) asked = true;
+        tools.used.push({agent: to, name, args, ok: true, ms: Date.now() - started});
       } catch (e) {
         result = {error: (e as Error).message ?? String(e)};
-        tools.used.push({agent: to, name, args, ok: false});
+        tools.used.push({agent: to, name, args, ok: false, ms: Date.now() - started});
       }
     }
     let text = JSON.stringify({tool_result: {name, result}});
@@ -148,7 +164,7 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
 export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?: AgentToolHost): Promise<AgentTurnOutput> {
   const invocations: AgentTurnOutput['invocations'] = [];
   const messages: AgentEmittedMessage[] = [];
-  const tools: TurnTools = {host, used: []};
+  const tools: TurnTools = {host, used: [], modelCalls: [], parseFailures: []};
 
   let agent: AgentPreset = input.page.agent;
   let intent: string = input.page.intent;
@@ -193,7 +209,7 @@ export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?
     };
   }
 
-  return {invocations, messages, proposal, toolCalls: tools.used};
+  return {invocations, messages, proposal, toolCalls: tools.used, modelCalls: tools.modelCalls, parseFailures: tools.parseFailures};
 }
 
 /**

@@ -1,4 +1,4 @@
-import type {AgentRuntimeContract, CatalogContract, ExampleSource, FileStore, Identity, LabelingContract, LlmGatewayContract} from '@tsp/contracts';
+import {NO_TELEMETRY, type AgentRuntimeContract, type CatalogContract, type ExampleSource, type FileStore, type Identity, type LabelingContract, type LlmGatewayContract, type TelemetryPort} from '@tsp/contracts';
 
 /**
  * What the bff talks to. The bff holds no records of its own: product records live in the
@@ -14,17 +14,19 @@ export interface BffDeps {
   files: FileStore;
   examples: ExampleSource;
   standIns: string[];
+  telemetry?: TelemetryPort;
 }
 
 export interface App extends BffDeps {
   user: () => Promise<{id: string; name: string}>;
+  tm: TelemetryPort;
 }
 
 let app: App | null = null;
 
 export function configureBff(deps: BffDeps): void {
   let user: Promise<{id: string; name: string}> | null = null;
-  app = {...deps, user: () => (user ??= deps.identity.currentUser())};
+  app = {...deps, tm: deps.telemetry ?? NO_TELEMETRY, user: () => (user ??= deps.identity.currentUser())};
 }
 
 export function getApp(): App {
@@ -59,3 +61,6 @@ export async function once<T>(key: string, fn: () => Promise<T>): Promise<T | nu
   }
 }
 export const busy = (key: string) => starting.has(key);
+
+/** Metrics and product events from bff code; a no-op until configureBff ran with a port. */
+export const tm = (): TelemetryPort => app?.tm ?? NO_TELEMETRY;

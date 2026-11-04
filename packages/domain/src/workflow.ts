@@ -75,7 +75,7 @@ export function estimate(state: ProjectState, version: PromptVersion, endpoint: 
   const report = state.reports.find(r => r.promptVersionId === version.id && r.endpoint === endpoint && !r.archivedNow);
   let per1000 = report?.metrics.costPer1000;
   if (!per1000) {
-    const sample = all.slice(0, 20);
+    const sample = (all.length ? all : state.examples).slice(0, 20);
     const tokens = sample.map(ex => {
       const parts = renderPrompt(version.template, ex, version.features, version.images);
       return estimateTokens(parts);
@@ -83,6 +83,31 @@ export function estimate(state: ProjectState, version: PromptVersion, endpoint: 
     per1000 = sample.length ? costForTokens(state.endpoints, endpoint, tokens.reduce((a, b) => a + b, 0) / sample.length, 150) * 1000 : 0;
   }
   return {count: all.length, train, test, reused: all.length - todo.length, costUsd: (per1000 * todo.length) / 1000, minutes: todo.length ? minutesFor(todo.length) : 0, per1000, report: report ?? null};
+}
+
+/**
+ * What the final run does with the test set. A test example's label is its gold label when
+ * someone gave one, else the chosen version's saved answer; only examples with neither need the
+ * model, and only when the user ticks "label the rest" in the confirm.
+ */
+export function finalRunPlan(state: ProjectState, version: PromptVersion, endpoint: EndpointId, answered: ReadonlySet<string> = new Set()) {
+  const train = estimate(state, version, endpoint, ['train'], answered);
+  const test = state.examples.filter(e => e.split === 'test');
+  const withGold = test.filter(e => state.gold.has(e.id)).map(e => e.id);
+  const withAnswer = test.filter(e => !state.gold.has(e.id) && answered.has(e.id)).map(e => e.id);
+  const toLabel = test.filter(e => !state.gold.has(e.id) && !answered.has(e.id)).map(e => e.id);
+  const testCostUsd = (train.per1000 * toLabel.length) / 1000;
+  return {
+    train,
+    test: {total: test.length, withGold, withAnswer, toLabel, costUsd: testCostUsd},
+    per1000: train.per1000,
+    report: train.report,
+    /** Cost and minutes for the train set plus, if `labelTest`, the test examples with no label. */
+    total(labelTest: boolean) {
+      const n = train.count - train.reused + (labelTest ? toLabel.length : 0);
+      return {costUsd: train.costUsd + (labelTest ? testCostUsd : 0), minutes: n ? minutesFor(n) : 0, count: n};
+    },
+  };
 }
 
 /** Per chosen model: its best passing version (else its best scored, else the newest version). */

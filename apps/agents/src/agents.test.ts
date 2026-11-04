@@ -90,3 +90,49 @@ test('a tool outside the preset list is refused, and a model that keeps asking s
   assert.ok(n <= 6);
   assert.equal(out.messages.length, 1);
 });
+
+test('a paid start that asks the user ends the turn: no more tools after asked_user', async () => {
+  const calls: string[] = [];
+  const host = {
+    async call(c: {name: string; args: Record<string, unknown>}) {
+      calls.push(c.name);
+      return {asked_user: true, label: 'Score v1.2 on Model A', estimate_usd: 0.03};
+    },
+  };
+  let n = 0;
+  const llm = {
+    async chat() {
+      n++;
+      // A model that keeps asking for tools: the runtime must stop after the card.
+      return JSON.stringify({tool: {name: 'score_version', args: {version: 'v1.2', model: 'A'}}});
+    },
+  } as unknown as Parameters<typeof runAgentTurn>[1];
+  const out = await runAgentTurn(
+    {userText: 'score v1.2 on model A', page: {label: 'Prompt versions', agent: 'prompt_agent', intent: 'explain_version', context: {}}, workspace: {projectId: 'pr_1', task: '', schema: null, history: [], pageView: null}},
+    llm,
+    host,
+  );
+  assert.deepEqual(calls, ['score_version']);
+  assert.equal(n, 2);
+  assert.equal(out.toolCalls.length, 1);
+  assert.match(out.messages.at(-1)!.text, /approval/);
+});
+
+test('the front desk cannot use start tools; the scripted prompt agent asks for score_version', async () => {
+  const calls: string[] = [];
+  const host = {
+    async call(c: {name: string; args: Record<string, unknown>}) {
+      calls.push(`${c.name}:${JSON.stringify(c.args)}`);
+      return {asked_user: true, label: 'Score v1.2 on Model A', estimate_usd: 0.03};
+    },
+  };
+  const out = await runAgentTurn(
+    {userText: 'Please score v1.2 on model A', page: {label: 'Prompt versions', agent: 'front_desk', intent: 'answer', context: {}}, workspace: {projectId: 'pr_1', task: '', schema: null, history: [], pageView: null}},
+    scriptedAgent(),
+    host,
+  );
+  assert.equal(out.invocations.at(-1)!.to, 'prompt_agent');
+  assert.deepEqual(calls, ['score_version:{"version":"v1.2","model":"A"}']);
+  assert.match(out.messages.at(-1)!.text, /asked for your approval/);
+  assert.equal(out.modelCalls.length, 3);
+});

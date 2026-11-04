@@ -1,5 +1,5 @@
 import type {SetupPatch, SetupVersion} from '@tsp/contracts';
-import {emitChange, getApp} from './app.ts';
+import {emitChange, getApp, tm} from './app.ts';
 import {getProject} from './projects.ts';
 
 export type {SetupPatch};
@@ -20,8 +20,17 @@ export async function saveSetup(projectId: string, patch: SetupPatch): Promise<S
     thresholds: patch.thresholds !== undefined ? patch.thresholds : (prev?.thresholds ?? null),
     models: patch.models ?? prev?.models ?? [],
     steps: {...(prev?.steps ?? {schema: false, evaluation: false, models: false}), ...patch.steps},
+    autoStart: patch.autoStart ?? prev?.autoStart ?? true,
     createdBy: u.name,
   });
+  const t = tm();
+  if (schemaChanged && next.schema) t.event('schema_approved', {fields: next.schema.fields.length, values: next.schema.fields.reduce((n, f) => n + f.values.length, 0), schema_version: next.schemaVersion, revisions_before: 0, edited_before_approve: false});
+  if (patch.thresholds !== undefined) t.event('thresholds_saved', {mode: patch.thresholds === null ? 'none' : 'custom', changed: ''});
+  if (patch.models) t.event('models_saved', {slots: patch.models.length > 1 ? 'both' : 'A', temperature_changed: patch.models.some(m => m.temperature !== 0)});
+  if (patch.autoStart !== undefined && patch.autoStart !== (prev?.autoStart ?? true)) {
+    t.event('auto_start_switched', {on: patch.autoStart});
+    await catalog.audit(projectId, u.name, 'setup.auto_start', {on: patch.autoStart});
+  }
   await catalog.patch('projects', projectId, {setupVersionId: next.id});
   await catalog.audit(projectId, u.name, 'setup.save', {number: next.number, schemaChanged});
   emitChange();

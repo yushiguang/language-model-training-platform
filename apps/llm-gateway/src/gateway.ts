@@ -12,6 +12,8 @@ import {
   type LlmStreamChunk,
   type ModelMessage,
   type Platform,
+  NO_TELEMETRY,
+  type TelemetryPort,
 } from '@tsp/contracts';
 import {estimateTokens} from '@tsp/domain';
 import {EndpointLimiter} from './limiter.ts';
@@ -25,6 +27,7 @@ export interface GatewayOptions {
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   /** Output budget assumed for chat calls that do not set one (reasoning counts toward TPM). */
   defaultChatOutputTokens?: number;
+  telemetry?: TelemetryPort;
 }
 
 export const DEFAULT_RETRY_DELAYS_MS = [2000, 4000, 8000, 16000];
@@ -47,6 +50,9 @@ const costOf = (ep: EndpointConfig, inputTokens: number, outputTokens: number) =
  */
 export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'endpoints'>, opts: GatewayOptions = {}): LlmGatewayContract {
   const registry = buildRegistry(platform);
+  const tm = opts.telemetry ?? NO_TELEMETRY;
+  for (const ep of registry)
+    for (const [kind, v] of [['qpm', ep.qpm], ['tpm', ep.tpm], ['concurrency', ep.maxConcurrency]] as const) tm.gauge('tsp_llm_endpoint_limit', v, {endpoint: ep.id, kind, assumed: ep.assumed});
   const delays = opts.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
   const sleep = opts.sleep ?? abortableSleep;
   const limiters = new Map<string, EndpointLimiter>();
@@ -59,32 +65,84 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
     return l;
   };
 
+  const sample = (ep: EndpointConfig, l: EndpointLimiter) => {
+    const st = l.stats();
+    tm.gauge('tsp_llm_limiter_queue_length', st.waiting, {endpoint: ep.id});
+    tm.gauge('tsp_llm_in_flight', st.inFlight, {endpoint: ep.id});
+    tm.gauge('tsp_llm_concurrency_limit', st.concurrency, {endpoint: ep.id});
+    tm.gauge('tsp_llm_qpm_used_ratio', ep.qpm ? st.requestsInWindow / ep.qpm : 0, {endpoint: ep.id});
+    tm.gauge('tsp_llm_tpm_used_ratio', ep.tpm ? st.tokensInWindow / ep.tpm : 0, {endpoint: ep.id});
+  };
+
   /** Runs one call under the endpoint's limiter, retrying busy or broken replies. */
   async function call<T>(ep: EndpointConfig, estimate: number, signal: AbortSignal | undefined, fn: () => Promise<{value: T; tokens?: number}>): Promise<{value: T; attempts: number}> {
-    if (!ep.active) throw new LlmCallError('rejected', `Endpoint ${ep.id} (${ep.model}) is not active.`);
+    const purpose = ep.purpose;
+    const started = Date.now();
+    const done = (outcome: string) => {
+      tm.counter('tsp_llm_calls_total', {endpoint: ep.id, purpose, outcome});
+      tm.histogram('tsp_llm_call_duration_seconds', (Date.now() - started) / 1000, {endpoint: ep.id, purpose});
+    };
+    if (!ep.active) {
+      done('rejected');
+      throw new LlmCallError('rejected', `Endpoint ${ep.id} (${ep.model}) is not active.`);
+    }
+    tm.histogram('tsp_llm_request_tokens', estimate, {endpoint: ep.id, purpose});
     const limiter = limiterFor(ep);
     let last: unknown;
     for (let attempt = 0; attempt <= delays.length; attempt++) {
-      const permit = await limiter.acquire(estimate, signal);
+      const asked = Date.now();
+      let permit;
+      try {
+        permit = await limiter.acquire(estimate, signal);
+      } catch (e) {
+        done('aborted');
+        throw e;
+      }
+      tm.histogram('tsp_llm_limiter_wait_seconds', (Date.now() - asked) / 1000, {endpoint: ep.id});
+      sample(ep, limiter);
+      const sent = Date.now();
       try {
         const {value, tokens} = await fn();
         permit.release(tokens);
+        tm.counter('tsp_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose, outcome: 'ok'});
+        tm.histogram('tsp_llm_request_duration_seconds', (Date.now() - sent) / 1000, {endpoint: ep.id, model: ep.model, purpose});
+        sample(ep, limiter);
+        done('ok');
         return {value, attempts: attempt + 1};
       } catch (e) {
         permit.release();
+        sample(ep, limiter);
         const kind = errorKindOf(e);
-        if (kind === 'aborted') throw e;
-        if (kind === 'rejected') throw e instanceof LlmCallError ? e : new LlmCallError('rejected', (e as Error).message ?? String(e));
+        tm.counter('tsp_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose, outcome: kind});
+        tm.histogram('tsp_llm_request_duration_seconds', (Date.now() - sent) / 1000, {endpoint: ep.id, model: ep.model, purpose});
+        if (kind === 'aborted') {
+          done('aborted');
+          throw e;
+        }
+        if (kind === 'rejected') {
+          done('rejected');
+          throw e instanceof LlmCallError ? e : new LlmCallError('rejected', (e as Error).message ?? String(e));
+        }
         last = e;
         if (attempt === delays.length) break;
+        tm.counter('tsp_llm_retries_total', {endpoint: ep.id, purpose, reason: kind});
         const retryAfter = e instanceof LlmCallError ? e.retryAfterMs : undefined;
         if (kind === 'rate_limited') limiter.onRateLimited(retryAfter ?? delays[attempt]);
         await sleep(Math.max(delays[attempt], retryAfter ?? 0), signal);
       }
     }
+    done('gave_up');
     const msg = (last as Error)?.message ?? String(last);
     throw new LlmCallError(errorKindOf(last), `${ep.model} didn't answer after ${delays.length + 1} tries. Last error: ${msg}`);
   }
+
+  const usage = (ep: EndpointConfig, input: number, output: number, reasoning = 0) => {
+    const l = {endpoint: ep.id, model: ep.model, purpose: ep.purpose};
+    tm.counter('tsp_llm_tokens_total', {...l, kind: 'input'}, input);
+    tm.counter('tsp_llm_tokens_total', {...l, kind: 'output'}, output);
+    if (reasoning) tm.counter('tsp_llm_tokens_total', {...l, kind: 'reasoning'}, reasoning);
+    tm.counter('tsp_llm_cost_usd_total', l, costOf(ep, input, output));
+  };
 
   const chatEndpointFor = (model?: string): EndpointConfig => {
     const chat = registry.filter(e => e.purpose === 'chat');
@@ -101,6 +159,7 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
     const estimate = estimateTokens(textOfMessages(messages)) + (o.maxOutputTokens ?? opts.defaultChatOutputTokens ?? 2000);
     const {value} = await call(ep, estimate, o.signal, async () => {
       const r = await platform.agent.complete(messages, {...o, model: ep.model as AgentChatOptions['model']});
+      if (r.usage) usage(ep, r.usage.inputTokens, r.usage.outputTokens);
       return {value: r, tokens: r.usage ? r.usage.inputTokens + r.usage.outputTokens : undefined};
     });
     return value;
@@ -147,6 +206,7 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
           traceId: req.traceId,
           signal: req.signal,
         });
+        usage(ep, r.inputTokens, r.outputTokens);
         return {value: r, tokens: r.inputTokens + r.outputTokens};
       });
       return {

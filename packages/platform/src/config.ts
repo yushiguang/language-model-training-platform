@@ -3,7 +3,7 @@ import {localDocRuntime} from './standins/local-db.ts';
 import {sampleExamples} from './standins/sample-examples.ts';
 import {simulatedModels} from './standins/simulated-models.ts';
 import {scriptedAgent} from './standins/scripted-agent.ts';
-import {browserFiles, localIdentity} from './standins/local.ts';
+import {browserFiles, localIdentity, localTelemetrySink} from './standins/local.ts';
 
 /**
  * The default platform: browser/local stand-ins, so the public repository runs end to end without
@@ -20,7 +20,8 @@ export function createPlatform(): Platform {
     identity: localIdentity(),
     files: browserFiles(),
     examples: sampleExamples(process.env.NEXT_PUBLIC_BASE_PATH ?? ''),
-    standIns: ['storage', 'labeling models', 'agent model', 'identity', 'files', 'examples'],
+    telemetry: localTelemetrySink(),
+    standIns: ['storage', 'labeling models', 'agent model', 'identity', 'files', 'examples', 'telemetry'],
   };
 }
 

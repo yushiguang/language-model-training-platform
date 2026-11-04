@@ -1,3 +1,4 @@
+import type {TelemetrySink} from './telemetry.ts';
 import type {EndpointInfo} from './types.ts';
 import type {EndpointConfig} from './gateway-api.ts';
 
@@ -399,6 +400,11 @@ export interface Platform {
    * assumed defaults (`apps/llm-gateway/src/registry.ts`).
    */
   endpoints?: EndpointConfig[];
+  /**
+   * Where telemetry goes (metrics are pushed as Prometheus text; events in batches). Optional:
+   * without it nothing leaves the page. See the doc "Telemetry: events and metrics".
+   */
+  telemetry?: TelemetrySink;
   /** Shown in the header so nobody mistakes a stand-in for the real service. */
   standIns: string[];
 }

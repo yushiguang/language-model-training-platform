@@ -47,6 +47,7 @@ export async function labelEvalSet(
   endpoint: EndpointId,
   examples: Example[],
   purpose: 'eval' | 'optimiser' = 'eval',
+  opts: {auto?: boolean} = {},
 ): Promise<LabelingTask | null> {
   const {labeling, user} = getApp();
   const settings = settingsFor(setup, endpoint);
@@ -61,10 +62,12 @@ export async function labelEvalSet(
     endpoint,
     settings,
     exampleIds,
-    createdBy: purpose === 'optimiser' ? 'optimiser' : (await user()).name,
+    // 'auto' marks scoring code started without a click: it counts toward the automatic-spend cap.
+    createdBy: purpose === 'optimiser' ? 'optimiser' : opts.auto ? 'auto' : (await user()).name,
   });
-  if (task.state === 'needs_attention') return labeling.retryFailed(task.id);
-  return labeling.runTask(task.id);
+  const trigger = opts.auto || purpose === 'optimiser' ? 'system' : 'user';
+  if (task.state === 'needs_attention') return labeling.retryFailed(task.id, trigger);
+  return labeling.runTask(task.id, trigger);
 }
 
 export function stopRun(runId: string): void {

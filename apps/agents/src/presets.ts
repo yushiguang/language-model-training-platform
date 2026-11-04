@@ -34,7 +34,13 @@ export const TOOL_SPECS: Record<AgentToolName, {args: string; returns: string}> 
   get_gold_labels: {args: '{"split"?: "eval" | "test", "limit"?: up to 20}', returns: 'gold labels people gave'},
   get_predictions: {args: '{"version": id or label, "model": "A" | "B", "mixedUpOnly"?: boolean, "limit"?: up to 20}', returns: "the model's answers on the eval set next to the gold labels"},
   check_template: {args: '{"template": string, "features"?: {"video": [], "photo_text": [], "metadata": []}}', returns: 'the editor checks (errors and warnings) for a template'},
+  try_template: {args: '{"template": string, "features"?: {"video": [], "photo_text": [], "metadata": []}, "model"?: "A" | "B", "n"?: up to 5}', returns: "PAID, small: the model's answers on n eval examples next to their gold labels; nothing is saved"},
+  score_version: {args: '{"version": id or label, "model"?: "A" | "B"}', returns: 'PAID: starts scoring a saved version on the eval set; the report appears when it finishes'},
+  start_optimiser: {args: '{"model": "A" | "B"}', returns: 'PAID: starts an optimiser run for a model'},
 };
+
+/** Tools that spend money. When automatic starts are not allowed, the user is asked with a card. */
+export const START_TOOLS: AgentToolName[] = ['try_template', 'score_version', 'start_optimiser'];
 
 const READ_ALL: AgentToolName[] = ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions'];
 
@@ -72,7 +78,7 @@ export const PRESETS: Record<AgentPreset | 'optimiser', Preset> = {
       revise_prompt: '{"reply": string, "template": string, "change": string}',
       explain_version: '{"reply": string}',
     },
-    tools: [...READ_ALL, 'check_template'],
+    tools: [...READ_ALL, 'check_template', 'try_template', 'score_version', 'start_optimiser'],
     system: `${common}\nYou are the prompt agent. Prompts are templates: example features go in as {{Key}} placeholders (keys from the catalogue in the context; no spaces). Never add, remove or rename placeholders when revising. The output section must ask for JSON with exactly the schema's field names and values.`,
   },
   evaluation_agent: {
@@ -80,7 +86,7 @@ export const PRESETS: Record<AgentPreset | 'optimiser', Preset> = {
     model: 'gpt-5.6-terra',
     observes: ['the current page view (on the Eval report: the report, its checks, mix-ups and trend)', 'any report, version or prediction through read tools'],
     intents: {explain_report: '{"reply": string}'},
-    tools: READ_ALL,
+    tools: [...READ_ALL, 'score_version', 'start_optimiser'],
     system: `${common}\nYou are the evaluation agent. Explain scores against the user's thresholds in plain words, name the main mix-ups, and say which next step you recommend and why. The main score is the lowest macro-F1 across fields.`,
   },
   optimiser: {

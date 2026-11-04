@@ -11,6 +11,7 @@
     "apps/labeling",
     "apps/agents",
     "apps/bff",
+    "apps/telemetry",
     "apps/web"
   ],
   "scripts": {

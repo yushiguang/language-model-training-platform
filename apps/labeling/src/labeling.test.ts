@@ -144,3 +144,15 @@ test('one runner per task: a second run returns null; Stop stops it; a closed ru
   assert.equal(listed?.state, 'paused');
   assert.equal(listed?.stopReason, 'closed');
 });
+
+test('tryTemplate labels a few examples with an unsaved template and saves nothing', async () => {
+  const {db, catalog, v, ids} = await setup(3, 'try-');
+  const labeling = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": ["Vlog"]}'), locks: memoryLocks()});
+  const examples = await catalog.findByIds('examples', ids);
+  const rows = await labeling.tryTemplate({template: 'Draft {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], schema, settings: {endpoint: 'A', maxOutputTokens: 100, temperature: 0}, examples});
+  assert.deepEqual(rows.map(r => r.exampleId), ids);
+  assert.ok(rows.every(r => r.answer?.format?.[0] === 'Vlog' && r.costUsd === 0.01));
+  assert.equal((await labeling.listTasks('pr_1')).length, 0);
+  // Nothing saved under the version that exists either.
+  assert.equal((await labeling.predictions(v.id, 'A', 'any')).size, 0);
+});

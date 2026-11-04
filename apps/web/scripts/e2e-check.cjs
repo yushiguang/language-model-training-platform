@@ -1,8 +1,10 @@
 /**
  * End-to-end check of the static build on the stand-ins (100 examples): a new project through
  * Setup, Dataset, Gold labels, scoring and the optimiser; the prompt preview; an agent question
- * answered with a read tool; model answers for the test set; then the final run (train + test)
- * watched from a second tab, interrupted by a reload and resumed from the other tab; the exports.
+ * answered with a read tool; with automatic paid starts switched off, an agent start tool that asks
+ * with a card and runs on Approve; model answers for the test set; then the final run (train, and
+ * test examples with no label) watched from a second tab, interrupted by a reload and resumed from
+ * the other tab; the two result tabs and their exports; the telemetry events and metrics.
  *
  * Needs Playwright with Chromium. Run:
  *   npm run build && npx serve apps/web/out -l 4173   (any static server)
@@ -44,6 +46,8 @@ const errors = [];
   await page.getByRole('button', {name: 'Approve'}).click({timeout: 20000});
   await page.getByRole('button', {name: 'Next step: Evaluation'}).click();
   await page.getByRole('button', {name: 'Continue: Models'}).click();
+  const autoSwitch = page.getByRole('switch', {name: 'Start paid labeling automatically'});
+  log('auto-start switch on by default:', await autoSwitch.isChecked());
   await page.getByRole('button', {name: 'Next step: Dataset'}).click();
   log('setup done');
 
@@ -108,6 +112,24 @@ const errors = [];
   log('evaluation agent:', agentReply.slice(0, 160));
   await shot(page, '7-agent-reads-report');
 
+  // Switch automatic paid starts off; an agent start tool then asks with a card
+  await page.goto(`${BASE}/setup/?p=${pid}&step=3`);
+  await page.getByRole('switch', {name: 'Start paid labeling automatically'}).uncheck();
+  await page.getByRole('button', {name: 'Next step: Dataset'}).click();
+  await page.waitForURL(/dataset/);
+  await page.goto(url('/prompt/'));
+  await page.getByPlaceholder('Message the assistant').fill('Please try the current prompt on model A.');
+  await page.keyboard.press('Enter');
+  const approveCard = page.locator('.start-card').getByRole('button', {name: /^Approve about \$/});
+  await approveCard.waitFor({timeout: 20000});
+  const cardText = await page.locator('.agent-msg', {has: page.locator('.start-card')}).last().innerText();
+  log('start card:', cardText.replace(/\n/g, ' | ').slice(0, 200));
+  await shot(page, '8-start-card');
+  await approveCard.click();
+  await page.getByText(/Tried the draft on \d+ eval examples/).last().waitFor({timeout: 30000});
+  const tried = await page.getByText(/Tried the draft on \d+ eval examples/).last().innerText();
+  log('after approve:', tried.split('\n')[0]);
+
   // Gold Labels: get model answers for the test set (optional, with a cost confirm)
   await page.goto(url('/gold/'));
   await page.getByRole('button', {name: 'Get model answers'}).click();
@@ -115,13 +137,28 @@ const errors = [];
   await page.getByText(/Model answers ready from Model/).waitFor({timeout: 120000});
   log('test answers:', ((await main(page)).match(/Model answers ready[^\n.]*/) || [''])[0]);
 
+  // Take the gold label off 3 test examples: their label then comes from the model answers above
+  // (never labeled again), and the confirm has nothing to label in the test set.
+  const ungolded = await page.evaluate(() => {
+    const read = k => JSON.parse(localStorage.getItem('tsp-doc:' + k) || '[]');
+    const testIds = new Set(read('examples').map(d => d.data).filter(e => e.split === 'test').slice(0, 3).map(e => e._appId ?? e.id));
+    const gold = read('gold_labels');
+    const kept = gold.filter(d => !testIds.has(d.data.exampleId));
+    localStorage.setItem('tsp-doc:gold_labels', JSON.stringify(kept));
+    return gold.length - kept.length;
+  });
+  log('gold labels removed from test examples:', ungolded);
+
   // Final run: start in tab 1 (the test answers above are reused)
   await page.goto(url('/training-set/'));
-  await page.getByText(/already have a model answer and are reused/).waitFor({timeout: 10000});
+  await page.getByText(/with a gold label · \d+ with an answer from/).waitFor({timeout: 10000});
   log('plan:', ((await main(page)).match(/Test examples\n[^\n]*/) || [''])[0].replace('\n', ' '));
   await page.getByRole('button', {name: 'Approve and generate'}).click();
   const cont = page.getByRole('button', {name: /^Continue with Model/});
   if (await cont.count()) await cont.click();
+  const confirmText = await page.locator('.confirm-lines').innerText();
+  log('confirm:', confirmText.replace(/\n/g, ' | '));
+  await shot(page, '9-final-run-confirm');
   await page.getByRole('button', {name: /^Approve \$.* and generate$/}).click();
   await page.waitForTimeout(4000);
   log('tab 1 runs:', await progress(page));
@@ -146,17 +183,22 @@ const errors = [];
   await tab2.getByRole('button', {name: /^(Resume|Retry failed)$/}).click();
   await page.waitForTimeout(5500);
   log('resumed in tab 2, tab 1 sees:', await progress(page));
-  await tab2.getByRole('button', {name: 'Test set (JSONL)'}).waitFor({timeout: 120000});
+  await tab2.getByRole('tab', {name: /^Test set/}).waitFor({timeout: 120000});
   await tab2.waitForTimeout(1000);
   await shot(tab2, '5-training-set-done');
   const download = async name => {
     const [d] = await Promise.all([tab2.waitForEvent('download'), tab2.getByRole('button', {name}).click()]);
     return fs.readFileSync(await d.path(), 'utf8').trim().split('\n');
   };
-  const trainLines = await download('Training set (JSONL)');
-  const testLines = await download('Test set (JSONL)');
-  const csvLines = await download('Both (CSV)');
-  const exportFacts = {train: trainLines.length, test: testLines.length, testWithGold: testLines.filter(l => JSON.parse(l).gold).length, csvRows: csvLines.length - 1, csvHead: csvLines[0].split(',').slice(0, 3).join(',')};
+  const trainLines = await download('Download JSONL');
+  const trainCsv = await download('Download CSV');
+  await tab2.getByRole('tab', {name: /^Test set/}).click();
+  await tab2.waitForTimeout(500);
+  await shot(tab2, '10-test-set-tab');
+  const testLines = await download('Download JSONL');
+  const testCsv = await download('Download CSV');
+  const sources = testLines.map(l => JSON.parse(l).label_source);
+  const exportFacts = {train: trainLines.length, trainCsvRows: trainCsv.length - 1, test: testLines.length, testCsvRows: testCsv.length - 1, fromGold: sources.filter(s => s === 'gold').length, fromModel: sources.filter(s => s === 'model').length, testCsvHead: testCsv[0]};
   log('exports:', JSON.stringify(exportFacts));
 
   const facts = await tab2.evaluate(() => {
@@ -166,9 +208,26 @@ const errors = [];
     const tools = docs('audit_log').filter(a => a.action === 'agent.tool').map(a => a.data?.name);
     const preds = docs('predictions').filter(p => p.promptVersionId === task.promptVersionId && p.endpoint === task.endpoint && p.settingsHash === task.settingsHash && task.exampleIds.includes(p.exampleId));
     const ids = JSON.parse(localStorage.getItem('tsp-doc:predictions') || '[]').map(d => d.data._appId);
-    return {state: task.state, done: task.done, total: task.total, failed: task.failed, costUsd: +task.costUsd.toFixed(3), budgetUsd: +task.budgetUsd.toFixed(3), predictions: preds.length, uniqueExamples: new Set(preds.map(p => p.exampleId)).size, duplicatePredictionIds: ids.length - new Set(ids).size, testTask: testTask && {state: testTask.state, done: testTask.done, total: testTask.total, sameVersion: testTask.promptVersionId === task.promptVersionId && testTask.endpoint === task.endpoint}, toolCalls: tools};
+    const audit = docs('audit_log').map(a => a.action);
+    const ts = docs('training_sets').pop();
+    return {state: task.state, done: task.done, total: task.total, failed: task.failed, costUsd: +task.costUsd.toFixed(3), budgetUsd: +task.budgetUsd.toFixed(3), predictions: preds.length, uniqueExamples: new Set(preds.map(p => p.exampleId)).size, duplicatePredictionIds: ids.length - new Set(ids).size, testTask: testTask && {state: testTask.state, done: testTask.done, total: testTask.total, sameVersion: testTask.promptVersionId === task.promptVersionId && testTask.endpoint === task.endpoint}, trainingSet: {trainTotal: ts.trainTotal, testTotal: ts.testTotal, testWithGold: ts.testWithGold, testWithAnswers: ts.testWithAnswers, testToLabel: ts.testToLabel, labelTest: ts.labelTest}, toolCalls: tools, autoStarts: audit.filter(a => a === 'auto_start').length, cardsApproved: audit.filter(a => a === 'start_card.approve').length};
   });
   log('training task:', JSON.stringify(facts));
+  // Telemetry: flush, then read what the stand-in sink kept (events in localStorage, metrics text)
+  await tab2.evaluate(() => new Promise(r => {
+    document.dispatchEvent(new Event('visibilitychange'));
+    setTimeout(r, 300);
+  }));
+  const tel = await tab2.evaluate(() => {
+    const ev = JSON.parse(localStorage.getItem('tsp-telemetry-events') || '[]');
+    const names = {};
+    for (const e of ev) names[e.event] = (names[e.event] || 0) + 1;
+    const leaks = ev.filter(e => /Short-video tagging|Tag short videos/.test(JSON.stringify(e))).length;
+    const text = globalThis.__tspMetrics || '';
+    const series = [...new Set(text.split('\n').filter(l => l && !l.startsWith('#')).map(l => l.split(/[{ ]/)[0].replace(/_(bucket|sum|count)$/, '')))];
+    return {events: ev.length, names, leaks, metricNames: series.length, sample: series.filter(s => /tsp_(llm_requests|labeling_examples|agent_turns|bff_calls|web_page_views|auto_starts|cost_confirms)/.test(s))};
+  });
+  log('telemetry:', JSON.stringify(tel));
   log('console errors:', errors.length ? errors : 'none');
   await ctx.close();
   const ok =
@@ -178,8 +237,17 @@ const errors = [];
     facts.uniqueExamples === facts.total &&
     facts.duplicatePredictionIds === 0 &&
     facts.testTask?.state === 'done' &&
-    exportFacts.train + exportFacts.test === exportFacts.csvRows &&
+    exportFacts.train === exportFacts.trainCsvRows &&
+    exportFacts.test === exportFacts.testCsvRows &&
     exportFacts.test > 0 &&
+    exportFacts.fromGold + exportFacts.fromModel === exportFacts.test &&
+    exportFacts.fromModel === ungolded &&
+    facts.trainingSet.testToLabel === 0 &&
+    facts.total === facts.trainingSet.trainTotal &&
+    facts.cardsApproved === 1 &&
+    tel.events > 0 &&
+    tel.leaks === 0 &&
+    tel.sample.length >= 4 &&
     preview.images > 0 &&
     !errors.length;
   console.log(ok ? 'E2E PASSED' : 'E2E FAILED');

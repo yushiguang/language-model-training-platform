@@ -1,5 +1,6 @@
 import {
   DocFieldValue,
+  NO_TELEMETRY,
   errorKindOf,
   type CatalogContract,
   type ContentPart,
@@ -13,6 +14,8 @@ import {
   type ModelMessage,
   type Prediction,
   type TaskState,
+  type TelemetryPort,
+  type TryTemplateRow,
 } from '@tsp/contracts';
 import {hashString, parseOutput, renderPrompt, settingsHash, type Part} from '@tsp/domain';
 import {DocRepo, newId} from '@tsp/platform';
@@ -27,6 +30,7 @@ export interface LabelingDeps {
   resolveUrl?: (url: string) => string;
   /** Called after every write, so open pages refresh. */
   onChange?: () => void;
+  telemetry?: TelemetryPort;
 }
 
 /** Examples labeled at once by default. */
@@ -64,6 +68,24 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
   const locks = deps.locks ?? browserLocks();
   const emit = () => deps.onChange?.();
   const active = new Map<string, AbortController>();
+  const tm = deps.telemetry ?? NO_TELEMETRY;
+  const running = new Map<string, number>();
+  const stopPressed = new Map<string, number>();
+  const setRunning = (purpose: string, d: number) => {
+    running.set(purpose, (running.get(purpose) ?? 0) + d);
+    tm.gauge('tsp_labeling_tasks_running', running.get(purpose)!, {task_purpose: purpose});
+  };
+  const defaultTrigger = (t: LabelingTask) => (t.purpose === 'eval' || t.purpose === 'optimiser' ? 'system' : 'user');
+
+  /** Runs a task under its lock; a second tab asking for the same task gets null. */
+  async function run(taskId: string, trigger?: 'system' | 'user') {
+    const r = await locks.run(lockName(taskId), () => execute(taskId, trigger));
+    if (r === null) {
+      const t = await getTask(taskId);
+      if (t) tm.counter('tsp_labeling_lock_conflicts_total', {task_purpose: t.purpose});
+    }
+    return r;
+  }
 
   const getTask = (id: string) => repo.get<LabelingTask>(TASKS, id);
 
@@ -78,9 +100,14 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     return active.has(taskId) || (await locks.isHeld(lockName(taskId)));
   }
 
-  async function execute(taskId: string): Promise<LabelingTask | null> {
+  async function execute(taskId: string, trigger?: 'system' | 'user'): Promise<LabelingTask | null> {
     const task = await getTask(taskId);
     if (!task || FINISHED.includes(task.state)) return task;
+    const purpose = task.purpose;
+    const how = trigger ?? defaultTrigger(task);
+    tm.counter('tsp_labeling_tasks_started_total', {task_purpose: purpose, trigger: how});
+    if (task.startedAt) tm.counter('tsp_labeling_resumes_total', {task_purpose: purpose, trigger: how});
+    const runStarted = Date.now();
     const [version, setup] = await Promise.all([deps.catalog.get('prompt_versions', task.promptVersionId), deps.catalog.get('setup_versions', task.setupVersionId)]);
     if (!version || !setup?.schema) {
       await repo.patch<LabelingTask>(TASKS, taskId, {state: 'failed', error: 'The prompt version or schema of this task no longer exists.', finishedAt: now()});
@@ -107,6 +134,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     const examples = new Map((await deps.catalog.findByIds('examples', pending)).map(e => [e.id, e] as [string, Example]));
     const ctrl = new AbortController();
     active.set(taskId, ctrl);
+    setRunning(purpose, 1);
     let stopReason: LabelingTask['stopReason'] = null;
     let inARow = 0;
     let lastError: string | null = null;
@@ -117,13 +145,17 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       if (Date.now() - lastStopCheck < STOP_CHECK_MS) return;
       lastStopCheck = Date.now();
       const fresh = await getTask(taskId);
-      if (fresh?.stopRequested) ctrl.abort();
+      if (fresh?.stopRequested) {
+        if (!stopPressed.has(taskId)) stopPressed.set(taskId, Date.now() - STOP_CHECK_MS / 2);
+        ctrl.abort();
+      }
     };
 
     const worker = async () => {
       while (next < pending.length && !stopReason && !ctrl.signal.aborted) {
         const exampleId = pending[next++];
         const ex = examples.get(exampleId);
+        const exStarted = Date.now();
         try {
           if (!ex) throw new Error('The example no longer exists.');
           const parts = renderPrompt(version.template, ex, version.features, version.images);
@@ -158,8 +190,12 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           counts.done++;
           counts.costUsd += res.costUsd;
           inARow = 0;
+          tm.counter('tsp_labeling_examples_total', {task_purpose: purpose, result: parsed.answer ? 'valid' : 'invalid'});
+          tm.counter('tsp_labeling_cost_usd_total', {task_purpose: purpose}, res.costUsd);
+          tm.histogram('tsp_labeling_example_duration_seconds', (Date.now() - exStarted) / 1000, {task_purpose: purpose});
         } catch (e) {
           if (errorKindOf(e) === 'aborted') break;
+          tm.counter('tsp_labeling_examples_total', {task_purpose: purpose, result: 'failed'});
           inARow++;
           counts.failed++;
           lastError = (e as Error).message ?? String(e);
@@ -176,6 +212,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       await Promise.all(Array.from({length: Math.max(1, task.parallel)}, worker));
     } finally {
       active.delete(taskId);
+      setRunning(purpose, -1);
     }
 
     let state: TaskState;
@@ -197,6 +234,13 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     }
     await repo.patch<LabelingTask>(TASKS, taskId, {state, stopReason, error, finishedAt: now()});
     emit();
+    tm.counter('tsp_labeling_tasks_ended_total', {task_purpose: purpose, state, reason: stopReason ?? 'none'});
+    if (state === 'needs_attention') tm.event('run_needs_attention', {task_purpose: purpose, failed: counts.failed, total: task.total});
+    tm.histogram('tsp_labeling_task_duration_seconds', (Date.now() - runStarted) / 1000, {task_purpose: purpose});
+    if (state === 'done' && task.budgetUsd) tm.histogram('tsp_labeling_cost_vs_estimate_ratio', counts.costUsd / task.budgetUsd, {task_purpose: purpose});
+    const pressed = stopPressed.get(taskId);
+    if (state === 'stopped' && pressed) tm.histogram('tsp_labeling_stop_latency_seconds', (Date.now() - pressed) / 1000, {task_purpose: purpose});
+    stopPressed.delete(taskId);
     return getTask(taskId);
   }
 
@@ -235,18 +279,19 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       return task;
     },
 
-    runTask: taskId => locks.run(lockName(taskId), () => execute(taskId)),
+    runTask: run,
 
     async stopTask(taskId: string) {
+      stopPressed.set(taskId, Date.now());
       active.get(taskId)?.abort();
       if (!active.has(taskId)) await repo.patch<LabelingTask>(TASKS, taskId, {stopRequested: true});
       emit();
     },
 
-    async retryFailed(taskId: string) {
+    async retryFailed(taskId: string, trigger?: 'system' | 'user') {
       await repo.patch<LabelingTask>(TASKS, taskId, {failedExampleIds: [], failed: 0, state: 'queued', error: null, stopReason: null});
       emit();
-      return locks.run(lockName(taskId), () => execute(taskId));
+      return run(taskId, trigger);
     },
 
     getTask,
@@ -271,5 +316,30 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
 
     isRunning,
     predictions,
+
+    async tryTemplate(input) {
+      const out: TryTemplateRow[] = [];
+      await Promise.all(
+        input.examples.map(async ex => {
+          try {
+            const parts = renderPrompt(input.template, ex, input.features, input.images);
+            const res = await deps.gateway.label({
+              slot: input.settings.endpoint,
+              messages: toMessages(parts, deps.resolveUrl),
+              maxOutputTokens: input.settings.maxOutputTokens,
+              temperature: input.settings.temperature,
+              traceId: ex.externalId,
+              signal: input.signal,
+            });
+            const parsed = parseOutput(res.text, input.schema);
+            out.push({exampleId: ex.id, answer: parsed.answer, invalidReason: parsed.reason, costUsd: res.costUsd, error: null});
+          } catch (e) {
+            out.push({exampleId: ex.id, answer: null, invalidReason: null, costUsd: 0, error: (e as Error).message ?? String(e)});
+          }
+        }),
+      );
+      const order = new Map(input.examples.map((e, i) => [e.id, i]));
+      return out.sort((a, b) => order.get(a.exampleId)! - order.get(b.exampleId)!);
+    },
   };
 }

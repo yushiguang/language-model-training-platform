@@ -6,3 +6,4 @@ export * from './labeling-api.ts';
 export * from './catalog-api.ts';
 export * from './agent-api.ts';
 export * from './bff-api.ts';
+export * from './telemetry.ts';

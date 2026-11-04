@@ -12,5 +12,5 @@ npm run build      # static site in apps/web/out/
 ```
 
 - [AGENTS.md](AGENTS.md): rules and layout for anyone (person or coding agent) changing this repo.
-- [docs/architecture.md](docs/architecture.md): the seven apps, how labeling runs, where each rule lives.
+- [docs/architecture.md](docs/architecture.md): the eight apps, how labeling runs, where each rule lives.
 - [docs/handover/integration.md](docs/handover/integration.md): what the internal build replaces, and how.

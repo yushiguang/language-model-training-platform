@@ -1,6 +1,6 @@
 import type {NewVersion, PromptVersion} from '@tsp/contracts';
 import {checkTemplate, MADE_BY, versionLabel} from '@tsp/domain';
-import {emitChange, getApp} from './app.ts';
+import {emitChange, getApp, tm} from './app.ts';
 
 export {MADE_BY};
 export type {NewVersion};
@@ -22,6 +22,16 @@ export async function createVersion(projectId: string, v: NewVersion): Promise<P
     kind: v.kind,
   });
   await catalog.audit(projectId, v.madeBy === 'user' ? (await user()).name : v.madeBy, 'prompt.create', {version: versionLabel(version)});
+  const before = new Set((v.parent?.template ?? '').split('\n'));
+  const after = new Set(v.template.split('\n'));
+  tm().event('version_created', {
+    made_by: v.madeBy,
+    kind: v.kind,
+    from_version_id: v.parent?.id ?? null,
+    warnings: check.warnings.length,
+    lines_added: [...after].filter(l => !before.has(l)).length,
+    lines_removed: v.parent ? [...before].filter(l => !after.has(l)).length : 0,
+  });
   emitChange();
   return version;
 }

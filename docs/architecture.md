@@ -4,7 +4,7 @@ The MVP produces a labeled training set and a labeled test set for one task: Set
 Gold Labels (optional) → Prompt Engineering → Training Set (the final run labels train and test). It is a fixed-workflow website with agents built into each step.
 Code decides the next step; agents explain and propose, people approve.
 
-## Seven apps, three packages
+## Eight apps, three packages
 
 ```
 apps/web ──► apps/web/src/backend-api (composition root)
@@ -13,8 +13,9 @@ apps/web ──► apps/web/src/backend-api (composition root)
                  │   (what pages call)  ├──► labeling     (tasks, predictions) ──► llm-gateway
                  │                      ├──► agents       (presets, runtime)   ──► llm-gateway
                  │                      └──► llm-gateway  (endpoint list, agent model)
+                 ├── telemetry (one port, given to every app above) ──► the platform's sink
                  └── @tsp/platform-impl (stand-ins, or the internal adapters)
-                       document store · labeling models · agent model · identity · files · examples
+                       document store · labeling models · agent model · identity · files · examples · telemetry sink
 
 All apps depend only on packages/contracts (types, contracts) and packages/domain (pure rules).
 catalog and labeling also use packages/platform for DocRepo over the document store.
@@ -31,6 +32,7 @@ composition root is the only place that knows which implementation sits behind e
 | `catalog` | All product collections (`CatalogRecords` in `catalog-api.ts`). Assigns version numbers | `CatalogContract` |
 | `agents` | Agent presets and the turn/handoff logic. Stateless | `AgentRuntimeContract` (`agent-api.ts`) |
 | `bff` | Nothing stored. Workflow, gates, when labeling starts, reports, optimiser loop | `BffContract` (`bff-api.ts`) |
+| `telemetry` | Metrics (Prometheus style, `tsp_*`) and product events; sends them to `Platform.telemetry` | `TelemetryPort` (`telemetry.ts`) |
 | `web` | Pages and components | calls `@/backend-api` |
 
 ## Model calls: llm-gateway
@@ -53,8 +55,24 @@ composition root is the only place that knows which implementation sits behind e
 A labeling task runs one prompt version on one model (with fixed settings) over a list of
 examples and stores one prediction per example. The bff creates tasks for four reasons: scoring a
 new version on the eval set (system), labeling an optimiser candidate (system), "Get model answers"
-for the test set on Gold Labels (the user approves the cost), and the final run over the train and
-test splits (the user approves the cost). Code starts only the cheap work the workflow needs.
+for the test set on Gold Labels (the user approves the cost), and the final run (the user approves
+the cost). Code starts only the cheap work the workflow needs, and only while automatic starts are
+allowed (below).
+
+**The final run** labels every train example. A test example's label is its gold label when
+someone gave one, else the chosen version's saved answer; only test examples with neither are
+labeled, and only when the user ticks that line in the confirm ("Test set: a have a gold label,
+b have an answer from v1.3. Label the other c?"). The results page has a Training set tab and a
+Test set tab, each with counts, rows and JSONL/CSV downloads; test rows say where their label
+came from (gold or model).
+
+**Automatic paid starts.** Setup step 3 has "Start paid labeling automatically" (on by default,
+`SetupVersion.autoStart`). It covers scoring a new version, the optimiser, resuming scoring after
+a closed page, and the agents' start tools. `dueStarts` (`packages/domain/src/auto-start.ts`) says
+what the workflow would start; `autoStartCheck` allows it when the switch is on, the start costs
+at most $1, and automatic starts in the project have spent less than $5. Otherwise the page shows
+a button with the cost ("Score on Model A · about $0.03"). Test answers and the final run always
+ask. Every automatic start writes an `auto_start` audit record.
 
 ```
 createTask ──► runTask (browser lock "labeling:<task>"; a second tab gets null)
@@ -91,6 +109,20 @@ reports, examples, gold labels, predictions, template checks), like a coding age
 a repo: up to 4 calls per turn, each one logged, nothing changed. Changes stay proposals the user
 approves on the page. All presets use the reasoning model.
 
+Three **start tools** spend money (`apps/bff/src/services/starts.ts`): `try_template` (prompt
+agent: up to 5 eval examples with an unsaved draft, nothing saved), `score_version` and
+`start_optimiser` (prompt and evaluation agents). When an automatic start is allowed they run at
+once; otherwise the tool answers `asked_user`, the chat shows a card with Approve and Cancel, and
+the turn ends. On Approve the bff runs it and posts the result in the chat for the next turn.
+
+## Telemetry
+
+One `TelemetryPort` from `apps/telemetry` goes to every app. Metrics are Prometheus style with
+small label sets (model calls, limiter, labeling, catalog, agents, bff calls, gates, automatic
+starts, cost confirms, page views and timings). Product events carry ids, counts and durations,
+never content. The browser pushes both to `Platform.telemetry`; the stand-in keeps events in
+`localStorage`. The audit log stays in the catalog.
+
 ## Prompts with images
 
 A labeling request is one user message whose content lists text and image parts in order; each
@@ -120,7 +152,10 @@ application `id` to the store's document id.
 | What an agent sees of each page (page views) and the read tools' implementation | `apps/bff/src/services/page-views.ts` |
 | When labeling starts, reports scored on the held-out half of the eval set | `apps/bff/src/services/evaluation.ts`, `work.ts` |
 | Optimiser: GEPA-style loop; candidates are labeled as optimiser tasks | `apps/bff/src/services/optimiser.ts` |
-| Test answers and the final run (train + test) as labeling tasks with a budget | `apps/bff/src/services/training.ts` |
+| Test answers and the final run (train, plus unlabeled test when ticked) as labeling tasks with a budget; output rows with their label source | `apps/bff/src/services/training.ts`, `finalRunPlan` in `packages/domain/src/workflow.ts` |
+| What starts without a click, the $1 and $5 caps | `packages/domain/src/auto-start.ts`, `tick` in `apps/bff/src/services/work.ts` |
+| Agent start tools and their Approve card | `apps/bff/src/services/starts.ts` |
+| Metric and event names, labels and props | `packages/contracts/src/telemetry.ts` |
 
 ## Known limits of this version
 
