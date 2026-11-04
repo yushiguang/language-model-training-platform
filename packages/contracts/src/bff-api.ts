@@ -1,0 +1,104 @@
+import type {
+  Actor,
+  AgentProposal,
+  Answer,
+  ChatAttachment,
+  ChatMessage,
+  DatasetSnapshot,
+  EndpointId,
+  EndpointInfo,
+  EvalReport,
+  Example,
+  FeatureSelection,
+  GoldLabel,
+  ModelSettings,
+  NodeId,
+  PageContext,
+  Prediction,
+  Project,
+  PromptImage,
+  PromptVersion,
+  Schema,
+  SetupVersion,
+  TrainingRow,
+  TrainingSet,
+} from './types';
+import type {ProjectState} from './workflow';
+
+/**
+ * Contract 1: Frontend Web App <-> BFF Service (`@tsp/contracts/bff-api`).
+ *
+ * Every method is asynchronous and uses JSON-serialisable parameters and return types
+ * (with browser `File` objects converted at the client boundary).
+ * In the MVP, the client in `apps/web` delegates to `apps/bff` in-process; in production
+ * microservice deployments, it swaps to `fetch()` calls against the remote Go BFF service.
+ */
+
+export type SetupPatch = Partial<Pick<SetupVersion, 'task' | 'schema' | 'thresholds' | 'models' | 'steps'>>;
+
+export interface NewVersion {
+  template: string;
+  features: FeatureSelection;
+  images: PromptImage[];
+  parent: PromptVersion | null;
+  madeBy: Actor;
+  change: string;
+  kind: 'minor' | 'major';
+  schema: Schema;
+  schemaVersion: number;
+}
+
+export interface RuntimeInfo {
+  user: {id: string; name: string};
+  standIns: string[];
+  endpoints: EndpointInfo[];
+  hasBundledGold: boolean;
+}
+
+export interface BffContract {
+  getRuntimeInfo(): Promise<RuntimeInfo>;
+  subscribeChanges(listener: () => void): () => void;
+
+  // Projects & workflow gates
+  listProjects(): Promise<Project[]>;
+  createProject(name: string): Promise<Project>;
+  getProject(id: string): Promise<Project | null>;
+  updateProject(p: Project): Promise<Project>;
+  loadProjectState(projectId: string): Promise<ProjectState | null>;
+  approveNode(projectId: string, node: NodeId): Promise<void>;
+  skipGold(projectId: string): Promise<void>;
+
+  // Setup
+  saveSetup(projectId: string, patch: SetupPatch): Promise<SetupVersion>;
+
+  // Dataset & Gold labels
+  getSamplePoolSize(): Promise<number>;
+  startSampleDataset(projectId: string, count: number): Promise<DatasetSnapshot | null>;
+  stopSampleDataset(projectId: string): void;
+  uploadDatasetText(projectId: string, name: string, text: string): Promise<{snapshot?: DatasetSnapshot; error?: string}>;
+  applySplit(projectId: string, snapshotId: string, evalSize: number, testSize: number): Promise<void>;
+  saveGold(projectId: string, exampleId: string, schemaVersion: number, answer: Answer, revealed: boolean, source?: GoldLabel['source']): Promise<GoldLabel>;
+  uploadGold(projectId: string, schema: Schema, schemaVersion: number, examples: Example[], lines: {externalId: string; answer: Record<string, string[]>}[]): Promise<{saved: number; skipped: number}>;
+  importBundledGold(projectId: string, schema: Schema, schemaVersion: number, examples: Example[]): Promise<{saved: number; skipped: number}>;
+
+  // Prompts, evaluation & optimiser
+  createVersion(projectId: string, all: PromptVersion[], v: NewVersion): Promise<PromptVersion>;
+  scoreVersion(projectId: string, version: PromptVersion, only?: EndpointId): Promise<void>;
+  tick(state: ProjectState): Promise<void>;
+  stopRun(runId: string): void;
+  startOptimiser(projectId: string, endpoint: EndpointId): void;
+  stopOptimiser(runId: string): void;
+  predictionsFor(versionId: string, endpoint: EndpointId, settings: ModelSettings): Promise<Map<string, Prediction>>;
+
+  // Training set
+  startTrainingSet(projectId: string, version: PromptVersion, endpoint: EndpointId, report: EvalReport | null, estimateUsd: number, existing?: TrainingSet): Promise<TrainingSet>;
+  stopTrainingSet(tsId: string): void;
+  trainingRows(tsId: string): Promise<TrainingRow[]>;
+
+  // Assistant & proposals
+  chatHistory(projectId: string): Promise<ChatMessage[]>;
+  isAgentBusy(projectId: string): boolean;
+  sendUserMessage(projectId: string, text: string, page: PageContext, attachments?: ChatAttachment[]): Promise<AgentProposal | null>;
+  openProposals(projectId: string, kind: AgentProposal['kind']): Promise<AgentProposal[]>;
+  closeProposal(p: AgentProposal, state: 'approved' | 'discarded'): Promise<void>;
+}

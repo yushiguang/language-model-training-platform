@@ -1,0 +1,3541 @@
+{
+ "note": "Made-up examples for the stand-ins. Not real data.",
+ "examples": [
+  {
+   "externalId": "7340007919",
+   "type": "video",
+   "title": "Rent a flat in Lisbon: 5 things to check",
+   "features": {
+    "Description": "Moving to Lisbon? Check these before you sign.",
+    "OCR_Text": "1. WATER PRESSURE",
+    "ASR": "First, open every tap and check the pressure...",
+    "Cover": "sample-data/img/frame-2.svg",
+    "Creator_Nick_Name": "kai.daily",
+    "Creator_Bio": "Opinions are my own",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#home #travel",
+    "Create_Time": "2026-10-02 07:13",
+    "Country_Code": "DE",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Home & renting",
+    "Language": "German",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340015838",
+   "type": "video",
+   "title": "Talk show clip: chef on remote work",
+   "features": {
+    "Description": "From last night's show #clip",
+    "OCR_Text": "LIVE",
+    "ASR": "I think remote work changed how we eat lunch...",
+    "Cover": "sample-data/img/frame-3.svg",
+    "Creator_Nick_Name": "mia.travels",
+    "Creator_Bio": "Honest reviews",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#work #food",
+    "Create_Time": "2026-10-03 14:26",
+    "Country_Code": "FR",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Work & money",
+    "Language": "French",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340023757",
+   "type": "video",
+   "title": "My cat vs. the new sofa",
+   "features": {
+    "Description": "She won. Again.",
+    "OCR_Text": "DAY 3",
+    "ASR": "No no no, not the corner...",
+    "Cover": "sample-data/img/frame-4.svg",
+    "Creator_Nick_Name": "kai.pets",
+    "Creator_Bio": "",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#pets #home",
+    "Create_Time": "2026-10-04 21:39",
+    "Country_Code": "ES",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Pets & animals",
+    "Language": "Spanish",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340031676",
+   "type": "video",
+   "title": "Is this air fryer worth it? Honest review",
+   "features": {
+    "Description": "Honest review after 14 days. Link in bio for 20% off!",
+    "OCR_Text": "CODE: FRY20",
+    "ASR": "So I've been using this for two weeks...",
+    "Cover": "sample-data/img/frame-5.svg",
+    "Creator_Nick_Name": "tom.kitchen",
+    "Creator_Bio": "Just for fun",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#food #tech",
+    "Create_Time": "2026-10-05 04:52",
+    "Country_Code": "ES",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Food & drink",
+    "Language": "Spanish",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340039595",
+   "type": "video",
+   "title": "5 cheap lunches near the office",
+   "features": {
+    "Description": "Under 8 euros each, all walkable.",
+    "OCR_Text": "€7.50",
+    "ASR": "Number one is the bakery on the corner...",
+    "Cover": "sample-data/img/frame-6.svg",
+    "Creator_Nick_Name": "noa.travels",
+    "Creator_Bio": "Honest reviews",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#food #work",
+    "Create_Time": "2026-10-06 11:05",
+    "Country_Code": "PT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Food & drink",
+    "Language": "Portuguese",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340047514",
+   "type": "video",
+   "title": "Our first week in Porto",
+   "features": {
+    "Description": "Week one done. We love it already.",
+    "OCR_Text": "PORTO",
+    "ASR": "Okay so this is our street...",
+    "Cover": "sample-data/img/frame-7.svg",
+    "Creator_Nick_Name": "ivy.games",
+    "Creator_Bio": "",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#travel",
+    "Create_Time": "2026-10-07 18:18",
+    "Country_Code": "ES",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Travel",
+    "Language": "Spanish",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340055433",
+   "type": "video",
+   "title": "Why I quit my agency job",
+   "features": {
+    "Description": "Long story, here is my take. Tell me yours.",
+    "OCR_Text": "",
+    "ASR": "I want to talk about why I left...",
+    "Cover": "sample-data/img/frame-8.svg",
+    "Creator_Nick_Name": "leo.tech",
+    "Creator_Bio": "Opinions are my own",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#work",
+    "Create_Time": "2026-10-08 01:31",
+    "Country_Code": "IT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Work & money",
+    "Language": "Italian",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340063352",
+   "type": "photo_text",
+   "title": "This serum changed my skin (code inside)",
+   "features": {
+    "Description": "Use my code GLOW15 at checkout",
+    "OCR_Text": "GLOW15",
+    "ASR": "",
+    "Cover": "sample-data/img/frame-1.svg",
+    "Creator_Nick_Name": "max.kitchen",
+    "Creator_Bio": "Honest reviews",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#beauty",
+    "Create_Time": "2026-10-09 08:44",
+    "Country_Code": "FR",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Beauty & fashion",
+    "Language": "French",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "This serum changed my skin (code inside)",
+    "Images": [
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340071271",
+   "type": "video",
+   "title": "How to fix a slow laptop in 3 steps",
+   "features": {
+    "Description": "Works on most machines from the last 5 years.",
+    "OCR_Text": "STEP 1",
+    "ASR": "Open the task manager first...",
+    "Cover": "sample-data/img/frame-2.svg",
+    "Creator_Nick_Name": "tom.kitchen",
+    "Creator_Bio": "Daily life, mostly",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#tech",
+    "Create_Time": "2026-10-10 15:57",
+    "Country_Code": "FR",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Tech",
+    "Language": "French",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340079190",
+   "type": "video",
+   "title": "When your boss says 'quick call'",
+   "features": {
+    "Description": "We've all been there",
+    "OCR_Text": "",
+    "ASR": "Hey, got a minute? It'll be quick...",
+    "Cover": "sample-data/img/frame-3.svg",
+    "Creator_Nick_Name": "ana.games",
+    "Creator_Bio": "",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#work",
+    "Create_Time": "2026-10-11 22:10",
+    "Country_Code": "PT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Work & money",
+    "Language": "Portuguese",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340087109",
+   "type": "video",
+   "title": "Phone camera test: night mode",
+   "features": {
+    "Description": "Same street, three phones. Which wins?",
+    "OCR_Text": "PHONE A / PHONE B",
+    "ASR": "This is the first shot at 11pm...",
+    "Cover": "sample-data/img/frame-4.svg",
+    "Creator_Nick_Name": "leo.pets",
+    "Creator_Bio": "",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#tech",
+    "Create_Time": "2026-10-12 05:23",
+    "Country_Code": "GB",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Tech",
+    "Language": "English",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340095028",
+   "type": "photo_text",
+   "title": "Remote work is overrated. Change my mind",
+   "features": {
+    "Description": "Hot take: offices are better for juniors.",
+    "OCR_Text": "",
+    "ASR": "",
+    "Cover": "sample-data/img/frame-5.svg",
+    "Creator_Nick_Name": "zoe.daily",
+    "Creator_Bio": "Opinions are my own",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#work",
+    "Create_Time": "2026-10-13 12:36",
+    "Country_Code": "ES",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Work & money",
+    "Language": "Spanish",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "Remote work is overrated. Change my mind",
+    "Images": [
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340102947",
+   "type": "video",
+   "title": "Street food tour in Bangkok",
+   "features": {
+    "Description": "Twelve dishes, one night.",
+    "OCR_Text": "STOP 4",
+    "ASR": "This is the pad thai place everyone talks about...",
+    "Cover": "sample-data/img/frame-6.svg",
+    "Creator_Nick_Name": "tom.fit",
+    "Creator_Bio": "",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#food #travel",
+    "Create_Time": "2026-10-14 19:49",
+    "Country_Code": "ES",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Food & drink",
+    "Language": "Spanish",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340110866",
+   "type": "video",
+   "title": "Stretching routine for desk workers",
+   "features": {
+    "Description": "Ten minutes, no equipment.",
+    "OCR_Text": "HOLD 30s",
+    "ASR": "Sit tall and roll your shoulders back...",
+    "Cover": "sample-data/img/frame-7.svg",
+    "Creator_Nick_Name": "ben.travels",
+    "Creator_Bio": "Honest reviews",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#health #work",
+    "Create_Time": "2026-10-15 02:02",
+    "Country_Code": "FR",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Health & fitness",
+    "Language": "French",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340118785",
+   "type": "video",
+   "title": "Movie scene that still makes me cry",
+   "features": {
+    "Description": "From the 2019 film. #clip #movies",
+    "OCR_Text": "",
+    "ASR": "You were always there for me...",
+    "Cover": "sample-data/img/frame-8.svg",
+    "Creator_Nick_Name": "max.tech",
+    "Creator_Bio": "Opinions are my own",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#news",
+    "Create_Time": "2026-10-16 09:15",
+    "Country_Code": "DE",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "News & society",
+    "Language": "German",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340126704",
+   "type": "photo_text",
+   "title": "Get rich with this one app!!!",
+   "features": {
+    "Description": "Guaranteed 300% returns, DM me",
+    "OCR_Text": "300% PROFIT",
+    "ASR": "",
+    "Cover": "sample-data/img/frame-1.svg",
+    "Creator_Nick_Name": "ivy.games",
+    "Creator_Bio": "Just for fun",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#work #tech",
+    "Create_Time": "2026-10-17 16:28",
+    "Country_Code": "GB",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Work & money",
+    "Language": "English",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "Get rich with this one app!!!",
+    "Images": [
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340134623",
+   "type": "video",
+   "title": "Unpopular opinion: tipping should end",
+   "features": {
+    "Description": "Let's talk about it. What do you think?",
+    "OCR_Text": "",
+    "ASR": "I worked in restaurants for six years...",
+    "Cover": "sample-data/img/frame-2.svg",
+    "Creator_Nick_Name": "kai.home",
+    "Creator_Bio": "Daily life, mostly",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#food #news",
+    "Create_Time": "2026-10-18 23:41",
+    "Country_Code": "PT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Food & drink",
+    "Language": "Portuguese",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340142542",
+   "type": "photo_text",
+   "title": "Board game night: our top 3",
+   "features": {
+    "Description": "For groups of 4 to 6.",
+    "OCR_Text": "TOP 3",
+    "ASR": "",
+    "Cover": "sample-data/img/frame-3.svg",
+    "Creator_Nick_Name": "ben.tech",
+    "Creator_Bio": "",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#games",
+    "Create_Time": "2026-10-19 06:54",
+    "Country_Code": "ES",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Games",
+    "Language": "Spanish",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "Board game night: our top 3",
+    "Images": [
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340150461",
+   "type": "video",
+   "title": "Speedrun world record reaction",
+   "features": {
+    "Description": "He did it!! #gaming #clip",
+    "OCR_Text": "WR",
+    "ASR": "No way, no way, he skipped the whole level...",
+    "Cover": "sample-data/img/frame-4.svg",
+    "Creator_Nick_Name": "eli.fit",
+    "Creator_Bio": "Just for fun",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#games",
+    "Create_Time": "2026-10-20 13:07",
+    "Country_Code": "IT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Games",
+    "Language": "Italian",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340158380",
+   "type": "photo_text",
+   "title": "What to pack for a week in Iceland",
+   "features": {
+    "Description": "My full list, including what I forgot.",
+    "OCR_Text": "PACKING LIST",
+    "ASR": "Layers are everything...",
+    "Cover": "sample-data/img/frame-5.svg",
+    "Creator_Nick_Name": "ana.pets",
+    "Creator_Bio": "Just for fun",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#travel",
+    "Create_Time": "2026-10-21 20:20",
+    "Country_Code": "ES",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Travel",
+    "Language": "Spanish",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "What to pack for a week in Iceland",
+    "Images": [
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340166299",
+   "type": "video",
+   "title": "Puppy's first beach day",
+   "features": {
+    "Description": "He was scared of the waves at first.",
+    "OCR_Text": "",
+    "ASR": "Come on buddy, it's just water...",
+    "Cover": "sample-data/img/frame-6.svg",
+    "Creator_Nick_Name": "sara.fit",
+    "Creator_Bio": "Just for fun",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#pets #travel",
+    "Create_Time": "2026-10-22 03:33",
+    "Country_Code": "PT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Pets & animals",
+    "Language": "Portuguese",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340174218",
+   "type": "video",
+   "title": "City council votes on bike lanes",
+   "features": {
+    "Description": "My view on yesterday's vote. Agree?",
+    "OCR_Text": "",
+    "ASR": "I cycle to work every day, so here's my take...",
+    "Cover": "sample-data/img/frame-7.svg",
+    "Creator_Nick_Name": "noa.kitchen",
+    "Creator_Bio": "Honest reviews",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#news",
+    "Create_Time": "2026-10-23 10:46",
+    "Country_Code": "IT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "News & society",
+    "Language": "Italian",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340182137",
+   "type": "video",
+   "title": "Make-up look in 5 minutes",
+   "features": {
+    "Description": "Everyday look, drugstore only.",
+    "OCR_Text": "5 MIN",
+    "ASR": "Start with a light moisturiser...",
+    "Cover": "sample-data/img/frame-8.svg",
+    "Creator_Nick_Name": "ivy.pets",
+    "Creator_Bio": "Tips that work",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#beauty",
+    "Create_Time": "2026-10-24 17:59",
+    "Country_Code": "GB",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Beauty & fashion",
+    "Language": "English",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340190056",
+   "type": "video",
+   "title": "Waiter vs. customer who 'knows wine'",
+   "features": {
+    "Description": "Based on a true story",
+    "OCR_Text": "",
+    "ASR": "I'd like the 2015, it has more legs...",
+    "Cover": "sample-data/img/frame-1.svg",
+    "Creator_Nick_Name": "ben.fit",
+    "Creator_Bio": "Just for fun",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#food",
+    "Create_Time": "2026-10-25 00:12",
+    "Country_Code": "FR",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Food & drink",
+    "Language": "French",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340197975",
+   "type": "photo_text",
+   "title": "Budget for my first salary",
+   "features": {
+    "Description": "How I split it, 50/30/20.",
+    "OCR_Text": "50 / 30 / 20",
+    "ASR": "",
+    "Cover": "sample-data/img/frame-2.svg",
+    "Creator_Nick_Name": "max.money",
+    "Creator_Bio": "Tips that work",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#work",
+    "Create_Time": "2026-10-26 07:25",
+    "Country_Code": "ES",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Work & money",
+    "Language": "Spanish",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "Budget for my first salary",
+    "Images": [
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340205894",
+   "type": "video",
+   "title": "Late night stream highlights",
+   "features": {
+    "Description": "Best moments from Friday's stream",
+    "OCR_Text": "",
+    "ASR": "Chat, did you see that?...",
+    "Cover": "sample-data/img/frame-3.svg",
+    "Creator_Nick_Name": "eli.travels",
+    "Creator_Bio": "Opinions are my own",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#games",
+    "Create_Time": "2026-10-27 14:38",
+    "Country_Code": "ES",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Games",
+    "Language": "Spanish",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340213813",
+   "type": "video",
+   "title": "Is the new smartwatch worth it?",
+   "features": {
+    "Description": "After a month of use. Not sponsored.",
+    "OCR_Text": "",
+    "ASR": "Battery is the big question...",
+    "Cover": "sample-data/img/frame-4.svg",
+    "Creator_Nick_Name": "ben.home",
+    "Creator_Bio": "",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#tech #health",
+    "Create_Time": "2026-10-01 21:51",
+    "Country_Code": "IT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Tech",
+    "Language": "Italian",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340221732",
+   "type": "photo_text",
+   "title": "Fake giveaway: win a phone",
+   "features": {
+    "Description": "Like, share and send 2 euros to enter!",
+    "OCR_Text": "FREE PHONE",
+    "ASR": "",
+    "Cover": "sample-data/img/frame-5.svg",
+    "Creator_Nick_Name": "zoe.money",
+    "Creator_Bio": "Opinions are my own",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#tech",
+    "Create_Time": "2026-10-02 04:04",
+    "Country_Code": "GB",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Tech",
+    "Language": "English",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "Fake giveaway: win a phone",
+    "Images": [
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340229651",
+   "type": "video",
+   "title": "Apartment tour: 30 square metres",
+   "features": {
+    "Description": "Small but it works.",
+    "OCR_Text": "30 m²",
+    "ASR": "This is the whole place, basically...",
+    "Cover": "sample-data/img/frame-6.svg",
+    "Creator_Nick_Name": "kai.kitchen",
+    "Creator_Bio": "Tips that work",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#home",
+    "Create_Time": "2026-10-03 11:17",
+    "Country_Code": "DE",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Home & renting",
+    "Language": "German",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340237570",
+   "type": "photo_text",
+   "title": "Why fast fashion has to stop",
+   "features": {
+    "Description": "My thoughts after reading the report. Discuss.",
+    "OCR_Text": "",
+    "ASR": "",
+    "Cover": "sample-data/img/frame-7.svg",
+    "Creator_Nick_Name": "sara.pets",
+    "Creator_Bio": "Daily life, mostly",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#beauty #news",
+    "Create_Time": "2026-10-04 18:30",
+    "Country_Code": "ES",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Beauty & fashion",
+    "Language": "Spanish",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "Why fast fashion has to stop",
+    "Images": [
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340245489",
+   "type": "video",
+   "title": "Home workout: no gym needed",
+   "features": {
+    "Description": "Full body, 20 minutes.",
+    "OCR_Text": "ROUND 2",
+    "ASR": "Let's start with squats...",
+    "Cover": "sample-data/img/frame-8.svg",
+    "Creator_Nick_Name": "ana.daily",
+    "Creator_Bio": "Daily life, mostly",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#health",
+    "Create_Time": "2026-10-05 01:43",
+    "Country_Code": "IT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Health & fitness",
+    "Language": "Italian",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340253408",
+   "type": "video",
+   "title": "Interview clip: economist on rents",
+   "features": {
+    "Description": "From this morning's interview #clip",
+    "OCR_Text": "",
+    "ASR": "Rents rose faster than wages this year...",
+    "Cover": "sample-data/img/frame-1.svg",
+    "Creator_Nick_Name": "noa.games",
+    "Creator_Bio": "Honest reviews",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#home #news",
+    "Create_Time": "2026-10-06 08:56",
+    "Country_Code": "DE",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Home & renting",
+    "Language": "German",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340261327",
+   "type": "video",
+   "title": "Trying every snack in a Tokyo store",
+   "features": {
+    "Description": "Rating them 1 to 10.",
+    "OCR_Text": "8/10",
+    "ASR": "Okay this one is shrimp flavoured...",
+    "Cover": "sample-data/img/frame-2.svg",
+    "Creator_Nick_Name": "sara.money",
+    "Creator_Bio": "",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#food #travel",
+    "Create_Time": "2026-10-07 15:09",
+    "Country_Code": "DE",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Food & drink",
+    "Language": "German",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340269246",
+   "type": "video",
+   "title": "Cat translator app review",
+   "features": {
+    "Description": "Does it work? Sort of. Ad: thanks to the app for sponsoring",
+    "OCR_Text": "AD",
+    "ASR": "It says she wants food. Shocking...",
+    "Cover": "sample-data/img/frame-3.svg",
+    "Creator_Nick_Name": "ana.daily",
+    "Creator_Bio": "",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#pets #tech",
+    "Create_Time": "2026-10-08 22:22",
+    "Country_Code": "DE",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Pets & animals",
+    "Language": "German",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340277165",
+   "type": "photo_text",
+   "title": "How I prepare for job interviews",
+   "features": {
+    "Description": "My checklist, free to copy.",
+    "OCR_Text": "CHECKLIST",
+    "ASR": "",
+    "Cover": "sample-data/img/frame-4.svg",
+    "Creator_Nick_Name": "ana.games",
+    "Creator_Bio": "Just for fun",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#work",
+    "Create_Time": "2026-10-09 05:35",
+    "Country_Code": "GB",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Work & money",
+    "Language": "English",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "How I prepare for job interviews",
+    "Images": [
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340285084",
+   "type": "video",
+   "title": "Kids explain the news",
+   "features": {
+    "Description": "Today's topic: elections",
+    "OCR_Text": "",
+    "ASR": "So you pick the person you like most...",
+    "Cover": "sample-data/img/frame-5.svg",
+    "Creator_Nick_Name": "tom.daily",
+    "Creator_Bio": "Daily life, mostly",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#news",
+    "Create_Time": "2026-10-10 12:48",
+    "Country_Code": "ES",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "News & society",
+    "Language": "Spanish",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340293003",
+   "type": "photo_text",
+   "title": "Miracle tea: lose 10kg in a week",
+   "features": {
+    "Description": "Order now, link in bio",
+    "OCR_Text": "-10KG",
+    "ASR": "This tea melts fat while you sleep...",
+    "Cover": "sample-data/img/frame-6.svg",
+    "Creator_Nick_Name": "sara.tech",
+    "Creator_Bio": "Just for fun",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#health",
+    "Create_Time": "2026-10-11 19:01",
+    "Country_Code": "IT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Health & fitness",
+    "Language": "Italian",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "Miracle tea: lose 10kg in a week",
+    "Images": [
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340300922",
+   "type": "video",
+   "title": "Should games cost 80 euros?",
+   "features": {
+    "Description": "Prices keep going up. Where's the line for you?",
+    "OCR_Text": "",
+    "ASR": "Let's talk about the new price...",
+    "Cover": "sample-data/img/frame-7.svg",
+    "Creator_Nick_Name": "max.daily",
+    "Creator_Bio": "Tips that work",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#games #work",
+    "Create_Time": "2026-10-12 02:14",
+    "Country_Code": "GB",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Games",
+    "Language": "English",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340308841",
+   "type": "video",
+   "title": "Weekend in Seville on a budget",
+   "features": {
+    "Description": "Everything we spent, to the euro.",
+    "OCR_Text": "€146 TOTAL",
+    "ASR": "Day one, we got the early train...",
+    "Cover": "sample-data/img/frame-8.svg",
+    "Creator_Nick_Name": "mia.daily",
+    "Creator_Bio": "",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#travel #work",
+    "Create_Time": "2026-10-13 09:27",
+    "Country_Code": "DE",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Travel",
+    "Language": "German",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340316760",
+   "type": "video",
+   "title": "Dog tricks in 60 seconds",
+   "features": {
+    "Description": "Teach 'spin' in a day.",
+    "OCR_Text": "TRICK 1",
+    "ASR": "Hold the treat by his nose...",
+    "Cover": "sample-data/img/frame-1.svg",
+    "Creator_Nick_Name": "kai.pets",
+    "Creator_Bio": "Tips that work",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#pets",
+    "Create_Time": "2026-10-14 16:40",
+    "Country_Code": "FR",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Pets & animals",
+    "Language": "French",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340324679",
+   "type": "video",
+   "title": "Rent a flat in Lisbon: 5 things to check (part 2)",
+   "features": {
+    "Description": "Moving to Lisbon? Check these before you sign.",
+    "OCR_Text": "1. WATER PRESSURE",
+    "ASR": "First, open every tap and check the pressure...",
+    "Cover": "sample-data/img/frame-2.svg",
+    "Creator_Nick_Name": "sara.style",
+    "Creator_Bio": "Opinions are my own",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#home #travel",
+    "Create_Time": "2026-10-15 23:53",
+    "Country_Code": "FR",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Home & renting",
+    "Language": "French",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340332598",
+   "type": "video",
+   "title": "Talk show clip: chef on remote work (part 2)",
+   "features": {
+    "Description": "From last night's show #clip",
+    "OCR_Text": "LIVE",
+    "ASR": "I think remote work changed how we eat lunch...",
+    "Cover": "sample-data/img/frame-3.svg",
+    "Creator_Nick_Name": "zoe.kitchen",
+    "Creator_Bio": "Opinions are my own",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#work #food",
+    "Create_Time": "2026-10-16 06:06",
+    "Country_Code": "DE",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Work & money",
+    "Language": "German",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340340517",
+   "type": "video",
+   "title": "My cat vs. the new sofa (part 2)",
+   "features": {
+    "Description": "She won. Again.",
+    "OCR_Text": "DAY 3",
+    "ASR": "No no no, not the corner...",
+    "Cover": "sample-data/img/frame-4.svg",
+    "Creator_Nick_Name": "ivy.games",
+    "Creator_Bio": "Just for fun",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#pets #home",
+    "Create_Time": "2026-10-17 13:19",
+    "Country_Code": "DE",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Pets & animals",
+    "Language": "German",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340348436",
+   "type": "video",
+   "title": "Is this air fryer worth it? Honest review (part 2)",
+   "features": {
+    "Description": "Honest review after 14 days. Link in bio for 20% off!",
+    "OCR_Text": "CODE: FRY20",
+    "ASR": "So I've been using this for two weeks...",
+    "Cover": "sample-data/img/frame-5.svg",
+    "Creator_Nick_Name": "noa.travels",
+    "Creator_Bio": "Opinions are my own",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#food #tech",
+    "Create_Time": "2026-10-18 20:32",
+    "Country_Code": "DE",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Food & drink",
+    "Language": "German",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340356355",
+   "type": "video",
+   "title": "5 cheap lunches near the office (part 2)",
+   "features": {
+    "Description": "Under 8 euros each, all walkable.",
+    "OCR_Text": "€7.50",
+    "ASR": "Number one is the bakery on the corner...",
+    "Cover": "sample-data/img/frame-6.svg",
+    "Creator_Nick_Name": "noa.kitchen",
+    "Creator_Bio": "Honest reviews",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#food #work",
+    "Create_Time": "2026-10-19 03:45",
+    "Country_Code": "PT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Food & drink",
+    "Language": "Portuguese",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340364274",
+   "type": "video",
+   "title": "Our first week in Porto (part 2)",
+   "features": {
+    "Description": "Week one done. We love it already.",
+    "OCR_Text": "PORTO",
+    "ASR": "Okay so this is our street...",
+    "Cover": "sample-data/img/frame-7.svg",
+    "Creator_Nick_Name": "tom.money",
+    "Creator_Bio": "Honest reviews",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#travel",
+    "Create_Time": "2026-10-20 10:58",
+    "Country_Code": "PT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Travel",
+    "Language": "Portuguese",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340372193",
+   "type": "video",
+   "title": "Why I quit my agency job (part 2)",
+   "features": {
+    "Description": "Long story, here is my take. Tell me yours.",
+    "OCR_Text": "",
+    "ASR": "I want to talk about why I left...",
+    "Cover": "sample-data/img/frame-8.svg",
+    "Creator_Nick_Name": "kai.pets",
+    "Creator_Bio": "Honest reviews",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#work",
+    "Create_Time": "2026-10-21 17:11",
+    "Country_Code": "ES",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Work & money",
+    "Language": "Spanish",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340380112",
+   "type": "photo_text",
+   "title": "This serum changed my skin (code inside) · update",
+   "features": {
+    "Description": "Use my code GLOW15 at checkout",
+    "OCR_Text": "GLOW15",
+    "ASR": "",
+    "Cover": "sample-data/img/frame-1.svg",
+    "Creator_Nick_Name": "mia.pets",
+    "Creator_Bio": "Tips that work",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#beauty",
+    "Create_Time": "2026-10-22 00:24",
+    "Country_Code": "PT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Beauty & fashion",
+    "Language": "Portuguese",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "This serum changed my skin (code inside) · update",
+    "Images": [
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340388031",
+   "type": "video",
+   "title": "How to fix a slow laptop in 3 steps (part 2)",
+   "features": {
+    "Description": "Works on most machines from the last 5 years.",
+    "OCR_Text": "STEP 1",
+    "ASR": "Open the task manager first...",
+    "Cover": "sample-data/img/frame-2.svg",
+    "Creator_Nick_Name": "max.kitchen",
+    "Creator_Bio": "Daily life, mostly",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#tech",
+    "Create_Time": "2026-10-23 07:37",
+    "Country_Code": "ES",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Tech",
+    "Language": "Spanish",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340395950",
+   "type": "video",
+   "title": "When your boss says 'quick call' (part 2)",
+   "features": {
+    "Description": "We've all been there",
+    "OCR_Text": "",
+    "ASR": "Hey, got a minute? It'll be quick...",
+    "Cover": "sample-data/img/frame-3.svg",
+    "Creator_Nick_Name": "max.games",
+    "Creator_Bio": "Opinions are my own",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#work",
+    "Create_Time": "2026-10-24 14:50",
+    "Country_Code": "PT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Work & money",
+    "Language": "Portuguese",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340403869",
+   "type": "video",
+   "title": "Phone camera test: night mode (part 2)",
+   "features": {
+    "Description": "Same street, three phones. Which wins?",
+    "OCR_Text": "PHONE A / PHONE B",
+    "ASR": "This is the first shot at 11pm...",
+    "Cover": "sample-data/img/frame-4.svg",
+    "Creator_Nick_Name": "ana.fit",
+    "Creator_Bio": "Tips that work",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#tech",
+    "Create_Time": "2026-10-25 21:03",
+    "Country_Code": "FR",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Tech",
+    "Language": "French",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340411788",
+   "type": "photo_text",
+   "title": "Remote work is overrated. Change my mind · update",
+   "features": {
+    "Description": "Hot take: offices are better for juniors.",
+    "OCR_Text": "",
+    "ASR": "",
+    "Cover": "sample-data/img/frame-5.svg",
+    "Creator_Nick_Name": "eli.travels",
+    "Creator_Bio": "Just for fun",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#work",
+    "Create_Time": "2026-10-26 04:16",
+    "Country_Code": "ES",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Work & money",
+    "Language": "Spanish",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "Remote work is overrated. Change my mind · update",
+    "Images": [
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340419707",
+   "type": "video",
+   "title": "Street food tour in Bangkok (part 2)",
+   "features": {
+    "Description": "Twelve dishes, one night.",
+    "OCR_Text": "STOP 4",
+    "ASR": "This is the pad thai place everyone talks about...",
+    "Cover": "sample-data/img/frame-6.svg",
+    "Creator_Nick_Name": "eli.money",
+    "Creator_Bio": "Honest reviews",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#food #travel",
+    "Create_Time": "2026-10-27 11:29",
+    "Country_Code": "GB",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Food & drink",
+    "Language": "English",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340427626",
+   "type": "video",
+   "title": "Stretching routine for desk workers (part 2)",
+   "features": {
+    "Description": "Ten minutes, no equipment.",
+    "OCR_Text": "HOLD 30s",
+    "ASR": "Sit tall and roll your shoulders back...",
+    "Cover": "sample-data/img/frame-7.svg",
+    "Creator_Nick_Name": "sara.travels",
+    "Creator_Bio": "Tips that work",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#health #work",
+    "Create_Time": "2026-10-01 18:42",
+    "Country_Code": "IT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Health & fitness",
+    "Language": "Italian",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340435545",
+   "type": "video",
+   "title": "Movie scene that still makes me cry (part 2)",
+   "features": {
+    "Description": "From the 2019 film. #clip #movies",
+    "OCR_Text": "",
+    "ASR": "You were always there for me...",
+    "Cover": "sample-data/img/frame-8.svg",
+    "Creator_Nick_Name": "ben.home",
+    "Creator_Bio": "Opinions are my own",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#news",
+    "Create_Time": "2026-10-02 01:55",
+    "Country_Code": "DE",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "News & society",
+    "Language": "German",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340443464",
+   "type": "photo_text",
+   "title": "Get rich with this one app!!! · update",
+   "features": {
+    "Description": "Guaranteed 300% returns, DM me",
+    "OCR_Text": "300% PROFIT",
+    "ASR": "My friend made ten thousand in a week...",
+    "Cover": "sample-data/img/frame-1.svg",
+    "Creator_Nick_Name": "sara.style",
+    "Creator_Bio": "",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#work #tech",
+    "Create_Time": "2026-10-03 08:08",
+    "Country_Code": "ES",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Work & money",
+    "Language": "Spanish",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "Get rich with this one app!!! · update",
+    "Images": [
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340451383",
+   "type": "video",
+   "title": "Unpopular opinion: tipping should end (part 2)",
+   "features": {
+    "Description": "Let's talk about it. What do you think?",
+    "OCR_Text": "",
+    "ASR": "I worked in restaurants for six years...",
+    "Cover": "sample-data/img/frame-2.svg",
+    "Creator_Nick_Name": "kai.daily",
+    "Creator_Bio": "",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#food #news",
+    "Create_Time": "2026-10-04 15:21",
+    "Country_Code": "IT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Food & drink",
+    "Language": "Italian",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340459302",
+   "type": "photo_text",
+   "title": "Board game night: our top 3 · update",
+   "features": {
+    "Description": "For groups of 4 to 6.",
+    "OCR_Text": "TOP 3",
+    "ASR": "",
+    "Cover": "sample-data/img/frame-3.svg",
+    "Creator_Nick_Name": "mia.style",
+    "Creator_Bio": "Honest reviews",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#games",
+    "Create_Time": "2026-10-05 22:34",
+    "Country_Code": "GB",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Games",
+    "Language": "English",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "Board game night: our top 3 · update",
+    "Images": [
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340467221",
+   "type": "video",
+   "title": "Speedrun world record reaction (part 2)",
+   "features": {
+    "Description": "He did it!! #gaming #clip",
+    "OCR_Text": "WR",
+    "ASR": "No way, no way, he skipped the whole level...",
+    "Cover": "sample-data/img/frame-4.svg",
+    "Creator_Nick_Name": "ben.home",
+    "Creator_Bio": "Tips that work",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#games",
+    "Create_Time": "2026-10-06 05:47",
+    "Country_Code": "FR",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Games",
+    "Language": "French",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340475140",
+   "type": "photo_text",
+   "title": "What to pack for a week in Iceland · update",
+   "features": {
+    "Description": "My full list, including what I forgot.",
+    "OCR_Text": "PACKING LIST",
+    "ASR": "",
+    "Cover": "sample-data/img/frame-5.svg",
+    "Creator_Nick_Name": "sara.fit",
+    "Creator_Bio": "",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#travel",
+    "Create_Time": "2026-10-07 12:00",
+    "Country_Code": "PT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Travel",
+    "Language": "Portuguese",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "What to pack for a week in Iceland · update",
+    "Images": [
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340483059",
+   "type": "video",
+   "title": "Puppy's first beach day (part 2)",
+   "features": {
+    "Description": "He was scared of the waves at first.",
+    "OCR_Text": "",
+    "ASR": "Come on buddy, it's just water...",
+    "Cover": "sample-data/img/frame-6.svg",
+    "Creator_Nick_Name": "kai.tech",
+    "Creator_Bio": "Daily life, mostly",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#pets #travel",
+    "Create_Time": "2026-10-08 19:13",
+    "Country_Code": "FR",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Pets & animals",
+    "Language": "French",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340490978",
+   "type": "video",
+   "title": "City council votes on bike lanes (part 2)",
+   "features": {
+    "Description": "My view on yesterday's vote. Agree?",
+    "OCR_Text": "",
+    "ASR": "I cycle to work every day, so here's my take...",
+    "Cover": "sample-data/img/frame-7.svg",
+    "Creator_Nick_Name": "tom.games",
+    "Creator_Bio": "Daily life, mostly",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#news",
+    "Create_Time": "2026-10-09 02:26",
+    "Country_Code": "IT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "News & society",
+    "Language": "Italian",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340498897",
+   "type": "video",
+   "title": "Make-up look in 5 minutes (part 2)",
+   "features": {
+    "Description": "Everyday look, drugstore only.",
+    "OCR_Text": "5 MIN",
+    "ASR": "Start with a light moisturiser...",
+    "Cover": "sample-data/img/frame-8.svg",
+    "Creator_Nick_Name": "tom.style",
+    "Creator_Bio": "Tips that work",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#beauty",
+    "Create_Time": "2026-10-10 09:39",
+    "Country_Code": "DE",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Beauty & fashion",
+    "Language": "German",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340506816",
+   "type": "video",
+   "title": "Waiter vs. customer who 'knows wine' (part 2)",
+   "features": {
+    "Description": "Based on a true story",
+    "OCR_Text": "",
+    "ASR": "I'd like the 2015, it has more legs...",
+    "Cover": "sample-data/img/frame-1.svg",
+    "Creator_Nick_Name": "ben.kitchen",
+    "Creator_Bio": "Tips that work",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#food",
+    "Create_Time": "2026-10-11 16:52",
+    "Country_Code": "ES",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Food & drink",
+    "Language": "Spanish",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340514735",
+   "type": "photo_text",
+   "title": "Budget for my first salary · update",
+   "features": {
+    "Description": "How I split it, 50/30/20.",
+    "OCR_Text": "50 / 30 / 20",
+    "ASR": "",
+    "Cover": "sample-data/img/frame-2.svg",
+    "Creator_Nick_Name": "eli.home",
+    "Creator_Bio": "Tips that work",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#work",
+    "Create_Time": "2026-10-12 23:05",
+    "Country_Code": "PT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Work & money",
+    "Language": "Portuguese",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "Budget for my first salary · update",
+    "Images": [
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340522654",
+   "type": "video",
+   "title": "Late night stream highlights (part 2)",
+   "features": {
+    "Description": "Best moments from Friday's stream",
+    "OCR_Text": "",
+    "ASR": "Chat, did you see that?...",
+    "Cover": "sample-data/img/frame-3.svg",
+    "Creator_Nick_Name": "eli.fit",
+    "Creator_Bio": "Honest reviews",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#games",
+    "Create_Time": "2026-10-13 06:18",
+    "Country_Code": "GB",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Games",
+    "Language": "English",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340530573",
+   "type": "video",
+   "title": "Is the new smartwatch worth it? (part 2)",
+   "features": {
+    "Description": "After a month of use. Not sponsored.",
+    "OCR_Text": "",
+    "ASR": "Battery is the big question...",
+    "Cover": "sample-data/img/frame-4.svg",
+    "Creator_Nick_Name": "tom.travels",
+    "Creator_Bio": "Just for fun",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#tech #health",
+    "Create_Time": "2026-10-14 13:31",
+    "Country_Code": "PT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Tech",
+    "Language": "Portuguese",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340538492",
+   "type": "photo_text",
+   "title": "Fake giveaway: win a phone · update",
+   "features": {
+    "Description": "Like, share and send 2 euros to enter!",
+    "OCR_Text": "FREE PHONE",
+    "ASR": "",
+    "Cover": "sample-data/img/frame-5.svg",
+    "Creator_Nick_Name": "tom.fit",
+    "Creator_Bio": "",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#tech",
+    "Create_Time": "2026-10-15 20:44",
+    "Country_Code": "PT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Tech",
+    "Language": "Portuguese",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "Fake giveaway: win a phone · update",
+    "Images": [
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340546411",
+   "type": "video",
+   "title": "Apartment tour: 30 square metres (part 2)",
+   "features": {
+    "Description": "Small but it works.",
+    "OCR_Text": "30 m²",
+    "ASR": "This is the whole place, basically...",
+    "Cover": "sample-data/img/frame-6.svg",
+    "Creator_Nick_Name": "mia.money",
+    "Creator_Bio": "Tips that work",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#home",
+    "Create_Time": "2026-10-16 03:57",
+    "Country_Code": "IT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Home & renting",
+    "Language": "Italian",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340554330",
+   "type": "photo_text",
+   "title": "Why fast fashion has to stop · update",
+   "features": {
+    "Description": "My thoughts after reading the report. Discuss.",
+    "OCR_Text": "",
+    "ASR": "I read the whole report so you don't have to...",
+    "Cover": "sample-data/img/frame-7.svg",
+    "Creator_Nick_Name": "zoe.travels",
+    "Creator_Bio": "Just for fun",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#beauty #news",
+    "Create_Time": "2026-10-17 10:10",
+    "Country_Code": "IT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Beauty & fashion",
+    "Language": "Italian",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "Why fast fashion has to stop · update",
+    "Images": [
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340562249",
+   "type": "video",
+   "title": "Home workout: no gym needed (part 2)",
+   "features": {
+    "Description": "Full body, 20 minutes.",
+    "OCR_Text": "ROUND 2",
+    "ASR": "Let's start with squats...",
+    "Cover": "sample-data/img/frame-8.svg",
+    "Creator_Nick_Name": "ben.tech",
+    "Creator_Bio": "Daily life, mostly",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#health",
+    "Create_Time": "2026-10-18 17:23",
+    "Country_Code": "DE",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Health & fitness",
+    "Language": "German",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340570168",
+   "type": "video",
+   "title": "Interview clip: economist on rents (part 2)",
+   "features": {
+    "Description": "From this morning's interview #clip",
+    "OCR_Text": "",
+    "ASR": "Rents rose faster than wages this year...",
+    "Cover": "sample-data/img/frame-1.svg",
+    "Creator_Nick_Name": "noa.fit",
+    "Creator_Bio": "Opinions are my own",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#home #news",
+    "Create_Time": "2026-10-19 00:36",
+    "Country_Code": "ES",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Home & renting",
+    "Language": "Spanish",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340578087",
+   "type": "video",
+   "title": "Trying every snack in a Tokyo store (part 2)",
+   "features": {
+    "Description": "Rating them 1 to 10.",
+    "OCR_Text": "8/10",
+    "ASR": "Okay this one is shrimp flavoured...",
+    "Cover": "sample-data/img/frame-2.svg",
+    "Creator_Nick_Name": "noa.money",
+    "Creator_Bio": "Opinions are my own",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#food #travel",
+    "Create_Time": "2026-10-20 07:49",
+    "Country_Code": "DE",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Food & drink",
+    "Language": "German",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340586006",
+   "type": "video",
+   "title": "Cat translator app review (part 2)",
+   "features": {
+    "Description": "Does it work? Sort of. Ad: thanks to the app for sponsoring",
+    "OCR_Text": "AD",
+    "ASR": "It says she wants food. Shocking...",
+    "Cover": "sample-data/img/frame-3.svg",
+    "Creator_Nick_Name": "leo.daily",
+    "Creator_Bio": "Daily life, mostly",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#pets #tech",
+    "Create_Time": "2026-10-21 14:02",
+    "Country_Code": "PT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Pets & animals",
+    "Language": "Portuguese",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340593925",
+   "type": "photo_text",
+   "title": "How I prepare for job interviews · update",
+   "features": {
+    "Description": "My checklist, free to copy.",
+    "OCR_Text": "CHECKLIST",
+    "ASR": "",
+    "Cover": "sample-data/img/frame-4.svg",
+    "Creator_Nick_Name": "mia.daily",
+    "Creator_Bio": "Opinions are my own",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#work",
+    "Create_Time": "2026-10-22 21:15",
+    "Country_Code": "FR",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Work & money",
+    "Language": "French",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "How I prepare for job interviews · update",
+    "Images": [
+     "sample-data/img/frame-4.svg",
+     "sample-data/img/frame-5.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340601844",
+   "type": "video",
+   "title": "Kids explain the news (part 2)",
+   "features": {
+    "Description": "Today's topic: elections",
+    "OCR_Text": "",
+    "ASR": "So you pick the person you like most...",
+    "Cover": "sample-data/img/frame-5.svg",
+    "Creator_Nick_Name": "sara.pets",
+    "Creator_Bio": "Just for fun",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#news",
+    "Create_Time": "2026-10-23 04:28",
+    "Country_Code": "FR",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "News & society",
+    "Language": "French",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-5.svg",
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340609763",
+   "type": "photo_text",
+   "title": "Miracle tea: lose 10kg in a week · update",
+   "features": {
+    "Description": "Order now, link in bio",
+    "OCR_Text": "-10KG",
+    "ASR": "",
+    "Cover": "sample-data/img/frame-6.svg",
+    "Creator_Nick_Name": "zoe.fit",
+    "Creator_Bio": "Daily life, mostly",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#health",
+    "Create_Time": "2026-10-24 11:41",
+    "Country_Code": "PT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Health & fitness",
+    "Language": "Portuguese",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Title": "Miracle tea: lose 10kg in a week · update",
+    "Images": [
+     "sample-data/img/frame-6.svg",
+     "sample-data/img/frame-7.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340617682",
+   "type": "video",
+   "title": "Should games cost 80 euros? (part 2)",
+   "features": {
+    "Description": "Prices keep going up. Where's the line for you?",
+    "OCR_Text": "",
+    "ASR": "Let's talk about the new price...",
+    "Cover": "sample-data/img/frame-7.svg",
+    "Creator_Nick_Name": "mia.kitchen",
+    "Creator_Bio": "Opinions are my own",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#games #work",
+    "Create_Time": "2026-10-25 18:54",
+    "Country_Code": "IT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Games",
+    "Language": "Italian",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-7.svg",
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340625601",
+   "type": "video",
+   "title": "Weekend in Seville on a budget (part 2)",
+   "features": {
+    "Description": "Everything we spent, to the euro.",
+    "OCR_Text": "€146 TOTAL",
+    "ASR": "Day one, we got the early train...",
+    "Cover": "sample-data/img/frame-8.svg",
+    "Creator_Nick_Name": "leo.style",
+    "Creator_Bio": "Daily life, mostly",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#travel #work",
+    "Create_Time": "2026-10-26 01:07",
+    "Country_Code": "IT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Travel",
+    "Language": "Italian",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-8.svg",
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg"
+    ]
+   }
+  },
+  {
+   "externalId": "7340633520",
+   "type": "video",
+   "title": "Dog tricks in 60 seconds (part 2)",
+   "features": {
+    "Description": "Teach 'spin' in a day.",
+    "OCR_Text": "TRICK 1",
+    "ASR": "Hold the treat by his nose...",
+    "Cover": "sample-data/img/frame-1.svg",
+    "Creator_Nick_Name": "noa.tech",
+    "Creator_Bio": "Honest reviews",
+    "Creator_Avatar": "sample-data/img/avatar.svg",
+    "Hashtags": "#pets",
+    "Create_Time": "2026-10-27 08:20",
+    "Country_Code": "PT",
+    "POI_Name": "",
+    "POI_Info": "",
+    "Interest_V3": "Pets & animals",
+    "Language": "Portuguese",
+    "Intelligence_POI": "",
+    "Summary": "",
+    "Effective_Info": "",
+    "Frame": [
+     "sample-data/img/frame-1.svg",
+     "sample-data/img/frame-2.svg",
+     "sample-data/img/frame-3.svg",
+     "sample-data/img/frame-4.svg"
+    ]
+   }
+  }
+ ],
+ "labels": [
+  {
+   "externalId": "7340007919",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Home & renting",
+     "Travel"
+    ]
+   }
+  },
+  {
+   "externalId": "7340015838",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Clip"
+    ],
+    "topics": [
+     "Work & money",
+     "Food & drink"
+    ]
+   }
+  },
+  {
+   "externalId": "7340023757",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Pets & animals",
+     "Home & renting"
+    ]
+   }
+  },
+  {
+   "externalId": "7340031676",
+   "answer": {
+    "primary_value": [
+     "Ecosystem issue"
+    ],
+    "format": [
+     "Review"
+    ],
+    "topics": [
+     "Food & drink",
+     "Tech"
+    ]
+   }
+  },
+  {
+   "externalId": "7340039595",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Food & drink",
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340047514",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Travel"
+    ]
+   }
+  },
+  {
+   "externalId": "7340055433",
+   "answer": {
+    "primary_value": [
+     "Discussion"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340063352",
+   "answer": {
+    "primary_value": [
+     "Ecosystem issue"
+    ],
+    "format": [
+     "Review"
+    ],
+    "topics": [
+     "Beauty & fashion"
+    ]
+   }
+  },
+  {
+   "externalId": "7340071271",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Tech"
+    ]
+   }
+  },
+  {
+   "externalId": "7340079190",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Skit"
+    ],
+    "topics": [
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340087109",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Review"
+    ],
+    "topics": [
+     "Tech"
+    ]
+   }
+  },
+  {
+   "externalId": "7340095028",
+   "answer": {
+    "primary_value": [
+     "Discussion"
+    ],
+    "format": [
+     "Other"
+    ],
+    "topics": [
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340102947",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Food & drink",
+     "Travel"
+    ]
+   }
+  },
+  {
+   "externalId": "7340110866",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Health & fitness",
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340118785",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Clip"
+    ],
+    "topics": [
+     "News & society"
+    ]
+   }
+  },
+  {
+   "externalId": "7340126704",
+   "answer": {
+    "primary_value": [
+     "Ecosystem issue"
+    ],
+    "format": [
+     "Other"
+    ],
+    "topics": [
+     "Work & money",
+     "Tech"
+    ]
+   }
+  },
+  {
+   "externalId": "7340134623",
+   "answer": {
+    "primary_value": [
+     "Discussion"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Food & drink",
+     "News & society"
+    ]
+   }
+  },
+  {
+   "externalId": "7340142542",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Review"
+    ],
+    "topics": [
+     "Games"
+    ]
+   }
+  },
+  {
+   "externalId": "7340150461",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Clip"
+    ],
+    "topics": [
+     "Games"
+    ]
+   }
+  },
+  {
+   "externalId": "7340158380",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Travel"
+    ]
+   }
+  },
+  {
+   "externalId": "7340166299",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Pets & animals",
+     "Travel"
+    ]
+   }
+  },
+  {
+   "externalId": "7340174218",
+   "answer": {
+    "primary_value": [
+     "Discussion"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "News & society"
+    ]
+   }
+  },
+  {
+   "externalId": "7340182137",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Beauty & fashion"
+    ]
+   }
+  },
+  {
+   "externalId": "7340190056",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Skit"
+    ],
+    "topics": [
+     "Food & drink"
+    ]
+   }
+  },
+  {
+   "externalId": "7340197975",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340205894",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Clip"
+    ],
+    "topics": [
+     "Games"
+    ]
+   }
+  },
+  {
+   "externalId": "7340213813",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Review"
+    ],
+    "topics": [
+     "Tech",
+     "Health & fitness"
+    ]
+   }
+  },
+  {
+   "externalId": "7340221732",
+   "answer": {
+    "primary_value": [
+     "Ecosystem issue"
+    ],
+    "format": [
+     "Other"
+    ],
+    "topics": [
+     "Tech"
+    ]
+   }
+  },
+  {
+   "externalId": "7340229651",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Home & renting"
+    ]
+   }
+  },
+  {
+   "externalId": "7340237570",
+   "answer": {
+    "primary_value": [
+     "Discussion"
+    ],
+    "format": [
+     "Other"
+    ],
+    "topics": [
+     "Beauty & fashion",
+     "News & society"
+    ]
+   }
+  },
+  {
+   "externalId": "7340245489",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Health & fitness"
+    ]
+   }
+  },
+  {
+   "externalId": "7340253408",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Clip"
+    ],
+    "topics": [
+     "Home & renting",
+     "News & society"
+    ]
+   }
+  },
+  {
+   "externalId": "7340261327",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Review"
+    ],
+    "topics": [
+     "Food & drink",
+     "Travel"
+    ]
+   }
+  },
+  {
+   "externalId": "7340269246",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Review"
+    ],
+    "topics": [
+     "Pets & animals",
+     "Tech"
+    ]
+   }
+  },
+  {
+   "externalId": "7340277165",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340285084",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Skit"
+    ],
+    "topics": [
+     "News & society"
+    ]
+   }
+  },
+  {
+   "externalId": "7340293003",
+   "answer": {
+    "primary_value": [
+     "Ecosystem issue"
+    ],
+    "format": [
+     "Review"
+    ],
+    "topics": [
+     "Health & fitness"
+    ]
+   }
+  },
+  {
+   "externalId": "7340300922",
+   "answer": {
+    "primary_value": [
+     "Discussion"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Games",
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340308841",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Travel",
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340316760",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Pets & animals"
+    ]
+   }
+  },
+  {
+   "externalId": "7340324679",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Home & renting",
+     "Travel"
+    ]
+   }
+  },
+  {
+   "externalId": "7340332598",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Clip"
+    ],
+    "topics": [
+     "Work & money",
+     "Food & drink"
+    ]
+   }
+  },
+  {
+   "externalId": "7340340517",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Pets & animals",
+     "Home & renting"
+    ]
+   }
+  },
+  {
+   "externalId": "7340348436",
+   "answer": {
+    "primary_value": [
+     "Ecosystem issue"
+    ],
+    "format": [
+     "Review"
+    ],
+    "topics": [
+     "Food & drink",
+     "Tech"
+    ]
+   }
+  },
+  {
+   "externalId": "7340356355",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Food & drink",
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340364274",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Travel"
+    ]
+   }
+  },
+  {
+   "externalId": "7340372193",
+   "answer": {
+    "primary_value": [
+     "Discussion"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340380112",
+   "answer": {
+    "primary_value": [
+     "Ecosystem issue"
+    ],
+    "format": [
+     "Review"
+    ],
+    "topics": [
+     "Beauty & fashion"
+    ]
+   }
+  },
+  {
+   "externalId": "7340388031",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Tech"
+    ]
+   }
+  },
+  {
+   "externalId": "7340395950",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Skit"
+    ],
+    "topics": [
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340403869",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Review"
+    ],
+    "topics": [
+     "Tech"
+    ]
+   }
+  },
+  {
+   "externalId": "7340411788",
+   "answer": {
+    "primary_value": [
+     "Discussion"
+    ],
+    "format": [
+     "Other"
+    ],
+    "topics": [
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340419707",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Food & drink",
+     "Travel"
+    ]
+   }
+  },
+  {
+   "externalId": "7340427626",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Health & fitness",
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340435545",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Clip"
+    ],
+    "topics": [
+     "News & society"
+    ]
+   }
+  },
+  {
+   "externalId": "7340443464",
+   "answer": {
+    "primary_value": [
+     "Ecosystem issue"
+    ],
+    "format": [
+     "Other"
+    ],
+    "topics": [
+     "Work & money",
+     "Tech"
+    ]
+   }
+  },
+  {
+   "externalId": "7340451383",
+   "answer": {
+    "primary_value": [
+     "Discussion"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Food & drink",
+     "News & society"
+    ]
+   }
+  },
+  {
+   "externalId": "7340459302",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Review"
+    ],
+    "topics": [
+     "Games"
+    ]
+   }
+  },
+  {
+   "externalId": "7340467221",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Clip"
+    ],
+    "topics": [
+     "Games"
+    ]
+   }
+  },
+  {
+   "externalId": "7340475140",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Travel"
+    ]
+   }
+  },
+  {
+   "externalId": "7340483059",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Pets & animals",
+     "Travel"
+    ]
+   }
+  },
+  {
+   "externalId": "7340490978",
+   "answer": {
+    "primary_value": [
+     "Discussion"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "News & society"
+    ]
+   }
+  },
+  {
+   "externalId": "7340498897",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Beauty & fashion"
+    ]
+   }
+  },
+  {
+   "externalId": "7340506816",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Skit"
+    ],
+    "topics": [
+     "Food & drink"
+    ]
+   }
+  },
+  {
+   "externalId": "7340514735",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340522654",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Clip"
+    ],
+    "topics": [
+     "Games"
+    ]
+   }
+  },
+  {
+   "externalId": "7340530573",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Review"
+    ],
+    "topics": [
+     "Tech",
+     "Health & fitness"
+    ]
+   }
+  },
+  {
+   "externalId": "7340538492",
+   "answer": {
+    "primary_value": [
+     "Ecosystem issue"
+    ],
+    "format": [
+     "Other"
+    ],
+    "topics": [
+     "Tech"
+    ]
+   }
+  },
+  {
+   "externalId": "7340546411",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Home & renting"
+    ]
+   }
+  },
+  {
+   "externalId": "7340554330",
+   "answer": {
+    "primary_value": [
+     "Discussion"
+    ],
+    "format": [
+     "Other"
+    ],
+    "topics": [
+     "Beauty & fashion",
+     "News & society"
+    ]
+   }
+  },
+  {
+   "externalId": "7340562249",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Health & fitness"
+    ]
+   }
+  },
+  {
+   "externalId": "7340570168",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Clip"
+    ],
+    "topics": [
+     "Home & renting",
+     "News & society"
+    ]
+   }
+  },
+  {
+   "externalId": "7340578087",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Review"
+    ],
+    "topics": [
+     "Food & drink",
+     "Travel"
+    ]
+   }
+  },
+  {
+   "externalId": "7340586006",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Review"
+    ],
+    "topics": [
+     "Pets & animals",
+     "Tech"
+    ]
+   }
+  },
+  {
+   "externalId": "7340593925",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340601844",
+   "answer": {
+    "primary_value": [
+     "Entertainment"
+    ],
+    "format": [
+     "Skit"
+    ],
+    "topics": [
+     "News & society"
+    ]
+   }
+  },
+  {
+   "externalId": "7340609763",
+   "answer": {
+    "primary_value": [
+     "Ecosystem issue"
+    ],
+    "format": [
+     "Review"
+    ],
+    "topics": [
+     "Health & fitness"
+    ]
+   }
+  },
+  {
+   "externalId": "7340617682",
+   "answer": {
+    "primary_value": [
+     "Discussion"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Games",
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340625601",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Vlog"
+    ],
+    "topics": [
+     "Travel",
+     "Work & money"
+    ]
+   }
+  },
+  {
+   "externalId": "7340633520",
+   "answer": {
+    "primary_value": [
+     "Practical"
+    ],
+    "format": [
+     "Tutorial"
+    ],
+    "topics": [
+     "Pets & animals"
+    ]
+   }
+  }
+ ]
+}

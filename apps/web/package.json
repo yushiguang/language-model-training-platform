@@ -1,0 +1,27 @@
+{
+  "name": "training-set-platform-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "npx serve out",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types ../../packages/contracts/src/*.test.ts ../agents/src/*.test.ts ../bff/src/data/*.test.ts"
+  },
+  "dependencies": {
+    "@astryxdesign/core": "0.7.6",
+    "@astryxdesign/theme-neutral": "0.7.6",
+    "@stylexjs/stylex": "0.19.1",
+    "echarts": "6.1.0",
+    "next": "16.4.4",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.5",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "7.0.2"
+  }
+}
