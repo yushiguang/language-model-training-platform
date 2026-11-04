@@ -18,22 +18,21 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
    - `schema_agent`: Drafts and revises the labeling policy and label fields (`propose_schema`,
      `revise_schema`).
    - `prompt_agent`: Drafts, revises, and explains prompt templates using `{{Key}}` placeholders
-     from `@tsp/contracts/catalogue`.
+     from `@tsp/domain`.
    - `evaluation_agent`: Explains evaluation reports, thresholds, and mix-ups in plain language.
    - `optimiser`: Proposes targeted single-rule improvements during the GEPA-style optimiser loop.
-3. **Validation and self-correction**:
-   - Validate generated schemas and prompt templates (using `checkTemplate` from
-     `@tsp/contracts/template`) before returning proposals so broken placeholders or invalid schema
-     shapes are repaired automatically.
+3. **Validation**: a handoff goes only to a known specialist with a known intent; anything else
+   is ignored and the front desk answers itself. Validating and repairing schemas and templates
+   before they are returned (with `checkTemplate` from `@tsp/domain`) is planned.
 
 ## Strict Boundary Rules
 
-- **Stateless and DB-free**: Never import `@tsp/bff` or any database repository here. All project
+- **Stateless and storage-free**: imports `@tsp/contracts` and `@tsp/domain` only (the boundary check enforces it). All project
   state (`task`, `schema`, `history`, `attachedExamples`) arrives via `AgentTurnInput.workspace`,
   and all side effects (messages to append, proposals to save) are returned in `AgentTurnOutput`
   for the BFF to persist.
-- **LLM Agnostic & Model Selection**: Call the model exclusively through the `llm: AgentModel`
-  parameter:
+- **Model calls**: only through the `llm: AgentModel` parameter. The bff passes the llm-gateway's
+  agent model, which keeps calls under the chat endpoint's QPM/TPM and retries busy replies:
   - `llm.chat(messages, {model, json, maxOutputTokens, signal})`: returns plain text.
   - `llm.complete(messages, {model, json, maxOutputTokens, signal})`: returns `{text, thinking, model, stopReason, usage}` including reasoning traces.
   - `llm.chatStream(messages, {model, json, maxOutputTokens, signal})`: yields incremental `LlmStreamChunk` events (`delta`, `thinking`, `done`, `error`).
@@ -46,4 +45,5 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
   You may freely choose which `LlmModelId` each preset or reasoning step uses in `src/presets.ts`
   and `src/runtime.ts`.
 - **English only**: Write all prompts, comments, and tests in English.
-- **Testing**: Add unit tests in `src/agents.test.ts` and run `npm test` from `apps/web`.
+- **Testing**: unit tests in `src/agents.test.ts`; run `npm test` from the repo root.
+- **No framework**: agents are hand-written on purpose; keep it that way unless agreed.

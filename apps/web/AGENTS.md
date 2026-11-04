@@ -10,12 +10,12 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## Frontend App Rules (`apps/web`)
 
-- Read `../../AGENTS.md` and `../../docs/architecture.md` first for the monorepo service boundaries.
-- All documentation and code comments must be written in English only.
-- Pages and components under `src/app/` and `src/components/` may **only** import from:
-  - `@tsp/contracts` (or `@/core/*`) for domain types and pure rules
-  - `@/backend-api` for all asynchronous backend operations and state subscriptions
-  - `@/ui` for Astryx UI primitives
-- Never import `@tsp/bff`, `@tsp/agents`, or `@tsp/infra` directly from UI components.
-- Never commit keys, tokens, internal URLs, internal package scopes, or internal product names.
-- Before pushing: `npm run typecheck && npm test && npm run build`.
+- Read `../../AGENTS.md` and `../../docs/architecture.md` first.
+- Pages and components (`src/app/`, `src/components/`) may import only `@tsp/contracts` (types),
+  `@tsp/domain` (pure rules), `@/backend-api`, `@/components` and `@/ui`. The boundary check
+  enforces this.
+- `src/backend-api/index.ts` is the composition root: the only file that builds the apps and
+  imports `@tsp/platform-impl`.
+- UI text uses plain words (for example "the optimiser", never the method name).
+- Before pushing, from the repo root: `npm run check && npm run build`; for flow changes also
+  `node apps/web/scripts/e2e-check.cjs`.
