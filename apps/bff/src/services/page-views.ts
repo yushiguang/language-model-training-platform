@@ -1,6 +1,6 @@
 import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion, StartCard} from '@tsp/contracts';
 import {agentStart, isStartTool} from './starts.ts';
-import {AUTO_START_PROJECT_CAP_USD, AUTO_START_SINGLE_CAP_USD, autoSpendUsd, checkTemplate, defaultOutputPick, pageFromPath, estimate, isImageKey, judge, MADE_BY, recommend, settingsHash, versionLabel} from '@tsp/domain';
+import {AUTO_START_PROJECT_CAP_USD, AUTO_START_SINGLE_CAP_USD, autoSpendUsd, checkTemplate, defaultOutputPick, finalRunPlan, pageFromPath, isImageKey, judge, MADE_BY, recommend, settingsHash, versionLabel} from '@tsp/domain';
 import {getApp} from './app.ts';
 import {loadProjectState} from './projects.ts';
 import {waitingStarts} from './work.ts';
@@ -107,7 +107,16 @@ function adviceOf(state: ProjectState) {
   return {nextStep: a.title, reasons: a.reasons};
 }
 
-function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, unknown>): PageView {
+/** Test examples with a valid saved answer from the version the final run would use now. */
+async function answeredTest(state: ProjectState, page: PageId): Promise<ReadonlySet<string>> {
+  const pick = page === 'training' ? defaultOutputPick(state) : null;
+  const settings = pick && state.setup?.models.find(m => m.endpoint === pick.endpoint);
+  if (!pick || !settings) return new Set();
+  const preds = await getApp().labeling.predictions(pick.version.id, pick.endpoint, settingsHash(settings));
+  return new Set(state.examples.filter(e => e.split === 'test' && preds.get(e.id)?.answer).map(e => e.id));
+}
+
+function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, unknown>, answered: ReadonlySet<string> = new Set()): PageView {
   const {page, params} = loc;
   const s = state.setup;
   const counts = {eval: 0, test: 0, train: 0} as Record<string, number>;
@@ -173,10 +182,26 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
           run: {state: ts.state, version: v ? versionLabel(v) : null, model: ts.endpoint, done: ts.done, total: ts.total, train: ts.trainTotal ?? ts.total, test: ts.testTotal ?? 0, labeled: ts.labeled, invalid: ts.invalid, failed: ts.failed, costUsd: r2(ts.costUsd), approvedUsd: r2(ts.estimateUsd), evaluated: ts.evaluated},
         });
       }
-      const est = pick ? estimate(state, pick.version, pick.endpoint) : null;
-      return base(pick ? `Not generated yet. It would use ${versionLabel(pick.version)} on Model ${pick.endpoint}: ${counts.train} train and ${counts.test} test examples, about $${est!.costUsd.toFixed(2)}.` : 'Not generated yet: there is no prompt version.', {
-        plan: pick ? {version: versionLabel(pick.version), model: pick.endpoint, train: est!.train, test: est!.test, estimateUsd: r2(est!.costUsd), minutes: est!.minutes, evaluated: !!est!.report && !!state.reports.find(r => r.id === est!.report!.id)?.passed} : null,
-      });
+      // The same plan as the page's confirm: train is labeled; a test example uses its gold label,
+      // else the version's valid answer, and only the rest are labeled if the user ticks it.
+      const p = pick ? finalRunPlan(state, pick.version, pick.endpoint, answered) : null;
+      if (!pick || !p) return base('Not generated yet: there is no prompt version.', {plan: null});
+      const t = p.test;
+      const run = p.total(false);
+      return base(
+        `Not generated yet. It would use ${versionLabel(pick.version)} on Model ${pick.endpoint}: ${p.train.count} train examples, about $${run.costUsd.toFixed(2)}. Test set: ${t.withGold.length} with a gold label, ${t.withAnswer.length} with an answer from it, ${t.toLabel.length} with no label${t.toLabel.length ? ` (labeling them adds about $${t.costUsd.toFixed(2)})` : ''}.`,
+        {
+          plan: {
+            version: versionLabel(pick.version),
+            model: pick.endpoint,
+            train: p.train.count,
+            test: {total: t.total, withGold: t.withGold.length, withAnswer: t.withAnswer.length, noLabel: t.toLabel.length, labelThemUsd: r2(t.costUsd)},
+            estimateUsd: r2(run.costUsd),
+            minutes: run.minutes,
+            evaluated: !!p.report && !!state.reports.find(r => r.id === p.report!.id)?.passed,
+          },
+        },
+      );
     }
     default:
       return base(`Project ${state.project.name}.`, {steps: state.facts.approved});
@@ -188,7 +213,7 @@ export {pageFromPath};
 export async function getPageView(projectId: string, loc: PageLocation, unsaved: Record<string, unknown> = {}): Promise<PageView> {
   const state = await loadProjectState(projectId);
   if (!state) return {page: loc.page, title: TITLES[loc.page], summary: 'The project was not found.', data: {}};
-  const view = build(state, loc, unsaved);
+  const view = build(state, loc, unsaved, await answeredTest(state, loc.page));
   if (!state.setup) view.data.note = 'Setup is not finished yet.';
   return view;
 }
@@ -223,7 +248,7 @@ export function agentTools(projectId: string, cards: StartCard[] = []): AgentToo
           const params: Record<string, string> = {};
           for (const k of ['v', 'm', 'a', 'b', 'am', 'bm', 'step']) if (typeof args[k] === 'string') params[k] = args[k] as string;
           if (params.v) params.v = findVersion(state, params.v)?.id ?? params.v;
-          return build(state, {page, params}, {});
+          return build(state, {page, params}, {}, await answeredTest(state, page));
         }
         case 'list_versions':
           return state.versions.map(v => versionRow(state, v));

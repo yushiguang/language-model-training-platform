@@ -13,6 +13,8 @@ example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts
   - Budget: pauses when cost passes 120% of `budgetUsd`.
   - Stop: aborts locally, or sets `stopRequested`, which the runner checks every 2 s.
   - `listTasks` reports a `running` task whose lock nobody holds as `paused` / `closed`.
+  - `relabelInvalid` (the final run): an example whose only saved answer is invalid is labeled
+    once more; `predictions` returns the first valid answer per example, else the first.
   - `runTask(id, trigger, {auto, budgetUsd})`: an automatic run adds its cost to `autoCostUsd`
     and pauses (stopReason `budget`) once its own cost passes 120% of `budgetUsd`.
   - `tryTemplate` labels a few examples with an unsaved template (the prompt agent's

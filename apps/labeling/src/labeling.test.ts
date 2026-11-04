@@ -156,3 +156,29 @@ test('tryTemplate labels a few examples with an unsaved template and saves nothi
   // Nothing saved under the version that exists either.
   assert.equal((await labeling.predictions(v.id, 'A', 'any')).size, 0);
 });
+
+test('relabelInvalid: an example whose only answer is invalid is labeled once more, and the valid answer wins', async () => {
+  const {db, catalog, v, ids} = await setup(4, 'lab-relabel');
+  const seen = new Map<string, number>();
+  // Example 0 answers invalid the first time, valid after; example 1 is always invalid.
+  const gateway = fakeGateway(async req => {
+    const n = (seen.get(req.traceId!) ?? 0) + 1;
+    seen.set(req.traceId!, n);
+    if (req.traceId === '1' || (req.traceId === '0' && n === 1)) return 'not json';
+    return '{"format": "Vlog"}';
+  });
+  const lab = createLabeling({db, catalog, gateway, locks: memoryLocks()});
+  const first = await lab.runTask((await lab.createTask(input(ids, v))).id);
+  assert.deepEqual([first?.valid, first?.invalid], [2, 2]);
+  const again = await lab.createTask(input(ids, v, {relabelInvalid: true}));
+  const r = await lab.runTask(again.id);
+  assert.deepEqual([seen.get('0'), seen.get('1'), seen.get('2')], [2, 2, 1], 'only the invalid ones are called again');
+  assert.deepEqual([r?.done, r?.valid, r?.invalid], [4, 3, 1]);
+  const preds = await lab.predictions(v.id, 'A', again.settingsHash);
+  assert.ok(preds.get(ids[0])?.answer, 'the valid second answer wins');
+  // Running it again labels nothing: each example gets one more try only.
+  await lab.runTask(again.id);
+  const third = await lab.createTask(input(ids, v, {relabelInvalid: true}));
+  await lab.runTask(third.id);
+  assert.equal(seen.get('1'), 2);
+});

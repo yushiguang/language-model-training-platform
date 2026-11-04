@@ -4,7 +4,10 @@ import {useEffect, useState} from 'react';
 import type {EndpointId, PromptVersion} from '@tsp/contracts';
 import {predictionsFor, type ProjectState} from '@/backend-api';
 
-/** Test examples that already have a model answer for this version, model and settings (reused, free). */
+/**
+ * Test examples that already have a valid model answer for this version, model and settings
+ * (reused, free). An invalid answer is not a label, so the final run labels that example again.
+ */
 export function useLabeledTest(state: ProjectState, version: PromptVersion | undefined, endpoint: EndpointId | undefined): Set<string> {
   const [ids, setIds] = useState<Set<string>>(new Set());
   const settings = state.setup?.models.find(m => m.endpoint === endpoint);
@@ -13,7 +16,7 @@ export function useLabeledTest(state: ProjectState, version: PromptVersion | und
     if (!version || !settings) return setIds(new Set());
     let live = true;
     void predictionsFor(version.id, settings.endpoint, settings).then(m => {
-      if (live) setIds(new Set(state.examples.filter(e => e.split === 'test' && m.has(e.id)).map(e => e.id)));
+      if (live) setIds(new Set(state.examples.filter(e => e.split === 'test' && m.get(e.id)?.answer).map(e => e.id)));
     });
     return () => {
       live = false;

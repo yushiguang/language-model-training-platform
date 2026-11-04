@@ -46,6 +46,11 @@ export interface LabelingTask {
   budgetUsd: number | null;
   /** Examples labeled at once. */
   parallel: number;
+  /**
+   * Examples whose saved answer for this version, model and settings is invalid are labeled once
+   * more (the final run: such a test example has no label yet). A valid answer wins.
+   */
+  relabelInvalid?: boolean;
   state: TaskState;
   stopReason: TaskStopReason;
   /** Set by Stop from any tab; the runner checks it every few seconds. */
@@ -67,6 +72,7 @@ export interface CreateTaskInput {
   exampleIds: string[];
   budgetUsd?: number | null;
   parallel?: number;
+  relabelInvalid?: boolean;
   createdBy: string;
 }
 
@@ -99,7 +105,10 @@ export interface LabelingContract {
   listTasks(projectId: string): Promise<LabelingTask[]>;
   /** True when some tab of this browser currently runs the task. */
   isRunning(taskId: string): Promise<boolean>;
-  /** Saved predictions for one version, model and settings (first one per example wins). */
+  /**
+   * Saved predictions for one version, model and settings, one per example: the first valid one,
+   * else the first (an invalid answer labeled again under `relabelInvalid` leaves two).
+   */
   predictions(promptVersionId: string, endpoint: EndpointId, settingsHash: string): Promise<Map<string, Prediction>>;
   /**
    * Labels a few examples with an unsaved template (the prompt agent's try_template). Nothing is

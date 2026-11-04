@@ -56,8 +56,9 @@ export function toMessages(parts: Part[], resolveUrl: (u: string) => string = u 
   return [{role: 'user', content}];
 }
 
-/** One prediction per prompt version + model + settings + example. */
-export const predictionId = (promptVersionId: string, endpoint: EndpointId, hash: string, exampleId: string) => `pd_${hashString(`${promptVersionId}|${endpoint}|${hash}|${exampleId}`)}`;
+/** One prediction per prompt version + model + settings + example (`try` 2: labeled again after an invalid answer). */
+export const predictionId = (promptVersionId: string, endpoint: EndpointId, hash: string, exampleId: string, attempt = 1) =>
+  `pd_${hashString(`${promptVersionId}|${endpoint}|${hash}|${exampleId}`)}${attempt > 1 ? `_${attempt}` : ''}`;
 
 /**
  * The labeling app: runs labeling tasks. MVP runner = the open page, one runner per task via a
@@ -90,10 +91,17 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
 
   const getTask = (id: string) => repo.get<LabelingTask>(TASKS, id);
 
-  async function predictions(promptVersionId: string, endpoint: EndpointId, hash: string): Promise<Map<string, Prediction>> {
+  /** Every saved prediction per example, oldest first. */
+  async function allPredictions(promptVersionId: string, endpoint: EndpointId, hash: string): Promise<Map<string, Prediction[]>> {
     const rows = await repo.find<Prediction>(PREDICTIONS, {promptVersionId, endpoint, settingsHash: hash}, 'createdAt');
+    const out = new Map<string, Prediction[]>();
+    for (const p of rows) out.set(p.exampleId, [...(out.get(p.exampleId) ?? []), p]);
+    return out;
+  }
+
+  async function predictions(promptVersionId: string, endpoint: EndpointId, hash: string): Promise<Map<string, Prediction>> {
     const out = new Map<string, Prediction>();
-    for (const p of rows) if (!out.has(p.exampleId)) out.set(p.exampleId, p);
+    for (const [id, ps] of await allPredictions(promptVersionId, endpoint, hash)) out.set(id, ps.find(p => p.answer) ?? ps[0]);
     return out;
   }
 
@@ -118,10 +126,13 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     const schema = setup.schema;
 
     // Counters are rebuilt from saved predictions, so a crash never leaves them wrong.
-    const saved = await predictions(task.promptVersionId, task.endpoint, task.settingsHash);
-    const mine = task.exampleIds.filter(id => saved.has(id)).map(id => saved.get(id)!);
+    const all = await allPredictions(task.promptVersionId, task.endpoint, task.settingsHash);
+    const best = (id: string) => all.get(id)?.find(p => p.answer) ?? all.get(id)?.[0];
+    // Under relabelInvalid, an example whose only answer is invalid is labeled once more.
+    const again = (id: string) => !!task.relabelInvalid && all.get(id)?.length === 1 && !all.get(id)![0].answer;
+    const mine = task.exampleIds.filter(id => best(id) && !again(id)).map(id => best(id)!);
     const failedSet = new Set(task.failedExampleIds);
-    const pending = task.exampleIds.filter(id => !saved.has(id) && !failedSet.has(id));
+    const pending = task.exampleIds.filter(id => (!all.has(id) || again(id)) && !failedSet.has(id));
     const counts = {
       done: mine.length,
       valid: mine.filter(p => p.answer).length,
@@ -172,7 +183,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           });
           const parsed = parseOutput(res.text, schema);
           const pred: Prediction = {
-            id: predictionId(task.promptVersionId, task.endpoint, task.settingsHash, exampleId),
+            id: predictionId(task.promptVersionId, task.endpoint, task.settingsHash, exampleId, again(exampleId) ? 2 : 1),
             promptVersionId: task.promptVersionId,
             endpoint: task.endpoint,
             settingsHash: task.settingsHash,
@@ -274,6 +285,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         costUsd: 0,
         budgetUsd: input.budgetUsd ?? null,
         parallel: input.parallel ?? DEFAULT_PARALLEL,
+        ...(input.relabelInvalid ? {relabelInvalid: true} : {}),
         state: 'queued',
         stopReason: null,
         stopRequested: false,

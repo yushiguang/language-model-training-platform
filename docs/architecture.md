@@ -60,8 +60,9 @@ the cost). Code starts only the cheap work the workflow needs, and only while au
 allowed (below).
 
 **The final run** labels every train example. A test example's label is its gold label when
-someone gave one, else the chosen version's saved answer; only test examples with neither are
-labeled, and only when the user ticks that line in the confirm ("Test set: a have a gold label,
+someone gave one, else the chosen version's saved valid answer (an answer that isn't valid JSON
+for the labels is not a label); only test examples with neither are labeled, and only when the
+user ticks that line in the confirm ("Test set: a have a gold label,
 b have an answer from v1.3. Label the other c?"). The results page has a Training set tab and a
 Test set tab, each with counts, rows and JSONL/CSV downloads; test rows say where their label
 came from (gold or model).

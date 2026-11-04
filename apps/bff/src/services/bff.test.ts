@@ -15,20 +15,34 @@ const endpoint: EndpointInfo = {id: 'A', name: 'Model A', description: '', badge
 const EVAL = 10;
 
 /** A bff over the real catalog and labeling apps, with a fake model that costs `perCall` per example. */
-async function world(prefix: string, opts: {autoStart?: boolean; perCall?: number; delayMs?: number} = {}) {
+interface WorldOpts {
+  autoStart?: boolean;
+  perCall?: number;
+  delayMs?: number;
+  /** Test and train examples besides the 10 eval ones (external ids t0.., r0..). */
+  test?: number;
+  train?: number;
+  /** The model's reply for an example (by external id), on its nth call. */
+  answer?: (externalId: string, n: number) => string;
+}
+
+async function world(prefix: string, opts: WorldOpts = {}) {
   const db = localDocRuntime(prefix);
   const catalog = createCatalog(db);
   const calls = {n: 0};
+  const seen = new Map<string, number>();
   const gateway = {
     endpoints: () => [endpoint],
     labelingEndpoints: () => [endpoint],
     agentModel: () => {
       throw new Error('not used');
     },
-    async label(): Promise<LabelCallResult> {
+    async label(req: {traceId?: string}): Promise<LabelCallResult> {
       calls.n++;
+      const n = (seen.get(req.traceId ?? '') ?? 0) + 1;
+      seen.set(req.traceId ?? '', n);
       await new Promise(r => setTimeout(r, opts.delayMs ?? 1));
-      return {text: '{"format": ["Vlog"]}', inputTokens: 0, outputTokens: 150, costUsd: opts.perCall ?? 0.03, endpointId: 'labeling-A', attempts: 1};
+      return {text: opts.answer?.(req.traceId ?? '', n) ?? '{"format": "Vlog"}', inputTokens: 0, outputTokens: 150, costUsd: opts.perCall ?? 0.03, endpointId: 'labeling-A', attempts: 1};
     },
   } as unknown as LlmGatewayContract;
   const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks()});
@@ -44,15 +58,20 @@ async function world(prefix: string, opts: {autoStart?: boolean; perCall?: numbe
   });
   const projectId = `pr_${prefix}`;
   await catalog.insert('setup_versions', {id: `sv_${prefix}`, projectId, number: 1, schemaVersion: 1, task: '', schema, thresholds: null, models: [{endpoint: 'A', maxOutputTokens: 150, temperature: null}], steps: {schema: true, evaluation: true, models: true}, autoStart: opts.autoStart ?? true, createdAt: '', createdBy: ''});
-  await catalog.insert('dataset_snapshots', {id: `ds_${prefix}`, projectId, number: 1, source: 'sample', sourceName: 'test', createdAt: '', counts: {rows: EVAL, valid: EVAL, invalid: 0, video: EVAL, photoText: 0}, split: {eval: EVAL, test: 0, train: 0}});
-  await catalog.insertMany(
-    'examples',
-    Array.from({length: EVAL}, (_, i) => ({id: `ex_${prefix}_${i}`, snapshotId: `ds_${prefix}`, externalId: String(i), type: 'video' as const, title: '', features: {}, split: 'eval' as const, optimiserHalf: false})),
-  );
+  const nTest = opts.test ?? 0;
+  const nTrain = opts.train ?? 0;
+  const total = EVAL + nTest + nTrain;
+  await catalog.insert('dataset_snapshots', {id: `ds_${prefix}`, projectId, number: 1, source: 'sample', sourceName: 'test', createdAt: '', counts: {rows: total, valid: total, invalid: 0, video: total, photoText: 0}, split: {eval: EVAL, test: nTest, train: nTrain}});
+  const ex = (key: string, split: 'eval' | 'test' | 'train') => ({id: `ex_${prefix}_${key}`, snapshotId: `ds_${prefix}`, externalId: key, type: 'video' as const, title: '', features: {}, split, optimiserHalf: false});
+  await catalog.insertMany('examples', [
+    ...Array.from({length: EVAL}, (_, i) => ex(String(i), 'eval')),
+    ...Array.from({length: nTest}, (_, i) => ex(`t${i}`, 'test')),
+    ...Array.from({length: nTrain}, (_, i) => ex(`r${i}`, 'train')),
+  ]);
   await catalog.insert('projects', {id: projectId, name: 'p', createdAt: '', createdBy: '', setupVersionId: `sv_${prefix}`, snapshotId: `ds_${prefix}`, approvedNodes: []});
   const newVersion = () => catalog.createPromptVersion({projectId, template: 'Label this', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
   const state = async () => (await loadProjectState(projectId))!;
-  return {db, catalog, labeling, projectId, calls, newVersion, state};
+  return {db, catalog, labeling, projectId, calls, seen, newVersion, state};
 }
 
 async function until(cond: () => Promise<boolean>, what: string) {
@@ -158,4 +177,40 @@ test('Approve on a start card that can no longer start leaves the card open with
   assert.equal(msg?.startCard?.state, 'open');
   const events = (await w.catalog.find('chat_messages', {projectId: w.projectId})).filter(m => m.role === 'event');
   assert.match(events[0].text, /Couldn't start: There is no version/);
+});
+
+test('Get model answers after a re-split with the same count labels the new test set', async () => {
+  const w = await world('b8', {test: 3, train: 2});
+  const {labelTestSet} = await import('./training.ts');
+  const v = await w.newVersion();
+  const first = await labelTestSet(w.projectId, v, 'A', 1);
+  await until(async () => (await w.labeling.getTask(first.id))?.state === 'done', 'test answers');
+  // Swap one test example for a train one: still 3 test examples, but not the same ones.
+  await w.catalog.patch('examples', 'ex_b8_t2', {split: 'train'});
+  await w.catalog.patch('examples', 'ex_b8_r0', {split: 'test'});
+  const second = await labelTestSet(w.projectId, v, 'A', 1);
+  assert.notEqual(second.id, first.id);
+  assert.deepEqual([...second.exampleIds].sort(), ['ex_b8_r0', 'ex_b8_t0', 'ex_b8_t1']);
+  await until(async () => (await w.labeling.getTask(second.id))?.state === 'done', 'new test answers');
+  assert.equal(w.seen.get('r0'), 1, 'the new member was labeled');
+  assert.equal(w.seen.get('t0'), 1, 'answers already saved are reused');
+});
+
+test('the final run labels a test example whose saved answer is invalid, when the user ticks it', async () => {
+  // t1's first answer is not valid; its second is.
+  const w = await world('b9', {test: 3, train: 2, answer: (id, n) => (id === 't1' && n === 1 ? 'not json' : '{"format": "Vlog"}')});
+  const {labelTestSet, startTrainingSet, trainingRows} = await import('./training.ts');
+  const v = await w.newVersion();
+  const answers = await labelTestSet(w.projectId, v, 'A', 1);
+  await until(async () => (await w.labeling.getTask(answers.id))?.state === 'done', 'test answers');
+  const ts = await startTrainingSet(w.projectId, v, 'A', null, 1, {labelTest: true});
+  assert.deepEqual([ts.testWithAnswers, ts.testToLabel], [2, 1]);
+  await until(async () => (await w.labeling.getTask(ts.taskId))?.state === 'done', 'the final run');
+  assert.equal(w.seen.get('t1'), 2);
+  assert.equal(w.seen.get('t0'), 1);
+  const rows = await trainingRows(ts.id);
+  const t1 = rows.find(r => r.exampleId === 'ex_b9_t1')!;
+  assert.equal(t1.labelSource, 'model');
+  assert.ok(t1.answer);
+  assert.equal(rows.filter(r => r.split === 'train').length, 2);
 });

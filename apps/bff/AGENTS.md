@@ -20,7 +20,8 @@ it reads and writes through the catalog, starts labeling tasks, and asks the age
 - `optimiser.ts`: GEPA-style loop; each candidate is labeled as an optimiser task.
 - `training.ts`: `labelTestSet` ("Get model answers" on Gold Labels, user-started) and the final
   run: one labeling task over the train split plus, when the user ticked it, the test examples
-  with no gold label and no answer from the version. `trainingRows`: train rows from the run,
+  with no gold label and no valid answer from the version (`relabelInvalid`: an invalid answer
+  gets one more try). "Get model answers" reuses a task only for the same test examples. `trainingRows`: train rows from the run,
   every test row labeled with gold, else the saved answer (`labelSource`). User-started tasks
   don't resume by themselves after a reload.
 - `starts.ts`: the agents' start tools. Runs them within the caps, or posts an Approve card;

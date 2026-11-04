@@ -23,7 +23,11 @@ export async function labelTestSet(projectId: string, version: PromptVersion, en
   if (!exampleIds.length) throw new Error('There are no test examples. Change the split on Dataset.');
   const hash = settingsHash(settings);
   const tasks = await labeling.listTasks(projectId);
-  const same = tasks.find(t => t.purpose === 'test' && t.promptVersionId === version.id && t.endpoint === endpoint && t.settingsHash === hash && t.exampleIds.length === exampleIds.length);
+  // The same examples, not just as many: after a re-split the test set is a new task.
+  const want = new Set(exampleIds);
+  const same = tasks.find(
+    t => t.purpose === 'test' && t.promptVersionId === version.id && t.endpoint === endpoint && t.settingsHash === hash && t.exampleIds.length === want.size && t.exampleIds.every(id => want.has(id)),
+  );
   const u = await user();
   if (same) {
     if (same.state !== 'done' && same.state !== 'running') void (same.failed ? labeling.retryFailed(same.id, 'user') : labeling.runTask(same.id, 'user'));
@@ -69,16 +73,18 @@ export async function startTrainingSet(
   if (!settings) throw new Error(`Model ${endpoint} is not chosen in Setup.`);
   const u = await user();
   const saved = await labeling.predictions(version.id, endpoint, settingsHash(settings));
+  // An invalid answer is not a label: such a test example is labeled again, like one with none.
+  const valid = (id: string) => !!saved.get(id)?.answer;
   const train = state.examples.filter(e => e.split === 'train');
   const test = state.examples.filter(e => e.split === 'test');
   const withGold = test.filter(e => state.gold.has(e.id));
-  const withAnswer = test.filter(e => !state.gold.has(e.id) && saved.has(e.id));
-  const toLabel = test.filter(e => !state.gold.has(e.id) && !saved.has(e.id));
+  const withAnswer = test.filter(e => !state.gold.has(e.id) && valid(e.id));
+  const toLabel = test.filter(e => !state.gold.has(e.id) && !valid(e.id));
   const ids = [...train, ...(labelTest ? toLabel : [])].map(e => e.id);
   if (!ids.length) throw new Error('Nothing to label: there are no train examples, and every test example already has a label.');
-  // Answers already saved for these examples are reused for free. The task's cost counts them,
-  // so the budget adds what they cost: the 120% check then applies to new calls only.
-  const reusedUsd = ids.reduce((n, id) => n + (saved.get(id)?.costUsd ?? 0), 0);
+  // Valid answers already saved for these examples are reused for free. The task's cost counts
+  // them, so the budget adds what they cost: the 120% check then applies to new calls only.
+  const reusedUsd = ids.reduce((n, id) => n + (valid(id) ? saved.get(id)!.costUsd : 0), 0);
   const task = await labeling.createTask({
     projectId,
     purpose: 'training',
@@ -88,6 +94,7 @@ export async function startTrainingSet(
     settings,
     exampleIds: ids,
     budgetUsd: estimateUsd + reusedUsd,
+    relabelInvalid: true,
     createdBy: u.name,
   });
   const ts: TrainingSet = {
