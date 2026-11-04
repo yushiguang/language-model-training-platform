@@ -3,18 +3,20 @@
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
 import {useEffect, useMemo, useState} from 'react';
-import type {EndpointId, PromptVersion} from '@/core/types';
-import {versionLabel} from '@/core/versions';
+import type {EndpointId, PromptVersion} from '@tsp/contracts';
+import {versionLabel} from '@tsp/domain';
 import {NotYet} from '@/components/NotYet';
 import {ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {MODEL_COLOR, ScoreChart} from '@/components/ScoreChart';
 import {useChecks, Workbench, type Draft} from '@/components/prompt/Workbench';
-import {estimateLabeling, MADE_BY, minutesFor, recommend} from '@/core/workflow';
+import {estimateLabeling, MADE_BY, minutesFor, recommend} from '@tsp/domain';
 import {
   approveNode,
   createVersion,
+  scoreNewVersion,
   scoreVersion,
+  waitingStarts,
   startOptimiser,
   stopOptimiser,
   stopRun,
@@ -70,8 +72,8 @@ function Start({state, setPage}: {state: ProjectState; setPage: (p: PageContext)
     setBusy(true);
     setErr(null);
     try {
-      const v = await createVersion(state.project.id, state.versions, {...draft, parent: null, madeBy: 'user', change: 'Starting prompt', kind: 'minor', schema: state.setup!.schema!, schemaVersion: state.setup!.schemaVersion});
-      void scoreVersion(state.project.id, v);
+      await createVersion(state.project.id, {...draft, parent: null, madeBy: 'user', change: 'Starting prompt', kind: 'minor', schema: state.setup!.schema!, schemaVersion: state.setup!.schemaVersion});
+      void scoreNewVersion(state.project.id);
     } catch (e) {
       setErr((e as Error).message);
       setBusy(false);
@@ -85,7 +87,7 @@ function Start({state, setPage}: {state: ProjectState; setPage: (p: PageContext)
         <h1>Where should the prompt start?</h1>
         <p className="muted">This becomes v1.0. The platform improves it from here, so it doesn&apos;t need to be perfect.</p>
       </div>
-      <Workbench draft={draft} onChange={setDraft} check={check} />
+      <Workbench draft={draft} onChange={setDraft} check={check} state={state} />
       <div className="next">
         <Button label="Create" variant="primary" size="lg" disabled={!!blocked} loading={busy} onClick={create} />
         <span className="blocked">{blocked ?? `About ${est.minutes} minute${est.minutes > 1 ? 's' : ''} · ${money(est.costUsd)} to label the ${num(est.count)} eval examples`}</span>
@@ -108,6 +110,11 @@ function Overview({state, setPage}: {state: ProjectState; setPage: (p: PageConte
   const running = state.optimisation.find(o => o.state === 'running');
   const lastOpt = state.optimisation[0];
   const advice = recommend(state, running?.endpoint ?? null);
+  // Paid work that waits for a click: Setup's automatic switch is off, or a cost cap applies.
+  const waiting = waitingStarts(state);
+  const waitFor = (vId: string, ep: EndpointId) => waiting.find(w => (w.what === 'score' || w.what === 'resume') && w.versionId === vId && w.endpoint === ep);
+  const optWait = waiting.find(w => w.what === 'optimiser' && w.endpoint === advice.endpoint);
+  const why = waiting[0] ? WHY[waiting[0].reason as keyof typeof WHY] : null;
 
   useEffect(() => {
     void tick(state);
@@ -188,12 +195,24 @@ function Overview({state, setPage}: {state: ProjectState; setPage: (p: PageConte
                   ) : null}
                 </span>
                 <span className="row" style={{gap: 6}}>
-                  {run?.state === 'running' ? <Button label="Stop" size="sm" variant="ghost" onClick={() => stopRun(run.id)} /> : <Button label="Rerun" size="sm" onClick={() => scoreVersion(state.project.id, current, m.endpoint)} disabled={run?.state === 'done'} />}
+                  {run?.state === 'running' ? (
+                    <Button label="Stop" size="sm" variant="ghost" onClick={() => stopRun(run.id)} />
+                  ) : waitFor(current.id, m.endpoint) ? (
+                    <Button
+                      label={`${waitFor(current.id, m.endpoint)!.what === 'resume' ? 'Resume' : 'Score'} on Model ${m.endpoint} · about ${money(waitFor(current.id, m.endpoint)!.estimateUsd)}`}
+                      size="sm"
+                      variant="primary"
+                      onClick={() => scoreVersion(state.project.id, current, m.endpoint)}
+                    />
+                  ) : (
+                    <Button label="Rerun" size="sm" onClick={() => scoreVersion(state.project.id, current, m.endpoint)} disabled={run?.state === 'done'} />
+                  )}
                   {rep && <Button label="Report" size="sm" variant="ghost" href={href('/report', {v: current.id, m: m.endpoint})} />}
                 </span>
               </div>
             );
           })}
+          {why && models.some(m => waitFor(current.id, m.endpoint)) && <span className="small muted">{why}</span>}
           {state.runs.find(r => r.promptVersionId === current.id && r.state === 'failed')?.error && <Note tone="error">{state.runs.find(r => r.promptVersionId === current.id && r.state === 'failed')!.error}</Note>}
         </div>
       </div>
@@ -220,7 +239,13 @@ function Overview({state, setPage}: {state: ProjectState; setPage: (p: PageConte
         {(advice.kind === 'make_training_set' || advice.kind === 'no_eval' || advice.kind === 'label_gold' || (advice.kind === 'keep_improving' && !running)) && (
           <div>
             <Button
-              label={advice.kind === 'label_gold' ? 'Go to Gold Labels' : advice.kind === 'keep_improving' ? `Run the optimiser for Model ${advice.endpoint}` : advice.title.replace('Make the training set', 'Make training set')}
+              label={
+                advice.kind === 'label_gold'
+                  ? 'Go to Gold Labels'
+                  : advice.kind === 'keep_improving'
+                    ? `Run the optimiser for Model ${advice.endpoint}${optWait ? ` · about ${money(optWait.estimateUsd)}` : ''}`
+                    : advice.title.replace('Make the training and test sets', 'Make training and test sets')
+              }
               variant="primary"
               size="lg"
               onClick={act}
@@ -362,3 +387,11 @@ function reportBrief(state: ProjectState, vId: string, ep: EndpointId) {
     topMixUp: mu ? (mu.kind === 'confused' ? `${mu.gold} tagged as ${mu.predicted} (${mu.count})` : `${mu.predicted ?? mu.gold} ${mu.kind} (${mu.count})`) : null,
   };
 }
+
+/** Why paid work waits for a click, in plain words. */
+const WHY = {
+  off: 'Automatic paid starts are off in Setup, so scoring and the optimiser wait for you.',
+  over_single_cap: 'This costs more than $1, so it waits for you.',
+  over_project_cap: 'This would take automatic work in this project past $5, so it waits for you.',
+  paused_over_budget: 'Scoring paused because it cost more than 120% of its estimate, so resuming waits for you.',
+};

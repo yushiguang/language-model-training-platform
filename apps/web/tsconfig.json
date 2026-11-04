@@ -1,25 +1,6 @@
 {
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "lib": [
-      "dom",
-      "dom.iterable",
-      "esnext"
-    ],
-    "allowJs": false,
-    "skipLibCheck": true,
-    "strict": true,
-    "noEmit": true,
-    "esModuleInterop": true,
-    "module": "esnext",
-    "moduleResolution": "bundler",
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "types": [
-      "node"
-    ],
-    "allowImportingTsExtensions": true,
-    "jsx": "react-jsx",
     "incremental": true,
     "plugins": [
       {
@@ -27,35 +8,38 @@
       }
     ],
     "paths": {
-      "@/*": [
-        "./src/*"
-      ],
-      "@/core/*": [
-        "../../packages/contracts/src/*"
-      ],
       "@tsp/contracts": [
         "../../packages/contracts/src/index.ts"
       ],
-      "@tsp/contracts/*": [
-        "../../packages/contracts/src/*"
+      "@tsp/domain": [
+        "../../packages/domain/src/index.ts"
       ],
-      "@tsp/infra": [
-        "../../packages/infra/src/index.ts"
+      "@tsp/platform": [
+        "../../packages/platform/src/index.ts"
       ],
-      "@tsp/infra/*": [
-        "../../packages/infra/src/*"
+      "@tsp/platform-impl": [
+        "../../packages/platform/src/config.ts"
+      ],
+      "@tsp/llm-gateway": [
+        "../../apps/llm-gateway/src/index.ts"
+      ],
+      "@tsp/catalog": [
+        "../../apps/catalog/src/index.ts"
+      ],
+      "@tsp/labeling": [
+        "../../apps/labeling/src/index.ts"
       ],
       "@tsp/agents": [
-        "../agents/src/index.ts"
-      ],
-      "@tsp/agents/*": [
-        "../agents/src/*"
+        "../../apps/agents/src/index.ts"
       ],
       "@tsp/bff": [
-        "../bff/src/index.ts"
+        "../../apps/bff/src/index.ts"
       ],
-      "@tsp/bff/*": [
-        "../bff/src/*"
+      "@tsp/telemetry": [
+        "../../apps/telemetry/src/index.ts"
+      ],
+      "@/*": [
+        "./src/*"
       ]
     }
   },
@@ -63,10 +47,6 @@
     "next-env.d.ts",
     "**/*.ts",
     "**/*.tsx",
-    "../../packages/contracts/src/**/*.ts",
-    "../../packages/infra/src/**/*.ts",
-    "../agents/src/**/*.ts",
-    "../bff/src/**/*.ts",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts"
   ],

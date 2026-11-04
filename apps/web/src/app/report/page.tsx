@@ -2,14 +2,14 @@
 
 import {useRouter, useSearchParams} from 'next/navigation';
 import {Suspense, useState} from 'react';
-import {judge, pct} from '@/core/metrics';
-import type {EndpointId} from '@/core/types';
+import {judge, pct} from '@tsp/domain';
+import type {EndpointId} from '@tsp/contracts';
 import {mixUpHelp, mixUpText, signed} from '@/components/mixups';
-import {compareVersions, versionLabel} from '@/core/versions';
+import {compareVersions, versionLabel} from '@tsp/domain';
 import {ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {MODEL_COLOR, ScoreChart} from '@/components/ScoreChart';
-import {MADE_BY} from '@/core/workflow';
+import {MADE_BY} from '@tsp/domain';
 import {approveNode, type ProjectState} from '@/backend-api';
 import {Badge, Button, Icon, money, StatusBadge, timeOf} from '@/ui';
 

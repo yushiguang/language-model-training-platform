@@ -2,15 +2,15 @@
 
 import {useRouter, useSearchParams} from 'next/navigation';
 import {Suspense, useEffect, useMemo, useState} from 'react';
-import {diffLines, diffSummary} from '@/core/template';
-import {nextVersion, versionLabel} from '@/core/versions';
-import type {PromptVersion} from '@/core/types';
+import {diffLines, diffSummary} from '@tsp/domain';
+import {nextVersion, versionLabel} from '@tsp/domain';
+import type {PromptVersion} from '@tsp/contracts';
 import {ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {useChecks, Workbench, type Draft} from '@/components/prompt/Workbench';
 import {useAgentDrafts} from '@/components/prompt/useAgentDrafts';
-import {MADE_BY} from '@/core/workflow';
-import {createVersion, scoreVersion, type PageContext, type ProjectState} from '@/backend-api';
+import {MADE_BY} from '@tsp/domain';
+import {createVersion, scoreNewVersion, type PageContext, type ProjectState} from '@/backend-api';
 import {Button, Icon, Note, StatusBadge, timeOf} from '@/ui';
 
 export default function EditPage() {
@@ -73,9 +73,10 @@ function Edit({state, version, setPage}: {state: ProjectState; version: PromptVe
     setErr(null);
     try {
       const summary = change || (sum.added || sum.removed ? `${sum.added} line${sum.added === 1 ? '' : 's'} added, ${sum.removed} removed` : 'Features changed');
-      const v = await createVersion(state.project.id, state.versions, {...draft, parent: version, madeBy, change: summary, kind, schema: state.setup!.schema!, schemaVersion: state.setup!.schemaVersion});
-      void scoreVersion(state.project.id, v);
-      setSaved(`Saved as ${versionLabel(v)} · scoring on ${state.setup!.models.length > 1 ? 'both models' : `Model ${state.setup!.models[0].endpoint}`}`);
+      const v = await createVersion(state.project.id, {...draft, parent: version, madeBy, change: summary, kind, schema: state.setup!.schema!, schemaVersion: state.setup!.schemaVersion});
+      const {started} = await scoreNewVersion(state.project.id);
+      const on = started.length > 1 ? 'both models' : started.length ? `Model ${started[0]}` : null;
+      setSaved(`Saved as ${versionLabel(v)} · ${on ? `scoring on ${on}` : 'scoring waits for your click on Prompt Engineering'}`);
       setTimeout(() => router.push(href('/prompt')), 900);
     } catch (e) {
       setErr((e as Error).message);
@@ -118,7 +119,7 @@ function Edit({state, version, setPage}: {state: ProjectState; version: PromptVe
           })}
       </div>
       {version.change && <p className="small muted">What changed: {version.change}</p>}
-      <Workbench draft={draft} onChange={setDraft} check={check} hint={dirty ? <span className="small" style={{fontWeight: 500}}>Unsaved changes · {sum.removed} line{sum.removed === 1 ? '' : 's'} removed, {sum.added} added</span> : undefined} />
+      <Workbench draft={draft} onChange={setDraft} check={check} state={state} hint={dirty ? <span className="small" style={{fontWeight: 500}}>Unsaved changes · {sum.removed} line{sum.removed === 1 ? '' : 's'} removed, {sum.added} added</span> : undefined} />
       {dirty && sum.added + sum.removed > 0 && (
         <div className="col">
           <h3>Changes from {versionLabel(version)}</h3>

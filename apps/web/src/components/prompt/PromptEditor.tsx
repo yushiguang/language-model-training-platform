@@ -1,8 +1,8 @@
 'use client';
 
 import {useMemo, useRef, useState, type ReactNode} from 'react';
-import {ALL_KEYS, FEATURES, ITEM_ROWS} from '@/core/catalogue';
-import type {FeatureSelection} from '@/core/types';
+import {ALL_KEYS, FEATURES, ITEM_ROWS, isImageKey} from '@tsp/domain';
+import type {FeatureSelection} from '@tsp/contracts';
 
 interface Suggest {
   start: number;
@@ -11,7 +11,8 @@ interface Suggest {
 }
 
 /**
- * Template editor. Placeholders show as grey chips (red when the key is unknown). Typing {{
+ * Template editor. Placeholders show as grey chips (red when the key is unknown); image
+ * placeholders and the prompt's own [Image N] show as blue chips, since an image goes at that spot. Typing {{
  * opens a list of features that narrows as you type; ↑ ↓ move, Enter inserts, Esc closes.
  * Picking a feature that isn't ticked inserts it, and Checks then asks to tick it.
  */
@@ -118,10 +119,11 @@ export function PromptEditor({value, onChange, features, readOnly, label = 'Prom
 function highlight(text: string): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
-  for (const m of text.matchAll(/\{\{([A-Za-z0-9_]+)\}\}/g)) {
+  for (const m of text.matchAll(/\{\{([A-Za-z0-9_]+)\}\}|\[Image \d+\]/g)) {
     out.push(text.slice(last, m.index));
+    const cls = m[1] === undefined ? ' img' : !ALL_KEYS.includes(m[1]) ? ' bad' : isImageKey(m[1]) ? ' img' : '';
     out.push(
-      <span key={m.index} className={`ph${ALL_KEYS.includes(m[1]) ? '' : ' bad'}`}>
+      <span key={m.index} className={`ph${cls}`}>
         {m[0]}
       </span>,
     );

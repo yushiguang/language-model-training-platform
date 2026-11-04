@@ -1,24 +1,55 @@
-import {renderPrompt} from '../../../../packages/contracts/src/template';
-import type {EndpointId, EvalReport, PromptVersion, TrainingRow, TrainingSet} from '../../../../packages/contracts/src/types';
-import {estimate, MIN_PER_VALUE, minutesFor} from '../../../../packages/contracts/src/workflow';
-import {newId} from '../data/repo';
-import {emitChange, getApp, now} from './app';
-import {costOf, parseOutput, toMessages, withRetry} from './evaluation';
-import {once} from './locks';
-import {loadProjectState} from './projects';
+import type {EndpointId, EvalReport, LabelingTask, PromptVersion, TrainingRow, TrainingSet} from '@tsp/contracts';
+import {estimate, finalRunPlan, MIN_PER_VALUE, minutesFor, newId, settingsHash} from '@tsp/domain';
+import {emitChange, getApp, now, tm} from './app.ts';
+import {latestGold} from './evaluation.ts';
+import {loadProjectState} from './projects.ts';
+import {trainingView} from './views.ts';
 
-export {estimate, MIN_PER_VALUE, minutesFor};
+export {estimate, finalRunPlan, MIN_PER_VALUE, minutesFor};
 
-const active = new Map<string, AbortController>();
-export const isTrainingActive = (tsId: string) => active.has(tsId);
-export function stopTrainingSet(tsId: string) {
-  active.get(tsId)?.abort();
+/**
+ * "Get model answers" on Gold Labels: labels the test set with one version on one model, so
+ * people can gold-label with the model's answer as a hint. Started by the user with a cost
+ * confirm; it does not resume by itself after a reload. Running it again with the same version,
+ * model and settings resumes the same task (and retries failed examples).
+ */
+export async function labelTestSet(projectId: string, version: PromptVersion, endpoint: EndpointId, estimateUsd: number): Promise<LabelingTask> {
+  const {labeling, catalog, user} = getApp();
+  const state = (await loadProjectState(projectId))!;
+  const setup = state.setup!;
+  const settings = setup.models.find(m => m.endpoint === endpoint);
+  if (!settings) throw new Error(`Model ${endpoint} is not chosen in Setup.`);
+  const exampleIds = state.examples.filter(e => e.split === 'test').map(e => e.id);
+  if (!exampleIds.length) throw new Error('There are no test examples. Change the split on Dataset.');
+  const hash = settingsHash(settings);
+  const tasks = await labeling.listTasks(projectId);
+  // The same examples, not just as many: after a re-split the test set is a new task.
+  const want = new Set(exampleIds);
+  const same = tasks.find(
+    t => t.purpose === 'test' && t.promptVersionId === version.id && t.endpoint === endpoint && t.settingsHash === hash && t.exampleIds.length === want.size && t.exampleIds.every(id => want.has(id)),
+  );
+  const u = await user();
+  if (same) {
+    // Running it again after a budget pause is the user's choice to go on (the budget grows).
+    if (same.state !== 'done' && same.state !== 'running') void (same.failed ? labeling.retryFailed(same.id, 'user', {extendBudget: true}) : labeling.runTask(same.id, 'user', {extendBudget: true}));
+    return same;
+  }
+  const task = await labeling.createTask({projectId, purpose: 'test', promptVersionId: version.id, setupVersionId: setup.id, endpoint, settings, exampleIds, budgetUsd: estimateUsd, createdBy: u.name});
+  await catalog.audit(projectId, u.name, 'test_set.label', {version: version.id, endpoint, estimateUsd});
+  tm().counter('tsp_cost_confirms_total', {what: 'test_answers', outcome: 'accepted'});
+  tm().event('test_answers_requested', {estimate_usd: estimateUsd, examples: exampleIds.length});
+  void labeling.runTask(task.id, 'user');
+  emitChange();
+  return task;
 }
 
 /**
- * Generates the training set using sequential online calls from the open page (MVP has no batch API).
- * Completed rows are saved incrementally in `training_rows`, so a paused or stopped run can resume
- * without re-labeling examples that already finished.
+ * The final run, "Generate training and test sets": one labeling task over the train split, plus
+ * (when the user ticked it) the test examples that have neither a gold label nor an answer from
+ * this version, model and settings. Test examples with a gold label or a saved answer are never
+ * labeled again. No batch job: the labeling app runs it from the open page, 4 examples at a time.
+ * The task pauses if the cost passes 120% of the estimate the user accepted. Passing `existing`
+ * resumes it: examples already labeled are kept, and examples that failed are tried again.
  */
 export async function startTrainingSet(
   projectId: string,
@@ -26,101 +57,130 @@ export async function startTrainingSet(
   endpoint: EndpointId,
   report: EvalReport | null,
   estimateUsd: number,
-  existing?: TrainingSet,
+  opts: {labelTest?: boolean; existing?: TrainingSet} = {},
 ): Promise<TrainingSet> {
-  const {repo, platform, user} = getApp();
-  const state = (await loadProjectState(projectId))!;
-  const settings = state.setup!.models.find(m => m.endpoint === endpoint)!;
-  const train = state.examples.filter(e => e.split === 'train');
-  const existingRows = existing ? await repo.trainingRows<TrainingRow>(existing.id) : [];
-  const doneIds = new Set(existingRows.map(r => r.exampleId));
-
-  const ts: TrainingSet = existing
-    ? {
-        ...existing,
-        state: 'running',
-        error: null,
-        done: existingRows.length,
-        labeled: existingRows.filter(r => r.answer).length,
-        invalid: existingRows.filter(r => !r.answer).length,
-        finishedAt: null,
-      }
-    : {
-        id: newId('ts'),
-        projectId,
-        promptVersionId: version.id,
-        endpoint,
-        snapshotId: state.snapshot!.id,
-        evaluated: !!report,
-        reportId: report?.id ?? null,
-        batchJobId: null,
-        state: 'running',
-        total: train.length,
-        done: 0,
-        labeled: 0,
-        invalid: 0,
-        costUsd: 0,
-        estimateUsd,
-        error: null,
-        startedAt: now(),
-        finishedAt: null,
-      };
-
-  if (existing) await repo.update('training_sets', ts);
-  else {
-    await repo.insert('training_sets', ts);
-    await repo.audit(projectId, (await user()).name, 'training_set.start', {version: version.id, endpoint, estimateUsd});
+  const {catalog, labeling, user} = getApp();
+  const {existing} = opts;
+  if (existing) {
+    // Resume after a budget pause is the user's choice to go on: the budget grows by the share left.
+    void labeling.retryFailed(existing.taskId, 'user', {extendBudget: true});
+    tm().event('final_run_resumed', {after: existing.state, done: existing.done, total: existing.total});
+    emitChange();
+    return existing;
   }
-  emitChange();
-
-  void once(`training:${ts.id}`, async () => {
-    const ctrl = new AbortController();
-    active.set(ts.id, ctrl);
-    try {
-      for (const ex of train) {
-        if (doneIds.has(ex.id)) continue;
-        const parts = renderPrompt(version.template, ex, version.features, version.images);
-        const res = await withRetry(
-          () =>
-            platform.models.chat({
-              endpoint,
-              messages: toMessages(parts),
-              maxOutputTokens: settings.maxOutputTokens,
-              temperature: settings.temperature,
-              traceId: ex.externalId,
-              signal: ctrl.signal,
-            }),
-          ctrl.signal,
-        );
-        const parsed = parseOutput(res.text, state.setup!.schema!);
-        const cost = costOf(endpoint, res.inputTokens, res.outputTokens);
-        const row: TrainingRow = {trainingSetId: ts.id, exampleId: ex.id, answer: parsed.answer, invalidReason: parsed.reason};
-        await repo.insertTrainingRows([row]);
-        doneIds.add(ex.id);
-        ts.done++;
-        if (parsed.answer) ts.labeled++;
-        else ts.invalid++;
-        ts.costUsd += cost;
-        await repo.update('training_sets', ts);
-        emitChange();
-      }
-      ts.state = 'done';
-      ts.finishedAt = now();
-    } catch (e) {
-      const stopped = (e as Error).name === 'AbortError';
-      ts.state = stopped ? 'stopped' : 'failed';
-      ts.error = stopped ? null : `Model ${endpoint} failed after 3 tries: ${(e as Error).message}`;
-      ts.finishedAt = now();
-    } finally {
-      await repo.update('training_sets', ts);
-      active.delete(ts.id);
-      emitChange();
-    }
+  const labelTest = !!opts.labelTest;
+  const state = (await loadProjectState(projectId))!;
+  const setup = state.setup!;
+  const settings = setup.models.find(m => m.endpoint === endpoint);
+  if (!settings) throw new Error(`Model ${endpoint} is not chosen in Setup.`);
+  const u = await user();
+  const saved = await labeling.predictions(version.id, endpoint, settingsHash(settings));
+  // An invalid answer is not a label: such a test example is labeled again, like one with none.
+  const valid = (id: string) => !!saved.get(id)?.answer;
+  const train = state.examples.filter(e => e.split === 'train');
+  const test = state.examples.filter(e => e.split === 'test');
+  const withGold = test.filter(e => state.gold.has(e.id));
+  const withAnswer = test.filter(e => !state.gold.has(e.id) && valid(e.id));
+  const toLabel = test.filter(e => !state.gold.has(e.id) && !valid(e.id));
+  const ids = [...train, ...(labelTest ? toLabel : [])].map(e => e.id);
+  if (!ids.length) throw new Error('Nothing to label: there are no train examples, and every test example already has a label.');
+  // Valid answers already saved for these examples are reused for free. The task's cost counts
+  // them, so the budget adds what they cost: the 120% check then applies to new calls only.
+  const reusedUsd = ids.reduce((n, id) => n + (valid(id) ? saved.get(id)!.costUsd : 0), 0);
+  const task = await labeling.createTask({
+    projectId,
+    purpose: 'training',
+    promptVersionId: version.id,
+    setupVersionId: setup.id,
+    endpoint,
+    settings,
+    exampleIds: ids,
+    budgetUsd: estimateUsd + reusedUsd,
+    relabelInvalid: true,
+    createdBy: u.name,
   });
-
+  const ts: TrainingSet = {
+    id: newId('ts'),
+    projectId,
+    promptVersionId: version.id,
+    endpoint,
+    snapshotId: state.snapshot!.id,
+    evaluated: !!report,
+    reportId: report?.id ?? null,
+    taskId: task.id,
+    setupVersionId: setup.id,
+    state: 'running',
+    total: ids.length,
+    trainTotal: train.length,
+    testTotal: test.length,
+    labelTest,
+    testWithGold: withGold.length,
+    testWithAnswers: withAnswer.length,
+    testToLabel: toLabel.length,
+    done: 0,
+    labeled: 0,
+    invalid: 0,
+    failed: 0,
+    costUsd: 0,
+    estimateUsd,
+    error: null,
+    startedAt: now(),
+    finishedAt: null,
+  };
+  await catalog.insert('training_sets', ts);
+  await catalog.audit(projectId, u.name, 'training_set.start', {version: version.id, endpoint, estimateUsd, labelTest, testToLabel: toLabel.length});
+  tm().counter('tsp_cost_confirms_total', {what: 'final_run', outcome: 'accepted'});
+  tm().event('final_run_started', {version_id: version.id, slot: endpoint, label_test: labelTest, estimate_usd: estimateUsd});
+  void labeling.runTask(task.id, 'user');
+  emitChange();
   return ts;
 }
 
+export async function stopTrainingSet(tsId: string): Promise<void> {
+  const {catalog, labeling} = getApp();
+  const ts = await catalog.get('training_sets', tsId);
+  if (!ts) return;
+  await labeling.stopTask(ts.taskId);
+  const task = await labeling.getTask(ts.taskId);
+  tm().event('final_run_stopped_by_user', {done: task?.done ?? ts.done, total: task?.total ?? ts.total});
+}
+
+/**
+ * The output rows: every train example the run labeled, and every test example. A test row's
+ * label is its gold label when someone gave one, else this version's saved answer (from the run,
+ * or from "Get model answers" on Gold Labels); a test example with neither has no label.
+ */
 export async function trainingRows(tsId: string): Promise<TrainingRow[]> {
-  return getApp().repo.trainingRows<TrainingRow>(tsId);
+  const {catalog, labeling} = getApp();
+  const ts = await catalog.get('training_sets', tsId);
+  if (!ts) return [];
+  const task = await labeling.getTask(ts.taskId);
+  if (!task) return [];
+  const [preds, examples, setup] = await Promise.all([
+    labeling.predictions(task.promptVersionId, task.endpoint, task.settingsHash),
+    catalog.find('examples', {snapshotId: ts.snapshotId}),
+    catalog.get('setup_versions', ts.setupVersionId),
+  ]);
+  const {current: gold} = await latestGold(ts.projectId, setup?.schemaVersion ?? 0);
+  const inTask = new Set(task.exampleIds);
+  const rows: TrainingRow[] = [];
+  for (const e of examples) {
+    const p = preds.get(e.id);
+    if (e.split === 'train') {
+      if (!inTask.has(e.id) || !p) continue;
+      rows.push({trainingSetId: ts.id, exampleId: e.id, split: 'train', answer: p.answer, labelSource: p.answer ? 'model' : null, model: p.answer, invalidReason: p.invalidReason, gold: null});
+    } else if (e.split === 'test') {
+      const g = gold.get(e.id)?.answer ?? null;
+      const answer = g ?? p?.answer ?? null;
+      rows.push({trainingSetId: ts.id, exampleId: e.id, split: 'test', answer, labelSource: g ? 'gold' : answer ? 'model' : null, model: p?.answer ?? null, invalidReason: p?.invalidReason ?? null, gold: g});
+    }
+  }
+  return rows;
+}
+
+export async function getTrainingSet(tsId: string): Promise<TrainingSet | null> {
+  const {catalog, labeling} = getApp();
+  const ts = await catalog.get('training_sets', tsId);
+  if (!ts) return null;
+  return trainingView(ts, (await labeling.getTask(ts.taskId)) ?? undefined);
 }

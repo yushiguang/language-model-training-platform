@@ -16,14 +16,15 @@ import type {
   PageContext,
   Prediction,
   Project,
+  ProjectState,
   PromptImage,
   PromptVersion,
   Schema,
   SetupVersion,
   TrainingRow,
   TrainingSet,
-} from './types';
-import type {ProjectState} from './workflow';
+} from './types.ts';
+import type {LabelingTask} from './labeling-api.ts';
 
 /**
  * Contract 1: Frontend Web App <-> BFF Service (`@tsp/contracts/bff-api`).
@@ -34,12 +35,13 @@ import type {ProjectState} from './workflow';
  * microservice deployments, it swaps to `fetch()` calls against the remote Go BFF service.
  */
 
-export type SetupPatch = Partial<Pick<SetupVersion, 'task' | 'schema' | 'thresholds' | 'models' | 'steps'>>;
+export type SetupPatch = Partial<Pick<SetupVersion, 'task' | 'schema' | 'thresholds' | 'models' | 'steps' | 'autoStart'>>;
 
 export interface NewVersion {
   template: string;
   features: FeatureSelection;
   images: PromptImage[];
+  /** The version this one was edited from; null for the first version. */
   parent: PromptVersion | null;
   madeBy: Actor;
   change: string;
@@ -63,7 +65,6 @@ export interface BffContract {
   listProjects(): Promise<Project[]>;
   createProject(name: string): Promise<Project>;
   getProject(id: string): Promise<Project | null>;
-  updateProject(p: Project): Promise<Project>;
   loadProjectState(projectId: string): Promise<ProjectState | null>;
   approveNode(projectId: string, node: NodeId): Promise<void>;
   skipGold(projectId: string): Promise<void>;
@@ -82,17 +83,30 @@ export interface BffContract {
   importBundledGold(projectId: string, schema: Schema, schemaVersion: number, examples: Example[]): Promise<{saved: number; skipped: number}>;
 
   // Prompts, evaluation & optimiser
-  createVersion(projectId: string, all: PromptVersion[], v: NewVersion): Promise<PromptVersion>;
+  /** Version numbers are assigned by the catalog, never by the browser. */
+  createVersion(projectId: string, v: NewVersion): Promise<PromptVersion>;
+  /** A click on Score, Resume or Rerun: always starts (the user's start). */
   scoreVersion(projectId: string, version: PromptVersion, only?: EndpointId): Promise<void>;
+  /**
+   * After Save or Create: scores the new version on each model where an automatic start is
+   * allowed (Setup's switch and the caps); the others wait for a click.
+   */
+  scoreNewVersion(projectId: string): Promise<{started: EndpointId[]; waiting: EndpointId[]}>;
   tick(state: ProjectState): Promise<void>;
   stopRun(runId: string): void;
   startOptimiser(projectId: string, endpoint: EndpointId): void;
   stopOptimiser(runId: string): void;
   predictionsFor(versionId: string, endpoint: EndpointId, settings: ModelSettings): Promise<Map<string, Prediction>>;
 
-  // Training set
-  startTrainingSet(projectId: string, version: PromptVersion, endpoint: EndpointId, report: EvalReport | null, estimateUsd: number, existing?: TrainingSet): Promise<TrainingSet>;
+  // Test set answers (Gold Labels) and the final run (train + test)
+  labelTestSet(projectId: string, version: PromptVersion, endpoint: EndpointId, estimateUsd: number): Promise<LabelingTask>;
+  /** `labelTest`: also label the test examples that have no gold label and no answer from this version (the user ticked it in the confirm). */
+  startTrainingSet(projectId: string, version: PromptVersion, endpoint: EndpointId, report: EvalReport | null, estimateUsd: number, opts?: {labelTest?: boolean; existing?: TrainingSet}): Promise<TrainingSet>;
   stopTrainingSet(tsId: string): void;
+
+  // Paid starts: what waits for a click, and Approve / Cancel on an agent's start card
+  waitingStarts(state: ProjectState): {what: 'score' | 'resume' | 'optimiser'; versionId: string | null; endpoint: EndpointId; estimateUsd: number; key: string; reason: string}[];
+  answerStartCard(projectId: string, messageId: string, approve: boolean): Promise<void>;
   trainingRows(tsId: string): Promise<TrainingRow[]>;
 
   // Assistant & proposals

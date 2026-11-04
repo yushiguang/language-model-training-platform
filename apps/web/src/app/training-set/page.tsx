@@ -2,16 +2,18 @@
 
 import {useRouter, useSearchParams} from 'next/navigation';
 import {Suspense, useEffect, useMemo, useState} from 'react';
-import type {EndpointId, PromptVersion, TrainingRow, TrainingSet} from '@/core/types';
-import {versionLabel} from '@/core/versions';
+import type {EndpointId, PromptVersion, TrainingRow, TrainingSet} from '@tsp/contracts';
+import {outputCandidates, versionLabel} from '@tsp/domain';
 import {ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
-import {estimate, MIN_PER_VALUE} from '@/core/workflow';
+import {useLabeledTest} from '@/components/useLabeledTest';
+import {estimate, finalRunPlan, MIN_PER_VALUE} from '@tsp/domain';
 import {
   approveNode,
   startTrainingSet,
   stopTrainingSet,
   tick,
+  track,
   trainingRows,
   type ProjectState,
 } from '@/backend-api';
@@ -34,17 +36,6 @@ function TrainingRouter() {
   );
 }
 
-/** Best passing version per model, or the current version when nothing is evaluated. */
-function candidates(state: ProjectState) {
-  return state.setup!.models.map(m => {
-    const mine = state.reports.filter(r => r.endpoint === m.endpoint && !r.archivedNow);
-    const passing = mine.filter(r => r.passed).sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1)[0];
-    const best = [...mine].sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1)[0];
-    const version = state.versions.find(v => v.id === (passing ?? best)?.promptVersionId) ?? state.versions[0];
-    return {endpoint: m.endpoint, version, passing: passing ?? null, best: best ?? null};
-  });
-}
-
 function Training({state, vParam, mParam}: {state: ProjectState; vParam: string | null; mParam: EndpointId | null}) {
   useEffect(() => {
     void tick(state);
@@ -63,7 +54,7 @@ function Training({state, vParam, mParam}: {state: ProjectState; vParam: string 
 
 function Plan({state, vParam, mParam, running}: {state: ProjectState; vParam: string | null; mParam: EndpointId | null; running: TrainingSet | null}) {
   const {href} = useProject();
-  const cands = useMemo(() => candidates(state), [state]);
+  const cands = useMemo(() => outputCandidates(state), [state]);
   const evaluationOn = !!state.setup?.thresholds;
   const fromUrl = vParam && mParam ? {endpoint: mParam, version: state.versions.find(v => v.id === vParam)} : null;
   const [pick, setPick] = useState<{endpoint: EndpointId; version: PromptVersion} | null>(
@@ -71,15 +62,26 @@ function Plan({state, vParam, mParam, running}: {state: ProjectState; vParam: st
   );
   const [chooser, setChooser] = useState(false);
   const [confirm, setConfirm] = useState(false);
+  const [labelTest, setLabelTest] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const sel = pick ?? (cands.find(c => c.passing) ? {endpoint: cands.find(c => c.passing)!.endpoint, version: cands.find(c => c.passing)!.version!} : {endpoint: cands[0]?.endpoint, version: state.versions[0]});
+  const labeled = useLabeledTest(state, sel.version, sel.endpoint);
 
   if (!state.versions.length) return <p>Create a prompt version first.</p>;
   if (running) return <Running state={state} ts={running} />;
 
-  const sel = pick ?? (cands.find(c => c.passing) ? {endpoint: cands.find(c => c.passing)!.endpoint, version: cands.find(c => c.passing)!.version!} : {endpoint: cands[0].endpoint, version: state.versions[0]});
-  const est = estimate(state, sel.version, sel.endpoint);
-  const report = est.report;
+  const plan = finalRunPlan(state, sel.version, sel.endpoint, labeled);
+  const est = plan.train;
+  const tp = plan.test;
+  const total = plan.total(labelTest && tp.toLabel.length > 0);
+  const report = plan.report;
+  const vName = versionLabel(sel.version);
+  const openConfirm = () => {
+    setConfirm(true);
+    track('final_run_confirm_shown', {train: est.count, test_to_label: tp.toLabel.length, test_with_gold: tp.withGold.length, test_with_answers: tp.withAnswer.length, estimate_usd: total.costUsd, evaluated: !!passes});
+  };
   const passes = !!report && state.reports.find(r => r.id === report.id)?.passed;
   const t = state.setup!.thresholds;
 
@@ -87,7 +89,7 @@ function Plan({state, vParam, mParam, running}: {state: ProjectState; vParam: st
     setBusy(true);
     setErr(null);
     try {
-      await startTrainingSet(state.project.id, sel.version, sel.endpoint, passes ? report : null, est.costUsd);
+      await startTrainingSet(state.project.id, sel.version, sel.endpoint, passes ? report : null, total.costUsd, {labelTest: labelTest && tp.toLabel.length > 0});
       setConfirm(false);
     } catch (e) {
       setErr((e as Error).message);
@@ -100,8 +102,8 @@ function Plan({state, vParam, mParam, running}: {state: ProjectState; vParam: st
     <>
       <div className="page-head">
         <span className="eyebrow">Training Set</span>
-        <h1>Training Set</h1>
-        <p className="muted">The model labels every train example with the chosen prompt. Invalid answers are dropped.</p>
+        <h1>Training and test sets</h1>
+        <p className="muted">The model labels every train example with the chosen prompt. Test examples keep their gold label or the model answer they already have; you choose whether the model labels the rest. These two sets are what you take to model training. Invalid answers are dropped.</p>
       </div>
       <div className="card">
         <div className="row">
@@ -121,9 +123,17 @@ function Plan({state, vParam, mParam, running}: {state: ProjectState; vParam: st
           </dd>
           <dt>Train examples</dt>
           <dd>{num(est.count)}</dd>
+          <dt>Test examples</dt>
+          <dd>
+            {num(tp.total)}
+            <span className="small muted">
+              {' '}
+              · {num(tp.withGold.length)} with a gold label · {num(tp.withAnswer.length)} with an answer from {vName} · {num(tp.toLabel.length)} with no label
+            </span>
+          </dd>
           <dt>Estimate</dt>
           <dd>
-            about {money(est.costUsd)} · {est.minutes} min
+            about {money(total.costUsd)} · {total.minutes} min{tp.toLabel.length > 0 && labelTest ? ' (with the test examples that have no label)' : ''}
           </dd>
         </dl>
         {report && (
@@ -144,12 +154,12 @@ function Plan({state, vParam, mParam, running}: {state: ProjectState; vParam: st
         {!passes && evaluationOn && <Note>This version has not passed the threshold{t ? ` (lowest field ${t.macroF1.toFixed(2)})` : ''}. You can still generate, and the training set will be marked Not evaluated.</Note>}
       </div>
       <div className="next">
-        <Button label="Approve and generate" variant="primary" size="lg" disabled={!est.count} onClick={() => (cands.length > 1 && !pick ? setChooser(true) : setConfirm(true))} />
-        <span className="blocked">{est.count ? "You'll see the cost once more before anything is spent." : 'There are no train examples. Change the split on Dataset.'}</span>
+        <Button label="Approve and generate" variant="primary" size="lg" disabled={!est.count && !tp.toLabel.length} onClick={() => (cands.length > 1 && !pick ? setChooser(true) : openConfirm())} />
+        <span className="blocked">{est.count || tp.toLabel.length ? "You'll see the cost once more before anything is spent." : 'There are no train examples. Change the split on Dataset.'}</span>
       </div>
       {err && <Note tone="error">{err}</Note>}
 
-      <Dialog open={chooser} onClose={() => setChooser(false)} title="Which model makes the training set?" subtitle="You picked two models in Setup. Each one's best passing version is shown.">
+      <Dialog open={chooser} onClose={() => setChooser(false)} title="Which model makes the training and test sets?" subtitle="You picked two models in Setup. Each one's best passing version is shown.">
         <div className="col">
           {cands.map((c, i) => {
             const e = c.version ? estimate(state, c.version, c.endpoint) : null;
@@ -168,7 +178,7 @@ function Plan({state, vParam, mParam, running}: {state: ProjectState; vParam: st
                   </span>
                   {c.passing ? (
                     <span className="small muted">
-                      Lowest macro-F1 {c.passing.metrics.lowestField.macroF1.toFixed(2)} · {money(c.passing.metrics.costPer1000)} per 1,000 examples · {num(e!.count)} train examples, about {money(e!.costUsd)}, {e!.minutes} min
+                      Lowest macro-F1 {c.passing.metrics.lowestField.macroF1.toFixed(2)} · {money(c.passing.metrics.costPer1000)} per 1,000 examples · {num(e!.count)} train and test examples, about {money(e!.costUsd)}, {e!.minutes} min
                     </span>
                   ) : (
                     <span className="small muted">
@@ -188,32 +198,62 @@ function Plan({state, vParam, mParam, running}: {state: ProjectState; vParam: st
               onClick={() => {
                 setPick(sel);
                 setChooser(false);
-                setConfirm(true);
+                openConfirm();
               }}
             />
           </div>
         </div>
       </Dialog>
 
-      <Dialog open={confirm} onClose={() => setConfirm(false)} title="Generate the training set?" subtitle={`Model ${sel.endpoint} labels ${num(est.count)} examples with prompt ${versionLabel(sel.version)}.`}>
+      <Dialog open={confirm} onClose={() => setConfirm(false)} title="Generate the training and test sets?" subtitle={`Model ${sel.endpoint} labels with prompt ${vName}.`}>
         <div className="col">
+          <div className="confirm-lines">
+            <div className="confirm-line">
+              <b>Training set</b>
+              <span className="grow">{num(est.count)} examples{est.reused ? `, ${num(est.reused)} already labeled` : ''}</span>
+              <span>about {money(est.costUsd)}</span>
+            </div>
+            <div className="confirm-line">
+              <b>Test set</b>
+              {tp.toLabel.length > 0 ? (
+                <label className="grow row" style={{gap: 8, alignItems: 'flex-start'}}>
+                  <input type="checkbox" checked={labelTest} onChange={e => setLabelTest(e.target.checked)} aria-label="Label the test examples that have no label" />
+                  <span>
+                    {num(tp.withGold.length)} have a gold label, {num(tp.withAnswer.length)} have an answer from {vName}. Label the other {num(tp.toLabel.length)}?
+                  </span>
+                </label>
+              ) : (
+                <span className="grow">
+                  {num(tp.withGold.length)} have a gold label, {num(tp.withAnswer.length)} have an answer from {vName}. Nothing to label.
+                </span>
+              )}
+              <span>{tp.toLabel.length > 0 ? (labelTest ? `about ${money(tp.costUsd)}` : 'skipped') : '$0.00'}</span>
+            </div>
+          </div>
+          {tp.toLabel.length > 0 && !labelTest && <span className="small muted">The {num(tp.toLabel.length)} test examples with no label stay out of the test set. You can label them on Gold Labels.</span>}
           <div className="stats">
             <div className="stat">
               <span className="small muted">Estimated cost</span>
-              <b>{money(est.costUsd)}</b>
+              <b>{money(total.costUsd)}</b>
             </div>
             <div className="stat">
               <span className="small muted">Estimated time</span>
-              <b>{est.minutes} min</b>
+              <b>{total.minutes} min</b>
             </div>
           </div>
           <p className="small muted">
-            {report ? `Based on ${money(est.per1000)} per 1,000 examples from the eval runs. ` : 'Based on the prompt length, since this version has no eval run. '}
+            {report ? `Based on ${money(plan.per1000)} per 1,000 examples from the eval runs. ` : 'Based on the prompt length, since this version has no eval run. '}
             You can leave the page; progress shows in the stepper. You can stop at any time and keep what&apos;s done.
           </p>
           <div className="row" style={{justifyContent: 'flex-end'}}>
-            <Button label="Cancel" variant="ghost" onClick={() => setConfirm(false)} />
-            <Button label={`Approve ${money(est.costUsd)} and generate`} variant="primary" loading={busy} onClick={go} />
+            <Button
+              label="Cancel"
+              variant="ghost"
+              onClick={() => {
+                setConfirm(false);
+              }}
+            />
+            <Button label={`Approve ${money(total.costUsd)} and generate`} variant="primary" loading={busy} onClick={go} />
           </div>
         </div>
       </Dialog>
@@ -233,7 +273,7 @@ function Running({state, ts}: {state: ProjectState; ts: TrainingSet}) {
         ts.endpoint,
         ts.reportId ? (state.reports.find(r => r.id === ts.reportId) ?? null) : null,
         ts.estimateUsd,
-        ts,
+        {existing: ts},
       );
     } catch (e) {
       setErr((e as Error).message);
@@ -246,12 +286,12 @@ function Running({state, ts}: {state: ProjectState; ts: TrainingSet}) {
         <span className="eyebrow">Training Set</span>
         <h1>
           {ts.state === 'running'
-            ? 'Generating the training set'
+            ? 'Generating the training and test sets'
             : ts.state === 'paused'
-              ? 'Training set generation paused'
+              ? 'Generating the sets is paused'
               : ts.state === 'failed'
-                ? 'The training set stopped with an error'
-                : 'The training set was stopped'}
+                ? 'Generating the sets stopped with an error'
+                : 'Generating the sets was stopped'}
         </h1>
         <p className="muted">
           Prompt {v ? versionLabel(v) : ''} · Model {ts.endpoint} · started {timeOf(ts.startedAt)} · approved {money(ts.estimateUsd)}
@@ -272,8 +312,10 @@ function Running({state, ts}: {state: ProjectState; ts: TrainingSet}) {
           <Button label="Stop" size="lg" onClick={() => stopTrainingSet(ts.id)} />
         ) : (
           <>
-            <Button label="Resume" variant="primary" size="lg" onClick={resume} />
-            <span className="blocked">Continues from the {num(ts.done)} examples already labeled.</span>
+            <Button label={ts.failed > 0 ? 'Retry failed' : 'Resume'} variant="primary" size="lg" onClick={resume} />
+            <span className="blocked">
+              Continues from the {num(ts.done)} examples already labeled{ts.failed > 0 ? `; tries the ${num(ts.failed)} that failed again` : ''}.
+            </span>
           </>
         )}
       </div>
@@ -286,6 +328,7 @@ function Done({state, ts}: {state: ProjectState; ts: TrainingSet}) {
   const router = useRouter();
   const {href} = useProject();
   const [rows, setRows] = useState<TrainingRow[] | null>(null);
+  const [tab, setTab] = useState<'train' | 'test'>('train');
   const [show, setShow] = useState(5);
   useEffect(() => {
     void trainingRows(ts.id).then(setRows);
@@ -293,7 +336,16 @@ function Done({state, ts}: {state: ProjectState; ts: TrainingSet}) {
   const v = state.versions.find(x => x.id === ts.promptVersionId);
   const schema = state.setup!.schema!;
   const byId = useMemo(() => new Map(state.examples.map(e => [e.id, e])), [state.examples]);
-  const good = (rows ?? []).filter(r => r.answer);
+  const good = (rows ?? []).filter(r => r.answer && r.split === 'train');
+  const testRows = (rows ?? []).filter(r => r.split === 'test');
+  const goodTest = testRows.filter(r => r.answer);
+  const fromGold = goodTest.filter(r => r.labelSource === 'gold').length;
+  const fromModel = goodTest.length - fromGold;
+  const unlabeled = testRows.length - goodTest.length;
+  const agreeing = testRows.filter(r => r.gold && r.model && schema.fields.every(f => sameValues(r.gold![f.name], r.model![f.name]))).length;
+  const withBoth = testRows.filter(r => r.gold && r.model).length;
+  const trainTotal = ts.trainTotal ?? ts.total;
+  const testTotal = ts.testTotal ?? 0;
   const counts = schema.fields.map(f => ({
     field: f,
     values: f.values.map(val => ({name: val.name, n: good.filter(r => r.answer![f.name]?.includes(val.name)).length})).sort((a, b) => b.n - a.n),
@@ -303,18 +355,32 @@ function Done({state, ts}: {state: ProjectState; ts: TrainingSet}) {
   const limit = state.setup?.thresholds?.invalidRate;
   const took = ts.finishedAt ? Math.max(1, Math.round((Date.parse(ts.finishedAt) - Date.parse(ts.startedAt)) / 60000)) : null;
   const approved = state.project.approvedNodes.includes('training');
+  const shown = tab === 'train' ? good : testRows;
 
-  const download = (kind: 'csv' | 'jsonl') => {
-    const lines =
-      kind === 'jsonl'
-        ? good.map(r => JSON.stringify({id: byId.get(r.exampleId)?.externalId, title: byId.get(r.exampleId)?.title, answer: r.answer}))
-        : [['id', 'title', ...schema.fields.map(f => f.name)].join(','), ...good.map(r => [byId.get(r.exampleId)?.externalId ?? '', byId.get(r.exampleId)?.title ?? '', ...schema.fields.map(f => (r.answer![f.name] ?? []).join('; '))].map(csvCell).join(','))];
-    const blob = new Blob([lines.join('\n') + '\n'], {type: kind === 'csv' ? 'text/csv' : 'application/x-ndjson'});
+  const save = (name: string, lines: string[], type: string, ext: 'csv' | 'jsonl') => {
+    const blob = new Blob([lines.join('\n') + '\n'], {type});
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `training-set-${v ? versionLabel(v) : ts.id}-model-${ts.endpoint}.${kind}`;
+    a.download = `${name}-${v ? versionLabel(v) : ts.id}-model-${ts.endpoint}.${ext}`;
     a.click();
     URL.revokeObjectURL(a.href);
+  };
+  const name = (split: 'train' | 'test') => (split === 'train' ? 'training-set' : 'test-set');
+  const jsonl = (split: 'train' | 'test') => {
+    const rs = split === 'train' ? good : goodTest;
+    const lines = rs.map(r => JSON.stringify({id: byId.get(r.exampleId)?.externalId, title: byId.get(r.exampleId)?.title, answer: r.answer, ...(split === 'test' ? {label_source: r.labelSource, gold: r.gold, model: r.model} : {})}));
+    save(name(split), lines, 'application/x-ndjson', 'jsonl');
+    track('export_downloaded', {set: split === 'train' ? 'training' : 'test', format: 'jsonl', rows: rs.length});
+  };
+  const csv = (split: 'train' | 'test') => {
+    const rs = split === 'train' ? good : goodTest;
+    const head = ['id', 'title', ...schema.fields.map(f => f.name), ...(split === 'test' ? ['label_source'] : [])];
+    const lines = [
+      head.join(','),
+      ...rs.map(r => [byId.get(r.exampleId)?.externalId ?? '', byId.get(r.exampleId)?.title ?? '', ...schema.fields.map(f => (r.answer![f.name] ?? []).join('; ')), ...(split === 'test' ? [r.labelSource ?? ''] : [])].map(csvCell).join(',')),
+    ];
+    save(name(split), lines, 'text/csv', 'csv');
+    track('export_downloaded', {set: split === 'train' ? 'training' : 'test', format: 'csv', rows: rs.length});
   };
 
   return (
@@ -322,37 +388,66 @@ function Done({state, ts}: {state: ProjectState; ts: TrainingSet}) {
       <div className="page-head">
         <span className="eyebrow">Training Set</span>
         <div className="row">
-          <h1>Training Set</h1>
+          <h1>Training and test sets</h1>
           {ts.evaluated ? <Badge label="Evaluated" tone="success" icon={<Icon name="check" size={12} />} /> : <Badge label="Not evaluated" tone="warning" icon={<Icon name="alert" size={12} />} />}
-          <span className="right row" style={{gap: 8}}>
-            <Button label="CSV" size="sm" icon={<Icon name="download" />} onClick={() => download('csv')} disabled={!rows} />
-            <Button label="Export JSONL" size="sm" icon={<Icon name="download" />} onClick={() => download('jsonl')} disabled={!rows} />
-          </span>
         </div>
         <p className="muted">
           Prompt {v ? versionLabel(v) : ''} · Model {ts.endpoint} · finished {ts.finishedAt ? timeOf(ts.finishedAt) : ''} · cost {money(ts.costUsd)}
+          {took ? ` · took ${took} min` : ''}
         </p>
       </div>
-      <div className="stats">
-        <div className="stat">
-          <span className="small muted">Labeled examples</span>
-          <b>{num(ts.labeled)}</b>
-          <span className="small muted">of {num(ts.total)} train examples</span>
-        </div>
-        <div className="stat">
-          <span className="small muted">Invalid, dropped</span>
-          <b>{(invalidRate * 100).toFixed(1)}%</b>
-          <span className="small muted">
-            {num(ts.invalid)} answers{limit != null ? ` · limit ${(limit * 100).toFixed(0)}%` : ''}
-          </span>
-        </div>
-        <div className="stat">
-          <span className="small muted">Progress</span>
-          <b>100%</b>
-          {took && <span className="small muted">took {took} min</span>}
-        </div>
+      <div className="tabs" role="tablist">
+        <button role="tab" aria-selected={tab === 'train'} className={tab === 'train' ? 'on' : ''} onClick={() => (setTab('train'), setShow(5))}>
+          Training set <span className="muted">{num(good.length)}</span>
+        </button>
+        <button role="tab" aria-selected={tab === 'test'} className={tab === 'test' ? 'on' : ''} onClick={() => (setTab('test'), setShow(5))}>
+          Test set <span className="muted">{num(goodTest.length)}</span>
+        </button>
+        <span className="right row" style={{gap: 8}}>
+          <Button label="Download JSONL" size="sm" icon={<Icon name="download" />} onClick={() => jsonl(tab)} disabled={!rows || !(tab === 'train' ? good : goodTest).length} />
+          <Button label="Download CSV" size="sm" icon={<Icon name="download" />} onClick={() => csv(tab)} disabled={!rows || !(tab === 'train' ? good : goodTest).length} />
+        </span>
       </div>
-      {low.length > 0 && (
+      {tab === 'train' ? (
+        <div className="stats">
+          <div className="stat">
+            <span className="small muted">Labeled</span>
+            <b>{num(good.length)}</b>
+            <span className="small muted">of {num(trainTotal)} train examples</span>
+          </div>
+          <div className="stat">
+            <span className="small muted">Invalid, dropped</span>
+            <b>{(invalidRate * 100).toFixed(1)}%</b>
+            <span className="small muted">
+              {num(ts.invalid)} answers{limit != null ? ` · limit ${(limit * 100).toFixed(0)}%` : ''}
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="stats">
+          <div className="stat">
+            <span className="small muted">Labeled</span>
+            <b>{num(goodTest.length)}</b>
+            <span className="small muted">of {num(testTotal)} test examples</span>
+          </div>
+          <div className="stat">
+            <span className="small muted">Gold labels</span>
+            <b>{num(fromGold)}</b>
+            <span className="small muted">{withBoth ? `model agrees on ${num(agreeing)} of ${num(withBoth)}` : 'given by people'}</span>
+          </div>
+          <div className="stat">
+            <span className="small muted">Model answers</span>
+            <b>{num(fromModel)}</b>
+            <span className="small muted">from {v ? versionLabel(v) : 'this version'}</span>
+          </div>
+          <div className="stat">
+            <span className="small muted">No label</span>
+            <b>{num(unlabeled)}</b>
+            <span className="small muted">{unlabeled ? 'left out of the download' : 'every example has a label'}</span>
+          </div>
+        </div>
+      )}
+      {tab === 'train' && low.length > 0 && (
         <div className="banner">
           <Icon name="alert" />
           <span className="grow">
@@ -365,33 +460,40 @@ function Done({state, ts}: {state: ProjectState; ts: TrainingSet}) {
           <Button label="Add examples" size="sm" href={href('/dataset')} />
         </div>
       )}
-      <div className="card tight">
-        <div className="card-head">
-          <h2>Label counts</h2>
-        </div>
-        <div className="stats" style={{padding: 12, alignItems: 'start'}}>
-          {counts.map(c => (
-            <div key={c.field.name} className="col" style={{gap: 6}}>
-              <span className="row" style={{gap: 6}}>
-                <b className="mono">{c.field.name}</b>
-                <span className="small muted">{c.field.kind === 'multi' ? `Multi-select${c.field.max ? `, up to ${c.field.max}` : ''}` : 'Single-select'}</span>
-              </span>
-              {c.values.map(x => (
-                <span key={x.name} className="row small" style={{gap: 8}}>
-                  <span style={{width: 130}}>{x.name}</span>
-                  <span className="bar">
-                    <span style={{width: `${good.length ? (100 * x.n) / Math.max(...c.values.map(y => y.n), 1) : 0}%`}} />
-                  </span>
-                  <span style={{width: 40, textAlign: 'right'}}>{num(x.n)}</span>
+      {tab === 'test' && unlabeled > 0 && (
+        <Note>
+          {num(unlabeled)} test example{unlabeled === 1 ? ' has' : 's have'} no label. Add gold labels or model answers on <a href={href('/gold')}>Gold Labels</a>.
+        </Note>
+      )}
+      {tab === 'train' && (
+        <div className="card tight">
+          <div className="card-head">
+            <h2>Label counts in the training set</h2>
+          </div>
+          <div className="stats" style={{padding: 12, alignItems: 'start'}}>
+            {counts.map(c => (
+              <div key={c.field.name} className="col" style={{gap: 6}}>
+                <span className="row" style={{gap: 6}}>
+                  <b className="mono">{c.field.name}</b>
+                  <span className="small muted">{c.field.kind === 'multi' ? `Multi-select${c.field.max ? `, up to ${c.field.max}` : ''}` : 'Single-select'}</span>
                 </span>
-              ))}
-            </div>
-          ))}
+                {c.values.map(x => (
+                  <span key={x.name} className="row small" style={{gap: 8}}>
+                    <span style={{width: 130}}>{x.name}</span>
+                    <span className="bar">
+                      <span style={{width: `${good.length ? (100 * x.n) / Math.max(...c.values.map(y => y.n), 1) : 0}%`}} />
+                    </span>
+                    <span style={{width: 40, textAlign: 'right'}}>{num(x.n)}</span>
+                  </span>
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
       <div className="card tight">
         <div className="card-head">
-          <h2>Sample rows</h2>
+          <h2>{tab === 'train' ? 'Training set rows' : 'Test set rows'}</h2>
         </div>
         <div className="scroll-x">
           <table className="t">
@@ -403,21 +505,23 @@ function Done({state, ts}: {state: ProjectState; ts: TrainingSet}) {
                     {f.name}
                   </th>
                 ))}
+                {tab === 'test' && <th>Label from</th>}
               </tr>
             </thead>
             <tbody>
-              {good.slice(0, show).map(r => (
+              {shown.slice(0, show).map(r => (
                 <tr key={r.exampleId}>
                   <td>{byId.get(r.exampleId)?.title}</td>
                   {schema.fields.map(f => (
-                    <td key={f.name}>{(r.answer![f.name] ?? []).join(', ')}</td>
+                    <td key={f.name}>{r.answer ? (r.answer[f.name] ?? []).join(', ') : <span className="muted">—</span>}</td>
                   ))}
+                  {tab === 'test' && <td className="small">{r.labelSource === 'gold' ? <Badge label="Gold" tone="success" /> : r.labelSource === 'model' ? <Badge label="Model" /> : <span className="muted">No label</span>}</td>}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        {good.length > show && (
+        {shown.length > show && (
           <div style={{padding: '8px 12px'}}>
             <Button label="Show 10 more" variant="ghost" size="sm" onClick={() => setShow(s => s + 10)} />
           </div>
@@ -434,12 +538,18 @@ function Done({state, ts}: {state: ProjectState; ts: TrainingSet}) {
           }}
         />
         <span className="blocked">
-          Finished · {(invalidRate * 100).toFixed(1)}% invalid
+          Finished · {num(good.length)} train and {num(goodTest.length)} test rows
         </span>
       </div>
     </>
   );
 }
+
+const sameValues = (a: string[] | undefined, b: string[] | undefined) => {
+  const x = [...(a ?? [])].sort();
+  const y = [...(b ?? [])].sort();
+  return x.length === y.length && x.every((v, i) => v === y[i]);
+};
 
 const csvCell = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
 

@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import {Suspense, useEffect, useState, type ReactNode} from 'react';
-import {NODES, nodeStatuses} from '@/core/gates';
-import type {NodeId, PageContext} from '@/core/types';
+import {NODES, nodeStatuses} from '@tsp/domain';
+import type {NodeId, PageContext} from '@tsp/contracts';
 import {getRuntimeInfo} from '@/backend-api';
 import {Icon} from '@/ui';
 import {Assistant} from './Assistant';

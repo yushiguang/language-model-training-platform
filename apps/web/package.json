@@ -1,13 +1,12 @@
 {
-  "name": "training-set-platform-web",
+  "name": "@tsp/web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "npx serve out",
-    "typecheck": "tsc --noEmit",
-    "test": "node --test --experimental-strip-types ../../packages/contracts/src/*.test.ts ../agents/src/*.test.ts ../bff/src/data/*.test.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@astryxdesign/core": "0.7.6",
@@ -19,9 +18,8 @@
     "react-dom": "19.3.1"
   },
   "devDependencies": {
-    "@types/node": "26.6.5",
     "@types/react": "19.3.0",
-    "@types/react-dom": "19.3.0",
-    "typescript": "7.0.2"
-  }
+    "@types/react-dom": "19.3.0"
+  },
+  "type": "module"
 }

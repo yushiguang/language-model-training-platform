@@ -1,0 +1,30 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@tsp/contracts": ["./packages/contracts/src/index.ts"],
+      "@tsp/domain": ["./packages/domain/src/index.ts"],
+      "@tsp/platform": ["./packages/platform/src/index.ts"],
+      "@tsp/platform-impl": ["./packages/platform/src/config.ts"],
+      "@tsp/llm-gateway": ["./apps/llm-gateway/src/index.ts"],
+      "@tsp/catalog": ["./apps/catalog/src/index.ts"],
+      "@tsp/labeling": ["./apps/labeling/src/index.ts"],
+      "@tsp/agents": ["./apps/agents/src/index.ts"],
+      "@tsp/bff": ["./apps/bff/src/index.ts"],
+      "@tsp/telemetry": ["./apps/telemetry/src/index.ts"]
+    }
+  }
+}
