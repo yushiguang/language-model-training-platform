@@ -66,12 +66,6 @@ export interface SetupVersion {
   thresholds: Thresholds | null;
   models: ModelSettings[];
   steps: {schema: boolean; evaluation: boolean; models: boolean};
-  /**
-   * "Start paid labeling automatically" (Setup step 3). On: scoring new versions, the optimiser,
-   * resuming after a closed page and agent start tools start by themselves, within the fixed caps.
-   * Off: each asks first. Missing on older records = on.
-   */
-  autoStart?: boolean;
   createdAt: string;
   createdBy: string;
 }
@@ -347,23 +341,8 @@ export interface ChatMessage {
   choices?: string[];
   /** Files attached to this message. */
   attachments?: ChatAttachment[];
-  /** An agent asked to start paid work and needs the user's approval (Approve / Cancel). */
-  startCard?: StartCard;
   page: string;
   createdAt: string;
-}
-
-/** A paid start an agent asked for, waiting for the user's approval in the chat. */
-export interface StartCard {
-  tool: 'try_template' | 'score_version' | 'start_optimiser';
-  agent: AgentPreset;
-  /** What the buttons say, e.g. "Score v1.3 on Model A". */
-  label: string;
-  estimateUsd: number;
-  args: Record<string, unknown>;
-  /** Why it asks: the switch is off, or a fixed cap applies. */
-  reason: 'off' | 'over_single_cap' | 'over_project_cap';
-  state: 'open' | 'approved' | 'cancelled';
 }
 
 export interface AgentProposal {

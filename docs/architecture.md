@@ -67,21 +67,19 @@ b have an answer from v1.3. Label the other c?"). The results page has a Trainin
 Test set tab, each with counts, rows and JSONL/CSV downloads; test rows say where their label
 came from (gold or model).
 
-**Automatic paid starts.** Setup step 3 has "Start paid labeling automatically" (on by default,
-`SetupVersion.autoStart`). It covers scoring a new version, the optimiser, resuming scoring after
-a closed page, and the agents' start tools. `dueStarts` (`packages/domain/src/auto-start.ts`) says
-what the workflow would start; `autoStartCheck` allows it when the switch is on, the start costs
-at most $1, and it would not take automatic spend in the project past $5. Otherwise the page shows
-a button with the cost ("Score on Model A · about $0.03"). Test answers and the final run always
-ask. Every automatic start writes an `auto_start` audit record. Save and Create on Prompt
-Engineering go the same way (`scoreNewVersion`).
+**Automatic paid starts.** Every task starts by itself, with no cost limit and no approval
+(decided 2026-11-06: the exact cost of a task can't be predicted, the platform is there to make
+training faster, and every running task has a Stop button). This covers scoring a new version,
+the optimiser, resuming scoring after a closed page, and the agents' start tools. `dueStarts`
+(`packages/domain/src/auto-start.ts`) says what the workflow would start, and `tick` starts all
+of it. Test answers and the final run start from their page's button. Every automatic start
+writes an `auto_start` audit record.
 
 Automatic spend is counted per labeling run, not per task: a run started by code adds its cost to
 the task's `autoCostUsd`, so an automatic resume of a task the user started counts too, and so do
 the optimiser's own labeling runs. try_template saves no task, so it writes an `auto_spend` audit
-record with its cost. Starts still going hold their estimate as a reservation until they end, so
-starts made one after another can't pass $5 together. Each automatic run also has its estimate as
-a budget: past 120% it pauses, and resuming it asks.
+record with its cost. Automatic spend is recorded for the audit log and telemetry only; it
+limits nothing.
 
 ```
 createTask ──► runTask (browser lock "labeling:<task>"; a second tab gets null)
@@ -92,7 +90,7 @@ createTask ──► runTask (browser lock "labeling:<task>"; a second tab gets 
                  │ every 2 s: re-read the task; a Stop pressed in another tab aborts
                  ▼
                done │ needs_attention (any example failed; early when > 5% or 20 in a row)
-                    │ paused (cost passed 120% of the approved estimate, or the page closed)
+                    │ paused (the page closed; or, for a task given a budget, cost passed 120% of it)
                     │ stopped (Stop)
 ```
 
@@ -120,9 +118,8 @@ approves on the page. All presets use the reasoning model.
 
 Three **start tools** spend money (`apps/bff/src/services/starts.ts`): `try_template` (prompt
 agent: up to 5 eval examples with an unsaved draft, nothing saved), `score_version` and
-`start_optimiser` (prompt and evaluation agents). When an automatic start is allowed they run at
-once; otherwise the tool answers `asked_user`, the chat shows a card with Approve and Cancel, and
-the turn ends. On Approve the bff runs it and posts the result in the chat for the next turn.
+`start_optimiser` (prompt and evaluation agents). They run at once, like every automatic start;
+the user stops them from the page.
 
 ## Telemetry
 
@@ -161,9 +158,9 @@ application `id` to the store's document id.
 | What an agent sees of each page (page views) and the read tools' implementation | `apps/bff/src/services/page-views.ts` |
 | When labeling starts, reports scored on the held-out half of the eval set | `apps/bff/src/services/evaluation.ts`, `work.ts` |
 | Optimiser: GEPA-style loop; candidates are labeled as optimiser tasks | `apps/bff/src/services/optimiser.ts` |
-| Test answers and the final run (train, plus unlabeled test when ticked) as labeling tasks with a budget; output rows with their label source | `apps/bff/src/services/training.ts`, `finalRunPlan` in `packages/domain/src/workflow.ts` |
-| What starts without a click, the $1 and $5 caps | `packages/domain/src/auto-start.ts`, `tick` in `apps/bff/src/services/work.ts` |
-| Agent start tools and their Approve card | `apps/bff/src/services/starts.ts` |
+| Test answers and the final run (train, plus unlabeled test when ticked) as labeling tasks; output rows with their label source | `apps/bff/src/services/training.ts`, `finalRunPlan` in `packages/domain/src/workflow.ts` |
+| What starts without a click | `packages/domain/src/auto-start.ts`, `tick` in `apps/bff/src/services/work.ts` |
+| Agent start tools | `apps/bff/src/services/starts.ts` |
 | Metric and event names, labels and props | `packages/contracts/src/telemetry.ts` |
 
 ## Known limits of this version

@@ -3,7 +3,7 @@
  * a new project through Setup (schema drafted in Ask AI and approved), Dataset (auto sampling),
  * Gold Labels (labeled on the page with the answers bundled with the sample file), the first
  * prompt drafted in Ask AI, scoring and the optimiser until a version passes, an agent question,
- * an agent start (with its card when one asks), then the training set watched from a second tab,
+ * an agent start (it runs at once, no card), then the training set watched from a second tab,
  * interrupted by a reload and resumed from the other tab, the test set, the downloads, and the
  * telemetry events and metrics.
  *
@@ -138,17 +138,16 @@ let current = null;
   log('evaluation agent:', (await page.locator('aside.chat .msg-a').last().innerText()).replace(/\n/g, ' ').slice(0, 160));
   await shot(page, '7-ask-ai');
 
-  // An agent start: runs within the caps, or asks with a card first
+  // An agent start: runs at once, with no Approve card
   await ask(page, 'Please try the current prompt on model A.');
-  const approve = page.locator('aside.chat').getByRole('button', {name: 'Approve', exact: true});
-  await Promise.race([approve.waitFor({timeout: 15000}).catch(() => undefined), page.locator('aside.chat').getByText(/Tried the draft on \d+ eval examples/).waitFor({timeout: 15000}).catch(() => undefined)]);
-  if (await approve.count()) await approve.last().click();
   const tried = await page
     .locator('aside.chat')
-    .getByText(/Tried the draft on \d+ eval examples/)
+    .getByText(/I tried it on \d+ eval examples/)
     .last()
     .innerText({timeout: 30000})
     .catch(() => 'no result');
+  if (await page.locator('aside.chat').getByRole('button', {name: 'Approve', exact: true}).count()) throw new Error('an agent start asked for approval');
+  if (tried === 'no result') throw new Error(`the agent start gave no result: ${(await page.locator('aside.chat').innerText()).slice(-300)}`);
   log('agent start:', tried.split('\n')[0]);
 
   // Training set: start in tab 1

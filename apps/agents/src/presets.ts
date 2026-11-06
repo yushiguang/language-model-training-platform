@@ -34,12 +34,12 @@ export const TOOL_SPECS: Record<AgentToolName, {args: string; returns: string}> 
   get_gold_labels: {args: '{"split"?: "eval" | "test", "limit"?: up to 20}', returns: 'gold labels people gave'},
   get_predictions: {args: '{"version": id or label, "model": "A" | "B", "mixedUpOnly"?: boolean, "limit"?: up to 20}', returns: "the model's answers on the eval set next to the gold labels"},
   check_template: {args: '{"template": string, "features"?: {"video": [], "photo_text": [], "metadata": []}}', returns: 'the editor checks (errors and warnings) for a template'},
-  try_template: {args: '{"template": string, "features"?: {"video": [], "photo_text": [], "metadata": []}, "model"?: "A" | "B", "n"?: up to 5}', returns: "PAID, small: the model's answers on n eval examples next to their gold labels; nothing is saved"},
+  try_template: {args: '{"template"?: string (default: the newest version), "features"?: {"video": [], "photo_text": [], "metadata": []}, "model"?: "A" | "B", "n"?: up to 5}', returns: "PAID, small: the model's answers on n eval examples next to their gold labels; nothing is saved"},
   score_version: {args: '{"version": id or label, "model"?: "A" | "B"}', returns: 'PAID: starts scoring a saved version on the eval set; the report appears when it finishes'},
   start_optimiser: {args: '{"model": "A" | "B"}', returns: 'PAID: starts an optimiser run for a model'},
 };
 
-/** Tools that spend money. When automatic starts are not allowed, the user is asked with a card. */
+/** Tools that spend money. They start at once; the user stops them from the page. */
 export const START_TOOLS: AgentToolName[] = ['try_template', 'score_version', 'start_optimiser'];
 
 const READ_ALL: AgentToolName[] = ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions'];

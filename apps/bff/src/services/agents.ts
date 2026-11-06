@@ -6,7 +6,6 @@ import type {
   ChatMessage,
   PageContext,
   Schema,
-  StartCard,
   StartRequest,
 } from '@tsp/contracts';
 import {newId} from '@tsp/domain';
@@ -106,8 +105,7 @@ export async function sendUserMessage(
   try {
     const {catalog, agents, gateway} = getApp();
     const workspace = await loadWorkspaceSnapshot(projectId, page, attachments);
-    const cards: StartCard[] = [];
-    const turnOut = await agents.runAgentTurn({userText: text, page, attachments, workspace}, gateway.agentModel(), agentTools(projectId, cards));
+    const turnOut = await agents.runAgentTurn({userText: text, page, attachments, workspace}, gateway.agentModel(), agentTools(projectId));
     outcome = 'ok';
     recordTurn(turnOut, entry, started);
 
@@ -134,10 +132,6 @@ export async function sendUserMessage(
         page: page.label,
         ...(msg.choices ? {choices: msg.choices} : {}),
       });
-    }
-    // A paid start an agent asked for: a card with Approve and Cancel under the agent's reply.
-    for (const card of cards) {
-      await post(projectId, {role: 'agent', agent: card.agent, text: '', page: page.label, startCard: card});
     }
 
     if (turnOut.proposal) {

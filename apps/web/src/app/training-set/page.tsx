@@ -100,7 +100,7 @@ function Settings({state, split, vParam, mParam}: {state: ProjectState; split: S
   const start = async () => {
     setErr(null);
     try {
-      // The estimate is the run's budget only; it is never shown (design: no estimates).
+      // The estimate is only recorded with the run (no cost limit); it is never shown.
       const budget = estimate(state, v, ep, [split]).costUsd;
       if (split === 'train') {
         const rep = state.reports.find(r => r.promptVersionId === v.id && r.endpoint === ep && !r.archivedNow);

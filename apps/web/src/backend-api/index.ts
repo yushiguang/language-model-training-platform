@@ -218,7 +218,6 @@ export const saveGold = timed('saveGold', bff.saveGold);
 export const importBundledGold = timed('importBundledGold', bff.importBundledGold);
 export const createVersion = timed('createVersion', bff.createVersion);
 export const scoreVersion = timed('scoreVersion', bff.scoreVersion);
-export const scoreNewVersion = timed('scoreNewVersion', bff.scoreNewVersion);
 export const tick = timed('tick', bff.tick);
 export const stopRun = timed('stopRun', bff.stopRun);
 export const startOptimiser = timed('startOptimiser', bff.startOptimiser);
@@ -236,9 +235,6 @@ export const closeProposal = timed('closeProposal', bff.closeProposal);
 const uploadDatasetText = timed('uploadDatasetText', bff.uploadDatasetText);
 export const uploadGold = timed('uploadGold', bff.uploadGold);
 export const isAgentBusy = bff.isAgentBusy;
-export const answerStartCard = timed('answerStartCard', bff.answerStartCard);
-/** Paid starts waiting for a click, with their cost (Setup's switch is off, or a cap applies). */
-export const waitingStarts = bff.waitingStarts;
 
 export type {
   AgentProposal,

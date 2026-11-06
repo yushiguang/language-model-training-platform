@@ -11,11 +11,9 @@ it reads and writes through the catalog, starts labeling tasks, and asks the age
   and runs it; `buildReport` scores the held-out half of the eval set.
 - `work.ts`: `tick`, called by open pages: builds missing reports, then starts the paid work
   `dueStarts` lists (score the latest version, resume scoring left by a closed page, the
-  optimiser) when `autoStartCheck` allows it, writing an `auto_start` audit record.
-  `waitingStarts` is what waits for a click, with its cost, for the page's buttons.
-  `scoreNewVersion` (Save and Create) runs the same check for a new version. Automatic starts
-  reserve their estimate (`reserve`, `reservedUsd`) while they run, and pass `{auto, budgetUsd}`
-  to labeling so the run's cost counts toward the $5 and pauses past 120% of its estimate.
+  optimiser), all of it, with no cost limit, writing an `auto_start` audit record. Automatic
+  starts pass `{auto}` to labeling so the run's cost is recorded as automatic spend; no run gets
+  a budget, so nothing pauses for cost (the user stops a costly run with Stop).
   Tests: `work.test.ts` (real catalog and labeling over the stand-in store, fake model).
 - `optimiser.ts`: GEPA-style loop; each candidate is labeled as an optimiser task.
 - `training.ts`: `labelTestSet` ("Get model answers" on Gold Labels, user-started) and the final
@@ -24,8 +22,7 @@ it reads and writes through the catalog, starts labeling tasks, and asks the age
   gets one more try). "Get model answers" reuses a task only for the same test examples. `trainingRows`: train rows from the run,
   every test row labeled with gold, else the saved answer (`labelSource`). User-started tasks
   don't resume by themselves after a reload.
-- `starts.ts`: the agents' start tools. Runs them within the caps, or posts an Approve card;
-  `answerStartCard` runs an approved one and posts the result in the chat.
+- `starts.ts`: the agents' start tools. Runs them at once and audits them.
 - `page-views.ts`: `getPageView(projectId, where)` builds each page as the agent sees it from saved
   data, and `agentTools(projectId)` runs the agents' read tools (each call goes to the audit log).
   `agents.ts` sends the view of the user's page with every turn and lends the tools.

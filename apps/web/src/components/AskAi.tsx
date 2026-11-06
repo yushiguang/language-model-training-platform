@@ -3,7 +3,7 @@
 import {useEffect, useRef, useState, type ReactNode} from 'react';
 import type {ChatMessage, PageContext} from '@tsp/contracts';
 import {pageFromPath} from '@tsp/domain';
-import {answerStartCard, chatHistory, isAgentBusy, sendUserMessage, subscribeChanges} from '@/backend-api';
+import {chatHistory, isAgentBusy, sendUserMessage, subscribeChanges} from '@/backend-api';
 import {Badge, Button, Icon, LinkChip, Suggestion} from '@/ui';
 import {useProject} from './ProjectContext';
 
@@ -137,38 +137,9 @@ const larkTitle = (url: string) => {
 function Message({m}: {m: ChatMessage}) {
   if (m.role === 'user') return <UserText text={m.text} />;
   if (m.role === 'event') return <span className="t-3" style={{fontSize: 13}}>{m.text}</span>;
-  return (
-    <>
-      {m.text && <AgentText text={m.text} />}
-      {m.startCard && <StartCard m={m} />}
-    </>
-  );
+  return m.text ? <AgentText text={m.text} /> : null;
 }
 
-/** Work an agent asked to start, waiting for Approve (an AI Suggestion card, no label in the chat). */
-function StartCard({m}: {m: ChatMessage}) {
-  const {projectId} = useProject();
-  const c = m.startCard!;
-  if (c.state === 'approved') return <ApprovedCard title={c.label} />;
-  if (c.state === 'cancelled') return null;
-  return (
-    <section className="card ai">
-      <Suggestion
-        kicker={false}
-        title={c.label}
-        text="Starts when you approve."
-        actions={
-          <>
-            <Button label="Cancel" kind="ghost" onClick={() => answerStartCard(projectId, m.id, false)} />
-            <Button label="Approve" kind="primary" onClick={() => answerStartCard(projectId, m.id, true)} />
-          </>
-        }
-      />
-    </section>
-  );
-}
-
-/** An approved suggestion in Ask AI: neutral, one line, the headline and an Approved tag. */
 export function ApprovedCard({title}: {title: string}) {
   return (
     <section className="card ai approved">

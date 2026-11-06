@@ -15,7 +15,8 @@ example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts
     once it holds the task's lock (a running task: null, nothing changed). An example another run
     saved meanwhile counts as done.
   - Budget: pauses when cost passes 120% of `budgetUsd`. `extendBudget` (the user's Resume after
-    that pause) grows the budget by the share still to label.
+    that pause) grows the budget by the share still to label. The bff no longer sets a budget
+    (every task runs with no cost limit), so this applies only to tasks saved before that.
   - Stop: aborts locally, or sets `stopRequested` and `stopRequestedAt`; the runner reads them on
     a 2 s timer and aborts calls in flight. A Stop pressed before the run started is ignored.
   - `listTasks` reports a `running` task whose lock nobody holds as `paused` / `closed`.
@@ -23,8 +24,9 @@ example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts
     first starts is labeled once more. The first run stores which ones in `relabelExampleIds`, so
     a resumed task never relabels its own answers (no clock comparison). `predictions` returns the
     first valid answer per example, else the first.
-  - `runTask(id, trigger, {auto, budgetUsd})`: an automatic run adds its cost to `autoCostUsd`
-    and pauses (stopReason `budget`) once its own cost passes 120% of `budgetUsd`.
+  - `runTask(id, trigger, {auto, budgetUsd})`: an automatic run adds its cost to `autoCostUsd`.
+    With `budgetUsd` (the bff no longer passes one) it pauses (stopReason `budget`) once its own
+    cost passes 120% of it.
   - `tryTemplate` labels a few examples with an unsaved template (the prompt agent's
     try_template tool) and saves nothing.
   - Metrics: `tsp_labeling_*` (runs started and ended, resumes, examples, durations, cost,

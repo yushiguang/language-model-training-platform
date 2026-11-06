@@ -116,7 +116,7 @@ export const LABEL_VALUES: Record<string, readonly string[]> = {
   page: ['projects', 'setup', 'dataset', 'gold', 'prompt', 'prompt_edit', 'compare', 'report', 'training', 'other'],
   slot: ['A', 'B'],
   what: ['score', 'resume', 'optimiser', 'try_template', 'score_version', 'start_optimiser', 'final_run', 'test_answers'],
-  decision: ['started', 'asked_off', 'asked_over_single_cap', 'asked_over_project_cap', 'asked_paused_over_budget'],
+  decision: ['started'],
   node: ['setup', 'dataset', 'gold', 'prompt', 'training'],
   action: ['approve', 'refused', 'skip'],
   collection: ['projects', 'setup_versions', 'dataset_snapshots', 'examples', 'gold_labels', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'training_sets', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'recommendations', 'audit_log'],
@@ -154,7 +154,6 @@ export interface EventProps {
   schema_changed_after_labels: {gold_labels_needing_recheck: Num; reports_archived: Num};
   thresholds_saved: {mode: 'default' | 'custom' | 'none'; changed: string};
   models_saved: {slots: 'A' | 'B' | 'both'; temperature_changed: boolean};
-  auto_start_switched: {on: boolean};
   // Dataset
   sample_started: {requested: Num};
   sample_finished: {fetched: Num; seconds: Num; outcome: 'done' | 'stopped' | 'failed'};
@@ -234,7 +233,6 @@ export const EVENT_PROP_KEYS: {[E in EventName]: readonly (keyof EventProps[E] &
   schema_changed_after_labels: ['gold_labels_needing_recheck', 'reports_archived'],
   thresholds_saved: ['mode', 'changed'],
   models_saved: ['slots', 'temperature_changed'],
-  auto_start_switched: ['on'],
   // Dataset
   sample_started: ['requested'],
   sample_finished: ['fetched', 'seconds', 'outcome'],

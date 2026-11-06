@@ -29,7 +29,6 @@ not match, or that the canvas does not decide, so it can be discussed after codi
 | Training Set, a run stopped or paused | The Labeling card with a Stopped (or Failed) tag and Resume | Not drawn |
 | Training Set, Add examples | Opens Dataset | Dataset can't add examples to an existing dataset in the MVP, so this needs a decision |
 | Ask AI, events | Lines like "Evaluation agent joined" show as small grey text | Not drawn |
-| Ask AI, start cards | An agent's paid start shows as a card with its headline, "Starts when you approve." and Approve; the cost is no longer in the message | The canvas card names its action ("Make v13"); the code says Approve for every start |
 | Ask AI, open state | Stays open when moving between Prompt Engineering pages | Not drawn |
 
 ## Drawn, but the code differs
@@ -48,7 +47,7 @@ not match, or that the canvas does not decide, so it can be discussed after codi
 
 | What | Status |
 | --- | --- |
-| The switch for automatic paid starts (was on Labeling models) | Removed with the old page. Automatic starts stay on, inside the $1 per start and $5 per project caps, and a start above a cap asks with a card in Ask AI |
+| Automatic paid starts | Decided 2026-11-06: every task starts by itself, with no cost limit and no Approve card. The user stops a costly task with its Stop button. The switch, the $1 and $5 caps and the 120% pause are removed |
 | Choosing which models to use | Every model listed on Labeling models is used; there is no way to leave one out |
 | Reading Lark Doc links | Links show as chips in Ask AI; the agents' Lark Doc reading tool is not built yet |
 | Agent replies | The agents still name models "Model A" / "Model B" in their own text, and the page view they read still holds cost estimates, so a reply can mention cost |
