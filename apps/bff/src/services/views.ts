@@ -27,7 +27,9 @@ export const runView = (t: LabelingTask): LabelingRun => ({
   state: jobState(t.state),
   done: t.done,
   total: t.total,
+  valid: t.valid,
   costUsd: t.costUsd,
+  tokens: t.tokens ?? 0,
   error: t.error,
   startedAt: t.startedAt ?? t.createdAt,
   finishedAt: t.finishedAt,
@@ -48,6 +50,7 @@ export function trainingView(ts: TrainingSet, task: LabelingTask | undefined): T
     invalid: task.invalid,
     failed: task.failed,
     costUsd: task.costUsd,
+    tokens: task.tokens ?? 0,
     error: task.error,
     finishedAt: task.finishedAt,
   };

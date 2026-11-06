@@ -1,14 +1,15 @@
 import type {PromptVersion} from '@tsp/contracts';
 
-export const versionLabel = (v: Pick<PromptVersion, 'major' | 'minor'>) => `v${v.major}.${v.minor}`;
+/** Versions are single numbers (v1, v2, v3 …), decided 2026-11-05. Older minor versions keep their dot. */
+export const versionLabel = (v: Pick<PromptVersion, 'major' | 'minor'>) => (v.minor ? `v${v.major}.${v.minor}` : `v${v.major}`);
 
-/** Save makes the next minor in the edited version's major line; Save as starts the next major. Versions are never overwritten. */
-export function nextVersion(all: Pick<PromptVersion, 'major' | 'minor'>[], base: Pick<PromptVersion, 'major'> | null, kind: 'minor' | 'major'): {major: number; minor: number} {
+/**
+ * Every save makes the next number (v13 after v12), whichever version it was edited from; nothing
+ * is overwritten. `base` and `kind` are kept for older callers and no longer change the number.
+ */
+export function nextVersion(all: Pick<PromptVersion, 'major' | 'minor'>[], _base?: Pick<PromptVersion, 'major'> | null, _kind?: 'minor' | 'major'): {major: number; minor: number} {
   if (!all.length) return {major: 1, minor: 0};
-  const topMajor = Math.max(...all.map(v => v.major));
-  if (kind === 'major' || !base) return {major: topMajor + 1, minor: 0};
-  const inLine = all.filter(v => v.major === base.major);
-  return {major: base.major, minor: Math.max(...inLine.map(v => v.minor)) + 1};
+  return {major: Math.max(...all.map(v => v.major)) + 1, minor: 0};
 }
 
 export const compareVersions = (a: Pick<PromptVersion, 'major' | 'minor'>, b: Pick<PromptVersion, 'major' | 'minor'>) => a.major - b.major || a.minor - b.minor;

@@ -2,24 +2,13 @@
 
 import {useRouter, useSearchParams} from 'next/navigation';
 import {Suspense, useEffect, useState} from 'react';
-import {DEFAULT_THRESHOLDS} from '@tsp/domain';
-import type {AgentProposal, ChatAttachment, ModelSettings, Schema, Thresholds} from '@tsp/contracts';
-import {Composer} from '@/components/Assistant';
-import {ProjectPage} from '@/components/Shell';
-import {SchemaView} from '@/components/SchemaView';
+import {CUSTOM_START, DEFAULT_THRESHOLDS} from '@tsp/domain';
+import type {AgentProposal, LabelField, ModelSettings, Schema, Thresholds} from '@tsp/contracts';
+import {ApprovedCard} from '@/components/AskAi';
+import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
-import {
-  approveNode,
-  closeProposal,
-  openProposals,
-  saveSetup,
-  sendUserMessage,
-  subscribeChanges,
-  type PageContext,
-  type ProjectState,
-} from '@/backend-api';
-import {Badge, Button, Icon, Note, Tick} from '@/ui';
-import {NotYet} from '@/components/NotYet';
+import {approveNode, closeProposal, proposals, saveSetup, subscribeChanges, type PageContext, type ProjectState} from '@/backend-api';
+import {Badge, Button, Card, Code, Empty, Field, Hov, Icon, Opt, PageHead, Seg, Suggestion, Switch, Table} from '@/ui';
 
 export default function SetupPage() {
   return (
@@ -31,411 +20,371 @@ export default function SetupPage() {
 
 function SetupRouter() {
   const step = useSearchParams().get('step') ?? '1';
-  if (step === '2') return <ProjectPage node="setup" assistant="docked" page={{label: 'Setup · evaluation', agent: 'front_desk', intent: 'answer', hint: 'Ask what a check means.', context: {}}}>{() => <Evaluation />}</ProjectPage>;
-  if (step === '3') return <ProjectPage node="setup" assistant="docked" page={{label: 'Setup · models', agent: 'front_desk', intent: 'answer', hint: 'Ask about the models.', context: {}}}>{() => <Models />}</ProjectPage>;
-  return <Labels />;
+  if (step === '2') return <EvaluationPage />;
+  if (step === '3') return <ModelsPage />;
+  return <SchemaPage />;
 }
 
-/** Setup 1: the task goes in through the chat; the main area shows only the result. */
-function Labels() {
-  const [proposal, setProposal] = useState<AgentProposal | null>(null);
-  const [started, setStarted] = useState<boolean | null>(null);
-  const [pendingTask, setPendingTask] = useState<string>('');
-  const page: PageContext = {
-    label: 'Setup · task and labels',
-    agent: 'schema_agent',
-    intent: 'revise_schema',
-    hint: 'Tell me what to change in the labels.',
-    context: {schema: (proposal?.payload as Schema | undefined) ?? null},
-  };
+const FIRST = 'Tell me what your model should do. You can paste Lark Doc links.';
+const count = (f: LabelField) => `${f.kind === 'single' ? 'Single' : 'Multi'} · ${f.values.length}`;
+
+// ---------------------------------------------------------------------------------------------
+// Setup 1: Schema settings. The schema agent's draft comes from Ask AI; the table edits it.
+
+function SchemaPage() {
+  const [page, setPage] = useState<PageContext>({label: 'Schema settings', agent: 'schema_agent', intent: 'propose_schema', context: {}});
   return (
-    <ProjectPage
-      node="setup"
-      assistant="docked"
-      page={page}
-      hero={
-        started === false ? (
-          <Hero
-            onStartImmediate={taskText => {
-              setPendingTask(taskText);
-              setStarted(true);
-            }}
-            onProposal={p => setProposal(p)}
-          />
-        ) : undefined
-      }
-    >
-      {ctx => <LabelsMain state={ctx.state} pendingTask={pendingTask} proposal={proposal} setProposal={setProposal} setStarted={setStarted} page={page} />}
+    <ProjectPage node="setup" page={page} chatOpen>
+      {({state}) => <SchemaView state={state} setPage={setPage} />}
     </ProjectPage>
   );
 }
 
-function useStartState(state: ProjectState | null, setStarted: (b: boolean | ((prev: boolean | null) => boolean)) => void, setProposal: (p: AgentProposal | null) => void) {
+function useProposals(state: ProjectState) {
+  const [list, setList] = useState<AgentProposal[]>([]);
   useEffect(() => {
-    if (!state) return;
-    const load = () => {
-      openProposals(state.project.id, 'schema').then(list => {
-        setProposal(list[0] ?? null);
-        setStarted(prev => (prev === true ? true : !!state.setup?.task || list.length > 0));
-      });
-    };
+    const load = () => void proposals(state.project.id, 'schema').then(setList);
     load();
     return subscribeChanges(load);
-  }, [state?.project.id, state?.setup?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [state.project.id]);
+  return list;
 }
 
-function Hero({onStartImmediate, onProposal}: {onStartImmediate: (taskText: string) => void; onProposal: (p: AgentProposal) => void}) {
-  const {projectId, state} = useProject();
-  const [busy, setBusy] = useState(false);
-  const send = (text: string, attachments?: ChatAttachment[]) => {
-    setBusy(true);
-    // Transition immediately to the Setup main view while the schema agent works in the background.
-    onStartImmediate(text);
-    void (async () => {
-      await saveSetup(projectId, {task: text});
-      const proposal = await sendUserMessage(
-        projectId,
-        text,
-        {
-          label: 'Setup · task and labels',
-          agent: 'schema_agent',
-          intent: 'propose_schema',
-          context: {task: text, schema: state?.setup?.schema ?? null},
-        },
-        attachments,
-      );
-      if (proposal) onProposal(proposal);
-    })();
-  };
-  return (
-    <div className="hero-inner">
-      <h1>What do you want your model to do?</h1>
-      <Composer hero onSend={send} disabled={busy} placeholder="Describe the task, for example: tag short videos by what the viewer gets from them" />
-      <span className="small muted">The schema agent drafts the label fields and a policy from your description. You approve them next.</span>
-    </div>
-  );
-}
-
-function LabelsMain({
-  state,
-  pendingTask,
-  proposal,
-  setProposal,
-  setStarted,
-  page,
-}: {
-  state: ProjectState;
-  pendingTask: string;
-  proposal: AgentProposal | null;
-  setProposal: (p: AgentProposal | null) => void;
-  setStarted: (b: boolean | ((prev: boolean | null) => boolean)) => void;
-  page: PageContext;
-}) {
+function SchemaView({state, setPage}: {state: ProjectState; setPage: (p: PageContext) => void}) {
   const router = useRouter();
   const {href} = useProject();
-  useStartState(state, setStarted, setProposal);
   const setup = state.setup;
-  const taskText = setup?.task || pendingTask;
-  page.context = {task: taskText, schema: (proposal?.payload as Schema) ?? setup?.schema ?? null};
-  const approved = setup?.steps.schema && !proposal;
+  const all = useProposals(state);
+  const open = [...all].reverse().find(p => p.state === 'open') ?? null;
+  const source: Schema | null = (open?.payload as Schema | undefined) ?? setup?.schema ?? null;
+  const [draft, setDraft] = useState<Schema | null>(source);
+  const [sel, setSel] = useState(0);
+  const key = open?.id ?? `saved-${setup?.schemaVersion ?? 0}`;
+  const [loadedKey, setLoadedKey] = useState(key);
+  // Approve closes the proposal a moment before the saved schema arrives: keep the draft meanwhile.
+  if (key !== loadedKey && !(source === null && draft && !open)) {
+    setLoadedKey(key);
+    setDraft(source);
+    setSel(0);
+  }
+  const isDraft = !!open;
+  const dirty = !isDraft && !!draft && JSON.stringify(draft) !== JSON.stringify(setup?.schema ?? null);
+  const approved = !!setup?.steps.schema && !isDraft;
+
+  useEffect(() => {
+    setPage({
+      label: 'Schema settings',
+      agent: 'schema_agent',
+      intent: draft?.fields.length ? 'revise_schema' : 'propose_schema',
+      hint: FIRST,
+      context: {task: setup?.task ?? '', schema: draft},
+    });
+  }, [JSON.stringify(draft), setup?.task]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const approve = async () => {
-    if (!proposal) return;
-    await saveSetup(state.project.id, {schema: proposal.payload as Schema, steps: {schema: true, evaluation: setup?.steps.evaluation ?? false, models: setup?.steps.models ?? false}});
-    // The proposal stays on screen until the saved schema loads, so nothing flashes.
-    await closeProposal(proposal, 'approved');
+    if (!open || !draft) return;
+    await saveSetup(state.project.id, {schema: draft, steps: {schema: true, evaluation: setup?.steps.evaluation ?? false, models: setup?.steps.models ?? false}});
+    await closeProposal(open, 'approved');
   };
-  const discard = async () => {
-    if (!proposal) return;
-    await closeProposal(proposal, 'discarded');
-    setProposal(null);
+  const save = async () => {
+    if (!draft) return;
+    await saveSetup(state.project.id, {schema: draft, steps: {schema: true, evaluation: setup?.steps.evaluation ?? false, models: setup?.steps.models ?? false}});
+  };
+  const addField = () => {
+    const d: Schema = draft ?? {policy: '', fields: []};
+    const name = uniqueName(d.fields.map(f => f.name), 'new_field');
+    setDraft({...d, fields: [...d.fields, {name, kind: 'single', values: [{name: '', definition: ''}, {name: '', definition: ''}]}]});
+    setSel(d.fields.length);
+  };
+  const field = draft?.fields[sel];
+  const setField = (f: LabelField | null) => {
+    if (!draft) return;
+    const fields = f ? draft.fields.map((x, i) => (i === sel ? f : x)) : draft.fields.filter((_, i) => i !== sel);
+    setDraft({...draft, fields});
+    if (!f) setSel(Math.max(0, sel - 1));
   };
 
+  const head = (
+    <PageHead
+      title="Schema settings"
+      actions={
+        dirty ? (
+          <>
+            <span className="done-at" style={{margin: 0}}>
+              <Badge text="Unsaved changes" tone="warn" icon={false} />
+            </span>
+            <Button label="Discard" kind="ghost" onClick={() => setDraft(setup?.schema ?? null)} />
+            <Button label="Save" kind="primary" disabled={!valid(draft)} onClick={save} />
+          </>
+        ) : (
+          <Button label="Next: Evaluation" kind="primary" disabled={!approved} onClick={() => router.push(href('/setup', {step: '2'}))} />
+        )
+      }
+    />
+  );
+
+  const body = !draft?.fields.length ? (
+    <Empty title="No label fields yet" text="Describe your task in Ask AI, or add a field yourself.">
+      <Button label="Add field" icon="plus" onClick={addField} />
+    </Empty>
+  ) : (
+    <div className="grid-split" style={{gridTemplateColumns: '360px 1fr'}}>
+      <Card title="Fields">
+        <nav className="vlist" aria-label="Fields">
+          {draft.fields.map((f, i) => (
+            <a
+              key={i}
+              className="vrow"
+              href="#"
+              aria-current={i === sel}
+              onClick={e => {
+                e.preventDefault();
+                setSel(i);
+              }}
+            >
+              <Code>{f.name || 'unnamed'}</Code>
+              <span>{isDraft && <Badge text="Draft" icon={false} />}</span>
+              <span className="t-3" style={{fontSize: 13}}>
+                {count(f)}
+              </span>
+            </a>
+          ))}
+        </nav>
+        <div style={{margin: '4px -12px 0'}}>
+          <Button label="Add field" kind="ghost" icon="plus" onClick={addField} />
+        </div>
+      </Card>
+      {field && <FieldEditor key={`${key}-${sel}`} field={field} onChange={setField} />}
+    </div>
+  );
+
+  // Ask AI: the draft waits for Approve; an approved draft shrinks to one line.
+  const cards = all.map(p => {
+    const n = (p.payload as Schema).fields.length;
+    const title = `${n} label field${n === 1 ? '' : 's'}`;
+    return p.state === 'approved' ? (
+      <ApprovedCard key={p.id} title={title} />
+    ) : (
+      <section key={p.id} className="card ai">
+        <Suggestion kicker={false} title={title} text="Check them on the left." actions={<Button label="Approve" kind="primary" disabled={!valid(draft)} onClick={approve} />} />
+      </section>
+    );
+  });
+
   return (
-    <>
-      <div className="page-head">
-        <span className="eyebrow">Setup · step 1 of 3</span>
-        <h1>Agree on the labels</h1>
-      </div>
-      {taskText && (
-        <section className="card" aria-label="Task">
-          <h2>Task</h2>
-          <p>{taskText}</p>
-        </section>
-      )}
-      {proposal ? (
-        <section className="card" aria-label="Labels">
-          <div className="row">
-            <span style={{fontWeight: 600}}>Proposed by the schema agent</span>
-            <span className="right row" style={{gap: 8}}>
-              <Button label="Discard" size="lg" onClick={discard} />
-              <Button label="Approve" variant="primary" size="lg" onClick={approve} />
-            </span>
-          </div>
-          <SchemaView schema={proposal.payload as Schema} before={setup?.schema} />
-        </section>
-      ) : setup?.schema ? (
-        <section className="card" aria-label="Labels">
-          <div className="row">
-            <span className="row" style={{gap: 8, fontWeight: 600}}>
-              <Tick /> Labels approved
-            </span>
-            <span className="right">{approved && <Button label="Next step: Evaluation" variant="primary" size="lg" icon={<Icon name="arrow" />} onClick={() => router.push(href('/setup', {step: '2'}))} />}</span>
-          </div>
-          <SchemaView schema={setup.schema} />
-          <p className="small muted">To change a field or value, tell the schema agent in the chat. Changing the schema after labeling means labels get a quick re-check.</p>
-        </section>
-      ) : (
-        <section className="card">
-          <p className="muted">Waiting for the schema agent…</p>
-        </section>
-      )}
-    </>
+    <Frame
+      head={head}
+      chat={{
+        extra: cards.length ? <>{cards}</> : undefined,
+        first: FIRST,
+        placeholder: draft?.fields.length ? 'Ask about this page' : 'Describe your task or paste a Lark Doc link',
+        onSend: async (text: string) => {
+          if (!setup?.task) await saveSetup(state.project.id, {task: text});
+        },
+      }}
+    >
+      {body}
+    </Frame>
   );
 }
 
-function SummaryRows({state, upTo}: {state: ProjectState; upTo: 1 | 2}) {
-  const {href} = useProject();
-  const s = state.setup;
-  const t = s?.thresholds;
+function uniqueName(names: string[], base: string) {
+  let n = base;
+  for (let i = 2; names.includes(n); i++) n = `${base}_${i}`;
+  return n;
+}
+const valid = (s: Schema | null) => !!s && s.fields.length > 0 && s.fields.every(f => f.name.trim() && f.values.length >= 2 && f.values.every(v => v.name.trim())) && new Set(s.fields.map(f => f.name)).size === s.fields.length;
+
+function FieldEditor({field, onChange}: {field: LabelField; onChange: (f: LabelField | null) => void}) {
+  const multi = field.kind === 'multi';
+  const setVal = (i: number, patch: Partial<{name: string; definition: string}>) => onChange({...field, values: field.values.map((v, k) => (k === i ? {...v, ...patch} : v))});
   return (
-    <div className="card tight">
-      <div className="done-row">
-        <Tick />
-        <span style={{fontWeight: 500}}>Task and labels</span>
-        <span className="muted">{s?.schema?.fields.length ?? 0} label fields · policy approved</span>
-        <span className="right">
-          <Button label="Edit" variant="ghost" size="sm" href={href('/setup', {step: '1'})} />
-        </span>
+    <Card>
+      <div className="row" style={{gap: 12}}>
+        <input className="input mono" style={{width: 240}} value={field.name} aria-label="Field name" onChange={e => onChange({...field, name: e.target.value.replace(/\s+/g, '_')})} />
+        <Seg
+          label="Type"
+          value={field.kind}
+          options={[
+            {value: 'single', label: 'Single-select'},
+            {value: 'multi', label: 'Multi-select'},
+          ]}
+          onChange={k => onChange(k === 'multi' ? {...field, kind: 'multi', min: field.min ?? 1, max: field.max ?? Math.min(3, field.values.length)} : {...field, kind: 'single', min: undefined, max: undefined})}
+        />
+        {multi && (
+          <>
+            <span className="t-2" style={{marginLeft: 8}}>
+              Choose
+            </span>
+            <input className="input sm" style={{width: 56, padding: '0 12px'}} aria-label="At least" value={field.min ?? 1} onChange={e => onChange({...field, min: parseInt(e.target.value) || 1})} />
+            <span className="t-2">to</span>
+            <input className="input sm" style={{width: 56, padding: '0 12px'}} aria-label="At most" value={field.max ?? field.values.length} onChange={e => onChange({...field, max: parseInt(e.target.value) || 1})} />
+          </>
+        )}
+        <span className="grow" />
+        <Button label="Remove field" kind="ghost" onClick={() => onChange(null)} />
       </div>
-      {upTo === 2 && (
-        <div className="done-row">
-          <Tick />
-          <span style={{fontWeight: 500}}>Evaluation</span>
-          <span className="muted">{!t ? 'No evaluation' : t.mode === 'default' ? 'Default threshold' : 'Custom threshold'}</span>
-          <span className="right">
-            <Button label="Edit" variant="ghost" size="sm" href={href('/setup', {step: '2'})} />
-          </span>
+      <div style={{paddingTop: 8}}>
+        <Table
+          first={30}
+          actWidth={56}
+          cols={[{label: 'Value'}, {label: 'Definition'}, {label: '', kind: 'act'}]}
+          rows={field.values.map((v, i) => ({
+            key: String(i),
+            cells: [
+              <input key="n" className="input sm" value={v.name} aria-label="Value" onChange={e => setVal(i, {name: e.target.value})} />,
+              <input key="d" className="input sm" value={v.definition} aria-label="Definition" title={v.definition} onChange={e => setVal(i, {definition: e.target.value})} />,
+              <button key="x" type="button" className="icon-btn" aria-label="Remove value" onClick={() => onChange({...field, values: field.values.filter((_, k) => k !== i)})}>
+                <Icon name="x" />
+              </button>,
+            ],
+          }))}
+        />
+      </div>
+      <div style={{margin: '0 -12px'}}>
+        <Button label="Add value" kind="ghost" icon="plus" onClick={() => onChange({...field, values: [...field.values, {name: '', definition: ''}]})} />
+      </div>
+    </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Setup 2: Evaluation settings.
+
+function EvaluationPage() {
+  return (
+    <ProjectPage node="setup" page={{label: 'Evaluation settings', agent: 'front_desk', intent: 'answer', hint: 'Ask what a check means.', context: {}}}>
+      {({state}) => <Evaluation state={state} />}
+    </ProjectPage>
+  );
+}
+
+type Mode = 'default' | 'custom' | 'none';
+type Check = 'macroF1' | 'valueF1' | 'precision' | 'recall';
+const CHECKS: {key: Check; name: string; tip: string; applies: string}[] = [
+  {key: 'macroF1', name: 'Macro-F1', tip: 'Per field, every value counts equally', applies: 'Each field'},
+  {key: 'valueF1', name: 'F1', tip: 'Per value, so rare values are not ignored', applies: 'Each value'},
+  {key: 'precision', name: 'Precision', tip: 'Per value: how often the model’s pick is right', applies: 'Each value'},
+  {key: 'recall', name: 'Recall', tip: 'Per value: how many true cases the model finds', applies: 'Each value'},
+];
+
+function Evaluation({state}: {state: ProjectState}) {
+  const router = useRouter();
+  const {href, refresh} = useProject();
+  const s = state.setup;
+  const saved = s?.thresholds ?? null;
+  const [mode, setMode] = useState<Mode>(s?.steps.evaluation ? (saved ? saved.mode : 'none') : 'default');
+  const start = saved?.mode === 'custom' ? saved : null;
+  const [on, setOn] = useState<Record<Check, boolean>>({macroF1: true, valueF1: start ? start.valueF1 != null : true, precision: start?.precision != null, recall: start?.recall != null});
+  const [val, setVal] = useState<Record<Check, string>>({
+    macroF1: (start?.macroF1 ?? DEFAULT_THRESHOLDS.macroF1).toFixed(2),
+    valueF1: (start?.valueF1 ?? CUSTOM_START.valueF1).toFixed(2),
+    precision: (start?.precision ?? CUSTOM_START.precision).toFixed(2),
+    recall: (start?.recall ?? CUSTOM_START.recall).toFixed(2),
+  });
+
+  const next = async () => {
+    const n = (k: Check) => (on[k] ? Math.min(1, Math.max(0, parseFloat(val[k]) || 0)) : null);
+    const thresholds: Thresholds | null =
+      mode === 'none' ? null : mode === 'default' ? DEFAULT_THRESHOLDS : {...DEFAULT_THRESHOLDS, mode: 'custom', macroF1: n('macroF1') ?? DEFAULT_THRESHOLDS.macroF1, valueF1: n('valueF1'), precision: n('precision'), recall: n('recall')};
+    await saveSetup(state.project.id, {thresholds, steps: {schema: !!s?.steps.schema, evaluation: true, models: !!s?.steps.models}});
+    await refresh();
+    router.push(href('/setup', {step: '3'}));
+  };
+
+  const head = <PageHead title="Evaluation settings" back={{label: 'Schema settings', href: href('/setup', {step: '1'})}} actions={<Button label="Next: Models" kind="primary" disabled={!s?.steps.schema} onClick={next} />} />;
+  const body = (
+    <div className="grid-split" style={{gridTemplateColumns: '400px 1fr'}}>
+      <Card title="Pass rule">
+        <div className="opts" role="radiogroup" aria-label="Pass rule">
+          <Opt title="Default" tip="Macro-F1 of every field must reach 0.80" checked={mode === 'default'} onSelect={() => setMode('default')} extra={<><span className="grow" /><Badge text="Recommended" icon={false} /></>} />
+          <Opt title="Custom" tip="Choose which checks count and their threshold" checked={mode === 'custom'} onSelect={() => setMode('custom')} />
+          <Opt title="None" tip="No scores, so the optimiser cannot run" checked={mode === 'none'} onSelect={() => setMode('none')} />
         </div>
+      </Card>
+      {mode === 'custom' && (
+        <Card title="Checks">
+          <Table
+            first={34}
+            cols={[{label: 'Check'}, {label: 'Applies to'}, {label: 'On', kind: 'c'}, {label: 'Threshold', kind: 'c'}]}
+            rows={CHECKS.map(c => ({
+              key: c.key,
+              cells: [
+                <b key="n">
+                  <Hov text={c.name} tip={c.tip} />
+                </b>,
+                c.applies,
+                <Switch key="s" label={`${c.name} on`} on={on[c.key]} locked={c.key === 'macroF1'} onChange={v => setOn({...on, [c.key]: v})} />,
+                <input
+                  key="v"
+                  className="input sm"
+                  style={{width: 72, textAlign: 'center', padding: '0 8px'}}
+                  aria-label={`${c.name} threshold`}
+                  value={val[c.key]}
+                  onChange={e => {
+                    setVal({...val, [c.key]: e.target.value});
+                    if (c.key !== 'macroF1') setOn({...on, [c.key]: true});
+                  }}
+                />,
+              ],
+            }))}
+          />
+        </Card>
       )}
     </div>
   );
+  return <Frame head={head}>{body}</Frame>;
 }
 
-/** Setup 2: how good the labels must be. */
-function Evaluation() {
-  const {state, href, refresh} = useProject();
-  const router = useRouter();
-  const s = state!.setup;
-  const [mode, setMode] = useState<'default' | 'custom' | 'none'>(s?.steps.evaluation ? (s.thresholds ? s.thresholds.mode : 'none') : 'default');
-  const [t, setT] = useState<Thresholds>(s?.thresholds?.mode === 'custom' ? s.thresholds : {...DEFAULT_THRESHOLDS, mode: 'custom'});
-  if (!s?.steps.schema) return <NotYet text="Approve the labels first." to={href('/setup', {step: '1'})} />;
-  const D = DEFAULT_THRESHOLDS;
+// ---------------------------------------------------------------------------------------------
+// Setup 3: Labeling models.
 
-  const save = async () => {
-    const thresholds = mode === 'none' ? null : mode === 'default' ? D : {...t, mode: 'custom' as const};
-    await saveSetup(state!.project.id, {thresholds, steps: {...s.steps, evaluation: true}});
-    await refresh(); // step 3 checks this step, so load it before going there
-    router.push(href('/setup', {step: '3'}));
-  };
-  const numIn = (label: string, value: number | null, on: boolean, set: (v: number) => void, pct = false) => (
-    <input className="num" aria-label={label} disabled={!on} value={value == null ? '' : pct ? `${+(value * 100).toFixed(1)}%` : String(value)} onChange={e => set(pct ? parseFloat(e.target.value) / 100 || 0 : parseFloat(e.target.value) || 0)} />
-  );
-  const opt = <K extends keyof Thresholds>(key: K, fallback: number) => ({on: t[key] != null, toggle: () => setT({...t, [key]: t[key] == null ? fallback : null})});
-  const vf = opt('valueF1', 0.6);
-  const ir = opt('invalidRate', 0.01);
-  const ac = opt('accuracy', 0.85);
-
+function ModelsPage() {
   return (
-    <>
-      <SummaryRows state={state!} upTo={1} />
-      <div className="page-head">
-        <span className="eyebrow">Setup · step 2 of 3</span>
-        <h1>How good must the labels be?</h1>
-        <p className="muted">The platform checks every prompt version against this before you can make the training and test sets.</p>
-      </div>
-      <fieldset style={{border: 0, margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 10}}>
-        <legend className="sr-only">Evaluation threshold</legend>
-        <label className={`choice${mode === 'default' ? ' selected' : ''}`}>
-          <input type="radio" name="eval" checked={mode === 'default'} onChange={() => setMode('default')} />
-          <span className="col" style={{gap: 2}}>
-            <span className="row" style={{gap: 8, fontWeight: 600}}>
-              Use the default threshold <Badge label="Recommended" />
-            </span>
-            <span className="muted">
-              Macro-F1 per field ≥ {D.macroF1.toFixed(2)} · F1 per value ≥ {D.valueF1!.toFixed(2)} · invalid outputs ≤ 1% · eval examples ≥ {D.minEval}
-            </span>
-          </span>
-        </label>
-        <div className={`choice${mode === 'custom' ? ' selected' : ''}`} style={{flexDirection: 'column', gap: 14, cursor: 'default'}}>
-          <label className="row" style={{gap: 12, alignItems: 'flex-start', cursor: 'pointer'}}>
-            <input type="radio" name="eval" checked={mode === 'custom'} onChange={() => setMode('custom')} />
-            <span className="col" style={{gap: 2}}>
-              <span style={{fontWeight: 600}}>Set my own</span>
-              <span className="muted">Pick the checks that matter and their numbers.</span>
-            </span>
-          </label>
-          {mode === 'custom' && (
-            <div style={{marginLeft: 28, borderTop: '1px solid var(--line)'}}>
-              <div className="check-row">
-                <input type="checkbox" checked disabled aria-label="Macro-F1 per field, always on" />
-                <span className="grow col" style={{gap: 0}}>
-                  <span className="row" style={{gap: 6, fontWeight: 500}}>
-                    Macro-F1 per field <Badge label="Main score" />
-                  </span>
-                  <span className="small muted">Always on. Average quality across values, so rare values count as much as common ones</span>
-                </span>
-                <span className="sign">≥</span>
-                {numIn('Macro-F1 per field minimum', t.macroF1, true, v => setT({...t, macroF1: v}))}
-              </div>
-              {(
-                [
-                  ['F1 per value', 'Stops a rare value from being ignored while the average looks fine', vf, 'valueF1', '≥', false],
-                  ['Invalid output rate', "Answers that aren't valid JSON or use values outside the schema", ir, 'invalidRate', '≤', true],
-                  ['Accuracy, single-select fields', 'Share of examples where the label is exactly right', ac, 'accuracy', '≥', false],
-                ] as const
-              ).map(([label, help, o, key, sign, pct]) => (
-                <div className="check-row" key={key}>
-                  <input type="checkbox" checked={o.on} onChange={o.toggle} aria-label={label} />
-                  <span className="grow col" style={{gap: 0}}>
-                    <span style={{fontWeight: 500}}>{label}</span>
-                    <span className="small muted">{help}</span>
-                  </span>
-                  <span className="sign">{sign}</span>
-                  {numIn(`${label} limit`, t[key], o.on, v => setT({...t, [key]: v}), pct)}
-                </div>
-              ))}
-              <div className="check-row">
-                <input type="checkbox" checked disabled aria-label="Eval examples, always on" />
-                <span className="grow col" style={{gap: 0}}>
-                  <span style={{fontWeight: 500}}>Eval examples</span>
-                  <span className="small muted">Always on. More examples make scores steadier</span>
-                </span>
-                <span className="sign">≥</span>
-                {numIn('Eval examples minimum', t.minEval, true, v => setT({...t, minEval: Math.round(v)}))}
-              </div>
-            </div>
-          )}
-        </div>
-        <label className={`choice${mode === 'none' ? ' selected' : ''}`}>
-          <input type="radio" name="eval" checked={mode === 'none'} onChange={() => setMode('none')} />
-          <span className="col" style={{gap: 2}}>
-            <span style={{fontWeight: 600}}>No evaluation</span>
-            <span className="muted">Faster, but the training set is marked Not evaluated and the optimiser can&apos;t run.</span>
-          </span>
-        </label>
-      </fieldset>
-      {mode !== 'none' && <Note>You&apos;ll need correct answers (gold labels) for the eval examples. You can label them on the platform or upload them later.</Note>}
-      <div className="next">
-        <Button label="Continue: Models" variant="primary" size="lg" onClick={save} />
-      </div>
-    </>
+    <ProjectPage node="setup" page={{label: 'Labeling models', agent: 'front_desk', intent: 'answer', hint: 'Ask about the models.', context: {}}}>
+      {({state}) => <Models state={state} />}
+    </ProjectPage>
   );
 }
 
-/** Setup 3: which models label the examples. */
-function Models() {
-  const {state, href} = useProject();
+function Models({state}: {state: ProjectState}) {
   const router = useRouter();
-  const s = state!.setup;
-  const eps = state!.endpoints;
-  const [models, setModels] = useState<ModelSettings[]>(s?.models.length ? s.models : eps.map(e => ({endpoint: e.id, maxOutputTokens: 1024, temperature: e.supportsTemperature ? 0 : null})));
-  const [autoStart, setAutoStart] = useState(s?.autoStart ?? true);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  if (!s?.steps.evaluation) return <NotYet text="Choose how good the labels must be first." to={href('/setup', {step: s?.steps.schema ? '2' : '1'})} />;
-  const toggle = (id: 'A' | 'B') => {
-    const ep = eps.find(e => e.id === id)!;
-    setModels(models.some(m => m.endpoint === id) ? models.filter(m => m.endpoint !== id) : [...models, {endpoint: id, maxOutputTokens: 1024, temperature: ep.supportsTemperature ? 0 : null}].sort((a, b) => a.endpoint.localeCompare(b.endpoint)));
-  };
+  const {href} = useProject();
+  const s = state.setup;
+  const eps = state.endpoints;
+  // The design shows every model with its settings and no way to leave one out (docs/ui-gaps.md).
+  const [models, setModels] = useState<ModelSettings[]>(
+    eps.map(e => s?.models.find(m => m.endpoint === e.id) ?? {endpoint: e.id, maxOutputTokens: 1024, temperature: e.supportsTemperature ? 0 : null}),
+  );
   const patch = (id: string, p: Partial<ModelSettings>) => setModels(models.map(m => (m.endpoint === id ? {...m, ...p} : m)));
   const next = async () => {
-    setBusy(true);
-    setErr(null);
-    try {
-      await saveSetup(state!.project.id, {models, autoStart, steps: {...s.steps, models: true}});
-      await approveNode(state!.project.id, 'setup');
-      router.push(href('/dataset'));
-    } catch (e) {
-      setErr((e as Error).message);
-      setBusy(false);
-    }
+    await saveSetup(state.project.id, {models, steps: {schema: !!s?.steps.schema, evaluation: !!s?.steps.evaluation, models: true}});
+    await approveNode(state.project.id, 'setup');
+    router.push(href('/dataset'));
   };
-  return (
-    <>
-      <SummaryRows state={state!} upTo={2} />
-      <div className="page-head">
-        <span className="eyebrow">Setup · step 3 of 3</span>
-        <h1>Select models for labeling</h1>
-        <p className="muted">These large models label your examples. Pick one, or both to compare them.</p>
-      </div>
-      <fieldset style={{border: 0, margin: 0, padding: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12}}>
-        <legend className="sr-only">Labeling models</legend>
-        {eps.map(ep => {
-          const m = models.find(x => x.endpoint === ep.id);
-          return (
-            <div key={ep.id} className={`card${m ? ' selected' : ''}`}>
-              <label className="row" style={{gap: 10, cursor: 'pointer'}}>
-                <input type="checkbox" checked={!!m} onChange={() => toggle(ep.id)} />
-                <span style={{fontWeight: 700, fontSize: 17, lineHeight: '24px'}}>Model {ep.id}</span>
-                <span className="right">
-                  <Badge label={ep.badge} />
-                </span>
-              </label>
-              <span className="muted">{ep.name}</span>
-              <div className="stats" style={{gridTemplateColumns: '1fr 1fr'}}>
-                <span className="stat">
-                  <span className="small muted">Cost</span>
-                  <span style={{fontWeight: 600}}>{ep.cost}</span>
-                </span>
-                <span className="stat">
-                  <span className="small muted">Speed</span>
-                  <span style={{fontWeight: 600}}>{ep.speed}</span>
-                </span>
-              </div>
-              <div className="col" style={{borderTop: '1px solid var(--line)', paddingTop: 12}}>
-                <span className="small" style={{fontWeight: 600}}>
-                  Settings
-                </span>
-                <label className="row" style={{gap: 8}}>
-                  <span className="grow col" style={{gap: 0}}>
-                    <span>Max output tokens</span>
-                    <span className="small muted">Longest answer the model may write</span>
-                  </span>
-                  <input className="num" type="number" disabled={!m} value={m?.maxOutputTokens ?? 1024} onChange={e => patch(ep.id, {maxOutputTokens: parseInt(e.target.value) || 1})} />
-                </label>
-                <label className="row" style={{gap: 8}}>
-                  <span className="grow col" style={{gap: 0}}>
-                    <span>Temperature</span>
-                    <span className="small muted">{ep.supportsTemperature ? 'Lower = more consistent labels' : 'Not supported by this model'}</span>
-                  </span>
-                  {ep.supportsTemperature ? (
-                    <input className="num" type="number" step="0.1" min="0" max="2" disabled={!m} value={m?.temperature ?? 0} onChange={e => patch(ep.id, {temperature: parseFloat(e.target.value) || 0})} />
-                  ) : (
-                    <input className="num" value="–" disabled title="This model does not support temperature" readOnly />
-                  )}
-                </label>
-              </div>
+  const head = <PageHead title="Labeling models" back={{label: 'Evaluation settings', href: href('/setup', {step: '2'})}} actions={<Button label="Next: Dataset" kind="primary" disabled={!s?.steps.evaluation} onClick={next} />} />;
+  const body = (
+    <div className="grid-2">
+      {eps.map(ep => {
+        const m = models.find(x => x.endpoint === ep.id)!;
+        return (
+          <Card key={ep.id} title={ep.name} titleExtra={<Badge text={ep.badge} icon={false} />} className="form">
+            <div className="row" style={{gap: 16, alignItems: 'flex-end'}}>
+              <Field label="Max output tokens">
+                <input className="input" value={m.maxOutputTokens} onChange={e => patch(ep.id, {maxOutputTokens: parseInt(e.target.value) || 1})} />
+              </Field>
+              <Field label="Temperature">
+                {ep.supportsTemperature ? (
+                  <input className="input" value={m.temperature ?? 0} onChange={e => patch(ep.id, {temperature: parseFloat(e.target.value) || 0})} />
+                ) : (
+                  <input className="input" value="–" readOnly disabled title="This model does not support temperature" />
+                )}
+              </Field>
             </div>
-          );
-        })}
-      </fieldset>
-      {models.length > 1 && <Note>Every prompt runs on both so you can compare. Optimisation also runs for each, so it costs about twice as much. You pick one model before making the training set.</Note>}
-      <label className="card switch-row">
-        <span className="col grow" style={{gap: 4}}>
-          <b>Start paid labeling automatically</b>
-          <span className="small muted">
-            On: new prompt versions are scored, the optimiser runs, work left by a closed page resumes, and the assistant can start small runs, without asking. Off: each one shows a button with its cost first.
-            Anything above $1, or once automatic work in this project has spent $5, always asks. The test set answers and the final run always ask.
-          </span>
-        </span>
-        <input type="checkbox" role="switch" checked={autoStart} onChange={e => setAutoStart(e.target.checked)} aria-label="Start paid labeling automatically" />
-      </label>
-      <div className="next">
-        <Button label="Next step: Dataset" variant="primary" size="lg" icon={<Icon name="arrow" />} onClick={next} disabled={!models.length} loading={busy} />
-        <span className="blocked">{models.length ? 'You can edit any step later.' : 'Pick at least one model.'}</span>
-      </div>
-      {err && <Note tone="error">{err}</Note>}
-    </>
+          </Card>
+        );
+      })}
+    </div>
   );
+  return <Frame head={head}>{body}</Frame>;
 }

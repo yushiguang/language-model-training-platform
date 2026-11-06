@@ -1,27 +1,80 @@
 'use client';
 
 import {useRouter} from 'next/navigation';
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {gate} from '@tsp/domain';
-import {ProjectPage} from '@/components/Shell';
+import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
-import {
-  applySplit,
-  approveNode,
-  getSamplePoolSize,
-  startSampleDataset,
-  stopSampleDataset,
-  uploadDatasetFile,
-  type ProjectState,
-} from '@/backend-api';
-import {Badge, Button, Icon, Note, num, Progress, timeOf} from '@/ui';
-import {NotYet} from '@/components/NotYet';
+import {applySplit, approveNode, getSamplePoolSize, startSampleDataset, stopSampleDataset, uploadDatasetFile, type ProjectState} from '@/backend-api';
+import {Badge, Button, Card, CenterProgress, dateTime, Empty, Field, Hov, LinkChip, Metric, Metrics, num, PageHead} from '@/ui';
 
 export default function DatasetPage() {
   return (
     <ProjectPage node="dataset" page={{label: 'Dataset', agent: 'front_desk', intent: 'answer', hint: 'Ask how big the eval and test sets should be.', context: {}}}>
-      {({state, href}) => (state.facts.approved.includes('setup') ? <Dataset state={state} /> : <NotYet text="Finish Setup first." to={href('/setup')} />)}
+      {({state}) => <Dataset state={state} />}
     </ProjectPage>
+  );
+}
+
+function Dataset({state}: {state: ProjectState}) {
+  const snap = state.snapshot;
+  const task = state.samplingTask?.state === 'running' ? state.samplingTask : null;
+  const head = <PageHead title="Dataset" actions={snap && !task ? <NextButton state={state} /> : undefined} />;
+  if (task)
+    return (
+      <Frame head={head}>
+        <CenterProgress
+          title={task.kind === 'upload' ? `Loading features for ${num(task.total)} items` : `Sampling ${num(task.total)} examples`}
+          chip={task.kind === 'upload' && task.fileName ? <LinkChip text={task.fileName} /> : undefined}
+          done={task.fetched}
+          total={task.total}
+          startedAt={task.startedAt}
+          onStop={() => stopSampleDataset(state.project.id)}
+        />
+      </Frame>
+    );
+  if (!snap)
+    return (
+      <Frame head={head}>
+        <Start state={state} />
+      </Frame>
+    );
+  return (
+    <Frame head={head}>
+      <Ready state={state} />
+    </Frame>
+  );
+}
+
+function Start({state}: {state: ProjectState}) {
+  const [n, setN] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const file = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    // The default goes straight into the box: every example available.
+    getSamplePoolSize().then(a => setN(cur => cur || String(a)));
+  }, []);
+  const upload = async (f: File) => {
+    setErr(null);
+    const res = await uploadDatasetFile(state.project.id, f);
+    if (res.error) setErr(res.error);
+    if (file.current) file.current.value = '';
+  };
+  return (
+    <Empty title="No examples yet" text="Upload a file of item IDs, or let the platform pick examples at random.">
+      <div className="row" style={{gap: 12}}>
+        <Button label="Upload dataset" icon="upload" onClick={() => file.current?.click()} />
+        <input ref={file} type="file" className="sr-only" accept=".txt,.csv,.jsonl,.json" aria-label="Upload dataset" onChange={e => e.target.files?.[0] && void upload(e.target.files[0])} />
+        <span className="t-3">or</span>
+        <input className="input sm" style={{width: 80, textAlign: 'center', padding: '0 8px'}} aria-label="Example count" value={n} onChange={e => setN(e.target.value.replace(/\D/g, ''))} />
+        <Button label="Auto sampling" kind="primary" icon="shuffle" disabled={!(parseInt(n) > 0)} onClick={() => void startSampleDataset(state.project.id, parseInt(n))} />
+      </div>
+      {err && (
+        <p className="t-err" style={{marginTop: 12, marginBottom: 0}}>
+          {err}
+        </p>
+      )}
+    </Empty>
   );
 }
 
@@ -31,229 +84,105 @@ function recommended(total: number, minEval: number | null) {
   return {evalSize, test};
 }
 
-function Dataset({state}: {state: ProjectState}) {
-  const snap = state.snapshot;
-  const sampling = state.samplingTask;
-  if (sampling && !snap)
-    return (
-      <>
-        <Head />
-        <div className="card">
-          <div className="row">
-            <span className="col grow" style={{gap: 2}}>
-              <span style={{fontWeight: 600}}>Sampling {num(sampling.total)} examples from the platform</span>
-              <span className="small muted">Started {timeOf(sampling.startedAt)} · you can leave this page</span>
-            </span>
-            <Button label="Stop" onClick={() => stopSampleDataset(state.project.id)} />
-          </div>
-          <div className="row">
-            <Progress value={sampling.fetched} max={sampling.total} />
-            <span className="small muted">
-              {num(sampling.fetched)} / {num(sampling.total)}
-            </span>
-          </div>
-        </div>
-        <div className="card">
-          <h2>Split dataset</h2>
-          <p className="muted">You can set the sizes when sampling finishes.</p>
-        </div>
-      </>
-    );
-  if (!snap)
-    return (
-      <Empty
-        state={state}
-        onSample={n => {
-          void startSampleDataset(state.project.id, n);
-        }}
-      />
-    );
-  return <Split state={state} />;
-}
-
-function Head() {
-  return (
-    <div className="page-head">
-      <h1>Dataset</h1>
-      <p className="muted">The examples the model will label, split into eval, test and train sets.</p>
-    </div>
-  );
-}
-
-function Empty({state, onSample}: {state: ProjectState; onSample: (n: number) => void}) {
-  const [available, setAvailable] = useState(0);
-  const [n, setN] = useState('');
-  const [err, setErr] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  useEffect(() => {
-    getSamplePoolSize().then(a => setAvailable(a));
-  }, []);
-  const upload = async (f: File) => {
-    setBusy(true);
-    const res = await uploadDatasetFile(state.project.id, f);
-    setErr(res.error ?? null);
-    setBusy(false);
-  };
-  return (
-    <>
-      <div className="page-head">
-        <h1>Dataset</h1>
-        <p className="muted">Add the examples the model will label. Choose one way to start.</p>
-      </div>
-      <div className="card">
-        <h2>Upload a file</h2>
-        <p className="muted">
-          A JSONL file of examples with their features, or a CSV or JSONL file with a <code>video_id</code> column. Use this when you already have the examples you want.
-        </p>
-        <label className="row" style={{border: '1.5px dashed var(--line-2)', borderRadius: 12, padding: 20, justifyContent: 'center', cursor: 'pointer'}}>
-          <Icon name="upload" />
-          <span>Choose a file</span>
-          <input type="file" className="sr-only" accept=".csv,.jsonl,.json" onChange={e => e.target.files?.[0] && void upload(e.target.files[0])} disabled={busy} />
-        </label>
-        {err && <Note tone="error">{err}</Note>}
-      </div>
-      <div className="card">
-        <h2>Sample from the platform</h2>
-        <p className="muted">The system picks examples at random from its data. Use this when you don&apos;t have a list yet.</p>
-        <div className="row">
-          <label htmlFor="n">How many examples?</label>
-          <input id="n" className="num" type="number" min={1} max={available} value={n} placeholder={String(available)} onChange={e => setN(e.target.value)} />
-          <Button label={`Use ${num(available)}`} size="sm" onClick={() => setN(String(available))} />
-          <span className="small muted">That is every example available.</span>
-        </div>
-        <div>
-          <Button label="Sample examples" variant="primary" size="lg" disabled={!available} onClick={() => onSample(Math.min(available, parseInt(n) || available))} />
-        </div>
-      </div>
-    </>
-  );
-}
-
-function Split({state}: {state: ProjectState}) {
+function NextButton({state}: {state: ProjectState}) {
   const router = useRouter();
   const {href} = useProject();
+  const evalOn = !!state.setup?.thresholds;
+  const g = gate('dataset', state.facts);
+  return (
+    <Button
+      label={evalOn ? 'Next: Gold Labels' : 'Next: Prompt Engineering'}
+      kind="primary"
+      disabled={!g.ready}
+      title={g.ready ? undefined : (g.reason ?? undefined)}
+      onClick={async () => {
+        await approveNode(state.project.id, 'dataset');
+        router.push(href(evalOn ? '/gold' : '/prompt'));
+      }}
+    />
+  );
+}
+
+function Ready({state}: {state: ProjectState}) {
   const snap = state.snapshot!;
   const t = state.setup?.thresholds ?? null;
+  const evalOn = !!t;
   const total = snap.counts.valid;
   const rec = recommended(total, t?.minEval ?? null);
   const [evalSize, setEval] = useState(String(snap.split?.eval ?? rec.evalSize));
-  const [test, setTest] = useState(snap.split ? String(snap.split.test) : '');
-  const [err, setErr] = useState<string | null>(null);
+  const [test, setTest] = useState(String(snap.split?.test ?? rec.test));
   const locked = state.gold.size > 0;
-  const e = parseInt(evalSize) || 0;
+  const e = evalOn ? parseInt(evalSize) || 0 : 0;
   const te = parseInt(test) || 0;
   const train = Math.max(0, total - e - te);
-  const dirty = !snap.split || snap.split.eval !== e || snap.split.test !== te;
-  const g = gate('dataset', state.facts);
-  const evalOn = !!t;
+  const err = e + te >= total ? 'Leave some examples for train' : evalOn && e < t!.minEval ? `The eval set needs at least ${t!.minEval} examples` : null;
 
-  const apply = async () => {
-    if (e + te >= total) return setErr('Leave some examples for train.');
-    if (evalOn && e < t!.minEval) return setErr(`The eval set needs at least ${t!.minEval} examples.`);
-    setErr(null);
-    await applySplit(state.project.id, snap.id, e, te);
-  };
-  const next = async () => {
-    await approveNode(state.project.id, 'dataset');
-    router.push(href(evalOn ? '/gold' : '/prompt'));
-  };
+  // Sizes save as they are typed (no Apply button).
+  useEffect(() => {
+    if (locked || err || (snap.split && snap.split.eval === e && snap.split.test === te)) return;
+    const id = setTimeout(() => void applySplit(state.project.id, snap.id, e, te), 400);
+    return () => clearTimeout(id);
+  }, [e, te, locked, err]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const lockTip = locked ? 'The split is fixed because gold labels exist for it' : undefined;
   return (
-    <>
-      <Head />
-      <div className="card">
-        <div className="row">
-          <span className="col grow" style={{gap: 2}}>
-            <span style={{fontWeight: 600}}>{snap.sourceName}</span>
-            <span className="small muted">
-              {snap.source === 'sample' ? 'Sampled' : 'Uploaded file'} · {timeOf(snap.createdAt)} · {num(snap.counts.video)} videos · {num(snap.counts.photoText)} photo&amp;text
-            </span>
+    <div className="grid-split" style={{gridTemplateColumns: '1fr 1fr', alignItems: 'stretch'}}>
+      <Card title="Examples">
+        <Metrics>
+          <Metric label="Examples" value={num(snap.counts.rows)} />
+          <Metric label="Valid" value={num(snap.counts.valid)} />
+          <Metric label="Invalid" value={num(snap.counts.invalid)} />
+        </Metrics>
+        <div className="row" style={{gap: 12, paddingTop: 8}}>
+          <Badge text={snap.source === 'sample' ? 'Sampled' : 'Uploaded'} icon={false} />
+          <span className="t-3 one" style={{fontSize: 13}} title={snap.source === 'upload' ? snap.sourceName : undefined}>
+            {dateTime(snap.createdAt)} · {num(snap.counts.video)} videos · {num(snap.counts.photoText)} photo and text
           </span>
         </div>
-        <div className="stats">
-          <span className="stat">
-            <span className="small muted">Rows</span>
-            <b>{num(snap.counts.rows)}</b>
-          </span>
-          <span className="stat">
-            <span className="small muted">Valid</span>
-            <b>{num(snap.counts.valid)}</b>
-          </span>
-          <span className="stat">
-            <span className="small muted">Invalid</span>
-            <b>{num(snap.counts.invalid)}</b>
-          </span>
-        </div>
-      </div>
-      <div className="card">
-        <div className="col" style={{gap: 2}}>
-          <h2>Split dataset</h2>
-          <p className="muted">Set the eval and test sizes. Everything else goes to train.</p>
-        </div>
-        {evalOn && (
-          <div className="check-row">
-            <span className="grow col" style={{gap: 0}}>
-              <span className="row" style={{gap: 6, fontWeight: 500}}>
-                Eval size {e === rec.evalSize && <Badge label="Recommended" />}
-              </span>
-              <span className="small muted">Checks prompt quality. The optimiser learns from half and is scored on the other half; at least {t!.minEval}.</span>
-            </span>
-            <input className="num" type="number" aria-label="Eval size" value={evalSize} disabled={locked} onChange={x => setEval(x.target.value)} />
-          </div>
-        )}
-        <div className="check-row">
-          <span className="grow col" style={{gap: 0}}>
-            <span className="row" style={{gap: 6, fontWeight: 500}}>
-              Test size {te === rec.test && <Badge label="Recommended" />}
-            </span>
-            <span className="small muted">Kept aside to test the model you train later. Needs gold labels, any time.</span>
-          </span>
-          {!test && !locked && <Button label={`Use ${rec.test}`} size="sm" onClick={() => setTest(String(rec.test))} />}
-          <input className="num" type="number" aria-label="Test size" value={test} disabled={locked} placeholder="0" onChange={x => setTest(x.target.value)} />
-        </div>
-        <div className="split-bar" aria-hidden="true">
+      </Card>
+      <Card title="Split" className="form">
+        <div className="row" style={{gap: 16, alignItems: 'flex-end'}}>
           {evalOn && (
-            <div className="seg-eval" style={{flex: Math.max(e, 1)}}>
-              Eval {num(e)}
-            </div>
+            <Field label="Eval size" width={160}>
+              <input className="input" value={evalSize} disabled={locked} title={lockTip} onChange={x => setEval(x.target.value.replace(/\D/g, ''))} />
+            </Field>
           )}
-          {te ? (
-            <div className="seg-test" style={{flex: te}}>
-              Test {num(te)}
-            </div>
-          ) : (
-            <div className="seg-empty">Test 0</div>
-          )}
-          <div className="seg-train" style={{flex: Math.max(train, 1)}}>
-            Train {num(train)}
-          </div>
+          <Field label="Test size" width={160}>
+            <input className="input" value={test} disabled={locked} title={lockTip} onChange={x => setTest(x.target.value.replace(/\D/g, ''))} />
+          </Field>
+          <Field label={<Hov text="Train size" tip="Everything that is not eval or test" />} width={160}>
+            <span className="input" style={{display: 'flex', alignItems: 'center', background: 'var(--bg-muted)', borderColor: 'transparent'}}>
+              {num(train)}
+            </span>
+          </Field>
         </div>
-        <div className="col small" style={{gap: 4}}>
+        {err && (
+          <span className="t-err" style={{fontSize: 13}}>
+            {err}
+          </span>
+        )}
+        <div className="split" style={{marginTop: 16}}>
+          {evalOn && <i style={{flex: Math.max(e, 0), background: '#1b1b1b'}} />}
+          <i style={{flex: Math.max(te, 0), background: '#6a6a6a'}} />
+          <i style={{flex: Math.max(train, 0), background: '#d4d4d4'}} />
+        </div>
+        <div className="legend">
           {evalOn && (
             <span>
-              <b>Eval</b> · {num(e)} examples · <span className="muted">The optimiser learns from {Math.ceil(e / 2)} and is scored on the other {Math.floor(e / 2)}</span>
+              <i style={{background: '#1b1b1b'}} />
+              Eval <b>{num(e)}</b>
             </span>
           )}
           <span>
-            <b>Test</b> · {num(te)} examples · <span className="muted">Never shown to the model or the optimiser</span>
+            <i style={{background: '#6a6a6a'}} />
+            Test <b>{num(te)}</b>
           </span>
           <span>
-            <b>Train</b> · {num(train)} examples · <span className="muted">Labeled by the model to become the training set</span>
+            <i style={{background: '#d4d4d4'}} />
+            Train <b>{num(train)}</b>
           </span>
         </div>
-        {!locked && (
-          <div className="row">
-            <Button label={snap.split ? 'Apply new sizes' : 'Apply'} variant={dirty ? 'primary' : 'secondary'} disabled={!dirty || !te} onClick={apply} />
-            {!te && <span className="blocked">Set the test size to continue.</span>}
-          </div>
-        )}
-        {locked && <p className="small muted">The split is fixed because gold labels exist for it.</p>}
-        {err && <Note tone="error">{err}</Note>}
-      </div>
-      <div className="next">
-        <Button label={evalOn ? 'Next step: Gold Labels' : 'Next step: Prompt Engineering'} variant={g.ready && !dirty ? 'primary' : 'secondary'} size="lg" icon={<Icon name="arrow" />} disabled={!g.ready || dirty} onClick={next} />
-        <span className="blocked">{g.ready && !dirty ? `${num(snap.split!.eval)} eval · ${num(snap.split!.test)} test · ${num(snap.split!.train)} train` : g.reason ?? 'Apply the sizes to continue.'}</span>
-      </div>
-    </>
+      </Card>
+    </div>
   );
 }

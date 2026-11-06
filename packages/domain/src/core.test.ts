@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {applyFix, checkTemplate, diffLines, renderPrompt} from './template.ts';
 import {pageFromPath} from './pages.ts';
 import {computeMetrics, judge, DEFAULT_THRESHOLDS} from './metrics.ts';
-import {nextVersion} from './versions.ts';
+import {nextVersion, versionLabel} from './versions.ts';
 import type {Schema} from '@tsp/contracts';
 
 const sel = {video: ['Description', 'Frame'], photo_text: ['Description', 'Title'], metadata: ['Language']};
@@ -73,11 +73,12 @@ test('macro-F1 and pass judgement', () => {
   assert.equal(judge(m, DEFAULT_THRESHOLDS, 30).passed, false);
 });
 
-test('versions: save is next minor in its line, save as is next major', () => {
+test('versions: every save makes the next single number, whichever version it came from', () => {
   const all = [{major: 1, minor: 0}, {major: 1, minor: 4}, {major: 2, minor: 0}];
-  assert.deepEqual(nextVersion(all, {major: 1}, 'minor'), {major: 1, minor: 5});
+  assert.deepEqual(nextVersion(all, {major: 1}, 'minor'), {major: 3, minor: 0});
   assert.deepEqual(nextVersion(all, {major: 1}, 'major'), {major: 3, minor: 0});
   assert.deepEqual(nextVersion([], null, 'minor'), {major: 1, minor: 0});
+  assert.equal(versionLabel({major: 13, minor: 0}), 'v13');
 });
 
 test('diff', () => {

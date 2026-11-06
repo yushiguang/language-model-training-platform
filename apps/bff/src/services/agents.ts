@@ -12,7 +12,6 @@ import type {
 import {newId} from '@tsp/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {agentTools, getPageView} from './page-views.ts';
-import {cardReason} from './starts.ts';
 
 export type {PageContext};
 
@@ -138,7 +137,7 @@ export async function sendUserMessage(
     }
     // A paid start an agent asked for: a card with Approve and Cancel under the agent's reply.
     for (const card of cards) {
-      await post(projectId, {role: 'agent', agent: card.agent, text: `${card.label}, about $${card.estimateUsd.toFixed(2)}. ${cardReason(card)}`, page: page.label, startCard: card});
+      await post(projectId, {role: 'agent', agent: card.agent, text: '', page: page.label, startCard: card});
     }
 
     if (turnOut.proposal) {
@@ -196,6 +195,12 @@ function recordTurn(out: AgentTurnOutput, entry: string, started: number) {
 
 export async function openProposals(projectId: string, kind: AgentProposal['kind']): Promise<AgentProposal[]> {
   return getApp().catalog.find('agent_proposals', {projectId, kind, state: 'open'}, 'createdAt desc');
+}
+
+/** Open and approved proposals, oldest first: Ask AI shows each as a card (an approved one as one line). */
+export async function proposals(projectId: string, kind: AgentProposal['kind']): Promise<AgentProposal[]> {
+  const all = await getApp().catalog.find('agent_proposals', {projectId, kind}, 'createdAt desc');
+  return all.filter(p => p.state !== 'discarded').reverse();
 }
 
 export async function closeProposal(p: AgentProposal, state: 'approved' | 'discarded') {

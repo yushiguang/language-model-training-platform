@@ -114,5 +114,7 @@ export interface BffContract {
   isAgentBusy(projectId: string): boolean;
   sendUserMessage(projectId: string, text: string, page: PageContext, attachments?: ChatAttachment[]): Promise<AgentProposal | null>;
   openProposals(projectId: string, kind: AgentProposal['kind']): Promise<AgentProposal[]>;
+  /** Open and approved proposals, oldest first (Ask AI cards). */
+  proposals(projectId: string, kind: AgentProposal['kind']): Promise<AgentProposal[]>;
   closeProposal(p: AgentProposal, state: 'approved' | 'discarded'): Promise<void>;
 }

@@ -12,9 +12,11 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 - Read `../../AGENTS.md` and `../../docs/architecture.md` first.
 - Pages and components (`src/app/`, `src/components/`) may import only `@tsp/contracts` (types),
-  `@tsp/domain` (pure rules), `@/backend-api`, `@/components` and `@/ui`. Astryx
-  (`@astryxdesign/*`) is imported only in `src/ui` (`UiProvider` wraps the app). The boundary
-  check enforces this, and also checks the aliases in `tsconfig.json` and `next.config.mjs`.
+  `@tsp/domain` (pure rules), `@/backend-api`, `@/components` and `@/ui`. The boundary check
+  enforces this, and also checks the aliases in `tsconfig.json` and `next.config.mjs`.
+- The look comes from `src/ui/kit.css`, a copy of the Unified UI canvas styles: keep it identical
+  to the canvas and put app-only rules in `src/ui/app.css`. Pages build from the parts in `@/ui`.
+  Anything that can't match the canvas goes in `docs/ui-gaps.md`.
 - `src/backend-api/index.ts` is the composition root: the only file that builds the apps and
   imports `@tsp/platform-impl`.
 - UI text uses plain words (for example "the optimiser", never the method name).

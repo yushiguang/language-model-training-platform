@@ -160,6 +160,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       invalid: mine.filter(p => !p.answer).length,
       failed: failedSet.size,
       costUsd: mine.reduce((n, p) => n + p.costUsd, 0),
+      tokens: mine.reduce((n, p) => n + (p.tokens ?? 0), 0),
     };
     // The user chose to continue after a budget pause: the budget grows by the share still to label.
     let budgetUsd = task.budgetUsd;
@@ -229,6 +230,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           answer: parsed.answer,
           invalidReason: parsed.reason,
           costUsd: res.costUsd,
+          tokens: res.inputTokens + res.outputTokens,
           createdAt: now(),
         };
         await repo.insert(PREDICTIONS, pred);
@@ -241,6 +243,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         done: DocFieldValue.increment(1),
         [pred.answer ? 'valid' : 'invalid']: DocFieldValue.increment(1),
         costUsd: DocFieldValue.increment(pred.costUsd),
+        tokens: DocFieldValue.increment(pred.tokens ?? 0),
         ...(opts.auto && paid ? {autoCostUsd: DocFieldValue.increment(pred.costUsd)} : {}),
       });
       counts.done++;
@@ -338,6 +341,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         failed: 0,
         failedExampleIds: [],
         costUsd: 0,
+        tokens: 0,
         budgetUsd: input.budgetUsd ?? null,
         parallel: input.parallel ?? DEFAULT_PARALLEL,
         ...(input.relabelInvalid ? {relabelInvalid: true} : {}),

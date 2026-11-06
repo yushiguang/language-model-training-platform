@@ -8,7 +8,7 @@ import {loadSampleFile} from './sample-examples.ts';
  */
 export const ENDPOINTS: EndpointInfo[] = [
   {id: 'A', name: 'gpt-5.6-terra', description: 'Higher quality', badge: 'Higher quality', cost: 'Higher', speed: 'Slower', supportsTemperature: false, priceIn: 1.25, priceOut: 5.0},
-  {id: 'B', name: 'gpt-5.4', description: 'Cheaper', badge: 'Cheaper', cost: 'Lower', speed: 'Faster', supportsTemperature: false, priceIn: 0.75, priceOut: 3.0},
+  {id: 'B', name: 'gpt-5.4', description: 'Faster', badge: 'Faster', cost: 'Lower', speed: 'Faster', supportsTemperature: false, priceIn: 0.75, priceOut: 3.0},
 ];
 
 const SCHEMA_VALUES: Record<string, string[]> = {

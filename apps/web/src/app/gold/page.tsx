@@ -1,32 +1,20 @@
 'use client';
 
 import {useRouter} from 'next/navigation';
-import {useEffect, useMemo, useState} from 'react';
-import type {Answer, Example, Prediction} from '@tsp/contracts';
-import {defaultOutputPick, estimate, versionLabel} from '@tsp/domain';
-import {ExampleView} from '@/components/ExampleView';
-import {NotYet} from '@/components/NotYet';
-import {ProjectPage} from '@/components/Shell';
-import {FieldCard} from '@/components/SchemaView';
+import {Fragment, useEffect, useMemo, useRef, useState} from 'react';
+import type {Answer, Example, LabelField} from '@tsp/contracts';
+import {versionLabel} from '@tsp/domain';
+import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
-import {useLabeledTest} from '@/components/useLabeledTest';
-import {
-  getRuntimeInfo,
-  importBundledGold,
-  labelTestSet,
-  predictionsFor,
-  saveGold,
-  skipGold,
-  stopRun,
-  uploadGoldFile,
-  type ProjectState,
-} from '@/backend-api';
-import {Badge, Button, Dialog, Icon, money, Note, num, Progress} from '@/ui';
+import {approveNode, predictionsFor, saveGold, type ProjectState} from '@/backend-api';
+import {Badge, Banner, Button, Card, Code, dateTime, Empty, Icon, num, PageHead, Tabs} from '@/ui';
+
+type SetKey = 'eval' | 'test';
 
 export default function GoldPage() {
   return (
     <ProjectPage node="gold" page={{label: 'Gold Labels', agent: 'front_desk', intent: 'answer', hint: "If an example doesn't fit any value, tell me and I'll bring in the schema agent.", context: {}}}>
-      {({state, href}) => (state.snapshot?.split ? <Gold state={state} /> : <NotYet text="Split the dataset first." to={href('/dataset')} />)}
+      {({state}) => <Gold state={state} />}
     </ProjectPage>
   );
 }
@@ -34,299 +22,246 @@ export default function GoldPage() {
 function Gold({state}: {state: ProjectState}) {
   const router = useRouter();
   const {href} = useProject();
-  const [tab, setTab] = useState<'label' | 'upload'>('label');
-  const evalEx = state.examples.filter(e => e.split === 'eval');
-  const testEx = state.examples.filter(e => e.split === 'test');
-  const queue = useMemo(() => [...evalEx, ...testEx], [state.examples]); // eslint-disable-line react-hooks/exhaustive-deps
-  const firstOpen = Math.max(0, queue.findIndex(e => !state.gold.has(e.id)));
-  const [index, setIndex] = useState<number | null>(null);
-  const i = index ?? firstOpen;
-  const ex = queue[i];
-  const evalDone = state.facts.goldEvalDone;
-  const skip = async () => {
-    await skipGold(state.project.id);
-    router.push(href('/prompt'));
-  };
+  const sets = useMemo(() => ({eval: state.examples.filter(e => e.split === 'eval'), test: state.examples.filter(e => e.split === 'test')}), [state.examples]);
+  const [tab, setTab] = useState<SetKey>('eval');
+  const list = sets[tab];
+  const firstOpen = (k: SetKey) => Math.max(0, sets[k].findIndex(e => !state.gold.has(e.id)));
+  // Opens on the first example without a gold label; it stays put while labels save.
+  const [pos, setPos] = useState<Record<SetKey, number>>(() => ({eval: firstOpen('eval'), test: firstOpen('test')}));
+  const i = Math.min(pos[tab], Math.max(0, list.length - 1));
+  const ex = list[i];
+  const [showModel, setShowModel] = useState(true);
+  const evalDone = state.facts.goldEvalDone >= sets.eval.length && sets.eval.length > 0;
+  const move = (n: number) => setPos(p => ({...p, [tab]: n}));
+
+  const head = (
+    <PageHead
+      title="Gold Labels"
+      actions={
+        <>
+          {list.length > 0 && (
+            <>
+              <Button label="" ariaLabel="Previous" kind="ghost" icon="left" disabled={i === 0} onClick={() => move(i - 1)} />
+              <span className="t-2" style={{fontSize: 13, minWidth: 56, textAlign: 'center'}}>
+                {num(i + 1)} of {num(list.length)}
+              </span>
+              <Button label="" ariaLabel="Next" kind="ghost" icon="right" disabled={i >= list.length - 1} onClick={() => move(i + 1)} />
+            </>
+          )}
+          <Button
+            label="Next: Prompt Engineering"
+            kind="primary"
+            disabled={!evalDone}
+            title={evalDone ? undefined : 'Label every eval example first. Gold labels on the test set are optional.'}
+            onClick={async () => {
+              await approveNode(state.project.id, 'gold');
+              router.push(href('/prompt'));
+            }}
+          />
+        </>
+      }
+    />
+  );
+
+  if (!state.snapshot?.split || !state.setup?.schema)
+    return (
+      <Frame head={<PageHead title="Gold Labels" />}>
+        <Empty title="No examples to label yet" text="Split the dataset first, then label the eval set here." />
+      </Frame>
+    );
 
   return (
-    <>
-      {state.staleGold.size > 0 && (
-        <div className="banner" role="status">
-          <Icon name="alert" />
-          <span className="grow">
-            <b>The schema changed.</b> {num(state.staleGold.size)} labels were made under the old schema and need a quick re-check; your old answer stays as a hint.
-          </span>
+    <Frame head={head}>
+      {state.staleGold.size > 0 && <Banner text={`The schema changed. ${num(state.staleGold.size)} labels were made under the old schema and need a quick re-check.`} />}
+      <Tabs
+        label="Sets"
+        selected={tab}
+        onSelect={setTab}
+        items={[
+          {key: 'eval', label: 'Eval set', count: `${num(state.facts.goldEvalDone)} / ${num(sets.eval.length)}`},
+          {key: 'test', label: 'Test set', count: `${num(state.facts.goldTestDone)} / ${num(sets.test.length)}`},
+        ]}
+      />
+      {ex ? (
+        <div style={{display: 'grid', gridTemplateColumns: '520px 1fr', gap: 16, alignItems: 'start'}}>
+          <ExampleCard ex={ex} n={i + 1} />
+          <div className="col" style={{gap: 16}}>
+            <ModelAnswer key={`m-${ex.id}`} state={state} ex={ex} shown={showModel} onToggle={() => setShowModel(s => !s)} />
+            <YourAnswer key={`y-${ex.id}`} state={state} ex={ex} modelShown={showModel} />
+          </div>
         </div>
-      )}
-      <div className="page-head">
-        <h1>Gold Labels</h1>
-        <p className="muted">Give the correct answer for each example. Prompt scores start once the eval set is done. Gold labels on the test set are optional: without them, the test set keeps the model&apos;s labels.</p>
-      </div>
-      <div className="row" role="tablist">
-        <Button label="Label here" variant={tab === 'label' ? 'primary' : 'ghost'} onClick={() => setTab('label')} />
-        <Button label="Upload labels" variant={tab === 'upload' ? 'primary' : 'ghost'} onClick={() => setTab('upload')} />
-      </div>
-      <div className="stats" style={{gridTemplateColumns: '1fr 1fr'}}>
-        <div className="card" style={{gap: 6}}>
-          <span className="row" style={{gap: 6}}>
-            <b>Eval set</b>
-            <span className="small muted">needed before scoring</span>
-            <span className="right">{evalDone === evalEx.length ? <Badge tone="success" label="Done" icon={<Icon name="check" size={12} />} /> : null}</span>
-          </span>
-          <span className="row">
-            <Progress value={evalDone} max={evalEx.length} />
-            <span className="small">
-              {evalDone} / {evalEx.length}
-            </span>
-          </span>
-        </div>
-        <div className="card" style={{gap: 6}}>
-          <span className="row" style={{gap: 6}}>
-            <b>Test set</b>
-            <span className="small muted">optional · for testing the model you train</span>
-          </span>
-          <span className="row">
-            <Progress value={state.facts.goldTestDone} max={testEx.length} />
-            <span className="small">
-              {state.facts.goldTestDone} / {testEx.length}
-            </span>
-          </span>
-          <TestAnswers state={state} />
-        </div>
-      </div>
-      {tab === 'upload' ? (
-        <Upload state={state} />
-      ) : ex ? (
-        <Labeler key={ex.id} state={state} ex={ex} position={i} queue={queue} onMove={setIndex} />
       ) : (
-        <Note>Every example has a gold label.</Note>
+        <Empty title="No examples in this set" text="Change the split on the Dataset page to add some." />
       )}
-      <div className="next">
-        <Button label={evalDone === evalEx.length ? 'Next step: Prompt Engineering' : 'Skip for now: Prompt Engineering'} variant={evalDone === evalEx.length ? 'primary' : 'secondary'} size="lg" icon={<Icon name="arrow" />} onClick={skip} />
-        <span className="blocked">{evalDone === evalEx.length ? 'Scores can start now.' : 'Scores start when the eval set is labeled. You can come back any time.'}</span>
-      </div>
-    </>
+    </Frame>
   );
 }
 
-/**
- * "Get model answers" for the test set: optional, user-started, with a cost confirm. The answers
- * show behind "Show model answer" while labeling, and the final run reuses them for free.
- */
-function TestAnswers({state}: {state: ProjectState}) {
-  const pick = defaultOutputPick(state);
-  const labeled = useLabeledTest(state, pick?.version, pick?.endpoint);
-  const [confirm, setConfirm] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const run = pick ? state.testRuns.find(r => r.promptVersionId === pick.version.id && r.endpoint === pick.endpoint) : undefined;
-  const nTest = state.examples.filter(e => e.split === 'test').length;
-  if (!pick || !nTest) return <span className="small muted">Model answers for the test set can be fetched once there is a prompt version.</span>;
-  const est = estimate(state, pick.version, pick.endpoint, ['test'], labeled);
-  const go = async () => {
-    setErr(null);
-    try {
-      await labelTestSet(state.project.id, pick.version, pick.endpoint, est.costUsd);
-      setConfirm(false);
-    } catch (e) {
-      setErr((e as Error).message);
-    }
+/** The example with the features of its own type (design: media on top, one line per feature). */
+function ExampleCard({ex, n}: {ex: Example; n: number}) {
+  const f = (k: string) => {
+    const v = ex.features[k];
+    return (Array.isArray(v) ? v.join(', ') : (v ?? '')).trim();
   };
+  const joined = (...parts: string[]) => parts.filter(Boolean).join(' · ');
+  const posted = f('Create_Time');
+  const rows: [string, string][] = (
+    [
+      ['Title', ex.title || f('Title')],
+      ['Description', f('Description')],
+      ['On-screen text', f('OCR_Text')],
+      ['Speech', f('ASR')],
+      ['Creator', joined(f('Creator_Nick_Name'), f('Creator_Bio'))],
+      ['Hashtags', f('Hashtags')],
+      ['Posted', posted ? dateTime(posted.replace(' ', 'T')) : ''],
+      ['Country, language', joined(f('Country_Code'), f('Language'))],
+      ['Place', joined(f('POI_Name'), f('POI_Info'))],
+      ['Interest', f('Interest_V3')],
+      ['Summary', f('Summary')],
+    ] as [string, string][]
+  ).filter(([, v]) => v);
   return (
-    <>
-      {run?.state === 'running' ? (
-        <span className="row small" style={{gap: 8}}>
-          Getting model answers: {num(run.done)} of {num(run.total)}
-          <Button label="Stop" variant="ghost" size="sm" onClick={() => stopRun(run.id)} />
-        </span>
-      ) : labeled.size >= nTest ? (
-        <span className="small muted">
-          Model answers ready from Model {pick.endpoint} · {versionLabel(pick.version)}. Use &quot;Show model answer&quot; while labeling.
-        </span>
-      ) : (
-        <span className="row small" style={{gap: 8}}>
-          <Button label={labeled.size ? 'Get the rest of the model answers' : 'Get model answers'} size="sm" onClick={() => setConfirm(true)} />
-          <span className="muted">Optional. Lets you label with the model&apos;s answer as a hint.{run && run.state !== 'done' ? ` ${num(run.done)} of ${num(run.total)} done so far.` : ''}</span>
-        </span>
-      )}
-      {err && <Note tone="error">{err}</Note>}
-      <Dialog open={confirm} onClose={() => setConfirm(false)} title="Get model answers for the test set?" subtitle={`Model ${pick.endpoint} labels ${num(est.count - est.reused)} test examples with prompt ${versionLabel(pick.version)}.`}>
-        <div className="col">
-          <div className="stats">
-            <div className="stat">
-              <span className="small muted">Estimated cost</span>
-              <b>{money(est.costUsd)}</b>
-            </div>
-            <div className="stat">
-              <span className="small muted">Estimated time</span>
-              <b>{est.minutes} min</b>
-            </div>
-          </div>
-          <p className="small muted">
-            The answers stay hidden until you press &quot;Show model answer&quot;. Gold labels on the test set are optional either way. When you generate the training and test sets with the same prompt and model, these answers are reused, so you don&apos;t pay twice.
-          </p>
-          <div className="row" style={{justifyContent: 'flex-end'}}>
-            <Button label="Cancel" variant="ghost" onClick={() => setConfirm(false)} />
-            <Button label={`Approve ${money(est.costUsd)} and start`} variant="primary" onClick={go} />
-          </div>
-        </div>
-      </Dialog>
-    </>
+    <Card title={`Example ${n}`}>
+      <div className="media">
+        <Icon name={ex.type === 'video' ? 'video' : 'image'} />
+        <small>{ex.externalId}</small>
+      </div>
+      <div className="kv">
+        {rows.map(([k, v]) => (
+          <Fragment key={k}>
+            <span>{k}</span>
+            <span title={v}>{v}</span>
+          </Fragment>
+        ))}
+      </div>
+    </Card>
   );
 }
 
-function Labeler({state, ex, position, queue, onMove}: {state: ProjectState; ex: Example; position: number; queue: Example[]; onMove: (i: number) => void}) {
-  const schema = state.setup!.schema!;
-  const saved = state.gold.get(ex.id);
-  const hint = state.staleGold.get(ex.id);
-  const [answer, setAnswer] = useState<Answer>(saved?.answer ?? {});
-  const [revealed, setRevealed] = useState(false);
-  const [model, setModel] = useState<{pred: Prediction; label: string; endpoint: string} | null | undefined>(undefined);
-  const inEval = ex.split === 'eval';
-  const nInSet = queue.filter(e => e.split === ex.split).length;
-  const posInSet = queue.filter(e => e.split === ex.split).findIndex(e => e.id === ex.id) + 1;
-
+function ModelAnswer({state, ex, shown, onToggle}: {state: ProjectState; ex: Example; shown: boolean; onToggle: () => void}) {
+  const [found, setFound] = useState<{answer: Answer | null; invalid: string | null; label: string; endpoint: string} | null | undefined>(undefined);
   useEffect(() => {
-    if (!revealed) return;
+    let live = true;
     void (async () => {
-      for (const v of state.versions)
+      // The newest version that has an answer for this example, models in setup order.
+      for (const v of [...state.versions].reverse())
         for (const m of state.setup!.models) {
           const p = (await predictionsFor(v.id, m.endpoint, m)).get(ex.id);
-          if (p) return setModel({pred: p, label: versionLabel(v), endpoint: m.endpoint});
+          if (p) {
+            if (live) setFound({answer: p.answer, invalid: p.invalidReason, label: versionLabel(v), endpoint: state.endpoints.find(e => e.id === m.endpoint)?.name ?? m.endpoint});
+            return;
+          }
         }
-      setModel(null);
+      if (live) setFound(null);
     })();
-  }, [revealed, ex.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const pick = (field: string, value: string) => {
-    const f = schema.fields.find(x => x.name === field)!;
-    const cur = answer[field] ?? [];
-    if (f.kind === 'single') return setAnswer({...answer, [field]: [value]});
-    const next = cur.includes(value) ? cur.filter(v => v !== value) : cur.length >= (f.max ?? 99) ? cur : [...cur, value];
-    setAnswer({...answer, [field]: next});
-  };
-  const complete = schema.fields.every(f => (answer[f.name]?.length ?? 0) >= (f.kind === 'single' ? 1 : (f.min ?? 1)));
-  const save = async () => {
-    await saveGold(state.project.id, ex.id, state.setup!.schemaVersion, answer, revealed);
-    const nextOpen = queue.findIndex((e, k) => k > position && !state.gold.has(e.id));
-    onMove(nextOpen === -1 ? Math.min(position + 1, queue.length - 1) : nextOpen);
-  };
-
+    return () => {
+      live = false;
+    };
+  }, [ex.id, state.versions.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const schema = state.setup!.schema!;
   return (
-    <>
-      <div className="card">
-        <div className="row">
-          <h2>
-            Example {posInSet}
-          </h2>
-          <span className="muted">
-            of {nInSet} in the {inEval ? 'eval' : 'test'} set
+    <Card
+      title="Model answer"
+      titleExtra={
+        shown && found ? (
+          <span className="t-3 one" style={{fontSize: 13}}>
+            {found.endpoint} · prompt {found.label}
           </span>
-          <span className="right row" style={{gap: 6}}>
-            <Button label="Previous" variant="ghost" size="sm" disabled={position === 0} onClick={() => onMove(position - 1)} />
-            <Button label="Next" variant="ghost" size="sm" disabled={position >= queue.length - 1} onClick={() => onMove(position + 1)} />
-          </span>
-        </div>
-        <ExampleView ex={ex} />
-      </div>
-      <div className="card">
-        <div className="row">
-          <h2>Model answer</h2>
-          {revealed && model && (
-            <span className="small muted">
-              Model {model.endpoint} · prompt {model.label}
-            </span>
-          )}
-          <span className="right">{revealed ? <Button label="Hide" variant="ghost" size="sm" onClick={() => setRevealed(false)} /> : <Button label="Show model answer" size="sm" onClick={() => setRevealed(true)} />}</span>
-        </div>
-        {!revealed ? (
-          <p className="small muted">Hidden so it doesn&apos;t sway your answer. Your reveal is recorded.</p>
-        ) : model === undefined ? (
-          <p className="small muted">Loading…</p>
-        ) : model === null ? (
-          <p className="small muted">{inEval ? 'No model answer yet. It appears after a prompt version is labeled on the eval set.' : 'No model answer yet. Press "Get model answers" on the test set card above.'}</p>
-        ) : model.pred.answer ? (
-          <div className="col">
-            <div className="row" style={{gap: 6}}>
-              {Object.values(model.pred.answer)
-                .flat()
-                .map(v => (
-                  <Badge key={v} label={v} />
-                ))}
+        ) : undefined
+      }
+      actions={<Button label={shown ? 'Hide' : 'Show'} kind="ghost" size="sm" icon="eye" onClick={onToggle} />}
+    >
+      {!shown ? null : found === undefined ? (
+        <span className="t-3" style={{fontSize: 13}}>
+          Loading…
+        </span>
+      ) : found === null ? (
+        <span className="t-3" style={{fontSize: 13}}>
+          No model answer yet. It appears once a prompt version has labeled this example.
+        </span>
+      ) : !found.answer ? (
+        <span className="t-3 one" style={{fontSize: 13}} title={found.invalid ?? undefined}>
+          The model&apos;s answer was invalid
+        </span>
+      ) : (
+        <div className="col" style={{gap: 12}}>
+          {schema.fields.map(fl => (
+            <div key={fl.name} className="row" style={{gap: 12}}>
+              <span style={{width: 128, flex: 'none'}}>
+                <Code>{fl.name}</Code>
+              </span>
+              {(found.answer![fl.name] ?? []).map(v => (
+                <span key={v} className="ch" style={{cursor: 'default', background: 'var(--bg-muted)', borderColor: 'transparent'}}>
+                  {v}
+                </span>
+              ))}
             </div>
-            <p className="small muted">{tryField(model.pred.output, 'reasoning')}</p>
-          </div>
-        ) : (
-          <p className="small muted">The model&apos;s answer was invalid: {model.pred.invalidReason}</p>
-        )}
-      </div>
-      <div className="card">
-        <div className="row">
-          <h2>Your answer</h2>
-          {saved && <Badge tone="success" label="Saved" icon={<Icon name="check" size={12} />} />}
-          {hint && !saved && <span className="small muted">Old answer (before the schema changed): {Object.values(hint.answer).flat().join(', ')}</span>}
+          ))}
         </div>
-        {schema.fields.map(f => (
-          <FieldCard key={f.name} field={f} picked={answer[f.name] ?? []} onPick={v => pick(f.name, v)} />
-        ))}
-        <p className="small muted">Doesn&apos;t fit any value? Ask the schema agent in the assistant.</p>
-        <div className="row">
-          <Button label={saved ? 'Save changes and next' : 'Save and next'} variant="primary" size="lg" disabled={!complete} onClick={save} />
-          {!complete && <span className="blocked">Answer every field to save.</span>}
-        </div>
-      </div>
-    </>
+      )}
+    </Card>
   );
 }
 
-function tryField(json: string, key: string): string {
-  try {
-    return String(JSON.parse(json)[key] ?? '');
-  } catch {
-    return '';
-  }
-}
+const kindText = (f: LabelField) => (f.kind === 'single' ? 'Single-select' : `Multi-select, ${f.min ?? 1} to ${f.max ?? f.values.length}`);
+const same = (a: Answer, b: Answer) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
 
-function Upload({state}: {state: ProjectState}) {
-  const [msg, setMsg] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [hasBundled, setHasBundled] = useState(false);
+/** Picking values saves the answer as soon as every field has one (no Save button in the design). */
+function YourAnswer({state, ex, modelShown}: {state: ProjectState; ex: Example; modelShown: boolean}) {
+  const schema = state.setup!.schema!;
+  const saved = state.gold.get(ex.id);
+  const [answer, setAnswer] = useState<Answer>(saved?.answer ?? {});
+  const savedRef = useRef(saved);
+  savedRef.current = saved;
+  const complete = schema.fields.every(f => (answer[f.name]?.length ?? 0) >= (f.kind === 'single' ? 1 : (f.min ?? 1)));
+  const isSaved = !!saved && same(saved.answer, answer);
+
   useEffect(() => {
-    getRuntimeInfo().then(info => setHasBundled(info.hasBundledGold));
-  }, []);
-  const showResult = (r: {saved: number; skipped: number}) => {
-    setMsg(`Saved ${r.saved} labels.${r.skipped ? ` ${r.skipped} rows didn't match an eval or test example or the schema, and were skipped.` : ''}`);
-  };
-  const fromFile = async (f: File) => {
-    setBusy(true);
-    try {
-      showResult(await uploadGoldFile(state.project.id, state.setup!.schema!, state.setup!.schemaVersion, state.examples, f));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const fromBundled = async () => {
-    setBusy(true);
-    try {
-      showResult(await importBundledGold(state.project.id, state.setup!.schema!, state.setup!.schemaVersion, state.examples));
-    } finally {
-      setBusy(false);
-    }
+    if (!complete || (savedRef.current && same(savedRef.current.answer, answer))) return;
+    const id = setTimeout(() => void saveGold(state.project.id, ex.id, state.setup!.schemaVersion, answer, modelShown), 300);
+    return () => clearTimeout(id);
+  }, [answer, complete]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pick = (f: LabelField, value: string) => {
+    const cur = answer[f.name] ?? [];
+    if (f.kind === 'single') return setAnswer({...answer, [f.name]: [value]});
+    const next = cur.includes(value) ? cur.filter(v => v !== value) : cur.length >= (f.max ?? 99) ? cur : [...cur, value];
+    setAnswer({...answer, [f.name]: next});
   };
   return (
-    <div className="card">
-      <h2>Upload labels</h2>
-      <p className="muted">
-        A JSONL file, one line per example: <code>{'{"externalId": "…", "answer": {"field": ["value"]}}'}</code>. Values must match the schema. Train examples are skipped.
-      </p>
-      <div className="row">
-        <label className="row" style={{border: '1.5px dashed var(--line-2)', borderRadius: 12, padding: '12px 20px', cursor: 'pointer'}}>
-          <Icon name="upload" />
-          <span>Choose a file</span>
-          <input type="file" className="sr-only" accept=".jsonl,.json" disabled={busy} onChange={e => e.target.files?.[0] && void fromFile(e.target.files[0])} />
-        </label>
-        {hasBundled && <Button label="Use the answers that came with the examples" disabled={busy} onClick={fromBundled} />}
+    <Card
+      title="Your answer"
+      titleExtra={
+        isSaved ? (
+          <span className="done-at" style={{margin: 0}}>
+            <Badge text="Saved" tone="ok" />
+          </span>
+        ) : undefined
+      }
+    >
+      <div className="col" style={{gap: 28}}>
+        {schema.fields.map(f => (
+          <div key={f.name} className="col" style={{gap: 10}}>
+            <div className="row" style={{gap: 8}}>
+              <Code>{f.name}</Code>
+              <span className="t-3" style={{fontSize: 13}}>
+                {kindText(f)}
+              </span>
+            </div>
+            <div className="chs" role="group" aria-label={f.name}>
+              {f.values.map(v => {
+                const on = (answer[f.name] ?? []).includes(v.name);
+                return (
+                  <button key={v.name} type="button" className="ch" aria-pressed={on} title={v.definition} onClick={() => pick(f, v.name)}>
+                    {on && <Icon name="check" />}
+                    {v.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
       </div>
-      {msg && <Note>{msg}</Note>}
-    </div>
+    </Card>
   );
 }

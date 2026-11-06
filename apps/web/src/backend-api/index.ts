@@ -231,6 +231,7 @@ export const trainingRows = timed('trainingRows', bff.trainingRows);
 export const chatHistory = timed('chatHistory', bff.chatHistory);
 export const sendUserMessage = timed('sendUserMessage', bff.sendUserMessage);
 export const openProposals = timed('openProposals', bff.openProposals);
+export const proposals = timed('proposals', bff.proposals);
 export const closeProposal = timed('closeProposal', bff.closeProposal);
 const uploadDatasetText = timed('uploadDatasetText', bff.uploadDatasetText);
 export const uploadGold = timed('uploadGold', bff.uploadGold);

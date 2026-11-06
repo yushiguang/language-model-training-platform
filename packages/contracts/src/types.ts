@@ -36,7 +36,12 @@ export interface Thresholds {
   mode: 'default' | 'custom';
   /** Always on: the main score. Lowest macro-F1 across fields must reach it. */
   macroF1: number;
+  /** Per value. null = off. */
   valueF1: number | null;
+  /** Per value (added 2026-11-06). Missing on older records = off. */
+  precision?: number | null;
+  recall?: number | null;
+  /** Not shown in the MVP UI (2026-11-04); kept for older records. */
   invalidRate: number | null;
   accuracy: number | null;
   minEval: number;
@@ -158,6 +163,8 @@ export interface Prediction {
   answer: Answer | null;
   invalidReason: string | null;
   costUsd: number;
+  /** Input + output tokens of the call (reasoning included). Missing on older records. */
+  tokens?: number;
   createdAt: string;
 }
 
@@ -172,7 +179,11 @@ export interface LabelingRun {
   state: JobState;
   done: number;
   total: number;
+  /** Valid answers saved (examples that got a label). */
+  valid?: number;
   costUsd: number;
+  /** Tokens used by this run's answers (Training Set: "Total tokens"). */
+  tokens?: number;
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
@@ -281,6 +292,8 @@ export interface TrainingSet {
   /** Examples whose model call failed after all retries ("Retry failed" re-runs them). */
   failed: number;
   costUsd: number;
+  /** Tokens used by the run's answers (Training Set: "Total tokens"). */
+  tokens?: number;
   estimateUsd: number;
   error: string | null;
   startedAt: string;
@@ -444,6 +457,10 @@ export interface PageView {
 export interface SamplingTask {
   id: string;
   projectId: string;
+  /** 'upload': loading the features of an uploaded file's item IDs (Dataset, "Loading features"). Missing = 'sample'. */
+  kind?: 'sample' | 'upload';
+  /** Upload only: the file's name. */
+  fileName?: string;
   total: number;
   fetched: number;
   startedAt: string;
