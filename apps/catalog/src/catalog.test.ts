@@ -6,14 +6,14 @@ import {createCatalog} from './catalog.ts';
 
 const base = {projectId: 'pr_1', template: 't', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user' as const, change: '', schemaVersion: 1};
 
-test('catalog numbers prompt versions from what is stored', async () => {
+test('catalog numbers prompt versions from what is stored: every save is the next number', async () => {
   const c = createCatalog(localDocRuntime('cat-1'));
   const v1 = await c.createPromptVersion({...base, parentId: null, kind: 'minor'});
   const v11 = await c.createPromptVersion({...base, parentId: v1.id, kind: 'minor'});
   const v12 = await c.createPromptVersion({...base, parentId: v1.id, kind: 'minor'});
   const v2 = await c.createPromptVersion({...base, parentId: v12.id, kind: 'major'});
   const label = (v: PromptVersion) => `${v.major}.${v.minor}`;
-  assert.deepEqual([v1, v11, v12, v2].map(label), ['1.0', '1.1', '1.2', '2.0']);
+  assert.deepEqual([v1, v11, v12, v2].map(label), ['1.0', '2.0', '3.0', '4.0']);
 });
 
 test('catalog patch changes only the given fields; findByIds returns the asked records', async () => {

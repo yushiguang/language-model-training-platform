@@ -37,6 +37,8 @@ export interface LabelingTask {
   failed: number;
   failedExampleIds: string[];
   costUsd: number;
+  /** Tokens of the answers this task counts (input + output). Missing on older records. */
+  tokens?: number;
   /**
    * The part of `costUsd` spent by runs started automatically (`RunOptions.auto`): it counts
    * toward the project's automatic-spend cap, whoever created the task.

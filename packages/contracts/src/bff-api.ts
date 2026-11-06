@@ -35,7 +35,7 @@ import type {LabelingTask} from './labeling-api.ts';
  * microservice deployments, it swaps to `fetch()` calls against the remote Go BFF service.
  */
 
-export type SetupPatch = Partial<Pick<SetupVersion, 'task' | 'schema' | 'thresholds' | 'models' | 'steps' | 'autoStart'>>;
+export type SetupPatch = Partial<Pick<SetupVersion, 'task' | 'schema' | 'thresholds' | 'models' | 'steps'>>;
 
 export interface NewVersion {
   template: string;
@@ -87,11 +87,6 @@ export interface BffContract {
   createVersion(projectId: string, v: NewVersion): Promise<PromptVersion>;
   /** A click on Score, Resume or Rerun: always starts (the user's start). */
   scoreVersion(projectId: string, version: PromptVersion, only?: EndpointId): Promise<void>;
-  /**
-   * After Save or Create: scores the new version on each model where an automatic start is
-   * allowed (Setup's switch and the caps); the others wait for a click.
-   */
-  scoreNewVersion(projectId: string): Promise<{started: EndpointId[]; waiting: EndpointId[]}>;
   tick(state: ProjectState): Promise<void>;
   stopRun(runId: string): void;
   startOptimiser(projectId: string, endpoint: EndpointId): void;
@@ -104,9 +99,6 @@ export interface BffContract {
   startTrainingSet(projectId: string, version: PromptVersion, endpoint: EndpointId, report: EvalReport | null, estimateUsd: number, opts?: {labelTest?: boolean; existing?: TrainingSet}): Promise<TrainingSet>;
   stopTrainingSet(tsId: string): void;
 
-  // Paid starts: what waits for a click, and Approve / Cancel on an agent's start card
-  waitingStarts(state: ProjectState): {what: 'score' | 'resume' | 'optimiser'; versionId: string | null; endpoint: EndpointId; estimateUsd: number; key: string; reason: string}[];
-  answerStartCard(projectId: string, messageId: string, approve: boolean): Promise<void>;
   trainingRows(tsId: string): Promise<TrainingRow[]>;
 
   // Assistant & proposals
@@ -114,5 +106,7 @@ export interface BffContract {
   isAgentBusy(projectId: string): boolean;
   sendUserMessage(projectId: string, text: string, page: PageContext, attachments?: ChatAttachment[]): Promise<AgentProposal | null>;
   openProposals(projectId: string, kind: AgentProposal['kind']): Promise<AgentProposal[]>;
+  /** Open and approved proposals, oldest first (Ask AI cards). */
+  proposals(projectId: string, kind: AgentProposal['kind']): Promise<AgentProposal[]>;
   closeProposal(p: AgentProposal, state: 'approved' | 'discarded'): Promise<void>;
 }

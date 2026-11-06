@@ -100,15 +100,29 @@ export function hasBundledGold(): boolean {
   return typeof getApp().examples.bundledLabels === 'function';
 }
 
-/** Upload: JSONL of full examples, or CSV/JSONL of ids looked up in the example source. */
+/**
+ * Upload dataset: a text or CSV file of item IDs separated by commas or new lines (an optional
+ * header such as item_id is skipped), or JSONL of ids or full examples. The system then loads each
+ * item's features, which the Dataset page shows as "Loading features for N items".
+ */
 export async function uploadDatasetText(projectId: string, name: string, text: string): Promise<{snapshot?: DatasetSnapshot; error?: string}> {
-  if (!/\.(csv|jsonl|json)$/i.test(name)) {
-    return {error: `"${name}" can't be used. Upload a CSV or JSONL file instead. You can save a sheet as CSV from your spreadsheet app.`};
+  if (!/\.(csv|txt|jsonl|json)$/i.test(name)) {
+    return {error: `"${name}" can't be used. Upload a text or CSV file of item IDs.`};
   }
   const raws: RawExample[] = [];
   const ids: string[] = [];
   let invalid = 0;
-  if (/\.csv$/i.test(name)) {
+  const first = (text.split(/\r?\n/)[0] ?? '').split(',').map(h => h.trim().toLowerCase());
+  // A CSV table with several columns, one of them the id; anything else is a plain list of IDs.
+  const isTable = /\.csv$/i.test(name) && first.length > 1 && first.some(h => h === 'video_id' || h === 'id' || h === 'external_id');
+  if (!isTable && /\.(txt|csv)$/i.test(name)) {
+    // A list of item IDs, separated by commas or new lines; a header word is skipped.
+    for (const tok of text.split(/[\s,;]+/).map(t => t.trim()).filter(Boolean)) {
+      if (/^(item_id|video_id|id|external_id)$/i.test(tok)) continue;
+      if (/^[A-Za-z0-9_-]+$/.test(tok)) ids.push(tok);
+      else invalid++;
+    }
+  } else if (/\.csv$/i.test(name)) {
     const [head, ...rows] = text.trim().split(/\r?\n/);
     const col = head
       .split(',')
@@ -133,7 +147,8 @@ export async function uploadDatasetText(projectId: string, name: string, text: s
     }
   }
   if (ids.length) {
-    const found = await getApp().examples.lookup(ids);
+    const found = await loadFeatures(projectId, name, ids);
+    if (!found) return {};
     invalid += ids.length - found.length;
     raws.push(...found);
   }
@@ -143,6 +158,28 @@ export async function uploadDatasetText(projectId: string, name: string, text: s
   }
   tm().event('dataset_uploaded', {rows: raws.length + invalid, valid: raws.length, invalid, video: raws.filter(r => r.type === 'video').length, photo_text: raws.filter(r => r.type !== 'video').length});
   return {snapshot: await saveSnapshot(projectId, raws, 'upload', name, invalid)};
+}
+
+/** Looks the IDs up in chunks, as a task the Dataset page shows with its progress and Stop. */
+async function loadFeatures(projectId: string, fileName: string, ids: string[]): Promise<RawExample[] | null> {
+  stopSampleDataset(projectId);
+  const ctrl = new AbortController();
+  const task: SamplingTask = {id: newId('sm'), projectId, kind: 'upload', fileName, total: ids.length, fetched: 0, startedAt: now(), state: 'running', error: null};
+  activeSampling.set(projectId, {task, ctrl});
+  emitChange();
+  const out: RawExample[] = [];
+  try {
+    for (let i = 0; i < ids.length; i += 10) {
+      if (ctrl.signal.aborted) return null;
+      out.push(...(await getApp().examples.lookup(ids.slice(i, i + 10))));
+      task.fetched = Math.min(ids.length, i + 10);
+      emitChange();
+    }
+    return out;
+  } finally {
+    if (activeSampling.get(projectId)?.task === task) activeSampling.delete(projectId);
+    emitChange();
+  }
 }
 
 /** Order is fixed by a hash of the ids, so the same snapshot always splits the same way. */

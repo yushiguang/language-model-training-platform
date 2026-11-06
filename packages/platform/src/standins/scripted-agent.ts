@@ -60,7 +60,6 @@ function promptAgentStart(r: Req) {
       s.name === 'try_template' ? {template: template ?? '', n: 3, ...(s.model ? {model: s.model} : {})} : s.name === 'score_version' ? {version: s.version, ...(s.model ? {model: s.model} : {})} : {model: s.model};
     return {tool: {name: s.name, args}};
   }
-  if (res?.asked_user) return {reply: `I asked for your approval: ${res.label}, about $${Number(res.estimate_usd).toFixed(2)}.`};
   if (res?.error) return {reply: `I couldn't start that: ${res.error}`};
   if (res?.already) return {reply: res.already};
   if (s.name === 'try_template') {

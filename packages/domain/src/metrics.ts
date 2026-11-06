@@ -95,6 +95,10 @@ export function judge(m: Metrics, t: Thresholds, evalCount: number): {passed: bo
   const checks: CheckLine[] = [];
   checks.push({label: 'Lowest field macro-F1', actual: m.lowestField.macroF1.toFixed(2), need: `≥ ${t.macroF1.toFixed(2)}`, met: m.lowestField.macroF1 >= t.macroF1});
   if (t.valueF1 != null) checks.push({label: 'Lowest value F1', actual: m.lowestValue ? m.lowestValue.f1.toFixed(2) : '–', need: `≥ ${t.valueF1.toFixed(2)}`, met: !m.lowestValue || m.lowestValue.f1 >= t.valueF1});
+  const values = m.fields.flatMap(f => f.values.map(v => ({...v, field: f.field})));
+  const lowest = (k: 'precision' | 'recall') => (values.length ? Math.min(...values.map(v => v[k])) : 1);
+  if (t.precision != null) checks.push({label: 'Lowest value precision', actual: lowest('precision').toFixed(2), need: `≥ ${t.precision.toFixed(2)}`, met: lowest('precision') >= t.precision});
+  if (t.recall != null) checks.push({label: 'Lowest value recall', actual: lowest('recall').toFixed(2), need: `≥ ${t.recall.toFixed(2)}`, met: lowest('recall') >= t.recall});
   if (t.invalidRate != null) checks.push({label: 'Invalid outputs', actual: pct(m.invalidRate), need: `≤ ${pct(t.invalidRate)}`, met: m.invalidRate <= t.invalidRate});
   if (t.accuracy != null) {
     const singles = m.fields.filter(f => f.kind === 'single');
@@ -107,4 +111,7 @@ export function judge(m: Metrics, t: Thresholds, evalCount: number): {passed: bo
 
 export const pct = (x: number) => `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;
 
-export const DEFAULT_THRESHOLDS: Thresholds = {mode: 'default', macroF1: 0.8, valueF1: 0.6, invalidRate: 0.01, accuracy: null, minEval: 20};
+/** Default (Setup, Evaluation settings): Macro-F1 of every field must reach 0.80 (UI design 2026-11-05). */
+export const DEFAULT_THRESHOLDS: Thresholds = {mode: 'default', macroF1: 0.8, valueF1: null, precision: null, recall: null, invalidRate: null, accuracy: null, minEval: 20};
+/** Custom starts from these: F1 on at 0.60, Precision and Recall off with 0.70 ready in their boxes. */
+export const CUSTOM_START = {valueF1: 0.6, precision: 0.7, recall: 0.7};

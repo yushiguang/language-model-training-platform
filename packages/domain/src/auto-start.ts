@@ -5,12 +5,10 @@ import {costForTokens} from './workflow.ts';
 
 /**
  * Paid work that starts without a click: scoring a new version, the optimiser, resuming after
- * a closed page, and agent start tools. Setup's "Start paid labeling automatically" switch turns
- * it on or off; these fixed caps always ask, whatever the switch says.
+ * a closed page, and agent start tools. All of it starts by itself, with no cost limit: the cost
+ * can't be predicted exactly, the platform is there to make training faster, and every running
+ * task has a Stop button.
  */
-export const AUTO_START_SINGLE_CAP_USD = 1;
-/** Automatic starts in a project may spend this much in all; a start that would pass it asks. */
-export const AUTO_START_PROJECT_CAP_USD = 5;
 /** Optimiser candidates per run. */
 export const OPTIMISER_CANDIDATES = 6;
 /** The prompt agent's try_template labels at most this many eval examples. */
@@ -34,25 +32,13 @@ export function optimiserEstimate(state: ProjectState, endpoint: EndpointId, can
 }
 
 /**
- * What automatic starts have spent in this project: every labeling run started by code (scoring,
- * resumes, optimiser parents and candidates; counted per run, so an automatic resume of a task a
- * user started counts too) plus try_template runs, which leave no task.
+ * What automatic starts have spent in this project, for the audit log and telemetry: every
+ * labeling run started by code (scoring, resumes, optimiser parents and candidates; counted per
+ * run, so an automatic resume of a task a user started counts too) plus try_template runs,
+ * which leave no task.
  */
 export function autoSpendUsd(state: ProjectState): number {
   return state.runs.reduce((n, r) => n + (r.autoCostUsd ?? 0), 0) + (state.otherAutoSpendUsd ?? 0);
-}
-
-export type AutoStartReason = 'off' | 'over_single_cap' | 'over_project_cap' | 'paused_over_budget';
-
-/**
- * May this start go ahead without asking? `reservedUsd`: estimates of automatic starts already
- * going whose cost is not saved yet, so starts made one after another can't pass the $5 together.
- */
-export function autoStartCheck(state: ProjectState, estimateUsd: number, reservedUsd = 0): {allowed: boolean; reason: AutoStartReason | null} {
-  if (state.setup?.autoStart === false) return {allowed: false, reason: 'off'};
-  if (estimateUsd > AUTO_START_SINGLE_CAP_USD) return {allowed: false, reason: 'over_single_cap'};
-  if (autoSpendUsd(state) + reservedUsd + estimateUsd > AUTO_START_PROJECT_CAP_USD) return {allowed: false, reason: 'over_project_cap'};
-  return {allowed: true, reason: null};
 }
 
 export interface DueStart {
@@ -60,23 +46,14 @@ export interface DueStart {
   versionId: string | null;
   endpoint: EndpointId;
   estimateUsd: number;
-  /** Stable key, for "asked once" bookkeeping. */
+  /** Stable key: one start per key at a time. */
   key: string;
-  /** A resume of scoring that paused because it cost more than 120% of its estimate. */
-  overBudget?: boolean;
-}
-
-/** `autoStartCheck` for a due start: a resume after an over-budget pause always asks. */
-export function dueStartCheck(state: ProjectState, d: DueStart, reservedUsd = 0): {allowed: boolean; reason: AutoStartReason | null} {
-  if (d.overBudget) return {allowed: false, reason: 'paused_over_budget'};
-  return autoStartCheck(state, d.estimateUsd, reservedUsd);
 }
 
 /**
  * Paid work the workflow would start now: scoring the newest version on each chosen model,
  * resuming scoring a closed page left, and an optimiser run for a model with no passing version
- * once the eval set is gold-labeled. `tick` starts what `autoStartCheck` allows; pages show a
- * button with the cost for the rest.
+ * once the eval set is gold-labeled. `tick` starts all of it.
  */
 export function dueStarts(state: ProjectState, opts: {optimiserBusy?: boolean} = {}): DueStart[] {
   const out: DueStart[] = [];
@@ -89,7 +66,7 @@ export function dueStarts(state: ProjectState, opts: {optimiserBusy?: boolean} =
     const v = state.versions.find(x => x.id === r.promptVersionId);
     if (!v) continue;
     const left = Math.max(0, r.total - r.done);
-    out.push({what: 'resume', versionId: v.id, endpoint: r.endpoint, estimateUsd: evalEstimate(state, v, r.endpoint, left), key: `resume:${r.id}`, ...(r.overBudget ? {overBudget: true} : {})});
+    out.push({what: 'resume', versionId: v.id, endpoint: r.endpoint, estimateUsd: evalEstimate(state, v, r.endpoint, left), key: `resume:${r.id}`});
   }
 
   const latest = state.versions[0];

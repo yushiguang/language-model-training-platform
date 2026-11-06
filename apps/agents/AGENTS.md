@@ -22,9 +22,8 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
      calls per turn; a tool not on the preset's list is refused; results are cut at 12,000
      characters. Changes are still proposals in the answer.
    - **Start tools** (`START_TOOLS`: `try_template`, `score_version`, `start_optimiser`) spend
-     money and are marked PAID in the prompt. The host runs them within the automatic-start caps,
-     or answers `{"asked_user": true}` and shows the user an Approve card; after that answer the
-     runtime ends the turn (no more tools).
+     money and are marked PAID in the prompt. The host runs them at once (no cost limit, no
+     approval); the user stops them from the page.
    - The output lists the model calls and the answers that weren't JSON, for metrics.
 2. **Specialist agent presets (`src/presets.ts`)**:
    - `front_desk`: Answers questions about the current page and hands off to specialists.

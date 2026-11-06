@@ -1,9 +1,8 @@
-import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion, StartCard} from '@tsp/contracts';
+import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@tsp/contracts';
 import {agentStart, isStartTool} from './starts.ts';
-import {AUTO_START_PROJECT_CAP_USD, AUTO_START_SINGLE_CAP_USD, autoSpendUsd, checkTemplate, defaultOutputPick, finalRunPlan, pageFromPath, isImageKey, judge, MADE_BY, recommend, settingsHash, versionLabel} from '@tsp/domain';
+import {checkTemplate, defaultOutputPick, finalRunPlan, pageFromPath, isImageKey, judge, MADE_BY, recommend, settingsHash, versionLabel} from '@tsp/domain';
 import {getApp} from './app.ts';
 import {loadProjectState} from './projects.ts';
-import {waitingStarts} from './work.ts';
 
 /**
  * Page views: each page as the agent sees it, built from the same saved data the page shows.
@@ -128,7 +127,7 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
       const step = params.step ?? '1';
       return base(
         step === '1' ? 'Setup step 1: the task and the labels (schema).' : step === '2' ? 'Setup step 2: how prompts are evaluated (thresholds).' : 'Setup step 3: which labeling models to use.',
-        {step, task: s?.task ?? '', schema: s?.schema ?? null, thresholds: s?.thresholds ?? null, models: s?.models ?? [], startPaidLabelingAutomatically: s?.autoStart !== false, availableModels: state.endpoints.map(e => ({id: e.id, name: e.name, cost: e.cost, speed: e.speed}))},
+        {step, task: s?.task ?? '', schema: s?.schema ?? null, thresholds: s?.thresholds ?? null, models: s?.models ?? [], availableModels: state.endpoints.map(e => ({id: e.id, name: e.name, cost: e.cost, speed: e.speed}))},
       );
     }
     case 'dataset': {
@@ -154,13 +153,11 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
         moreVersions: Math.max(0, state.versions.length - 12),
         optimiser: running ? {model: running.endpoint, state: running.state, candidates: running.candidates, calls: running.calls, budgetCalls: running.budgetCalls, stopReason: running.stopReason} : null,
         advice: adviceOf(state),
-        paidStarts: paidStarts(state),
       });
     }
     case 'prompt_edit': {
       const v = findVersion(state, params.v) ?? state.versions[0];
-      const scoredHow = state.setup?.autoStart === false ? 'which waits for the user to start scoring' : 'which is scored right away';
-      return base(v ? `Editing ${versionLabel(v)}. Saving makes a new version, ${scoredHow}.` : 'Writing the first prompt version.', {version: v ? versionDetail(state, v) : null, paidStarts: paidStarts(state)});
+      return base(v ? `Editing ${versionLabel(v)}. Saving makes a new version, which is scored right away.` : 'Writing the first prompt version.', {version: v ? versionDetail(state, v) : null});
     }
     case 'compare': {
       const a = findVersion(state, params.a);
@@ -218,28 +215,19 @@ export async function getPageView(projectId: string, loc: PageLocation, unsaved:
   return view;
 }
 
-/** Whether paid work starts by itself, and what waits for the user's click with its cost. */
-function paidStarts(state: ProjectState) {
-  return {
-    automatic: state.setup?.autoStart !== false,
-    caps: {singleUsd: AUTO_START_SINGLE_CAP_USD, projectUsd: AUTO_START_PROJECT_CAP_USD, spentAutomaticallyUsd: r2(autoSpendUsd(state))},
-    waitingForUser: waitingStarts(state).map(d => ({what: d.what, version: d.versionId ? versionLabel(state.versions.find(v => v.id === d.versionId)!) : null, model: d.endpoint, estimateUsd: r2(d.estimateUsd), why: d.reason})),
-  };
-}
-
 const limitOf = (x: unknown, max: number, dflt: number) => Math.max(1, Math.min(max, typeof x === 'number' ? Math.floor(x) : dflt));
 
 /**
  * The read tools, run as the signed-in user. Each call is written to the audit log. Errors come
  * back to the agent as messages it can act on.
  */
-export function agentTools(projectId: string, cards: StartCard[] = []): AgentToolHost {
+export function agentTools(projectId: string): AgentToolHost {
   return {
     async call({agent, name, args}: AgentToolCall): Promise<unknown> {
       const {catalog, labeling} = getApp();
       await catalog.audit(projectId, `agent:${agent}`, 'agent.tool', {name, args});
-      // Start-work tools spend money; they live in starts.ts (runs within the caps, or asks).
-      if (isStartTool(name)) return agentStart(projectId, agent, name, args, cards);
+      // Start-work tools spend money and start at once; they live in starts.ts.
+      if (isStartTool(name)) return agentStart(projectId, agent, name, args);
       const state = await loadProjectState(projectId);
       if (!state) throw new Error('The project was not found.');
       switch (name) {

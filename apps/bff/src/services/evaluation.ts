@@ -40,10 +40,8 @@ async function findTask(projectId: string, version: PromptVersion, endpoint: End
  * same version + model + settings + examples when there is one (so a reload resumes it), and
  * creates one otherwise. Returns null when another tab is running it.
  *
- * `auto`: this run was started by code without a click, so its cost counts toward the
- * automatic-spend cap (on the task, per run: an automatic resume of a task a user started counts
- * too). `budgetUsd`: the estimate the automatic start was checked against; the run pauses once it
- * costs 120% of that, and resuming it then asks.
+ * `auto`: this run was started by code without a click, so its cost is recorded as automatic
+ * spend (on the task, per run: an automatic resume of a task a user started counts too).
  */
 export async function labelEvalSet(
   projectId: string,
@@ -52,7 +50,7 @@ export async function labelEvalSet(
   endpoint: EndpointId,
   examples: Example[],
   purpose: 'eval' | 'optimiser' = 'eval',
-  opts: {auto?: boolean; budgetUsd?: number} = {},
+  opts: {auto?: boolean} = {},
 ): Promise<LabelingTask | null> {
   const {labeling, user} = getApp();
   const settings = settingsFor(setup, endpoint);
@@ -67,11 +65,11 @@ export async function labelEvalSet(
     endpoint,
     settings,
     exampleIds,
-    // 'auto' marks scoring code started without a click: it counts toward the automatic-spend cap.
+    // 'auto' marks scoring code started without a click.
     createdBy: purpose === 'optimiser' ? 'optimiser' : opts.auto ? 'auto' : (await user()).name,
   });
   const trigger = opts.auto || purpose === 'optimiser' ? 'system' : 'user';
-  const run = opts.auto ? {auto: true, budgetUsd: opts.budgetUsd} : {};
+  const run = opts.auto ? {auto: true} : {};
   if (task.state === 'needs_attention') return labeling.retryFailed(task.id, trigger, run);
   return labeling.runTask(task.id, trigger, run);
 }

@@ -104,7 +104,7 @@ export function checkTemplate(template: string, sel: FeatureSelection, opts: {sc
         code: 'unknown_key',
         key,
         line,
-        message: near ? `{{${key}}} isn't a feature. Did you mean {{${near}}}?` : `{{${key}}} isn't a feature.`,
+        message: near ? `{{${key}}} is not a feature. Did you mean ${labelOf(near)}?` : `{{${key}}} is not a feature`,
         fixes: near ? [{label: 'Replace', fix: {kind: 'replace', from: `{{${key}}}`, to: `{{${near}}}`}}] : [],
       });
     } else if (!tickedAnywhere(sel, key)) {
@@ -114,7 +114,7 @@ export function checkTemplate(template: string, sel: FeatureSelection, opts: {sc
         code: 'not_ticked',
         key,
         line,
-        message: `{{${key}}} is in the prompt but isn't ticked, so it would load nothing.`,
+        message: `{{${key}}} is in the template but not ticked`,
         fixes: groups.map(g => ({label: groups.length > 1 ? `Tick for ${g === 'video' ? 'video' : g === 'photo_text' ? 'photo&text' : 'metadata'}` : 'Tick', fix: {kind: 'tick', group: g, key}})),
       });
     } else matched++;
@@ -130,7 +130,7 @@ export function checkTemplate(template: string, sel: FeatureSelection, opts: {sc
       severity: 'error',
       code: 'unused_feature',
       key,
-      message: `${label} is ticked${where} but isn't in the prompt.`,
+      message: `${label} is ticked${where} but not in the template`,
       fixes: [
         {label: 'Insert', fix: {kind: 'insert', key}},
         {label: 'Untick', fix: {kind: 'untick', groups: [...groups], key}},

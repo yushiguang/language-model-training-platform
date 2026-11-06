@@ -1,0 +1,40 @@
+/*
+ * App-only rules: what the canvas draws with inline styles or does not need (a live textarea,
+ * focus rings, screen-reader text). Keep kit.css identical to the design.
+ */
+html, body { min-height: 100%; }
+body { font-family: var(--sans); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+button:focus-visible, a:focus-visible, [tabindex]:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.input:focus, .select select:focus { border-color: var(--text); outline: none; }
+
+/* Ask AI on a live page: as tall as the window below the step bar. */
+.chat { height: calc(100vh - 88px); }
+.chat-in textarea { flex: 1; min-width: 0; border: 0; outline: none; resize: none; background: none; font: inherit; color: var(--text); line-height: 20px; padding: 6px 0; height: 32px; }
+.chat-in textarea::placeholder { color: var(--text-3); }
+.chat-in textarea:focus-visible { outline: none; }
+.send[aria-disabled=true] { opacity: .5; cursor: default; }
+.send { cursor: pointer; }
+
+/* Links that look like nothing (list rows, tabs). */
+.k a.plain { color: inherit; text-decoration: none; }
+
+/* A two-column card grid whose cards keep their own height. */
+.grid-split { display: grid; gap: 16px; align-items: start; }
+
+/* Prompt template: a live textarea over the highlighted text (the canvas draws only the text). */
+.ed-scroll { flex: 1 1 0; min-height: 0; overflow: auto; scrollbar-width: none; padding-bottom: 32px; }
+.ed-scroll::-webkit-scrollbar { display: none; }
+.ed { position: relative; }
+.ed .editor, .ed textarea { font-family: var(--mono); font-size: 13px; line-height: 22px; white-space: pre-wrap; overflow-wrap: anywhere; letter-spacing: 0; }
+.ed textarea { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; outline: none; resize: none; overflow: hidden; background: transparent; color: transparent; caret-color: var(--text); }
+.ed textarea:focus-visible { outline: none; }
+.ed textarea::placeholder { color: var(--text-3); }
+/* Tokens keep their glyphs where the textarea has them: the chip padding is drawn with shadows. */
+.ed .tok { display: inline; padding: 0; line-height: 22px; box-shadow: -5px 0 0 var(--bg-muted), 5px 0 0 var(--bg-muted); }
+.ed .tok.bad { box-shadow: -5px 0 0 var(--err-bg), 5px 0 0 var(--err-bg); }
+
+/* A list card that fills its grid area and scrolls inside, whatever its length. */
+.card.fill > .vlist { contain: size; }
+.k a.vrow { cursor: pointer; }
+.k .copy-name { cursor: copy; }
