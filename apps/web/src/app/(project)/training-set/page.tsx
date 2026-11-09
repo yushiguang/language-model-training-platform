@@ -5,6 +5,7 @@ import {Suspense, useEffect, useMemo, useState} from 'react';
 import type {Answer, EndpointId, LabelingRun, PromptVersion, Schema, TrainingSet} from '@tsp/contracts';
 import {estimate, MIN_PER_VALUE, recommend, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
+import {LabelDistribution, labelCounts} from '@/components/LabelDistribution';
 import {modelName, versionScore} from '@/components/prompt/scores';
 import {labelTestSet, predictionsFor, startTrainingSet, stopRun, stopTrainingSet, tick, track, trainingRows, type ProjectState} from '@/backend-api';
 import {Badge, Banner, Button, Card, Code, dateTime, Empty, Hov, Metric, Metrics, num, PageHead, Progress, Select, Tabs} from '@/ui';
@@ -193,12 +194,6 @@ function useRows(state: ProjectState, split: SetKey, job: TrainingSet | Labeling
   return rows;
 }
 
-function counts(schema: Schema, rows: Row[]) {
-  return schema.fields.map(f => ({
-    field: f.name,
-    values: f.values.map(v => ({name: v.name, n: rows.filter(r => r.answer?.[f.name]?.includes(v.name)).length})).sort((a, b) => b.n - a.n),
-  }));
-}
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -206,7 +201,7 @@ function Done({state, split, rows, job}: {state: ProjectState; split: SetKey; ro
   const schema = state.setup!.schema!;
   const v = state.versions.find(x => x.id === job.promptVersionId);
   const labeled = rows.filter(r => r.answer);
-  const c = useMemo(() => counts(schema, labeled), [rows]); // eslint-disable-line react-hooks/exhaustive-deps
+  const c = useMemo(() => labelCounts(schema, labeled.map(r => r.answer)), [rows]); // eslint-disable-line react-hooks/exhaustive-deps
   const low = c.flatMap(f => f.values).filter(x => x.n > 0 && x.n < MIN_PER_VALUE).length;
   const none = c.flatMap(f => f.values).filter(x => x.n === 0).length;
   const parts = [
@@ -253,7 +248,7 @@ function Done({state, split, rows, job}: {state: ProjectState; split: SetKey; ro
             </div>
           </div>
         </Card>
-        <LabelCounts data={c} />
+        <LabelDistribution data={c} min={MIN_PER_VALUE} />
       </div>
     </>
   );
@@ -261,62 +256,6 @@ function Done({state, split, rows, job}: {state: ProjectState; split: SetKey; ro
 
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
 
-/** Label counts: every value of the schema in two columns; under 5 is yellow, none is red. */
-function LabelCounts({data}: {data: ReturnType<typeof counts>}) {
-  const thr = MIN_PER_VALUE;
-  const legend = (
-    <div className="row" style={{gap: 16, fontSize: 12}}>
-      <span className="row" style={{gap: 6}}>
-        <i style={{width: 8, height: 8, borderRadius: '50%', background: '#e0a800'}} />
-        <span className="t-3">
-          <Hov text={`Fewer than ${thr}`} tip={`Values with fewer than ${thr} examples may be learned poorly`} />
-        </span>
-      </span>
-      <span className="row" style={{gap: 6}}>
-        <i style={{width: 8, height: 8, borderRadius: '50%', background: 'var(--err)'}} />
-        <span className="t-3">None</span>
-      </span>
-    </div>
-  );
-  return (
-    <Card title="Label counts" actions={legend}>
-      <div className="col" style={{gap: 24}}>
-        {data.map((f, i) => {
-          const mx = Math.max(1, ...f.values.map(x => x.n));
-          return (
-            <div key={f.field} className="col" style={{gap: 24}}>
-              {i > 0 && <div style={{height: 1, background: 'var(--border)'}} />}
-              <div className="col" style={{gap: 8, alignItems: 'flex-start'}}>
-                <span>
-                  <Code>{f.field}</Code>
-                </span>
-                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: 40, rowGap: 4, alignSelf: 'stretch'}}>
-                  {f.values.map(x => {
-                    const tone = x.n === 0 ? 'err' : x.n < thr ? 'warn' : '';
-                    const col = tone === 'err' ? 'var(--err)' : tone === 'warn' ? 'var(--warn)' : 'var(--text)';
-                    const fill = tone === 'warn' ? '#e0a800' : '#1b1b1b';
-                    const bold = tone ? 600 : undefined;
-                    return (
-                      <div key={x.name} style={{display: 'grid', gridTemplateColumns: '140px 1fr 32px', alignItems: 'center', gap: 12, height: 28, fontSize: 13}}>
-                        <span className="one" title={x.name} style={{color: col, fontWeight: bold}}>
-                          {x.name}
-                        </span>
-                        <span style={{height: 6, borderRadius: 3, background: 'var(--bg-muted)', overflow: 'hidden'}}>
-                          <span style={{display: 'block', height: '100%', width: `${Math.round((x.n / mx) * 100)}%`, background: fill, borderRadius: 3}} />
-                        </span>
-                        <span style={{textAlign: 'right', color: tone ? col : 'var(--text-2)', fontWeight: bold}}>{x.n}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </Card>
-  );
-}
 
 function Downloads({state, split, rows, versionId, endpoint}: {state: ProjectState; split: SetKey; rows: Row[]; versionId: string; endpoint: EndpointId}) {
   const schema = state.setup!.schema!;

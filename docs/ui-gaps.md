@@ -25,7 +25,7 @@ and its row "6 · More states, drawn from the code" now draws the states it lack
 | Prompt versions, stopped or not scored | Grey line saying why, with Score or Resume (drawn) |
 | Training Set, a run stopped | Labeling card with a Stopped tag and Resume (drawn) |
 | Training Set, Add examples | Removed; adding examples to a dataset comes in a later version |
-| Ask AI, events | Small grey lines such as "Evaluation agent joined" (drawn) |
+| Ask AI, events | Small grey action lines such as "Scores helper joined to answer" (drawn; see below for the 2026-11-09 set) |
 
 These code choices are approved but not drawn, because they are small or follow an existing pattern:
 
@@ -37,14 +37,46 @@ These code choices are approved but not drawn, because they are small or follow 
 - Prompt versions: the newest version is selected; with evaluation off there is no chart and the
   suggestion is "Make the training and test sets with vN"; when nothing passes it says "No version
   passes yet"; before gold labels it says "Label the eval set to start scoring".
-- Ask AI stays open when moving between Prompt Engineering pages.
+- Ask AI stays open (or closed) when moving between any steps: the shell is shared by every step
+  page since 2026-11-09 (it was per page before, so this line used to be wrong).
+
+## Done on 2026-11-09: review, hands-on pass and the new canvas states
+
+Evelyn approved the canvas row "7 · Agents, motion and states" and the no-gold version card, and
+asked for the code. What the code does now (the review `docs/review-2026-11-09.md` and the
+hands-on list `docs/acceptance-2026-11-09.md` are covered by the same pass):
+
+| Where | What the code does |
+| --- | --- |
+| Ask AI, helpers | Each answer names its helper: Assistant, Labels helper, Prompt helper, Scores helper. The header says who answers ("Scores helper answers") |
+| Ask AI, a helper joins | A grey line "Scores helper joined to answer"; the "I'll bring in…" reply is not shown. The helper keeps answering on that page; from another page the page's own helper answers again, with a line "Assistant answers on Dataset". A helper that stayed passes work for another helper on (for example the Scores helper hands "try the prompt" to the Prompt helper) |
+| Ask AI, while a turn runs | A live line with a spinner ("Thinking…", "Reading the v4 report…"), then the reply streams in with a caret. Read tools are not shown as lines |
+| Ask AI, action lines | Saved in the chat: a draft put on a page, You approved or discarded the schema, You saved it as vN (after a helper's draft), a helper's paid start, Workflow starts (scoring, the optimiser), You stopped work. 12px, the time on the right; a line with a place to go is itself the link |
+| Ask AI, dates and memory | A date line where the day changes; "Helpers read your recent messages" under the input |
+| Ask AI, input | Enter adds a line and never sends; only the button sends. The box grows to 6 lines, then scrolls with no scrollbar. Enter does not submit the Projects name either |
+| Schema settings, AI draft | Header: "AI draft" tag, Discard, Approve. The chat card's Approve stays as a shortcut. The labeling policy is gone everywhere (the value definitions and the prompt carry the rules) |
+| Buttons | A button doing work shows a spinner, and its header group is locked. A failure shows one red banner at the top of the content with Retry |
+| Step changes | The island, the project state and Ask AI stay mounted; the new step fades in (150ms). The panel spinner shows only while the project first loads |
+| Labeling models | A model without temperature shows a grey "Not supported" box with a grey label |
+| Step numbers | Centred in their circles |
+| Prompt versions, labeled with no gold labels | Labeled N / M, Filtered and Failed (hover text, Failed red when above 0, 80px apart), the AI Suggestion "Label the eval set to start scoring", and a Label distribution card. The list shows labeled counts; no chart |
+| Training Set | "Label counts" is now "Label distribution" |
+| Gold Labels, feature rows | Every feature the example has is listed (the known ones by their names first, then the rest), except images and ids |
+| Projects page | A project with every step done shows "Finished"; the project finishes by itself once the training set and the test set are done |
+| Stand-in sampling | 400ms per step of 8 examples (was 120ms), so the progress can be seen |
 
 ## Still different from the canvas
 
 | Where | Canvas | Code | Why |
 | --- | --- | --- | --- |
-| Gold Labels, feature rows | Title, Description, On-screen text, Speech, Creator, Hashtags, Posted, Country and language | The same, plus Place, Interest and Summary when an example has them; empty rows are left out | The rows come from the example's features |
-| Gold Labels, example media | A dark tile with a video icon | The same tile. The media interface is drafted (`MediaSource`, see `docs/handover/integration.md`, "Media") but the page does not show frames or video | Showing media needs a design once the real video interface exists |
+| Gold Labels, feature rows | Title, Description, On-screen text, Speech, Creator, Hashtags, Posted, Country and language | The same, plus every other feature the example has; empty rows are left out | Labelers must be able to see every feature (review 2026-11-09) |
+| Ask AI, a paid start line | "Prompt helper started scoring v4" | "Prompt helper started scoring v4 on gpt-5.6-terra" | Two models can be scored separately; the line says which |
+| Ask AI, while the optimiser runs | A few lines | One "Workflow started scoring vN on <model>" line per automatic start, so a long optimiser run adds many lines | Every automatic start is recorded, as decided; grouping them needs a design |
+| Ask AI, approved schema | The approved card | The approved card and the line "You approved the schema" | Both are records of the same act |
+| Ask AI, the staying helper | Until the page changes | Until the page changes or the page is reloaded (kept in this browser tab) | Not saved with the project |
+| Step-Loading board | Spinner while the next step loads | Steps switch at once (the state is already loaded); the spinner shows only on the first load | Nothing to wait for |
+| Prompt versions, Filtered | 1 on the board | Always 0 on the stand-ins (they have no safety filter); the real adapter reports it with `LlmCallError('filtered')` | Stand-ins |
+| Removed before the canvas (review 2026-11-09) | — | Prompt page: no diff preview, version selector or change note; Labeling models: no description, cost or speed per model | The canvas has none of them; to discuss if they are wanted back |
 | Step bar | Gold Labels "In progress" in the labeling board | Gold Labels is Finished once the eval set is labeled, In progress while it is partly labeled | Rule from the doc applied to the data |
 | Evaluation report, Compare, gold-label upload, prompt preview, fixed prompt images, placeholder autocomplete | On the canvas but marked not in the MVP | Removed from the code | UI Design doc §10 |
 
@@ -54,8 +86,8 @@ These code choices are approved but not drawn, because they are small or follow 
 | --- | --- |
 | Automatic paid starts | Decided 2026-11-06: every task starts by itself, with no cost limit and no Approve card. The user stops a costly task with its Stop button |
 | Choosing which models to use | Every model listed on Labeling models is used; there is no way to leave one out |
-| Reading Lark Doc links | Links show as chips in Ask AI; the agents' Lark Doc reading tool is not built yet |
-| Agent replies | The agents still name models "Model A" / "Model B" in their own text, and the page view they read still holds cost estimates, so a reply can mention cost |
+| Reading document links | Links show as chips in Ask AI; the agents' document reading tool is not built yet |
+| Agent replies | The helpers now read model names and version labels the way the pages show them, and their tool notes use the pages' terms. The page view they read still holds cost estimates, so a reply can mention cost |
 
 ## Tech changes
 

@@ -1,13 +1,22 @@
 import type {EndpointId, OptimisationRun, PromptVersion} from '@tsp/contracts';
 import {checkTemplate, newId, placeholderKeys} from '@tsp/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
+import {postEvent} from './chat-events.ts';
 import {buildReport, labelEvalSet, scoreOnOptimiserHalf} from './evaluation.ts';
 import {loadProjectState} from './projects.ts';
 import {createVersion} from './prompts.ts';
 
 const active = new Map<string, AbortController>();
 export const optimiserActive = (id: string) => active.has(id);
-export const stopOptimiser = (id: string) => active.get(id)?.abort();
+/** The user's Stop: ends the run and saves "You stopped the optimiser" in Ask AI. */
+export function stopOptimiser(id: string): void {
+  const ctrl = active.get(id);
+  if (!ctrl) return;
+  ctrl.abort();
+  void getApp()
+    .catalog.get('optimisation_runs', id)
+    .then(o => o && postEvent(o.projectId, 'stop', 'user', 'stopped the optimiser', {path: '/prompt'}));
+}
 
 const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
 

@@ -41,8 +41,14 @@ let current = null;
   const ask = async (p, text) => {
     await p.locator('aside.chat, button.ask').first().waitFor();
     if (!(await p.locator('aside.chat').count())) await button(p, 'Ask AI').click();
+    // Enter adds a line and never sends; only the Send button does.
+    const before = await p.locator('aside.chat .msg-u').count();
     await p.locator('#chat-input').fill(text);
-    await p.keyboard.press('Enter');
+    await p.locator('#chat-input').press('Enter');
+    await p.waitForTimeout(150);
+    if ((await p.locator('aside.chat .msg-u').count()) !== before) throw new Error('Enter sent the message');
+    if (!(await p.locator('#chat-input').inputValue()).endsWith('\n')) throw new Error('Enter did not add a line');
+    await p.locator('aside.chat').getByRole('button', {name: 'Send'}).click();
   };
 
   // Projects
@@ -56,7 +62,7 @@ let current = null;
   // Setup: the task goes in Ask AI, the draft is approved there
   await ask(page, 'Tag short videos by what the viewer gets from them: primary value, format and topics.');
   await page.locator('aside.chat').getByRole('button', {name: 'Approve'}).click({timeout: 20000});
-  await page.locator('aside.chat').getByText('Approved').waitFor();
+  await page.locator('aside.chat').getByText('Approved', {exact: true}).waitFor();
   await shot(page, '1-schema-approved');
   await button(page, 'Next: Evaluation').click();
   await button(page, 'Next: Models').click();
@@ -134,8 +140,10 @@ let current = null;
   // An agent question: the evaluation agent reads the report with a tool
   await page.goto(url('/prompt/'));
   await ask(page, 'Is the score good enough to pass?');
+  await page.locator('aside.chat').getByText('Scores helper joined to answer').waitFor({timeout: 20000});
   await page.locator('aside.chat').getByText(/macro-F1/i).last().waitFor({timeout: 20000});
-  log('evaluation agent:', (await page.locator('aside.chat .msg-a').last().innerText()).replace(/\n/g, ' ').slice(0, 160));
+  if (!(await page.locator('aside.chat .chat-who').innerText()).startsWith('Scores helper')) throw new Error('the helper that joined does not stay on the page');
+  log('scores helper:', (await page.locator('aside.chat .msg-a').last().innerText()).replace(/\n/g, ' ').slice(0, 160));
   await shot(page, '7-ask-ai');
 
   // An agent start: runs at once, with no Approve card
@@ -148,7 +156,10 @@ let current = null;
     .catch(() => 'no result');
   if (await page.locator('aside.chat').getByRole('button', {name: 'Approve', exact: true}).count()) throw new Error('an agent start asked for approval');
   if (tried === 'no result') throw new Error(`the agent start gave no result: ${(await page.locator('aside.chat').innerText()).slice(-300)}`);
-  log('agent start:', tried.split('\n')[0]);
+  // The staying helper passed it on, and the paid start left an action line.
+  await page.locator('aside.chat .evt').getByText(/^Prompt helper tried the prompt on \d+ eval examples?/).waitFor({timeout: 5000});
+  log('agent start:', tried.split('\n')[0], '|', (await page.locator('aside.chat .evt').allInnerTexts()).map(t => t.replace(/\n/g, ' ')).join(' / '));
+  await shot(page, '7b-ask-ai-actions');
 
   // Training set: start in tab 1
   await page.goto(url('/training-set/'));
@@ -208,7 +219,7 @@ let current = null;
     const ids = JSON.parse(localStorage.getItem('tsp-doc:predictions') || '[]').map(d => d.data._appId);
     const audit = docs('audit_log').map(a => a.action);
     const ts = docs('training_sets').pop();
-    return {state: task.state, done: task.done, total: task.total, failed: task.failed, predictions: preds.length, uniqueExamples: new Set(preds.map(p => p.exampleId)).size, duplicatePredictionIds: ids.length - new Set(ids).size, testTask: testTask && {state: testTask.state, done: testTask.done, total: testTask.total}, trainTotal: ts.trainTotal, toolCalls: tools, autoStarts: audit.filter(a => a === 'auto_start').length, cardsApproved: audit.filter(a => a === 'start_card.approve').length};
+    return {state: task.state, done: task.done, total: task.total, failed: task.failed, predictions: preds.length, uniqueExamples: new Set(preds.map(p => p.exampleId)).size, duplicatePredictionIds: ids.length - new Set(ids).size, testTask: testTask && {state: testTask.state, done: testTask.done, total: testTask.total}, trainTotal: ts.trainTotal, toolCalls: tools, autoStarts: audit.filter(a => a === 'auto_start').length, actionLines: docs('chat_messages').filter(m => m.role === 'event' && m.event).length};
   });
   log('training task:', JSON.stringify(facts));
   // Telemetry: flush, then read what the stand-in sink kept (events in localStorage, metrics text)
@@ -228,7 +239,7 @@ let current = null;
     const series = [...new Set(text.split('\n').filter(l => l && !l.startsWith('#')).map(l => l.split(/[{ ]/)[0].replace(/_(bucket|sum|count)$/, '')))];
     // Labels whose values come from the running apps: none should fall back to "other".
     const undeclared = [...new Set([...text.matchAll(/\b(endpoint|model|method|op|collection)="other"/g)].map(m => m[1]))];
-    return {events: ev.length, names, leaks, undeclared, metricNames: series.length, sample: series.filter(s => /tsp_(llm_requests|labeling_examples|agent_turns|bff_calls|web_page_views|auto_starts|cost_confirms)/.test(s))};
+    return {events: ev.length, names, leaks, undeclared, metricNames: series.length, sample: series.filter(s => /tsp_(llm_requests|labeling_examples|agent_turns|bff_calls|web_page_views|auto_starts)/.test(s))};
   });
   log('telemetry:', JSON.stringify(tel));
   log('console errors:', errors.length ? errors : 'none');
@@ -241,6 +252,8 @@ let current = null;
     facts.duplicatePredictionIds === 0 &&
     facts.total === facts.trainTotal &&
     facts.testTask?.state === 'done' &&
+    facts.autoStarts > 0 &&
+    facts.actionLines > 0 &&
     exportFacts.train === exportFacts.trainCsvRows &&
     exportFacts.test === exportFacts.testCsvRows &&
     exportFacts.test > 0 &&

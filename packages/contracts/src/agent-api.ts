@@ -2,6 +2,7 @@ import type {AgentModel, RawExample} from './platform-api.ts';
 import type {
   AgentPreset,
   ChatAttachment,
+  ChatEvent,
   ChatMessage,
   FeatureSelection,
   FieldMetrics,
@@ -80,7 +81,14 @@ export interface AgentEmittedMessage {
   agent: AgentPreset | null;
   text: string;
   choices?: string[];
+  event?: ChatEvent;
 }
+
+/**
+ * Live progress of a turn, reported while it runs: a message as soon as it is final (the host
+ * saves it then), what an agent is doing (`working`), and its reply as it streams (`reply`).
+ */
+export type AgentTurnProgress = (p: {message: AgentEmittedMessage} | {agent: AgentPreset; working: string} | {agent: AgentPreset; reply: string}) => void;
 
 export type AgentProposalDraft =
   | {
@@ -136,6 +144,6 @@ export interface OptimiserReflectOutput {
 
 /** The agent runtime as the bff sees it (implemented by `apps/agents`). */
 export interface AgentRuntimeContract {
-  runAgentTurn(input: AgentTurnInput, llm: AgentModel, tools?: AgentToolHost): Promise<AgentTurnOutput>;
+  runAgentTurn(input: AgentTurnInput, llm: AgentModel, tools?: AgentToolHost, progress?: AgentTurnProgress): Promise<AgentTurnOutput>;
   reflectPrompt(input: OptimiserReflectInput, llm: AgentModel): Promise<OptimiserReflectOutput>;
 }

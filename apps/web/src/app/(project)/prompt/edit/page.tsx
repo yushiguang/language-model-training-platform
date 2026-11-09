@@ -48,7 +48,6 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
   const [draft, setDraft] = useState<Draft>(base);
   const [change, setChange] = useState('');
   const [madeBy, setMadeBy] = useState<'user' | 'prompt_agent'>('user');
-  const [err, setErr] = useState<string | null>(null);
   const types = useMemo(() => [...new Set(state.examples.map(e => e.type))], [state.examples]);
   const check = useChecks(draft, state.setup?.schema, types);
   const sum = diffSummary(diffLines(version.template, draft.template));
@@ -71,17 +70,13 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
     setMadeBy('prompt_agent');
   });
 
+  // A failed save shows the page's red banner with Retry (the Button reports it).
   const save = async () => {
-    setErr(null);
-    try {
-      const summary = change || (sum.added || sum.removed ? `${sum.added} line${sum.added === 1 ? '' : 's'} added, ${sum.removed} removed` : 'Features changed');
-      const v = await createVersion(state.project.id, {...draft, parent: version, madeBy, change: summary, kind: 'major', schema: state.setup!.schema!, schemaVersion: state.setup!.schemaVersion});
-      // Saving is the user's start: the new version is scored right away.
-      void scoreVersion(state.project.id, v);
-      router.push(href('/prompt'));
-    } catch (e) {
-      setErr((e as Error).message);
-    }
+    const summary = change || (sum.added || sum.removed ? `${sum.added} line${sum.added === 1 ? '' : 's'} added, ${sum.removed} removed` : 'Features changed');
+    const v = await createVersion(state.project.id, {...draft, parent: version, madeBy, change: summary, kind: 'major', schema: state.setup!.schema!, schemaVersion: state.setup!.schemaVersion});
+    // Saving is the user's start: the new version is scored right away.
+    void scoreVersion(state.project.id, v);
+    router.push(href('/prompt'));
   };
   const discard = () => {
     setDraft(base);
@@ -99,7 +94,7 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
         </span>
       )}
       {dirty && <Button label="Discard" kind="ghost" onClick={discard} />}
-      <Button label={`Save as ${next}`} kind="primary" disabled={!dirty || check.errors.length > 0} title={err ?? (check.errors.length ? 'Fix the errors in Checks first' : undefined)} onClick={save} />
+      <Button label={`Save as ${next}`} kind="primary" disabled={!dirty || check.errors.length > 0} title={check.errors.length ? 'Fix the errors in Checks first' : undefined} onClick={save} />
     </>
   );
   return (

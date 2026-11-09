@@ -17,17 +17,18 @@ function whyBelow(m: Metrics, t: Thresholds, evalCount: number): string {
 
 export const MADE_BY: Record<Actor, string> = {
   user: 'You',
-  prompt_agent: 'Prompt agent',
+  prompt_agent: 'Prompt helper',
   optimiser: 'Optimiser',
-  schema_agent: 'Schema agent',
+  schema_agent: 'Labels helper',
   system: 'System',
 };
 
+/** The helpers' names in Ask AI (plain words; the presets keep their technical ids). */
 const AGENT_NAMES: Record<AgentPreset, string> = {
-  front_desk: 'Front desk',
-  schema_agent: 'Schema agent',
-  prompt_agent: 'Prompt agent',
-  evaluation_agent: 'Evaluation agent',
+  front_desk: 'Assistant',
+  schema_agent: 'Labels helper',
+  prompt_agent: 'Prompt helper',
+  evaluation_agent: 'Scores helper',
 };
 
 export const agentName = (preset: AgentPreset): string => AGENT_NAMES[preset];

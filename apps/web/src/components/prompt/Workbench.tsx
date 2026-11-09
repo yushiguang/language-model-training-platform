@@ -143,7 +143,7 @@ function Features({features, onChange}: {features: FeatureSelection; onChange?: 
                     const ph = `{{${f.key}}}`;
                     return (
                       <div key={f.key} className="row" style={{height: 36, gap: 12}}>
-                        <span className="grow one copy-name" role="button" tabIndex={0} title={copied === ph ? `Copied ${ph}` : `Click to copy ${ph}`} onClick={() => copy(ph)} onKeyDown={e => e.key === 'Enter' && copy(ph)}>
+                        <span className="grow one copy-name" role="button" tabIndex={0} title={copied === ph ? `Copied ${ph}` : `Click to copy ${ph}`} onClick={() => copy(ph)} onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), copy(ph))}>
                           {f.label}
                         </span>
                         <Cb state={features[group].includes(f.key) ? 'on' : 'off'} label={`${f.label}, ${name}`} onToggle={onChange ? () => toggle(group, f.key) : undefined} />

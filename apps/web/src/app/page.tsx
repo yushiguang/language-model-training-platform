@@ -26,8 +26,9 @@ export default function Home() {
         list.map(async p => {
           const s = await loadProjectState(p.id);
           const st = s ? nodeStatuses(s.facts) : null;
-          const cur = NODES.find(n => st?.[n.id] === 'current');
-          return {...p, where: cur ? cur.label : 'Training Set', path: cur ? cur.path : '/training-set'};
+          // The first step not done yet; a project with every step done is Finished.
+          const cur = st ? NODES.find(n => st[n.id] !== 'done') : NODES[0];
+          return {...p, where: cur ? cur.label : 'Finished', path: cur ? cur.path : '/training-set'};
         }),
       );
       setProjects(withWhere);
@@ -63,7 +64,7 @@ export default function Home() {
           <div className="container">
             <Card title="New project" style={{width: 706}} className="form" actions={<Button label="Create project" kind="primary" icon="plus" onClick={create} />}>
               <Field label="Project name">
-                <input className="input" value={name} placeholder="Short-video tagging" onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && void create()} />
+                <input className="input" value={name} placeholder="Short-video tagging" onChange={e => setName(e.target.value)} />
               </Field>
             </Card>
             {projects && projects.length > 0 && (

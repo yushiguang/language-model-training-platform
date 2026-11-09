@@ -32,14 +32,22 @@ export function findVersion(state: ProjectState, ref: unknown): PromptVersion | 
   return state.versions.find(v => v.id === ref || versionLabel(v) === label || versionLabel(v) === `v${label}`);
 }
 
-export const asModel = (m: unknown): EndpointId | undefined => (m === 'A' || m === 'B' ? m : undefined);
+/** A model named the way the pages name it ("gpt-5.4"), or by its slot ("A"); undefined if neither. */
+export function asModel(m: unknown, state?: ProjectState): EndpointId | undefined {
+  if (m === 'A' || m === 'B') return m;
+  if (typeof m !== 'string' || !state) return undefined;
+  return state.endpoints.find(e => e.name.toLowerCase() === m.trim().toLowerCase())?.id;
+}
+
+/** The model's name as the pages show it. */
+export const modelName = (state: ProjectState, id: EndpointId): string => state.endpoints.find(e => e.id === id)?.name ?? id;
 
 function scoresOf(state: ProjectState, v: PromptVersion) {
   return (state.setup?.models ?? []).map(m => {
     const r = state.reports.find(x => x.promptVersionId === v.id && x.endpoint === m.endpoint && !x.archivedNow);
     const run = state.runs.find(x => x.promptVersionId === v.id && x.endpoint === m.endpoint);
     return {
-      model: m.endpoint,
+      model: modelName(state, m.endpoint),
       lowestFieldMacroF1: r ? r2(r.metrics.lowestField.macroF1) : null,
       passed: r ? r.passed : null,
       labeling: !r && run ? `${run.state}, ${run.done} of ${run.total}` : undefined,
@@ -59,7 +67,7 @@ function versionDetail(state: ProjectState, v: PromptVersion) {
 function reportView(state: ProjectState, v: PromptVersion | undefined, model: EndpointId | undefined) {
   const current = state.reports.filter(r => !r.archivedNow && (!model || r.endpoint === model));
   const r = v ? current.find(x => x.promptVersionId === v.id) : current[0];
-  if (!r) return {report: null, why: v ? `${versionLabel(v)} has no report${model ? ` on Model ${model}` : ''} yet.` : 'No version has a report yet.'};
+  if (!r) return {report: null, why: v ? `${versionLabel(v)} has no report${model ? ` on ${modelName(state, model)}` : ''} yet.` : 'No version has a report yet.'};
   const ver = state.versions.find(x => x.id === r.promptVersionId)!;
   const t = state.setup?.thresholds;
   const nEval = state.examples.filter(e => e.split === 'eval').length;
@@ -72,7 +80,7 @@ function reportView(state: ProjectState, v: PromptVersion | undefined, model: En
     report: {
       version: versionLabel(ver),
       versionId: ver.id,
-      model: r.endpoint,
+      model: modelName(state, r.endpoint),
       scoredOn: r.metrics.n,
       passed: r.passed,
       fields: r.metrics.fields.map(f => ({field: f.field, kind: f.kind, macroF1: r2(f.macroF1), accuracy: r2(f.accuracy), weakestValues: [...f.values].sort((a, b) => a.f1 - b.f1).slice(0, 3).map(x => ({value: x.value, f1: r2(x.f1)}))})),
@@ -141,7 +149,7 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
       const testRun = state.testRuns[0];
       return base(`Gold labels: eval ${state.facts.goldEvalDone} of ${counts.eval}, test ${state.facts.goldTestDone} of ${counts.test}. Eval labels are needed for scores; test labels are optional.`, {
         eval: {done: state.facts.goldEvalDone, total: counts.eval},
-        test: {done: state.facts.goldTestDone, total: counts.test, modelAnswers: testRun ? {state: testRun.state, done: testRun.done, total: testRun.total, model: testRun.endpoint} : null},
+        test: {done: state.facts.goldTestDone, total: counts.test, modelAnswers: testRun ? {state: testRun.state, done: testRun.done, total: testRun.total, model: modelName(state, testRun.endpoint)} : null},
         needRecheckAfterSchemaChange: state.staleGold.size,
         note: 'Model answers stay hidden while people label, so as not to sway them. Do not reveal them unless asked.',
       });
@@ -151,7 +159,7 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
       return base(`${state.versions.length} prompt version(s); the newest is ${state.versions[0] ? versionLabel(state.versions[0]) : 'none'}.`, {
         versions: state.versions.slice(0, 12).map(v => versionRow(state, v)),
         moreVersions: Math.max(0, state.versions.length - 12),
-        optimiser: running ? {model: running.endpoint, state: running.state, candidates: running.candidates, calls: running.calls, budgetCalls: running.budgetCalls, stopReason: running.stopReason} : null,
+        optimiser: running ? {model: modelName(state, running.endpoint), state: running.state, candidates: running.candidates, calls: running.calls, budgetCalls: running.budgetCalls, stopReason: running.stopReason} : null,
         advice: adviceOf(state),
       });
     }
@@ -162,21 +170,21 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
     case 'compare': {
       const a = findVersion(state, params.a);
       const b = findVersion(state, params.b);
-      const one = (v: PromptVersion | undefined, m: unknown) => (v ? {...versionRow(state, v), ...reportView(state, v, asModel(m) ?? 'A')} : null);
+      const one = (v: PromptVersion | undefined, m: unknown) => (v ? {...versionRow(state, v), ...reportView(state, v, asModel(m, state) ?? 'A')} : null);
       return base(a && b ? `Comparing ${versionLabel(a)} (Model ${params.am ?? 'A'}) with ${versionLabel(b)} (Model ${params.bm ?? 'A'}).` : 'Pick two scores to compare.', {a: one(a, params.am), b: one(b, params.bm)});
     }
     case 'report': {
       const v = findVersion(state, params.v);
-      const view = reportView(state, v, asModel(params.m));
-      return base(view.report ? `Eval report for ${view.report.version} on Model ${view.report.model}: lowest field macro-F1 ${view.report.lowestField.macroF1} (${view.report.lowestField.field}), ${view.report.passed ? 'passes' : 'below'} the threshold.` : view.why!, {...view, advice: adviceOf(state)});
+      const view = reportView(state, v, asModel(params.m, state));
+      return base(view.report ? `Eval report for ${view.report.version} on ${view.report.model}: lowest field macro-F1 ${view.report.lowestField.macroF1} (${view.report.lowestField.field}), ${view.report.passed ? 'passes' : 'below'} the threshold.` : view.why!, {...view, advice: adviceOf(state)});
     }
     case 'training': {
       const ts = state.trainingSets[0];
       const pick = defaultOutputPick(state);
       if (ts) {
         const v = state.versions.find(x => x.id === ts.promptVersionId);
-        return base(`Training and test sets with ${v ? versionLabel(v) : 'a version'} on Model ${ts.endpoint}: ${ts.state}, ${ts.done} of ${ts.total} labeled.`, {
-          run: {state: ts.state, version: v ? versionLabel(v) : null, model: ts.endpoint, done: ts.done, total: ts.total, train: ts.trainTotal ?? ts.total, test: ts.testTotal ?? 0, labeled: ts.labeled, invalid: ts.invalid, failed: ts.failed, costUsd: r2(ts.costUsd), approvedUsd: r2(ts.estimateUsd), evaluated: ts.evaluated},
+        return base(`Training and test sets with ${v ? versionLabel(v) : 'a version'} on ${modelName(state, ts.endpoint)}: ${ts.state}, ${ts.done} of ${ts.total} labeled.`, {
+          run: {state: ts.state, version: v ? versionLabel(v) : null, model: modelName(state, ts.endpoint), done: ts.done, total: ts.total, train: ts.trainTotal ?? ts.total, test: ts.testTotal ?? 0, labeled: ts.labeled, invalid: ts.invalid, failed: ts.failed, costUsd: r2(ts.costUsd), approvedUsd: r2(ts.estimateUsd), evaluated: ts.evaluated},
         });
       }
       // The same plan as the page's confirm: train is labeled; a test example uses its gold label,
@@ -186,11 +194,11 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
       const t = p.test;
       const run = p.total(false);
       return base(
-        `Not generated yet. It would use ${versionLabel(pick.version)} on Model ${pick.endpoint}: ${p.train.count} train examples, about $${run.costUsd.toFixed(2)}. Test set: ${t.withGold.length} with a gold label, ${t.withAnswer.length} with an answer from it, ${t.toLabel.length} with no label${t.toLabel.length ? ` (labeling them adds about $${t.costUsd.toFixed(2)})` : ''}.`,
+        `Not generated yet. It would use ${versionLabel(pick.version)} on ${modelName(state, pick.endpoint)}: ${p.train.count} train examples, about $${run.costUsd.toFixed(2)}. Test set: ${t.withGold.length} with a gold label, ${t.withAnswer.length} with an answer from it, ${t.toLabel.length} with no label${t.toLabel.length ? ` (labeling them adds about $${t.costUsd.toFixed(2)})` : ''}.`,
         {
           plan: {
             version: versionLabel(pick.version),
-            model: pick.endpoint,
+            model: modelName(state, pick.endpoint),
             train: p.train.count,
             test: {total: t.total, withGold: t.withGold.length, withAnswer: t.withAnswer.length, noLabel: t.toLabel.length, labelThemUsd: r2(t.costUsd)},
             estimateUsd: r2(run.costUsd),
@@ -236,6 +244,7 @@ export function agentTools(projectId: string): AgentToolHost {
           const params: Record<string, string> = {};
           for (const k of ['v', 'm', 'a', 'b', 'am', 'bm', 'step']) if (typeof args[k] === 'string') params[k] = args[k] as string;
           if (params.v) params.v = findVersion(state, params.v)?.id ?? params.v;
+          if (params.m) params.m = asModel(params.m, state) ?? params.m;
           return build(state, {page, params}, {}, await answeredTest(state, page));
         }
         case 'list_versions':
@@ -246,7 +255,7 @@ export function agentTools(projectId: string): AgentToolHost {
           return versionDetail(state, v);
         }
         case 'get_report':
-          return reportView(state, findVersion(state, args.version), asModel(args.model));
+          return reportView(state, findVersion(state, args.version), asModel(args.model, state));
         case 'get_examples': {
           const ids = Array.isArray(args.ids) ? new Set(args.ids.map(String)) : null;
           const split = typeof args.split === 'string' ? args.split : null;
@@ -260,7 +269,7 @@ export function agentTools(projectId: string): AgentToolHost {
         }
         case 'get_predictions': {
           const v = findVersion(state, args.version);
-          const m = asModel(args.model) ?? state.setup?.models[0]?.endpoint;
+          const m = asModel(args.model, state) ?? state.setup?.models[0]?.endpoint;
           const settings = state.setup?.models.find(x => x.endpoint === m);
           if (!v || !settings) throw new Error('Name a version and one of the chosen models.');
           const preds = await labeling.predictions(v.id, settings.endpoint, settingsHash(settings));
@@ -269,7 +278,7 @@ export function agentTools(projectId: string): AgentToolHost {
             .filter(e => e.split === 'eval' && preds.has(e.id))
             .map(e => ({e, p: preds.get(e.id)!, g: state.gold.get(e.id)?.answer ?? null}))
             .filter(({p, g}) => !args.mixedUpOnly || !p.answer || (g && state.setup!.schema!.fields.some(f => !same(g[f.name], p.answer![f.name]))));
-          return {version: versionLabel(v), model: m, rows: rows.slice(0, limitOf(args.limit, 20, 10)).map(({e, p, g}) => ({id: e.externalId, title: e.title, model: p.answer, invalid: p.invalidReason, gold: g})), matching: rows.length};
+          return {version: versionLabel(v), model: modelName(state, settings.endpoint), rows: rows.slice(0, limitOf(args.limit, 20, 10)).map(({e, p, g}) => ({id: e.externalId, title: e.title, model: p.answer, invalid: p.invalidReason, gold: g})), matching: rows.length};
         }
         case 'check_template': {
           const template = typeof args.template === 'string' ? args.template : '';

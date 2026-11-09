@@ -7,7 +7,7 @@ const version = {id: 'pv_1', template: 'Label {{Title}}', features: {video: [], 
 const state = (over: Partial<ProjectState> = {}): ProjectState =>
   ({
     project: {id: 'pr_1'},
-    setup: {schema: {policy: '', fields: []}, models: [{endpoint: 'A', maxOutputTokens: 512, temperature: 0}], thresholds: null},
+    setup: {schema: {fields: []}, models: [{endpoint: 'A', maxOutputTokens: 512, temperature: 0}], thresholds: null},
     snapshot: {split: {eval: 2, test: 0, train: 0}},
     examples: [
       {id: 'ex_1', split: 'eval', features: {Title: 'a'}, type: 'video'},

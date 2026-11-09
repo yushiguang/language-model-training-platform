@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {scriptedAgent} from '@tsp/platform';
-import {runAgentTurn} from './runtime.ts';
+import {partialReply, runAgentTurn} from './runtime.ts';
 
 test('runAgentTurn hands off from front_desk to schema_agent and returns a schema proposal', async () => {
   const llm = scriptedAgent();
@@ -29,7 +29,9 @@ test('runAgentTurn hands off from front_desk to schema_agent and returns a schem
   assert.equal(out.invocations[0].to, 'front_desk');
   assert.equal(out.invocations[1].to, 'schema_agent');
   assert.equal(out.proposal?.kind, 'schema');
-  assert.ok(out.messages.some(m => m.role === 'event' && m.text.includes('Schema agent joined')));
+  assert.ok(out.messages.some(m => m.role === 'event' && m.event === 'join' && m.text === 'Labels helper joined to answer'));
+  // The front desk's "I'll bring in…" is not shown: the join line says who answers.
+  assert.equal(out.messages.filter(m => m.role === 'agent' && m.agent === 'front_desk').length, 0);
 });
 
 test('an unknown handoff target is ignored and the front desk answers itself', async () => {
@@ -65,7 +67,7 @@ test('off the report page, the evaluation agent reads the report with a tool and
   );
   assert.deepEqual(calls, ['get_report:{"version":"v1.2"}']);
   assert.deepEqual(out.toolCalls.map(t => [t.agent, t.name, t.ok]), [['evaluation_agent', 'get_report', true]]);
-  assert.match(out.messages.at(-1)!.text, /v1\.2 on Model A .*0\.71.*needs at least 0\.80/);
+  assert.match(out.messages.at(-1)!.text, /v1\.2 on A .*0\.71.*needs at least 0\.80/);
 });
 
 test('a tool outside the preset list is refused, and a model that keeps asking still ends the turn', async () => {
@@ -108,4 +110,32 @@ test('the front desk cannot use start tools; the scripted prompt agent starts sc
   assert.deepEqual(calls, ['score_version:{"version":"v1.2","model":"A"}']);
   assert.match(out.messages.at(-1)!.text, /[Ss]cor/);
   assert.equal(out.modelCalls.length, 3);
+});
+
+test('the reply of a JSON answer is read while it arrives', () => {
+  assert.equal(partialReply('{"rep'), null);
+  assert.equal(partialReply('{"reply": "On gpt'), 'On gpt');
+  assert.equal(partialReply('{"reply": "Line one\\nand \\"two\\" \\u00e9'), 'Line one\nand "two" é');
+  assert.equal(partialReply('{"reply": "Done.", "schema": {}}'), 'Done.');
+  assert.equal(partialReply('{"reply": "half an escape \\'), 'half an escape ');
+});
+
+test('with progress, the turn reports the live line, the streamed reply and each message as it is final', async () => {
+  const seen: string[] = [];
+  const out = await runAgentTurn(
+    {userText: 'Is v1 good enough?', page: {label: 'Prompt versions', agent: 'front_desk', intent: 'answer', context: {}}, workspace: {projectId: 'pr_1', task: '', schema: null, history: [], pageView: null}},
+    scriptedAgent(),
+    {async call() {
+      return {report: null, why: 'No report yet.'};
+    }},
+    p => seen.push('message' in p ? `message:${p.message.event ?? p.message.role}` : 'working' in p ? `working:${p.agent}:${p.working}` : `reply:${p.agent}`),
+  );
+  assert.equal(out.messages.at(-1)!.agent, 'evaluation_agent');
+  const first = (s: string) => seen.findIndex(x => x.startsWith(s));
+  assert.ok(first('working:front_desk:Thinking') === 0);
+  assert.ok(first('message:join') > 0);
+  assert.ok(seen.includes('working:evaluation_agent:Reading the v1 report…'));
+  assert.ok(first('reply:evaluation_agent') > first('working:evaluation_agent:Reading the v1 report…'));
+  assert.ok(!seen.includes('reply:front_desk'), "a reply that hands off isn't streamed");
+  assert.equal(seen.at(-1), 'message:agent');
 });

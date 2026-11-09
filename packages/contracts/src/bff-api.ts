@@ -1,5 +1,7 @@
 import type {
   Actor,
+  AgentLive,
+  AgentPreset,
   AgentProposal,
   Answer,
   ChatAttachment,
@@ -107,6 +109,11 @@ export interface BffContract {
   // Assistant & proposals
   chatHistory(projectId: string): Promise<ChatMessage[]>;
   isAgentBusy(projectId: string): boolean;
+  /** The turn running now, if any: who works, what it is doing, the reply so far (HTTP: SSE). */
+  agentLive(projectId: string): AgentLive | null;
+  subscribeAgentLive(listener: () => void): () => void;
+  /** Which helper answers the next message on this page: one that joined on it stays until the page changes. */
+  answeringAgent(projectId: string, page: PageContext): AgentPreset;
   sendUserMessage(projectId: string, text: string, page: PageContext, attachments?: ChatAttachment[]): Promise<AgentProposal | null>;
   openProposals(projectId: string, kind: AgentProposal['kind']): Promise<AgentProposal[]>;
   /** Open and approved proposals, oldest first (Ask AI cards). */

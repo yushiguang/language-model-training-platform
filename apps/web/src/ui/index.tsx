@@ -6,7 +6,7 @@
  * the canvas. A change to a part goes on the canvas first, then here.
  */
 import Link from 'next/link';
-import {useEffect, useRef, useState, type CSSProperties, type ReactNode} from 'react';
+import {createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode} from 'react';
 
 /** Mounted once around the app. The kit needs no theme provider; this only sets the root class. */
 export function UiProvider({children}: {children: ReactNode}) {
@@ -109,6 +109,12 @@ const PATHS: Record<string, ReactNode> = {
   ),
   stop: <rect x="6" y="6" width="12" height="12" rx="1.5" />,
   play: <path d="M6 4v16l14-8z" />,
+  next: (
+    <>
+      <path d="M5 12h14" />
+      <path d="m12 5 7 7-7 7" />
+    </>
+  ),
 };
 
 export function Icon({name, size, style}: {name: keyof typeof PATHS | string; size?: number; style?: CSSProperties}) {
@@ -117,6 +123,67 @@ export function Icon({name, size, style}: {name: keyof typeof PATHS | string; si
       {PATHS[name]}
     </svg>
   );
+}
+
+// ---------- pending and failed actions ----------
+/**
+ * A failed action (design: "Failed" rule): one red banner at the top of the content saying what
+ * failed, with Retry. The user's edits stay where they are. One at a time; a new failure replaces it.
+ */
+type ActionError = {text: string; retry?: () => void};
+let actionError: ActionError | null = null;
+const errorListeners = new Set<() => void>();
+const setActionError = (e: ActionError | null) => {
+  actionError = e;
+  errorListeners.forEach(fn => fn());
+};
+export const reportActionError = (text: string, retry?: () => void) => setActionError({text, retry});
+export const clearActionError = () => setActionError(null);
+const subscribeErrors = (fn: () => void) => {
+  errorListeners.add(fn);
+  return () => void errorListeners.delete(fn);
+};
+
+/** The banner for the last failed action, if any (rendered at the top of the page content). */
+export function ActionErrorBanner() {
+  const e = useSyncExternalStore(
+    subscribeErrors,
+    () => actionError,
+    () => null,
+  );
+  if (!e) return null;
+  return (
+    <div className="err-slot">
+      <Banner
+        tone="err"
+        text={e.text}
+        action={
+          e.retry ? (
+            <Button
+              label="Retry"
+              kind="white"
+              size="sm"
+              onClick={() => {
+                const r = e.retry!;
+                clearActionError();
+                r();
+              }}
+            />
+          ) : undefined
+        }
+      />
+    </div>
+  );
+}
+
+/** Buttons in one group (a page header's actions) lock together while one of them is working. */
+const PendingGroup = createContext<{
+  pending: boolean;
+  set: (p: boolean) => void;
+} | null>(null);
+export function ActionGroup({children}: {children: ReactNode}) {
+  const [pending, set] = useState(false);
+  return <PendingGroup.Provider value={{pending, set}}>{children}</PendingGroup.Provider>;
 }
 
 // ---------- buttons ----------
@@ -146,10 +213,11 @@ export function Button({
   className?: string;
 }) {
   const [busy, setBusy] = useState(false);
-  const cls = `btn btn-${kind}${size === 'sm' ? ' btn-sm' : ''}${label ? '' : ' btn-icon'}${className ? ` ${className}` : ''}`;
+  const group = useContext(PendingGroup);
+  const cls = `btn btn-${kind}${size === 'sm' ? ' btn-sm' : ''}${label ? '' : ' btn-icon'}${busy ? ' pending' : ''}${className ? ` ${className}` : ''}`;
   const inner = (
     <>
-      {icon && <Icon name={icon} />}
+      {busy ? <Icon name="ring" /> : icon && <Icon name={icon} />}
       {label}
     </>
   );
@@ -159,20 +227,40 @@ export function Button({
         {inner}
       </Link>
     );
+  // Work that takes time shows a spinner and locks the button (and its group) until it ends; a
+  // failure shows the page's red banner with Retry.
   const click = async () => {
-    if (!onClick || busy) return;
-    const r = onClick();
+    if (!onClick || busy || group?.pending) return;
+    let r: void | Promise<unknown>;
+    try {
+      r = onClick();
+    } catch (e) {
+      failed(e);
+      return;
+    }
     if (r instanceof Promise) {
       setBusy(true);
+      group?.set(true);
       try {
         await r;
+        clearActionError();
+      } catch (e) {
+        failed(e);
       } finally {
         setBusy(false);
+        group?.set(false);
       }
     }
   };
+  const failed = (e: unknown) => {
+    console.warn(e);
+    // A plain sentence from the backend ("Fix 2 errors in Checks first.") says why; anything else is a connection problem.
+    const msg = e instanceof Error ? e.message : '';
+    const why = /^[A-Z][^{}<>\n]{0,160}\.$/.test(msg) ? msg : 'Check your connection and try again.';
+    reportActionError(`Couldn't ${(label ?? ariaLabel ?? 'do that').toLowerCase()}. ${why}`, () => void click());
+  };
   return (
-    <button type="button" className={cls} disabled={disabled || busy} onClick={() => void click()} title={title} aria-label={ariaLabel}>
+    <button type="button" className={cls} disabled={disabled || busy || (!!group?.pending && !busy)} aria-busy={busy || undefined} onClick={() => void click()} title={title} aria-label={ariaLabel}>
       {inner}
     </button>
   );
@@ -180,7 +268,12 @@ export function Button({
 
 // ---------- badges ----------
 export type Tone = 'ok' | 'err' | 'info' | 'run' | 'warn' | 'gray';
-const TONE_ICON: Partial<Record<Tone, string>> = {ok: 'check', err: 'x', info: 'ring', run: 'ring'};
+const TONE_ICON: Partial<Record<Tone, string>> = {
+  ok: 'check',
+  err: 'x',
+  info: 'ring',
+  run: 'ring',
+};
 
 export function Badge({text, tone = 'gray', icon = true}: {text: string; tone?: Tone; icon?: boolean}) {
   const i = icon ? TONE_ICON[tone] : undefined;
@@ -282,7 +375,12 @@ export function Table({cols, rows, first = 28, actWidth = 160}: {cols: Col[]; ro
     <table className="tbl">
       <colgroup>
         {cols.map((c, i) => (
-          <col key={i} style={{width: i === 0 ? `${first}%` : c.kind === 'act' ? `${actWidth}px` : 'auto'}} />
+          <col
+            key={i}
+            style={{
+              width: i === 0 ? `${first}%` : c.kind === 'act' ? `${actWidth}px` : 'auto',
+            }}
+          />
         ))}
       </colgroup>
       <thead>
@@ -310,9 +408,9 @@ export function Table({cols, rows, first = 28, actWidth = 160}: {cols: Col[]; ro
 }
 
 // ---------- form ----------
-export function Field({label, children, width}: {label: ReactNode; children: ReactNode; width?: number}) {
+export function Field({label, children, width, off}: {label: ReactNode; children: ReactNode; width?: number; off?: boolean}) {
   return (
-    <label className="field" style={width ? {width} : undefined}>
+    <label className={off ? 'field off' : 'field'} style={width ? {width} : undefined}>
       <span className="field-l">{label}</span>
       {children}
     </label>
@@ -354,14 +452,7 @@ export function Progress({done, total}: {done: number; total: number}) {
 /** One choice of a few (radio). The meaning sits on the title's hover. */
 export function Opt({title, tip, checked, onSelect, extra}: {title: string; tip: string; checked: boolean; onSelect: () => void; extra?: ReactNode}) {
   return (
-    <div
-      className="opt"
-      role="radio"
-      aria-checked={checked}
-      tabIndex={0}
-      onClick={onSelect}
-      onKeyDown={e => (e.key === ' ' || e.key === 'Enter') && (e.preventDefault(), onSelect())}
-    >
+    <div className="opt" role="radio" aria-checked={checked} tabIndex={0} onClick={onSelect} onKeyDown={e => (e.key === ' ' || e.key === 'Enter') && (e.preventDefault(), onSelect())}>
       <span className="radio" />
       <b>
         <Hov text={title} tip={tip} />
@@ -409,7 +500,10 @@ export function Cb({state, onToggle, label}: {state: 'on' | 'off' | 'mixed'; onT
       aria-checked={mixed ? 'mixed' : state === 'on'}
       aria-label={label}
       tabIndex={onToggle ? 0 : -1}
-      style={{cursor: onToggle ? 'pointer' : undefined, ...(mixed ? {background: 'var(--text)', borderColor: 'var(--text)'} : {})}}
+      style={{
+        cursor: onToggle ? 'pointer' : undefined,
+        ...(mixed ? {background: 'var(--text)', borderColor: 'var(--text)'} : {}),
+      }}
       onClick={onToggle}
       onKeyDown={e => onToggle && (e.key === ' ' || e.key === 'Enter') && (e.preventDefault(), onToggle())}
     >
@@ -462,17 +556,10 @@ export function Suggestion({title, text, actions, kicker = true}: {title: string
     </div>
   );
 }
-export function SuggestionCard(props: {title: string; text?: string; actions?: ReactNode}) {
-  return (
-    <section className="card ai" aria-label="AI Suggestion">
-      <Suggestion {...props} />
-    </section>
-  );
-}
 
-export function Banner({text, action}: {text: string; action?: ReactNode}) {
+export function Banner({text, action, tone = 'warn'}: {text: string; action?: ReactNode; tone?: 'warn' | 'err'}) {
   return (
-    <div className="banner warn" role="status">
+    <div className={`banner ${tone}`} role={tone === 'err' ? 'alert' : 'status'}>
       <Icon name="alert" />
       <span className="grow">{text}</span>
       {action}
@@ -483,9 +570,22 @@ export function Banner({text, action}: {text: string; action?: ReactNode}) {
 // ---------- tabs ----------
 export function Tabs<K extends string>({items, selected, onSelect, end, label}: {items: {key: K; label: string; count?: ReactNode; extra?: ReactNode}[]; selected: K; onSelect: (k: K) => void; end?: ReactNode; label: string}) {
   return (
-    <div className="tabs" role="tablist" aria-label={label}>
+    <div
+      className="tabs"
+      role="tablist"
+      aria-label={label}
+      // Left and right arrows move between tabs; only the selected tab is in the Tab order.
+      onKeyDown={e => {
+        if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+        const i = items.findIndex(t => t.key === selected);
+        const next = items[(i + (e.key === 'ArrowRight' ? 1 : items.length - 1)) % items.length];
+        e.preventDefault();
+        onSelect(next.key);
+        (e.currentTarget.querySelector(`[data-tab="${next.key}"]`) as HTMLElement | null)?.focus();
+      }}
+    >
       {items.map(t => (
-        <button key={t.key} type="button" role="tab" className="tab" aria-selected={t.key === selected} onClick={() => onSelect(t.key)} style={{display: 'inline-flex', alignItems: 'center', gap: 8}}>
+        <button key={t.key} type="button" role="tab" data-tab={t.key} tabIndex={t.key === selected ? 0 : -1} className="tab" aria-selected={t.key === selected} onClick={() => onSelect(t.key)} style={{display: 'inline-flex', alignItems: 'center', gap: 8}}>
           {t.label}
           {t.count != null && <span className="cnt">{t.count}</span>}
           {t.extra}
@@ -529,7 +629,11 @@ export function PageHead({title, actions, back}: {title: string; actions?: React
         </Link>
       )}
       <h1 title={title}>{title}</h1>
-      {actions && <div className="ph-actions">{actions}</div>}
+      {actions && (
+        <div className="ph-actions">
+          <ActionGroup>{actions}</ActionGroup>
+        </div>
+      )}
     </div>
   );
 }

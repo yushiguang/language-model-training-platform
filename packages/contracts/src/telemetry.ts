@@ -58,7 +58,7 @@ export const METRICS = {
   tsp_agent_turns_total: {type: 'counter', help: 'User messages answered', labels: ['agent', 'page', 'outcome']},
   tsp_agent_turn_duration_seconds: {type: 'histogram', help: 'User message to last reply', labels: ['agent'], buckets: BUCKETS.CALL},
   tsp_agent_model_calls_total: {type: 'counter', help: 'Model calls in turns, tool loops included', labels: ['agent', 'model']},
-  tsp_agent_handoffs_total: {type: 'counter', help: 'Front desk handoffs', labels: ['from', 'to', 'outcome']},
+  tsp_agent_handoffs_total: {type: 'counter', help: 'Handoffs to a helper (from the front desk, or passed on by a helper that stayed)', labels: ['from', 'to', 'outcome']},
   tsp_agent_tool_calls_total: {type: 'counter', help: 'Agent tool calls', labels: ['agent', 'tool', 'outcome']},
   tsp_agent_tool_duration_seconds: {type: 'histogram', help: 'One tool call', labels: ['tool'], buckets: BUCKETS.SHORT},
   tsp_agent_tool_calls_per_turn: {type: 'histogram', help: 'Tool calls in one turn', labels: ['agent'], buckets: BUCKETS.COUNT},
@@ -78,7 +78,6 @@ export const METRICS = {
   tsp_bff_project_state_load_seconds: {type: 'histogram', help: 'loadProjectState, which every page calls', labels: [], buckets: BUCKETS.SHORT},
   tsp_gate_actions_total: {type: 'counter', help: 'Gate approvals, skips and refusals', labels: ['node', 'action']},
   tsp_auto_starts_total: {type: 'counter', help: 'Automatic paid starts and what was decided', labels: ['what', 'decision']},
-  tsp_cost_confirms_total: {type: 'counter', help: 'Cost confirms shown, accepted, cancelled', labels: ['what', 'outcome']},
   tsp_stale_writes_rejected_total: {type: 'counter', help: 'Writes based on an old read that were refused', labels: ['collection']},
   // web
   tsp_web_page_views_total: {type: 'counter', help: 'Page views', labels: ['page']},
@@ -100,16 +99,16 @@ export type MetricName = keyof typeof METRICS;
  */
 export const LABEL_VALUES: Record<string, readonly string[]> = {
   purpose: ['labeling', 'chat'],
-  outcome: ['ok', 'error', 'rate_limited', 'server', 'timeout', 'rejected', 'aborted', 'gave_up', 'shown', 'accepted', 'cancelled', 'approved', 'discarded', 'joined', 'passes', 'no_new_ideas', 'budget', 'stopped', 'failed'],
+  outcome: ['ok', 'error', 'rate_limited', 'server', 'timeout', 'rejected', 'filtered', 'aborted', 'gave_up', 'shown', 'accepted', 'cancelled', 'approved', 'discarded', 'joined', 'passes', 'no_new_ideas', 'budget', 'stopped', 'failed'],
   reason: ['rate_limited', 'server', 'timeout', 'user', 'budget', 'failures', 'closed', 'none'],
   kind: ['input', 'output', 'reasoning', 'qpm', 'tpm', 'concurrency', 'script', 'asset', 'backend', 'image', 'schema', 'prompt', 'other'],
   assumed: ['true', 'false'],
   task_purpose: ['eval', 'optimiser', 'test', 'training'],
   trigger: ['system', 'user'],
   state: ['queued', 'running', 'paused', 'needs_attention', 'done', 'stopped', 'failed'],
-  result: ['valid', 'invalid', 'failed', 'kept', 'rejected', 'placeholders_changed'],
+  result: ['valid', 'invalid', 'filtered', 'failed', 'kept', 'rejected', 'placeholders_changed'],
   agent: ['front_desk', 'schema_agent', 'prompt_agent', 'evaluation_agent'],
-  from: ['front_desk'],
+  from: ['front_desk', 'schema_agent', 'prompt_agent', 'evaluation_agent'],
   to: ['schema_agent', 'prompt_agent', 'evaluation_agent'],
   intent: ['answer', 'propose_schema', 'revise_schema', 'draft_prompt', 'revise_prompt', 'explain_version', 'explain_report', 'reflect'],
   tool: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions', 'check_template', 'try_template', 'score_version', 'start_optimiser'],
@@ -199,9 +198,6 @@ export interface EventProps {
   prompt_proposal_shown: {agent: string};
   prompt_proposal_approved: {agent: string; edited_before_approve: boolean};
   prompt_proposal_discarded: {agent: string};
-  start_card_shown: {tool: string; estimate_usd: Num};
-  start_card_accepted: {tool: string; estimate_usd: Num};
-  start_card_cancelled: {tool: string; estimate_usd: Num};
   auto_started: {what: string; estimate_usd: Num; project_auto_spend_usd: Num};
   // Problems
   error_shown: {code: string; where: string};
@@ -278,9 +274,6 @@ export const EVENT_PROP_KEYS: {[E in EventName]: readonly (keyof EventProps[E] &
   prompt_proposal_shown: ['agent'],
   prompt_proposal_approved: ['agent', 'edited_before_approve'],
   prompt_proposal_discarded: ['agent'],
-  start_card_shown: ['tool', 'estimate_usd'],
-  start_card_accepted: ['tool', 'estimate_usd'],
-  start_card_cancelled: ['tool', 'estimate_usd'],
   auto_started: ['what', 'estimate_usd', 'project_auto_spend_usd'],
   // Problems
   error_shown: ['code', 'where'],

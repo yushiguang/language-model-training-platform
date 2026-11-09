@@ -1,6 +1,7 @@
 import type {NewVersion, PromptVersion} from '@tsp/contracts';
 import {checkTemplate, MADE_BY, versionLabel} from '@tsp/domain';
 import {emitChange, getApp, tm} from './app.ts';
+import {postEvent} from './chat-events.ts';
 
 export {MADE_BY};
 export type {NewVersion};
@@ -10,6 +11,10 @@ export async function createVersion(projectId: string, v: NewVersion): Promise<P
   const {catalog, user} = getApp();
   const check = checkTemplate(v.template, v.features, {schema: v.schema, images: v.images});
   if (check.errors.length) throw new Error(`Fix ${check.errors.length} error${check.errors.length > 1 ? 's' : ''} in Checks first.`);
+  // A save right after a helper's draft went into the editor closes that story in Ask AI.
+  const [newest] = await catalog.find('prompt_versions', {projectId}, 'createdAt desc');
+  const [draft] = await catalog.find('agent_proposals', {projectId, kind: 'prompt'}, 'createdAt desc');
+  const fromDraft = v.madeBy === 'user' && draft?.state === 'approved' && (!newest || draft.createdAt > newest.createdAt);
   const version = await catalog.createPromptVersion({
     projectId,
     template: v.template,
@@ -22,6 +27,7 @@ export async function createVersion(projectId: string, v: NewVersion): Promise<P
     kind: v.kind,
   });
   await catalog.audit(projectId, v.madeBy === 'user' ? (await user()).name : v.madeBy, 'prompt.create', {version: versionLabel(version)});
+  if (fromDraft) await postEvent(projectId, 'approved', 'user', `saved it as ${versionLabel(version)}`, {path: '/prompt/edit', params: {v: version.id}});
   const before = new Set((v.parent?.template ?? '').split('\n'));
   const after = new Set(v.template.split('\n'));
   tm().event('version_created', {

@@ -158,6 +158,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       done: mine.length,
       valid: mine.filter(p => p.answer).length,
       invalid: mine.filter(p => !p.answer).length,
+      filtered: mine.filter(p => p.filtered).length,
       failed: failedSet.size,
       costUsd: mine.reduce((n, p) => n + p.costUsd, 0),
       tokens: mine.reduce((n, p) => n + (p.tokens ?? 0), 0),
@@ -211,14 +212,25 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         if (saved) return {pred: saved, paid: false};
         if (!ex) throw new Error('The example no longer exists.');
         const parts = renderPrompt(version.template, ex, version.features, version.images);
-        const res = await deps.gateway.label({
-          slot: task.endpoint,
-          messages: toMessages(parts, deps.resolveUrl),
-          maxOutputTokens: task.settings.maxOutputTokens,
-          temperature: task.settings.temperature,
-          traceId: ex.externalId,
-          signal: ctrl.signal,
-        });
+        const res = await deps.gateway
+          .label({
+            slot: task.endpoint,
+            messages: toMessages(parts, deps.resolveUrl),
+            maxOutputTokens: task.settings.maxOutputTokens,
+            temperature: task.settings.temperature,
+            traceId: ex.externalId,
+            signal: ctrl.signal,
+          })
+          .catch(e => {
+            // The safety filter's answer is final: saved as a filtered example, not a failure.
+            if (errorKindOf(e) === 'filtered') return null;
+            throw e;
+          });
+        if (!res) {
+          const pred: Prediction = {id, promptVersionId: task.promptVersionId, endpoint: task.endpoint, settingsHash: task.settingsHash, exampleId, output: '', answer: null, invalidReason: 'Stopped by the safety filter', filtered: true, costUsd: 0, tokens: 0, createdAt: now()};
+          await repo.insert(PREDICTIONS, pred);
+          return {pred, paid: true};
+        }
         const parsed = parseOutput(res.text, schema);
         const pred: Prediction = {
           id,
@@ -242,6 +254,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       await repo.patch<LabelingTask>(TASKS, taskId, {
         done: DocFieldValue.increment(1),
         [pred.answer ? 'valid' : 'invalid']: DocFieldValue.increment(1),
+        ...(pred.filtered ? {filtered: DocFieldValue.increment(1)} : {}),
         costUsd: DocFieldValue.increment(pred.costUsd),
         tokens: DocFieldValue.increment(pred.tokens ?? 0),
         ...(opts.auto && paid ? {autoCostUsd: DocFieldValue.increment(pred.costUsd)} : {}),
@@ -249,7 +262,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       counts.done++;
       counts.costUsd += pred.costUsd;
       if (paid) runCostUsd += pred.costUsd;
-      tm.counter('tsp_labeling_examples_total', {task_purpose: purpose, result: pred.answer ? 'valid' : 'invalid'});
+      tm.counter('tsp_labeling_examples_total', {task_purpose: purpose, result: pred.answer ? 'valid' : pred.filtered ? 'filtered' : 'invalid'});
       if (paid) tm.counter('tsp_labeling_cost_usd_total', {task_purpose: purpose}, pred.costUsd);
       return true;
     };
@@ -338,6 +351,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         done: 0,
         valid: 0,
         invalid: 0,
+        filtered: 0,
         failed: 0,
         failedExampleIds: [],
         costUsd: 0,

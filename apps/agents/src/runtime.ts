@@ -6,6 +6,7 @@ import type {
   AgentProposalDraft,
   AgentTurnInput,
   AgentTurnOutput,
+  AgentTurnProgress,
   OptimiserReflectInput,
   OptimiserReflectOutput,
   AgentModel,
@@ -21,7 +22,7 @@ export const MAX_TOOL_CALLS = 4;
 /** A tool result longer than this is cut, so one call can't fill the context. */
 const MAX_RESULT_CHARS = 12_000;
 
-/** The front desk may only hand off to these specialists; anything else is ignored (no handoff). */
+/** Handoffs go only to these specialists; anything else is ignored (no handoff). */
 const HANDOFF_TARGETS: AgentPreset[] = ['schema_agent', 'prompt_agent', 'evaluation_agent'];
 
 interface RawAgentReply {
@@ -29,7 +30,6 @@ interface RawAgentReply {
   reply?: string;
   handoff?: {to: AgentPreset; intent: string};
   schema?: Schema;
-  policy?: string;
   fields?: Schema['fields'];
   template?: string;
   features?: FeatureSelection;
@@ -49,8 +49,8 @@ function parseJsonObject<T>(raw: string, fallback: T): T {
 
 function extractSchema(out: RawAgentReply): Schema | null {
   if (out.schema && Array.isArray(out.schema.fields)) return out.schema;
-  if (typeof out.policy === 'string' && Array.isArray(out.fields)) {
-    return {policy: out.policy, fields: out.fields};
+  if (Array.isArray(out.fields)) {
+    return {fields: out.fields};
   }
   return null;
 }
@@ -89,6 +89,86 @@ interface TurnTools {
   used: AgentTurnOutput['toolCalls'];
   modelCalls: AgentTurnOutput['modelCalls'];
   parseFailures: AgentTurnOutput['parseFailures'];
+  progress?: AgentTurnProgress;
+}
+
+/** What the live line in Ask AI says while a tool runs (plain words, the page's terms). */
+function workingLine(name: AgentToolName, args: Record<string, unknown>): string {
+  const v = typeof args.version === 'string' && args.version ? args.version : null;
+  switch (name) {
+    case 'get_page_view':
+      return 'Reading another page…';
+    case 'list_versions':
+      return 'Reading the prompt versions…';
+    case 'get_version':
+      return `Reading ${v ?? 'the version'}…`;
+    case 'get_report':
+      return `Reading the ${v ? `${v} ` : ''}report…`;
+    case 'get_examples':
+      return 'Reading examples…';
+    case 'get_gold_labels':
+      return 'Reading the gold labels…';
+    case 'get_predictions':
+      return `Reading the ${v ? `${v} ` : ''}answers…`;
+    case 'check_template':
+      return 'Checking the prompt…';
+    case 'try_template':
+      return 'Trying the prompt on a few examples…';
+    case 'score_version':
+      return `Starting scoring${v ? ` ${v}` : ''}…`;
+    case 'start_optimiser':
+      return 'Starting the optimiser…';
+  }
+}
+
+/**
+ * The `reply` string of a JSON answer that is still arriving, decoded as far as it goes (null
+ * until the key appears). Lets Ask AI stream the reply while the rest of the JSON is written.
+ */
+export function partialReply(raw: string): string | null {
+  const m = /"reply"\s*:\s*"/.exec(raw);
+  if (!m) return null;
+  let out = '';
+  for (let i = m.index + m[0].length; i < raw.length; i++) {
+    const c = raw[i];
+    if (c === '"') return out;
+    if (c !== '\\') {
+      out += c;
+      continue;
+    }
+    const n = raw[i + 1];
+    if (n === undefined) break;
+    if (n === 'u') {
+      const hex = raw.slice(i + 2, i + 6);
+      if (hex.length < 4) break;
+      out += String.fromCharCode(parseInt(hex, 16));
+      i += 5;
+      continue;
+    }
+    out += ({n: '\n', t: '\t', r: '', b: '', f: ''} as Record<string, string>)[n] ?? n;
+    i++;
+  }
+  return out;
+}
+
+/** One model call; with progress, streamed so the reply shows as it is written. */
+async function callModel(llm: AgentModel, to: AgentPreset, messages: ModelMessage[], progress?: AgentTurnProgress): Promise<string> {
+  if (!progress) return llm.chat(messages, {model: presetModel(to), json: true});
+  let raw = '';
+  let shown = '';
+  for await (const c of llm.chatStream(messages, {model: presetModel(to), json: true})) {
+    if (c.type === 'error') throw new Error(c.message);
+    if (c.type !== 'delta') continue;
+    raw += c.text;
+    // A handoff (written first) means another helper answers: this reply is not shown.
+    if (/"handoff"\s*:/.test(raw)) continue;
+    const reply = partialReply(raw);
+    if (reply && reply !== shown) {
+      shown = reply;
+      progress({agent: to, reply});
+    }
+  }
+  return raw;
 }
 
 function toolBlurb(to: AgentPreset, host?: AgentToolHost): string {
@@ -118,7 +198,7 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
   ];
   // A refused or extra call still counts as a step, so a model that keeps asking can't loop.
   for (let step = 0; ; step++) {
-    const raw = await llm.chat(messages, {model: presetModel(to), json: true});
+    const raw = await callModel(llm, to, messages, tools.progress);
     tools.modelCalls.push({agent: to, model: presetModel(to)});
     const notJson = {};
     const out = parseJsonObject<RawAgentReply>(raw, notJson as RawAgentReply);
@@ -135,6 +215,7 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
     else if (tools.used.length >= MAX_TOOL_CALLS) result = {error: 'No more tool calls in this turn. Answer now with what you have.'};
     else {
       const started = Date.now();
+      tools.progress?.({agent: to, working: workingLine(name, args)});
       try {
         result = await tools.host.call({agent: to, name, args});
         tools.used.push({agent: to, name, args, ok: true, ms: Date.now() - started});
@@ -157,30 +238,38 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
  * each agent call its read tools through `host`, and returns the emitted messages, invocation
  * records, tool calls, and any schema/prompt proposal.
  */
-export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?: AgentToolHost): Promise<AgentTurnOutput> {
+export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?: AgentToolHost, progress?: AgentTurnProgress): Promise<AgentTurnOutput> {
   const invocations: AgentTurnOutput['invocations'] = [];
   const messages: AgentEmittedMessage[] = [];
-  const tools: TurnTools = {host, used: [], modelCalls: [], parseFailures: []};
+  const tools: TurnTools = {host, used: [], modelCalls: [], parseFailures: [], progress};
+  // Each message is reported as soon as it is final, so the host can save it while the turn goes on.
+  const emit = (m: AgentEmittedMessage) => {
+    messages.push(m);
+    progress?.({message: m});
+  };
 
   let agent: AgentPreset = input.page.agent;
   let intent: string = input.page.intent;
 
   invocations.push({from: 'user', to: agent, intent, note: ''});
+  progress?.({agent, working: 'Thinking…'});
   let out = await invokePreset(llm, agent, intent, input, tools);
 
-  if (out.handoff && agent === 'front_desk' && HANDOFF_TARGETS.includes(out.handoff.to) && PRESETS[out.handoff.to].intents[out.handoff.intent]) {
-    if (out.reply) {
-      messages.push({role: 'agent', agent, text: out.reply});
-    }
+  // The front desk hands off; so does a helper that stayed on its page (follow_up), when the
+  // user asks for another helper's work.
+  const from = agent;
+  if (out.handoff && (agent === 'front_desk' || intent === 'follow_up') && out.handoff.to !== agent && HANDOFF_TARGETS.includes(out.handoff.to) && PRESETS[out.handoff.to].intents[out.handoff.intent]) {
+    // The handoff line alone tells the user who answers; the "I'll bring in…" reply is not shown.
     agent = out.handoff.to;
     intent = out.handoff.intent;
-    messages.push({role: 'event', agent: null, text: `${agentName(agent)} joined`});
-    invocations.push({from: 'front_desk', to: agent, intent, note: 'Handed off by the front desk'});
+    emit({role: 'event', agent: null, event: 'join', text: `${agentName(agent)} joined to answer`});
+    invocations.push({from, to: agent, intent, note: from === 'front_desk' ? 'Handed off by the front desk' : 'Passed on by the helper that stayed'});
+    progress?.({agent, working: 'Thinking…'});
     out = await invokePreset(llm, agent, intent, input, tools);
   }
 
   if (out.reply) {
-    messages.push({role: 'agent', agent, text: out.reply});
+    emit({role: 'agent', agent, text: out.reply});
   }
 
   const resolvedSchema = extractSchema(out);

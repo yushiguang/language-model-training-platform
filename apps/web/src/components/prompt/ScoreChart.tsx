@@ -51,7 +51,12 @@ export function ScoreChart({points, threshold, selected, onSelect, H = 200, W = 
         const anchor = n === 1 ? 'middle' : i === 0 ? 'start' : i === n - 1 ? 'end' : 'middle';
         const lx = xs[i] + (n === 1 ? 0 : i === 0 ? 8 : i === n - 1 ? -8 : 0);
         return (
-          <g key={p.label} style={onSelect ? {cursor: 'pointer'} : undefined} onClick={() => onSelect?.(p.label)}>
+          <g
+            key={p.label}
+            style={onSelect ? {cursor: 'pointer'} : undefined}
+            onClick={() => onSelect?.(p.label)}
+            {...(onSelect ? {role: 'button', tabIndex: 0, 'aria-label': `${p.label}, ${p.score.toFixed(2)}`, onKeyDown: (e: React.KeyboardEvent) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onSelect(p.label))} : {})}
+          >
             <rect x={xs[i] - 18} y={top - 8} width={36} height={H - top} fill="transparent" />
             <text x={xs[i]} y={H - 6} textAnchor="middle" fontSize={12} fontWeight={isSel ? 600 : 400} fill={isSel ? '#000' : '#6a6a6a'} style={FONT}>
               {p.label}

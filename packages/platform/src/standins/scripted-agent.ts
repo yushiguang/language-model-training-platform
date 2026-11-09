@@ -39,13 +39,13 @@ function readRequest(messages: ModelMessage[]): Req {
   return req;
 }
 
-/** Paid starts the user asked for in words: "try the prompt", "score v1.2 on model A", "run the optimiser". */
+/** Paid starts the user asked for in words: "try the prompt", "score v4 on gpt-5.4", "run the optimiser". */
 function startRequest(t: string) {
-  const model = t.match(/\bmodel ([ab])\b/i)?.[1]?.toUpperCase();
-  const v = t.match(/\bv\d+\.\d+\b/i)?.[0];
+  const model = t.match(/\bon (gpt-[\w.-]+)/i)?.[1] ?? t.match(/\bmodel ([ab])\b/i)?.[1]?.toUpperCase();
+  const v = t.match(/\bv\d+(?:\.\d+)?\b/i)?.[0];
   if (/\btry\b/i.test(t)) return {name: 'try_template', model};
   if (/\bscore\b/i.test(t) && v) return {name: 'score_version', version: v, model};
-  if (/\boptimi[sz]er\b/i.test(t) && /\b(run|start)\b/i.test(t)) return {name: 'start_optimiser', model: model ?? 'A'};
+  if (/\boptimi[sz]er\b/i.test(t) && /\b(run|start)\b/i.test(t)) return {name: 'start_optimiser', model};
   return null;
 }
 
@@ -57,7 +57,7 @@ function promptAgentStart(r: Req) {
   if (!(s.name in r.results)) {
     const template = r.context.pageView?.data?.version?.template ?? r.context.template ?? r.context.pageView?.data?.current?.template;
     const args: Record<string, unknown> =
-      s.name === 'try_template' ? {template: template ?? '', n: 3, ...(s.model ? {model: s.model} : {})} : s.name === 'score_version' ? {version: s.version, ...(s.model ? {model: s.model} : {})} : {model: s.model};
+      s.name === 'try_template' ? {template: template ?? '', n: 3, ...(s.model ? {model: s.model} : {})} : s.name === 'score_version' ? {version: s.version, ...(s.model ? {model: s.model} : {})} : s.model ? {model: s.model} : {};
     return {tool: {name: s.name, args}};
   }
   if (res?.error) return {reply: `I couldn't start that: ${res.error}`};
@@ -70,17 +70,17 @@ function promptAgentStart(r: Req) {
   return {reply: `Started. ${res?.note ?? ''}`.trim()};
 }
 
+// A handoff is written first (see the front desk's answer shape), so its reply is never streamed.
 function frontDesk(r: Req) {
   const t = (r.userText ?? '').toLowerCase();
-  if (startRequest(t)) return {reply: "I'll bring in the prompt agent for that.", handoff: {to: 'prompt_agent', intent: 'explain_version'}};
-  if (/\b(value|field|label|schema|policy)\b/.test(t) && /\b(add|rename|change|remove|new|split)\b/.test(t))
-    return {reply: "That's a change to the labels, so I'll bring in the schema agent.", handoff: {to: 'schema_agent', intent: 'revise_schema'}};
+  if (startRequest(t)) return {handoff: {to: 'prompt_agent', intent: 'explain_version'}, reply: "I'll bring in the Prompt helper for that."};
+  if (/\b(value|field|label|schema)\b/.test(t) && /\b(add|rename|change|remove|new|split)\b/.test(t))
+    return {handoff: {to: 'schema_agent', intent: 'revise_schema'}, reply: "That's a change to the labels, so I'll bring in the Labels helper."};
   if (/\b(prompt|rule|wording|version|draft)\b/.test(t) && /\b(change|fix|add|draft|write|improve|what)\b/.test(t))
-    return {reply: "I'll bring in the prompt agent for that.", handoff: {to: 'prompt_agent', intent: /what|why/.test(t) ? 'explain_version' : 'revise_prompt'}};
-  if (/\b(score|report|f1|pass|threshold|good enough)\b/.test(t))
-    return {reply: "I'll ask the evaluation agent, who can read the reports.", handoff: {to: 'evaluation_agent', intent: 'explain_report'}};
+    return {handoff: {to: 'prompt_agent', intent: /what|why/.test(t) ? 'explain_version' : 'revise_prompt'}, reply: "I'll bring in the Prompt helper for that."};
+  if (/\b(score|report|f1|pass|threshold|good enough|fail)\b/.test(t)) return {handoff: {to: 'evaluation_agent', intent: 'explain_report'}, reply: "I'll ask the Scores helper, who can read the scores."};
   if (/both|which model|cheaper/.test(t))
-    return {reply: 'If your training set will be large, pick both: a cheaper model with similar quality saves real money on the full run. If you only need a quick result, Model A alone is simpler.'};
+    return {reply: 'If your training set will be large, pick both: a cheaper model with similar quality saves real money on the full run. If you only need a quick result, the first model alone is simpler.'};
   if (/strict|0\.\d+|default/.test(t))
     return {reply: 'Multi-select fields usually score lower than single-select ones. The default of 0.80 is a common bar for almost perfect agreement. You can change it later without losing any scores.'};
   const view = r.context.pageView;
@@ -92,7 +92,7 @@ function schemaAgent(r: Req) {
   const schema: Schema = structuredClone((r.context.schema as Schema) ?? SAMPLE_SCHEMA);
   if (r.intent === 'propose_schema') {
     return {
-      reply: `I read your description${r.context.attachments?.length ? ` and the ${r.context.attachments.length} attached files` : ''} and drafted ${schema.fields.length} label fields with a policy. The proposal is on the left. Approve it, or tell me what to change.`,
+      reply: `I read your description${r.context.attachments?.length ? ` and the ${r.context.attachments.length} attached files` : ''} and drafted ${schema.fields.length} label fields, each value with a one-line definition. The proposal is on the left. Approve it, or tell me what to change.`,
       schema,
     };
   }
@@ -110,8 +110,7 @@ function schemaAgent(r: Req) {
     for (const f of schema.fields) for (const v of f.values) if (v.name.toLowerCase() === rename[1].toLowerCase()) v.name = rename[2];
     return {reply: `I renamed ${rename[1]} to ${rename[2]}.`, schema};
   }
-  schema.policy = `${schema.policy} ${t.trim().replace(/\.?$/, '.')}`;
-  return {reply: 'I added that to the policy. The change is on the left.', schema};
+  return {reply: 'I can add, rename or remove values and fields. Tell me which field to change, for example "add Unboxing to format".'};
 }
 
 function promptAgent(r: Req) {
@@ -121,10 +120,12 @@ function promptAgent(r: Req) {
     const d = draftTemplate(r.context.schema, r.context.task ?? '');
     return {reply: 'I drafted a starting prompt from your schema and ticked the features it uses. Edit anything, then press Create.', ...d};
   }
-  if (r.intent === 'explain_version') {
+  // A follow-up on the page where it joined: a question is answered, anything else is a change.
+  if (r.intent === 'explain_version' || (r.intent === 'follow_up' && /\?\s*$|^(what|why|how|which|does|is|can)\b/i.test((r.userText ?? '').trim()))) {
     const v = r.context.version;
     return {reply: v ? `${v.label} was made by ${v.madeBy}. ${v.change ? `It changed: ${v.change}.` : ''} ${v.delta ?? ''}`.trim() : 'Pick a version and I can tell you what it changed.'};
   }
+  if (!r.context.template) return {reply: 'Open a version with Edit prompt and tell me what to change there.'};
   const rule = (r.userText ?? '').trim().replace(/\.?$/, '.');
   const template = insertRule(r.context.template, r.context.schema?.fields?.[0]?.name ?? '', rule);
   return {reply: "I drafted that change in the editor. Save it to make a new version; it's scored on your models right away.", template, change: rule};
@@ -135,7 +136,7 @@ function evaluationAgent(r: Req) {
   const fromView = r.context.pageView?.page === 'report' ? r.context.pageView.data : null;
   const found = fromView?.report ? fromView : r.results.get_report;
   if (!found && !('get_report' in r.results)) {
-    const v = (r.userText ?? '').match(/\bv\d+\.\d+\b/i)?.[0];
+    const v = (r.userText ?? '').match(/\bv\d+(?:\.\d+)?\b/i)?.[0];
     return {tool: {name: 'get_report', args: v ? {version: v} : {}}};
   }
   const rep = found?.report;
@@ -150,7 +151,7 @@ function evaluationAgent(r: Req) {
       : '';
   return {
     reply: [
-      `${rep.version} on Model ${rep.model} has a lowest field macro-F1 of ${rep.lowestField.macroF1.toFixed(2)} (${rep.lowestField.field}).`,
+      `${rep.version} on ${rep.model} has a lowest field Macro-F1 of ${rep.lowestField.macroF1.toFixed(2)} (${rep.lowestField.field}).`,
       verdict,
       lv ? `The weakest value is ${lv.value} at ${lv.f1.toFixed(2)}.` : '',
       mix ? `The most common mix-up: ${mix.gold ?? 'nothing'} labeled as ${mix.predicted ?? 'nothing'} in ${mix.field}, ${mix.count} time${mix.count === 1 ? '' : 's'}.` : '',
@@ -175,11 +176,19 @@ function reflect(r: Req) {
   return {template: template.includes(rule) ? template : insertRule(template, r.context.schema.fields[0].name, rule), change: rule};
 }
 
+/** A helper that stayed on its page passes on what the front desk would send to another helper. */
+function passOn(r: Req) {
+  if (r.intent !== 'follow_up') return null;
+  const fd = frontDesk(r) as {handoff?: {to: string}};
+  return fd.handoff && fd.handoff.to !== r.preset ? fd : null;
+}
+
 export function scriptedAgent(): AgentModel {
   const runText = async (messages: ModelMessage[]) => {
     await new Promise(res => setTimeout(res, 450));
     const req = readRequest(messages);
     const out =
+      passOn(req) ??
       req.preset === 'front_desk'
         ? frontDesk(req)
         : req.preset === 'schema_agent'
@@ -204,9 +213,13 @@ export function scriptedAgent(): AgentModel {
         usage: {inputTokens: 120, outputTokens: Math.max(1, Math.round(text.length / 4))},
       };
     },
+    // Streams the answer in small pieces, the way a real model writes it.
     async *chatStream(messages: ModelMessage[], _opts?: AgentChatOptions): AsyncGenerator<LlmStreamChunk> {
       const text = await runText(messages);
-      yield {type: 'delta', text};
+      for (let i = 0; i < text.length; i += 12) {
+        yield {type: 'delta', text: text.slice(i, i + 12)};
+        await new Promise(res => setTimeout(res, 25));
+      }
       yield {type: 'done', createdAt: new Date().toISOString()};
     },
   };

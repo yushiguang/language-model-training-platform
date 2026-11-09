@@ -41,7 +41,7 @@ export function sampleExamples(base = ''): ExampleSource {
       }
       const picked = all.slice(0, n);
       for (let i = 0; i < picked.length; i += 8) {
-        await sleep(120, signal);
+        await sleep(400, signal);
         onProgress?.(Math.min(picked.length, i + 8));
       }
       return picked;

@@ -1,6 +1,7 @@
 import type {EndpointId, EvalReport, LabelingTask, PromptVersion, TrainingRow, TrainingSet} from '@tsp/contracts';
 import {estimate, finalRunPlan, MIN_PER_VALUE, minutesFor, newId, settingsHash} from '@tsp/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
+import {postEvent} from './chat-events.ts';
 import {latestGold} from './evaluation.ts';
 import {loadProjectState} from './projects.ts';
 import {trainingView} from './views.ts';
@@ -36,7 +37,6 @@ export async function labelTestSet(projectId: string, version: PromptVersion, en
   }
   const task = await labeling.createTask({projectId, purpose: 'test', promptVersionId: version.id, setupVersionId: setup.id, endpoint, settings, exampleIds, createdBy: u.name});
   await catalog.audit(projectId, u.name, 'test_set.label', {version: version.id, endpoint, estimateUsd});
-  tm().counter('tsp_cost_confirms_total', {what: 'test_answers', outcome: 'accepted'});
   tm().event('test_answers_requested', {estimate_usd: estimateUsd, examples: exampleIds.length});
   void labeling.runTask(task.id, 'user');
   emitChange();
@@ -125,7 +125,6 @@ export async function startTrainingSet(
   };
   await catalog.insert('training_sets', ts);
   await catalog.audit(projectId, u.name, 'training_set.start', {version: version.id, endpoint, estimateUsd, labelTest, testToLabel: toLabel.length});
-  tm().counter('tsp_cost_confirms_total', {what: 'final_run', outcome: 'accepted'});
   tm().event('final_run_started', {version_id: version.id, slot: endpoint, label_test: labelTest, estimate_usd: estimateUsd});
   void labeling.runTask(task.id, 'user');
   emitChange();
@@ -137,6 +136,7 @@ export async function stopTrainingSet(tsId: string): Promise<void> {
   const ts = await catalog.get('training_sets', tsId);
   if (!ts) return;
   await labeling.stopTask(ts.taskId);
+  await postEvent(ts.projectId, 'stop', 'user', 'stopped the training set', {path: '/training-set'});
   const task = await labeling.getTask(ts.taskId);
   tm().event('final_run_stopped_by_user', {done: task?.done ?? ts.done, total: task?.total ?? ts.total});
 }

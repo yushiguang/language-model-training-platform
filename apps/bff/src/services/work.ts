@@ -1,9 +1,11 @@
 import type {EndpointId, ProjectState, PromptVersion} from '@tsp/contracts';
-import {autoSpendUsd, dueStarts, OPTIMISER_CANDIDATES, type DueStart} from '@tsp/domain';
-import {busy, getApp, once, tm} from './app.ts';
+import {autoSpendUsd, dueStarts, OPTIMISER_CANDIDATES, versionLabel, type DueStart} from '@tsp/domain';
+import {busy, getApp, once, optimiserLock, tm} from './app.ts';
+import {postEvent} from './chat-events.ts';
 import {buildReport, labelEvalSet} from './evaluation.ts';
+import {modelName} from './page-views.ts';
 import {optimiserActive, runOptimiser} from './optimiser.ts';
-import {loadProjectState} from './projects.ts';
+import {approveNode, loadProjectState} from './projects.ts';
 
 /**
  * Background work that runs from the open page. The bff decides when labeling starts (system
@@ -44,12 +46,15 @@ async function autoStart(state: ProjectState, d: DueStart) {
   const {catalog} = getApp();
   const projectId = state.project.id;
   const spent = autoSpendUsd(state);
+  const model = modelName(state, d.endpoint);
   if (d.what === 'optimiser') {
     void startOptimiser(projectId, d.endpoint, {auto: true});
+    await postEvent(projectId, 'auto', 'workflow', `started the optimiser on ${model}`, {path: '/prompt'});
   } else {
     const v = state.versions.find(x => x.id === d.versionId);
     if (!v) return;
     void once(`auto:${d.key}`, () => scoreVersion(projectId, v, d.endpoint, {auto: true}));
+    await postEvent(projectId, 'auto', 'workflow', `started scoring ${versionLabel(v)} on ${model}`, {path: '/prompt'});
   }
   await catalog.audit(projectId, 'system', 'auto_start', {what: d.what, version: d.versionId, endpoint: d.endpoint, estimateUsd: d.estimateUsd, autoSpendUsd: spent});
   tm().counter('tsp_auto_starts_total', {what: d.what, decision: 'started'});
@@ -60,12 +65,22 @@ export async function tick(state: ProjectState) {
   const {catalog, labeling} = getApp();
   const projectId = state.project.id;
 
-  // An optimiser loop left "running" by a closed page shows as paused.
+  // An optimiser loop left "running" by a closed page shows as paused. One still running in
+  // another tab holds its lock, so it is left alone.
   for (const o of state.optimisation) {
     if (o.state !== 'running' || optimiserActive(o.id) || busy('optimiser')) continue;
+    if (await getApp().locks.isHeld(optimiserLock(projectId, o.endpoint))) continue;
     const fresh = await catalog.get('optimisation_runs', o.id);
     if (fresh?.state === 'running' && !optimiserActive(o.id)) await catalog.patch('optimisation_runs', o.id, {state: 'paused'});
   }
+  // The project is finished once the training set is done and the test set is done too (or there
+  // is no test set): recorded once, like any step approval.
+  const nTest = state.examples.filter(e => e.split === 'test').length;
+  const testDone = nTest === 0 || state.testRuns[0]?.state === 'done';
+  if (state.trainingSets[0]?.state === 'done' && testDone && !state.project.approvedNodes.includes('training')) {
+    void once(`finish:${projectId}`, () => approveNode(projectId, 'training'));
+  }
+
   // A task left running by a closed page shows as paused (listTasks marks it).
   await labeling.listTasks(projectId);
 
@@ -91,9 +106,13 @@ export async function tick(state: ProjectState) {
 /** Starts (or resumes) an optimiser run for a model: a click, an agent's start tool, or `tick`. */
 export async function startOptimiser(projectId: string, endpoint: EndpointId, opts: {auto?: boolean} = {}): Promise<void> {
   await once('optimiser', async () => {
-    const state = await loadProjectState(projectId);
-    const resumable = state?.optimisation.find(o => o.endpoint === endpoint && o.state === 'paused');
-    await runOptimiser(projectId, endpoint, OPTIMISER_CANDIDATES, resumable, opts);
+    // The lock covers every tab of this browser: a second tab asking for the same model's
+    // optimiser gets nothing, so the same work is never paid for twice.
+    await getApp().locks.run(optimiserLock(projectId, endpoint), async () => {
+      const state = await loadProjectState(projectId);
+      const resumable = state?.optimisation.find(o => o.endpoint === endpoint && (o.state === 'paused' || o.state === 'running'));
+      await runOptimiser(projectId, endpoint, OPTIMISER_CANDIDATES, resumable, opts);
+    });
   });
 }
 

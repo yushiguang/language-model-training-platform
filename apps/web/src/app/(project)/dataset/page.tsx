@@ -19,7 +19,11 @@ export default function DatasetPage() {
 function Dataset({state}: {state: ProjectState}) {
   const snap = state.snapshot;
   const task = state.samplingTask?.state === 'running' ? state.samplingTask : null;
-  const head = <PageHead title="Dataset" actions={snap && !task ? <NextButton state={state} /> : undefined} />;
+  // Split sizes save a moment after typing; Next saves any change still waiting first, and is off
+  // while the sizes are invalid, so the step never moves on with old numbers.
+  const flush = useRef<() => Promise<void>>(async () => undefined);
+  const [splitOk, setSplitOk] = useState(true);
+  const head = <PageHead title="Dataset" actions={snap && !task ? <NextButton state={state} flush={flush} splitOk={splitOk} /> : undefined} />;
   if (task)
     return (
       <Frame head={head}>
@@ -41,7 +45,7 @@ function Dataset({state}: {state: ProjectState}) {
     );
   return (
     <Frame head={head}>
-      <Ready state={state} />
+      <Ready state={state} flush={flush} onValid={setSplitOk} />
     </Frame>
   );
 }
@@ -84,7 +88,7 @@ function recommended(total: number, minEval: number | null) {
   return {evalSize, test};
 }
 
-function NextButton({state}: {state: ProjectState}) {
+function NextButton({state, flush, splitOk}: {state: ProjectState; flush: {current: () => Promise<void>}; splitOk: boolean}) {
   const router = useRouter();
   const {href} = useProject();
   const evalOn = !!state.setup?.thresholds;
@@ -93,9 +97,10 @@ function NextButton({state}: {state: ProjectState}) {
     <Button
       label={evalOn ? 'Next: Gold Labels' : 'Next: Prompt Engineering'}
       kind="primary"
-      disabled={!g.ready}
-      title={g.ready ? undefined : (g.reason ?? undefined)}
+      disabled={!g.ready || !splitOk}
+      title={!splitOk ? 'Fix the split sizes first' : g.ready ? undefined : (g.reason ?? undefined)}
       onClick={async () => {
+        await flush.current();
         await approveNode(state.project.id, 'dataset');
         router.push(href(evalOn ? '/gold' : '/prompt'));
       }}
@@ -103,7 +108,7 @@ function NextButton({state}: {state: ProjectState}) {
   );
 }
 
-function Ready({state}: {state: ProjectState}) {
+function Ready({state, flush, onValid}: {state: ProjectState; flush: {current: () => Promise<void>}; onValid: (ok: boolean) => void}) {
   const snap = state.snapshot!;
   const t = state.setup?.thresholds ?? null;
   const evalOn = !!t;
@@ -118,11 +123,16 @@ function Ready({state}: {state: ProjectState}) {
   const err = e + te >= total ? 'Leave some examples for train' : evalOn && e < t!.minEval ? `The eval set needs at least ${t!.minEval} examples` : null;
 
   // Sizes save as they are typed (no Apply button).
+  const unsaved = !locked && !err && !(snap.split && snap.split.eval === e && snap.split.test === te);
   useEffect(() => {
-    if (locked || err || (snap.split && snap.split.eval === e && snap.split.test === te)) return;
+    if (!unsaved) return;
     const id = setTimeout(() => void applySplit(state.project.id, snap.id, e, te), 400);
     return () => clearTimeout(id);
   }, [e, te, locked, err]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => onValid(locked || !err), [locked, err]); // eslint-disable-line react-hooks/exhaustive-deps
+  flush.current = async () => {
+    if (unsaved) await applySplit(state.project.id, snap.id, e, te);
+  };
 
   const lockTip = locked ? 'The split is fixed because gold labels exist for it' : undefined;
   return (

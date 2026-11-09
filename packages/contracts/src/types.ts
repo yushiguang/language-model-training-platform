@@ -24,8 +24,11 @@ export interface LabelField {
   values: LabelValue[];
 }
 
+/**
+ * The label fields. There is no separate policy text (removed 2026-11-09): each value's one-line
+ * definition and the prompt carry the rules.
+ */
 export interface Schema {
-  policy: string;
   fields: LabelField[];
 }
 
@@ -156,6 +159,8 @@ export interface Prediction {
   output: string;
   answer: Answer | null;
   invalidReason: string | null;
+  /** The endpoint's safety filter stopped the answer (`answer` is null). */
+  filtered?: boolean;
   costUsd: number;
   /** Input + output tokens of the call (reasoning included). Missing on older records. */
   tokens?: number;
@@ -175,6 +180,12 @@ export interface LabelingRun {
   total: number;
   /** Valid answers saved (examples that got a label). */
   valid?: number;
+  /** Answers saved that did not match the schema (filtered ones included). */
+  invalid?: number;
+  /** Examples the endpoint's safety filter stopped. */
+  filtered?: number;
+  /** Examples whose call failed after the gateway's retries. */
+  failed?: number;
   costUsd: number;
   /** Tokens used by this run's answers (Training Set: "Total tokens"). */
   tokens?: number;
@@ -183,9 +194,9 @@ export interface LabelingRun {
   finishedAt: string | null;
   /** Created by code without a click. */
   auto?: boolean;
-  /** What runs started by code spent on it (counts toward the automatic-spend cap). */
+  /** What runs started by code spent on it (metrics and the audit; there is no cap). */
   autoCostUsd?: number;
-  /** Paused because a run's cost passed 120% of its estimate: resuming always asks. */
+  /** Paused for its budget. The MVP sets no budgets, so this stays false; kept for the labeling app's budget support. */
   overBudget?: boolean;
 }
 
@@ -252,7 +263,7 @@ export interface OptimisationRun {
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
-  /** Started by code without a click (counts toward the automatic-spend cap). */
+  /** Started by code without a click (an agent's start tool or the workflow); shown in Ask AI as an action line. */
   auto?: boolean;
 }
 
@@ -331,12 +342,38 @@ export interface ChatAttachment {
   content?: string;
 }
 
+/**
+ * What a grey action line in Ask AI records (`role: 'event'`): a helper joined, a draft was put
+ * on a page, the user approved or discarded it, paid work started (by a helper, or automatically
+ * by the workflow), the user stopped work, or the page's own helper answers again.
+ */
+export type ChatEvent = 'join' | 'draft' | 'approved' | 'discarded' | 'start' | 'auto' | 'stop' | 'page';
+
+/** Where an action line leads: a step page and its query (the page adds the project). */
+export interface ChatLink {
+  path: string;
+  params?: Record<string, string>;
+}
+
+/** A turn while it runs, for Ask AI (not saved): who works, what it is doing, the reply so far. */
+export interface AgentLive {
+  agent: AgentPreset;
+  /** A plain line such as "Reading the v4 report…"; null once the reply streams. */
+  working: string | null;
+  /** The reply streamed so far. */
+  reply: string | null;
+}
+
 export interface ChatMessage {
   id: string;
   projectId: string;
   role: 'user' | 'agent' | 'event';
   agent: AgentPreset | null;
   text: string;
+  /** Action lines only: what happened, for the line's icon. */
+  event?: ChatEvent;
+  /** Action lines only: the page where it happened; the whole line links there. */
+  link?: ChatLink;
   /** Quick replies the user can tap. */
   choices?: string[];
   /** Files attached to this message. */

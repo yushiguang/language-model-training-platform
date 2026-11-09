@@ -1,6 +1,7 @@
 import type {EndpointId, EvalReport, Example, GoldLabel, LabelingTask, ModelSettings, Prediction, PromptVersion, SetupVersion, TaskPurpose} from '@tsp/contracts';
-import {computeMetrics, newId, settingsHash, type Scored} from '@tsp/domain';
+import {computeMetrics, newId, settingsHash, versionLabel, type Scored} from '@tsp/domain';
 import {emitChange, getApp, now} from './app.ts';
+import {postEvent} from './chat-events.ts';
 
 /** Latest gold label per example for the current schema; older-schema labels are kept as hints. */
 export async function latestGold(projectId: string, schemaVersion: number) {
@@ -74,8 +75,16 @@ export async function labelEvalSet(
   return labeling.runTask(task.id, trigger, run);
 }
 
+/** The user's Stop on scoring or on the test set's model answers; saved as an action line. */
 export function stopRun(runId: string): void {
-  void getApp().labeling.stopTask(runId);
+  const {labeling, catalog} = getApp();
+  void labeling.stopTask(runId).then(async () => {
+    const t = await labeling.getTask(runId);
+    if (!t) return;
+    const v = await catalog.get('prompt_versions', t.promptVersionId);
+    if (t.purpose === 'eval') await postEvent(t.projectId, 'stop', 'user', `stopped scoring ${v ? versionLabel(v) : 'a version'}`, {path: '/prompt'});
+    else if (t.purpose === 'test') await postEvent(t.projectId, 'stop', 'user', 'stopped the model answers for the test set', {path: '/gold'});
+  });
 }
 
 export async function predictionsFor(versionId: string, endpoint: EndpointId, settings: ModelSettings): Promise<Map<string, Prediction>> {

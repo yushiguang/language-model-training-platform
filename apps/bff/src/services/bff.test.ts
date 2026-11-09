@@ -9,7 +9,7 @@ import {loadProjectState} from './projects.ts';
 import {agentStart} from './starts.ts';
 import {tick} from './work.ts';
 
-const schema: Schema = {policy: '', fields: [{name: 'format', kind: 'single', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}]};
+const schema: Schema = {fields: [{name: 'format', kind: 'single', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}]};
 /** Output price only, so every estimate is 150 tokens x $200/M = $0.03 per example. */
 const endpoint: EndpointInfo = {id: 'A', name: 'Model A', description: '', badge: '', cost: 'Lower', speed: 'Faster', supportsTemperature: true, priceIn: 0, priceOut: 200};
 const EVAL = 10;
@@ -23,6 +23,7 @@ interface WorldOpts {
   train?: number;
   /** The model's reply for an example (by external id), on its nth call. */
   answer?: (externalId: string, n: number) => string;
+  agents?: AgentRuntimeContract;
 }
 
 async function world(prefix: string, opts: WorldOpts = {}) {
@@ -33,9 +34,7 @@ async function world(prefix: string, opts: WorldOpts = {}) {
   const gateway = {
     endpoints: () => [endpoint],
     labelingEndpoints: () => [endpoint],
-    agentModel: () => {
-      throw new Error('not used');
-    },
+    agentModel: () => ({}),
     async label(req: {traceId?: string}): Promise<LabelCallResult> {
       calls.n++;
       const n = (seen.get(req.traceId ?? '') ?? 0) + 1;
@@ -49,7 +48,7 @@ async function world(prefix: string, opts: WorldOpts = {}) {
     catalog,
     labeling,
     gateway,
-    agents: {} as AgentRuntimeContract,
+    agents: opts.agents ?? ({} as AgentRuntimeContract),
     identity: {currentUser: async () => ({id: 'u_1', name: 'Tester'})},
     files: {} as FileStore,
     examples: {} as ExampleSource,
@@ -121,7 +120,7 @@ test('an automatic resume of a task the user started counts as automatic spend',
   assert.ok(Math.abs((run.autoCostUsd ?? 0) - 0.18) < 1e-9, `the 6 resumed examples count (${run.autoCostUsd})`);
 });
 
-test('agent start tools start at once, with no card', async () => {
+test('agent start tools start at once, with no card, and leave an action line', async () => {
   const w = await world('b6', {delayMs: 20});
   await w.catalog.audit(w.projectId, 'system', 'auto_spend', {what: 'try_template', costUsd: 50});
   const v1 = await w.newVersion();
@@ -132,7 +131,14 @@ test('agent start tools start at once, with no card', async () => {
   assert.equal(b.started, true);
   await until(async () => (await w.state()).runs.filter(r => r.state === 'done').length === 2, 'both scorings');
   const state: ProjectState = await w.state();
-  assert.equal((await w.catalog.find('chat_messages', {projectId: state.project.id})).length, 0);
+  const lines = await w.catalog.find('chat_messages', {projectId: state.project.id}, 'createdAt');
+  assert.deepEqual(
+    lines.map(m => [m.role, m.event, m.text.replace(/ on .*$/, '')]),
+    [
+      ['event', 'start', 'Prompt helper started scoring v1'],
+      ['event', 'start', 'Prompt helper started scoring v2'],
+    ],
+  );
 });
 
 test('Get model answers after a re-split with the same count labels the new test set', async () => {
@@ -169,4 +175,39 @@ test('the final run labels a test example whose saved answer is invalid, when th
   assert.equal(t1.labelSource, 'model');
   assert.ok(t1.answer);
   assert.equal(rows.filter(r => r.split === 'train').length, 2);
+});
+
+test('a helper that joined keeps answering on its page; on another page the page helper answers, with a line', async () => {
+  const seen: string[] = [];
+  // The front desk always hands off to the schema agent; a specialist answers itself.
+  const agents = {
+    async runAgentTurn(input, _llm, _tools, progress) {
+      seen.push(`${input.page.agent}:${input.page.intent}`);
+      if (input.page.agent === 'front_desk') {
+        progress?.({message: {role: 'event', agent: null, event: 'join', text: 'Labels helper joined to answer'}});
+        progress?.({agent: 'schema_agent', reply: 'Sure'});
+        progress?.({message: {role: 'agent', agent: 'schema_agent', text: 'Sure.'}});
+        return {invocations: [{from: 'user', to: 'front_desk', intent: 'answer', note: ''}, {from: 'front_desk', to: 'schema_agent', intent: 'revise_schema', note: ''}], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
+      }
+      progress?.({message: {role: 'agent', agent: input.page.agent, text: 'Again.'}});
+      return {invocations: [{from: 'user', to: input.page.agent, intent: input.page.intent, note: ''}], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
+    },
+    reflectPrompt: async () => ({template: '', change: ''}),
+  } satisfies AgentRuntimeContract;
+  const w = await world('b12', {agents});
+  const {sendUserMessage, answeringAgent, agentLive} = await import('./agents.ts');
+  const gold = {label: 'Gold Labels', agent: 'front_desk' as const, intent: 'answer', context: {}, where: {page: 'gold' as const, params: {}}};
+  const dataset = {...gold, label: 'Dataset', where: {page: 'dataset' as const, params: {}}};
+  await sendUserMessage(w.projectId, 'add a value', gold);
+  assert.equal(answeringAgent(w.projectId, gold), 'schema_agent');
+  await sendUserMessage(w.projectId, 'and another', gold);
+  assert.equal(answeringAgent(w.projectId, dataset), 'front_desk');
+  await sendUserMessage(w.projectId, 'hello', dataset);
+  assert.deepEqual(seen, ['front_desk:answer', 'schema_agent:follow_up', 'front_desk:answer']);
+  assert.equal(agentLive(w.projectId), null, 'nothing is live after the turn');
+  const chat = await w.catalog.find('chat_messages', {projectId: w.projectId}, 'createdAt');
+  assert.deepEqual(
+    chat.map(m => (m.role === 'event' ? `-- ${m.text}` : `${m.agent ?? 'user'}: ${m.text}`)),
+    ['user: add a value', '-- Labels helper joined to answer', 'schema_agent: Sure.', 'user: and another', 'schema_agent: Again.', '-- Assistant answers on Dataset', 'user: hello', '-- Labels helper joined to answer', 'schema_agent: Sure.'],
+  );
 });

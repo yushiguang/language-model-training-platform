@@ -3,7 +3,7 @@
 import {useRouter} from 'next/navigation';
 import {Fragment, useEffect, useMemo, useRef, useState} from 'react';
 import type {Answer, Example, ExampleMedia, LabelField} from '@tsp/contracts';
-import {versionLabel} from '@tsp/domain';
+import {FEATURES, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {approveNode, exampleMedia, predictionsFor, saveGold, type ProjectState} from '@/backend-api';
@@ -31,6 +31,9 @@ function Gold({state}: {state: ProjectState}) {
   const i = Math.min(pos[tab], Math.max(0, list.length - 1));
   const ex = list[i];
   const [showModel, setShowModel] = useState(true);
+  // Whether this example has a model answer on screen; a label only counts as "model answer
+  // seen" when there was one to see.
+  const [answerShown, setAnswerShown] = useState<string | null>(null);
   const evalDone = state.facts.goldEvalDone >= sets.eval.length && sets.eval.length > 0;
   const move = (n: number) => setPos(p => ({...p, [tab]: n}));
 
@@ -86,8 +89,8 @@ function Gold({state}: {state: ProjectState}) {
         <div style={{display: 'grid', gridTemplateColumns: '520px 1fr', gap: 16, alignItems: 'start'}}>
           <ExampleCard ex={ex} n={i + 1} />
           <div className="col" style={{gap: 16}}>
-            <ModelAnswer key={`m-${ex.id}`} state={state} ex={ex} shown={showModel} onToggle={() => setShowModel(s => !s)} />
-            <YourAnswer key={`y-${ex.id}`} state={state} ex={ex} modelShown={showModel} />
+            <ModelAnswer key={`m-${ex.id}`} state={state} ex={ex} shown={showModel} onToggle={() => setShowModel(s => !s)} onFound={has => setAnswerShown(has ? ex.id : null)} />
+            <YourAnswer key={`y-${ex.id}`} state={state} ex={ex} modelShown={showModel && answerShown === ex.id} />
           </div>
         </div>
       ) : (
@@ -103,6 +106,10 @@ function Gold({state}: {state: ProjectState}) {
  * images (cover, a photo post's images, or key frames) under it; without a media source it
  * shows the item id only.
  */
+const SHOWN = new Set(['Title', 'Description', 'OCR_Text', 'ASR', 'Creator_Nick_Name', 'Creator_Bio', 'Hashtags', 'Create_Time', 'Country_Code', 'Language', 'POI_Name', 'POI_Info', 'Interest_V3', 'Summary']);
+const IMAGE_KEYS = new Set(Object.values(FEATURES).flatMap(list => list.filter(d => d.isImage).map(d => d.key)));
+const FEATURE_LABEL = new Map(Object.values(FEATURES).flatMap(list => list.map(d => [d.key, d.label] as const)));
+
 function ExampleCard({ex, n}: {ex: Example; n: number}) {
   const [media, setMedia] = useState<ExampleMedia | null | undefined>(undefined);
   const [picked, setPicked] = useState(0);
@@ -137,6 +144,10 @@ function ExampleCard({ex, n}: {ex: Example; n: number}) {
       ['Place', joined(f('POI_Name'), f('POI_Info'))],
       ['Interest', f('Interest_V3')],
       ['Summary', f('Summary')],
+      // Every other feature the example has, under its catalogue name, so nothing is hidden.
+      ...Object.keys(ex.features)
+        .filter(k => !SHOWN.has(k) && !IMAGE_KEYS.has(k) && !/(^|_)(url|urls|id)$/i.test(k))
+        .map(k => [FEATURE_LABEL.get(k) ?? k.replace(/_/g, ' '), f(k)]),
     ] as [string, string][]
   ).filter(([, v]) => v);
   return (
@@ -182,7 +193,7 @@ function ExampleCard({ex, n}: {ex: Example; n: number}) {
   );
 }
 
-function ModelAnswer({state, ex, shown, onToggle}: {state: ProjectState; ex: Example; shown: boolean; onToggle: () => void}) {
+function ModelAnswer({state, ex, shown, onToggle, onFound}: {state: ProjectState; ex: Example; shown: boolean; onToggle: () => void; onFound: (hasAnswer: boolean) => void}) {
   const [found, setFound] = useState<{answer: Answer | null; invalid: string | null; label: string; endpoint: string} | null | undefined>(undefined);
   useEffect(() => {
     let live = true;
@@ -192,11 +203,15 @@ function ModelAnswer({state, ex, shown, onToggle}: {state: ProjectState; ex: Exa
         for (const m of state.setup!.models) {
           const p = (await predictionsFor(v.id, m.endpoint, m)).get(ex.id);
           if (p) {
+            if (live) onFound(!!p.answer);
             if (live) setFound({answer: p.answer, invalid: p.invalidReason, label: versionLabel(v), endpoint: state.endpoints.find(e => e.id === m.endpoint)?.name ?? m.endpoint});
             return;
           }
         }
-      if (live) setFound(null);
+      if (live) {
+        onFound(false);
+        setFound(null);
+      }
     })();
     return () => {
       live = false;
@@ -254,11 +269,20 @@ function YourAnswer({state, ex, modelShown}: {state: ProjectState; ex: Example; 
   const complete = schema.fields.every(f => (answer[f.name]?.length ?? 0) >= (f.kind === 'single' ? 1 : (f.min ?? 1)));
   const isSaved = !!saved && same(saved.answer, answer);
 
+  // A complete answer saves a moment after the last click. Moving to another example (which
+  // unmounts this card) saves at once instead of dropping the answer.
+  const pending = useRef<(() => void) | null>(null);
   useEffect(() => {
     if (!complete || (savedRef.current && same(savedRef.current.answer, answer))) return;
-    const id = setTimeout(() => void saveGold(state.project.id, ex.id, state.setup!.schemaVersion, answer, modelShown), 300);
+    const save = () => {
+      pending.current = null;
+      void saveGold(state.project.id, ex.id, state.setup!.schemaVersion, answer, modelShown);
+    };
+    pending.current = save;
+    const id = setTimeout(save, 300);
     return () => clearTimeout(id);
   }, [answer, complete]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => pending.current?.(), []);
 
   const pick = (f: LabelField, value: string) => {
     const cur = answer[f.name] ?? [];

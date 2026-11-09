@@ -10,7 +10,8 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible, input:focus-vis
 
 /* Ask AI on a live page: as tall as the window below the step bar. */
 .chat { height: calc(100vh - 36px); }
-.chat-in textarea { flex: 1; min-width: 0; border: 0; outline: none; resize: none; background: none; font: inherit; color: var(--text); line-height: 20px; padding: 6px 0; height: 32px; }
+.chat-in textarea { flex: 1; min-width: 0; border: 0; outline: none; resize: none; background: none; font: inherit; color: var(--text); line-height: 20px; padding: 6px 0; height: 32px; max-height: 132px; overflow-y: auto; scrollbar-width: none; }
+.chat-in textarea::-webkit-scrollbar { display: none; }
 .chat-in textarea::placeholder { color: var(--text-3); }
 .chat-in textarea:focus-visible { outline: none; }
 .send[aria-disabled=true] { opacity: .5; cursor: default; }
@@ -38,3 +39,11 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible, input:focus-vis
 .card.fill > .vlist { contain: size; }
 .k a.vrow { cursor: pointer; }
 .k .copy-name { cursor: copy; }
+
+/* A failed action's banner sits above the page content; a new step's content fades in (150ms). */
+.err-slot { display: contents; }
+@keyframes k-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.page-in { animation: k-fade-in 150ms ease-out; }
+
+/* List rows that select something are buttons (the canvas draws them as links). */
+button.vrow { width: 100%; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }

@@ -1,5 +1,5 @@
 /*
- * The UI kit, copied from the approved design (UI canvas, page "Unified UI", stylesheet kit.css v10).
+ * The UI kit, copied from the approved design (UI canvas, page "Unified UI", stylesheet kit.css v11).
  * Keep it identical to the canvas: change the design first, then copy it here. App-only rules
  * (things the canvas draws with inline styles) live in app.css.
  */
@@ -45,7 +45,7 @@ body{margin:0;background:var(--bg-body)}
 .step{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px 0 6px;border-radius:var(--r-el);color:var(--text-2);text-decoration:none;font-weight:500;white-space:nowrap}
 .step:hover{background:var(--hover)}
 .step[aria-current=page]{background:var(--neutral);color:var(--text);font-weight:600}
-.step-ic{width:20px;height:20px;border-radius:var(--r-full);display:grid;place-items:center;flex:none;font-size:11px;font-weight:600;border:1.5px solid var(--border-strong);color:var(--text-3);background:var(--bg-surface)}
+.step-ic{width:20px;height:20px;border-radius:var(--r-full);display:grid;place-items:center;flex:none;font-size:11px;line-height:1;font-weight:600;font-variant-numeric:tabular-nums;border:1.5px solid var(--border-strong);color:var(--text-3);background:var(--bg-surface)}
 .step-ic svg.i{width:12px;height:12px;stroke-width:2.5}
 .step[aria-current=page] .step-ic{border-color:var(--accent);background:var(--accent);color:var(--on-accent)}
 .step.done .step-ic{border-color:var(--ok-bg);background:var(--ok-bg);color:var(--ok-ink)}
@@ -318,3 +318,35 @@ body{margin:0;background:var(--bg-body)}
 .b .b-head{top:76px}
 .b-body>.chat{top:12px;margin-top:12px}
 .b.still .b-body>.chat{top:76px;margin-top:0}
+
+/* ---------- 2026-11-09: agents in Ask AI, motion, pending and error states ---------- */
+@keyframes k-spin{to{transform:rotate(360deg)}}
+@keyframes k-blink{50%{opacity:0}}
+@keyframes k-shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+.k .spin,.k .badge.b-run svg.i,.k .step.running .step-ic svg.i{animation:k-spin 1s linear infinite}
+.progress .bar span{transition:width .4s ease}
+.progress.live .bar span{background-image:linear-gradient(90deg,transparent,rgb(255 255 255 / 35%),transparent);background-size:200% 100%;animation:k-shimmer 1.6s linear infinite}
+.input:disabled,.input[disabled]{background:var(--bg-muted);color:var(--text-3);border-color:var(--border);cursor:not-allowed}
+.field.off .field-l{color:var(--text-3)}
+.btn.pending{pointer-events:none;opacity:.85}
+.k .btn.pending svg.i{animation:k-spin 1s linear infinite}
+.loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:520px;color:var(--text-3)}
+.k .loading svg.i{width:24px;height:24px;color:var(--text-3);animation:k-spin 1s linear infinite}
+.chat-who{font-size:12px;line-height:16px;color:var(--text-2)}
+.chat-h .ctx-row{display:flex;align-items:center;gap:10px}
+.msg-a .agent-k b{font-weight:600}
+.live{display:flex;align-items:center;gap:8px;font-size:13px;line-height:20px;color:var(--text-2)}
+.k .live svg.i{width:14px;height:14px;color:var(--brand);animation:k-spin 1s linear infinite}
+.caret{display:inline-block;width:2px;height:16px;margin-left:2px;vertical-align:-3px;background:var(--text);animation:k-blink 1s step-end infinite}
+.evt{display:flex;align-items:center;gap:6px;font-size:12px;line-height:16px;color:var(--text-3);min-width:0;text-decoration:none}
+.k .evt svg.i{width:12px;height:12px;flex:none}
+.evt span.one{flex:1;min-width:0}
+.evt time{flex:none;font-variant-numeric:tabular-nums}
+.k a.evt,.k a.evt:visited{color:var(--text-3);cursor:pointer}
+a.evt:hover span.one{color:var(--text-2);text-decoration:underline;text-underline-offset:2px}
+.day{display:flex;align-items:center;gap:12px;font-size:12px;line-height:16px;color:var(--text-3)}
+.day::before,.day::after{content:"";flex:1;height:1px;background:var(--border)}
+.chat-in{align-items:flex-end}
+.chat-in .typed{flex:1;color:var(--text);white-space:pre-wrap;max-height:120px;overflow:auto;scrollbar-width:none;line-height:20px;padding:4px 0}
+.banner.err{background:var(--err-bg);color:var(--err-ink)}
+.chat-note{margin:-8px 16px 12px;font-size:12px;line-height:16px;color:var(--text-3);text-align:center}

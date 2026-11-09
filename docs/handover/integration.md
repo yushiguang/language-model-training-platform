@@ -35,7 +35,7 @@ The internal module exports `createPlatform()` returning the `Platform` object f
 | Field | What it must do | Stand-in |
 |---|---|---|
 | `db: DocRuntime` | Document collections: add, get, set, partial update with `DocFieldValue` (increment, arrayUnion, arrayRemove, delete), delete, find, query with filters and offset paging, polling subscribe, batch writes. `createdAt` is server time | `localDocRuntime` (`localStorage`) |
-| `models: LabelingModels` | One labeling call per example (`chat`, `chatStream`) on slot A or B; returns text and token usage. Throw `LlmCallError` (or an error with an HTTP `status`) so the gateway can tell busy from rejected | `simulatedModels` |
+| `models: LabelingModels` | One labeling call per example (`chat`, `chatStream`) on slot A or B; returns text and token usage. Throw `LlmCallError` (or an error with an HTTP `status`) so the gateway can tell busy from rejected; throw `LlmCallError('filtered', …)` when the endpoint's safety filter stops the answer (Prompt versions shows it as Filtered) | `simulatedModels` |
 | `agent: AgentModel` | Agent chat (`chat`, `complete` with usage and thinking, `chatStream`, `models()`) | `scriptedAgent` |
 | `identity: Identity` | The signed-in user (id, name, email, organization) | `localIdentity` |
 | `files: FileStore` | Uploads for prompt images and chat attachments; returns a URL the model can fetch | `browserFiles` (data URLs) |

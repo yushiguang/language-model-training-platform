@@ -1,7 +1,8 @@
-import type {AgentPreset, EndpointId, ProjectState} from '@tsp/contracts';
+import type {AgentPreset, ChatLink, EndpointId, ProjectState} from '@tsp/contracts';
 import {autoSpendUsd, evalEstimate, optimiserEstimate, TRY_TEMPLATE_MAX, versionLabel} from '@tsp/domain';
 import {getApp, tm} from './app.ts';
-import {asModel, findVersion} from './page-views.ts';
+import {postEvent} from './chat-events.ts';
+import {asModel, findVersion, modelName} from './page-views.ts';
 import {loadProjectState} from './projects.ts';
 import {scoreVersion, startOptimiser} from './work.ts';
 
@@ -16,7 +17,9 @@ export const START_TOOLS: StartTool[] = ['try_template', 'score_version', 'start
 export const isStartTool = (name: string): name is StartTool => (START_TOOLS as string[]).includes(name);
 
 interface Planned {
-  label: string;
+  /** The action line once it starts: "<helper> <line>", e.g. "started scoring v4 on gpt-5.4". */
+  line: string;
+  link?: ChatLink;
   estimateUsd: number;
   run: () => Promise<unknown>;
 }
@@ -26,8 +29,8 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
   const projectId = state.project.id;
   const models = state.setup?.models ?? [];
   const pickModel = (): EndpointId => {
-    const m = asModel(args.model) ?? models[0]?.endpoint;
-    if (!m || !models.some(x => x.endpoint === m)) throw new Error(`Model ${String(args.model)} is not chosen in Setup. Chosen: ${models.map(x => x.endpoint).join(', ')}.`);
+    const m = asModel(args.model, state) ?? models[0]?.endpoint;
+    if (!m || !models.some(x => x.endpoint === m)) throw new Error(`${String(args.model)} is not one of the models chosen in Setup. Chosen: ${models.map(x => modelName(state, x.endpoint)).join(', ')}.`);
     return m;
   };
   switch (tool) {
@@ -43,7 +46,7 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
       const examples = state.examples.filter(e => e.split === 'eval').slice(0, n);
       if (!examples.length) throw new Error('There are no eval examples to try it on.');
       return {
-        label: `Try the draft on ${examples.length} eval example${examples.length === 1 ? '' : 's'} with Model ${endpoint}`,
+        line: `tried the prompt on ${examples.length} eval example${examples.length === 1 ? '' : 's'} with ${modelName(state, endpoint)}`,
         estimateUsd: evalEstimate(state, draft, endpoint, examples.length),
         run: async () => {
           const settings = models.find(m => m.endpoint === endpoint)!;
@@ -53,7 +56,7 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
           // No task is saved, so the try's spend is recorded here as automatic spend.
           if (costUsd > 0) await getApp().catalog.audit(projectId, 'system', 'auto_spend', {what: 'try_template', costUsd});
           return {
-            model: endpoint,
+            model: modelName(state, endpoint),
             rows: rows.map(r => ({id: byId.get(r.exampleId)?.externalId, title: byId.get(r.exampleId)?.title, model: r.answer, invalid: r.invalidReason, error: r.error, gold: state.gold.get(r.exampleId)?.answer ?? null})),
             costUsd,
             saved: false,
@@ -66,10 +69,11 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
       if (!v) throw new Error(`There is no version "${String(args.version)}". Versions: ${state.versions.map(versionLabel).join(', ')}.`);
       const endpoint = pickModel();
       if (state.runs.some(r => r.promptVersionId === v.id && r.endpoint === endpoint && (r.state === 'done' || r.state === 'running'))) {
-        return {label: `Score ${versionLabel(v)} on Model ${endpoint}`, estimateUsd: 0, run: async () => ({already: `${versionLabel(v)} is already scored or being scored on Model ${endpoint}.`})};
+        return {line: '', estimateUsd: 0, run: async () => ({already: `${versionLabel(v)} is already scored or being scored on ${modelName(state, endpoint)}.`})};
       }
       return {
-        label: `Score ${versionLabel(v)} on Model ${endpoint}`,
+        line: `started scoring ${versionLabel(v)} on ${modelName(state, endpoint)}`,
+        link: {path: '/prompt'},
         estimateUsd: evalEstimate(state, v, endpoint),
         run: async () => {
           void scoreVersion(projectId, v, endpoint, {auto: true});
@@ -79,13 +83,14 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
     }
     case 'start_optimiser': {
       const endpoint = pickModel();
-      if (state.optimisation.some(o => o.state === 'running')) return {label: `Run the optimiser on Model ${endpoint}`, estimateUsd: 0, run: async () => ({already: 'An optimiser run is already going.'})};
+      if (state.optimisation.some(o => o.state === 'running')) return {line: '', estimateUsd: 0, run: async () => ({already: 'An optimiser run is already going.'})};
       return {
-        label: `Run the optimiser on Model ${endpoint}`,
+        line: `started the optimiser on ${modelName(state, endpoint)}`,
+        link: {path: '/prompt'},
         estimateUsd: optimiserEstimate(state, endpoint),
         run: async () => {
           void startOptimiser(projectId, endpoint, {auto: true});
-          return {started: true, note: 'The optimiser tries up to 6 changes; new versions appear on Prompt Engineering.'};
+          return {started: true, note: 'The optimiser tries up to 6 changes; new versions appear on Prompt versions.'};
         },
       };
     }
@@ -102,6 +107,7 @@ export async function agentStart(projectId: string, agent: AgentPreset, tool: St
   const p = plan(state, tool, args);
   const spent = autoSpendUsd(state);
   const result = await p.run();
+  if (p.line) await postEvent(projectId, 'start', agent, p.line, p.link);
   if (p.estimateUsd > 0) {
     await getApp().catalog.audit(projectId, `agent:${agent}`, 'auto_start', {what: tool, args, estimateUsd: p.estimateUsd, autoSpendUsd: spent});
     tm().counter('tsp_auto_starts_total', {what: tool, decision: 'started'});

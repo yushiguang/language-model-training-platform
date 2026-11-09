@@ -1,4 +1,5 @@
 import type {
+  AgentLive,
   AgentProposal,
   Answer,
   ChatAttachment,
@@ -51,7 +52,7 @@ const telemetry = createTelemetry({
 const gateway = createGateway(platform, {telemetry});
 const catalog = createCatalog(platform.db, {telemetry});
 const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: emitChange, telemetry});
-configureBff({catalog, labeling, gateway, agents: agentRuntime, identity: platform.identity, files: platform.files, examples: platform.examples, media: platform.media, standIns: platform.standIns, telemetry});
+configureBff({catalog, labeling, gateway, agents: agentRuntime, identity: platform.identity, files: platform.files, examples: platform.examples, media: platform.media, standIns: platform.standIns, telemetry, locks: browserLocks()});
 const web = webTelemetry(telemetry);
 void platform.identity.currentUser().then(u => telemetry.setContext({userId: u.id}));
 
@@ -236,8 +237,12 @@ export const closeProposal = timed('closeProposal', bff.closeProposal);
 const uploadDatasetText = timed('uploadDatasetText', bff.uploadDatasetText);
 export const uploadGold = timed('uploadGold', bff.uploadGold);
 export const isAgentBusy = bff.isAgentBusy;
+export const agentLive = bff.agentLive;
+export const subscribeAgentLive = bff.subscribeAgentLive;
+export const answeringAgent = bff.answeringAgent;
 
 export type {
+  AgentLive,
   AgentProposal,
   Answer,
   ChatAttachment,

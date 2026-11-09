@@ -1,18 +1,22 @@
 'use client';
 
-import {useEffect, useRef, useState, type ReactNode} from 'react';
-import type {ChatMessage, PageContext} from '@tsp/contracts';
-import {pageFromPath} from '@tsp/domain';
-import {chatHistory, isAgentBusy, sendUserMessage, subscribeChanges} from '@/backend-api';
-import {Badge, Button, Icon, LinkChip, Suggestion} from '@/ui';
+import Link from 'next/link';
+import {Fragment, useEffect, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
+import type {AgentPreset, ChatEvent, ChatMessage, PageContext} from '@tsp/contracts';
+import {agentName, pageFromPath} from '@tsp/domain';
+import {agentLive, answeringAgent, chatHistory, isAgentBusy, sendUserMessage, subscribeAgentLive, subscribeChanges} from '@/backend-api';
+import {Badge, dateTime, Icon, LinkChip} from '@/ui';
 import {useProject} from './ProjectContext';
 
 /** A document link pasted into the chat, shown as a chip (the text still goes to the agent as-is). */
 const DOC_LINK = /https?:\/\/[^\s]+\/(?:docx|docs|wiki)\/[^\s]+/gi;
 
 /**
- * Ask AI (design: "Ask AI panel"): the only way users give the agents anything, as text or
- * document links. One conversation per project; the agent reads the page it is opened on.
+ * Ask AI (design: "Ask AI panel", "Agents, motion and states"): the only way users give the
+ * helpers anything, as text or document links. One conversation per project; the helper reads the
+ * page it is opened on. Each answer names its helper; grey action lines record what helpers, the
+ * workflow and the user did; while a turn runs, a live line says what the helper is doing and
+ * then its reply streams in.
  */
 export function AskAi({
   page,
@@ -29,19 +33,27 @@ export function AskAi({
   extra?: ReactNode;
   chips?: string[];
   placeholder?: string;
-  /** The agent's opening line, shown first. */
+  /** The opening line of the page's helper, shown first. */
   first?: string;
   /** Runs before the message goes to the agent (Setup saves the first message as the task). */
   onSend?: (text: string) => Promise<void>;
 }) {
   const {projectId} = useProject();
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => seen.get(projectId) ?? []);
   const [busy, setBusy] = useState(false);
+  const liveTurn = useSyncExternalStore(
+    subscribeAgentLive,
+    () => agentLive(projectId),
+    () => null,
+  );
   const bodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const load = () => {
-      chatHistory(projectId).then(setMessages);
+      chatHistory(projectId).then(m => {
+        seen.set(projectId, m);
+        setMessages(m);
+      });
       setBusy(isAgentBusy(projectId));
     };
     load();
@@ -49,7 +61,7 @@ export function AskAi({
   }, [projectId]);
   useEffect(() => {
     bodyRef.current?.scrollTo({top: bodyRef.current.scrollHeight});
-  }, [messages.length, busy, !!extra]);
+  }, [messages.length, busy, !!extra, liveTurn?.working, liveTurn?.reply?.length]);
 
   const send = async (text: string) => {
     setBusy(true);
@@ -64,6 +76,9 @@ export function AskAi({
   };
   const last = [...messages].reverse().find(m => m.role === 'agent');
   const follow = chips ?? (last?.choices?.length ? last.choices : []);
+  const where = {...page, where: {page: pageFromPath(typeof location === 'undefined' ? '/' : location.pathname), params: {}}};
+  const answering = liveTurn?.agent ?? answeringAgent(projectId, where);
+  const working = busy || !!liveTurn;
 
   return (
     <aside className="chat" aria-label="Ask AI">
@@ -75,42 +90,90 @@ export function AskAi({
             <Icon name="x" />
           </button>
         </div>
-        <span className="ctx">
-          <Icon name="eye" />
-          {page.label}
-        </span>
+        <div className="ctx-row">
+          <span className="ctx">
+            <Icon name="eye" />
+            {page.label}
+          </span>
+          <span className="chat-who">{agentName(answering)} answers</span>
+        </div>
       </div>
-      <div className="chat-m" ref={bodyRef}>
-        {first ? <AgentText text={first} /> : messages.length === 0 && <AgentText text={page.hint ?? 'Ask me anything about this page.'} />}
-        {messages.map(m => (
-          <Message key={m.id} m={m} />
+      <div className="chat-m" ref={bodyRef} aria-live="polite">
+        {first ? <AgentText who={page.agent} text={first} /> : messages.length === 0 && <AgentText who={page.agent} text={page.hint ?? 'Ask me anything about this page.'} />}
+        {messages.map((m, i) => (
+          <Fragment key={m.id}>
+            {dayOf(m.createdAt) !== dayOf(messages[i - 1]?.createdAt ?? (i === 0 ? new Date().toISOString() : m.createdAt)) && <div className="day">{dayOf(m.createdAt)}</div>}
+            <Message m={m} />
+          </Fragment>
         ))}
         {extra}
-        {busy && <span className="t-3">Thinking…</span>}
+        {liveTurn?.reply ? (
+          <AgentText who={liveTurn.agent} text={liveTurn.reply} streaming />
+        ) : (
+          working && (
+            <div className="live" role="status">
+              <Icon name="ring" />
+              <span>{liveTurn?.working ?? 'Thinking…'}</span>
+            </div>
+          )
+        )}
       </div>
       {follow.length > 0 && (
         <div className="chips">
           {follow.map(c => (
-            <button key={c} type="button" className="chip" onClick={() => void send(c)}>
+            <button key={c} type="button" className="chip" disabled={working} onClick={() => void send(c)}>
               {c}
             </button>
           ))}
         </div>
       )}
-      <Composer onSend={send} disabled={busy} placeholder={placeholder} />
+      <Composer onSend={send} disabled={working} placeholder={placeholder} />
+      <div className="chat-note">Helpers read your recent messages</div>
     </aside>
   );
 }
 
-function AgentText({text}: {text: string}) {
+/** The last history read per project, so Ask AI opens on a new step without an empty flash. */
+const seen = new Map<string, ChatMessage[]>();
+
+/** "2026.11.09" for a date line; a new line starts each day the chat goes on. */
+const dayOf = (iso: string) => dateTime(iso).slice(0, 10);
+
+function AgentText({who, text, streaming}: {who: AgentPreset | null; text: string; streaming?: boolean}) {
   return (
     <div className="msg-a">
       <span className="agent-k">
         <Icon name="spark" />
-        AI
+        <b>{agentName(who ?? 'front_desk')}</b>
       </span>
-      <p style={{whiteSpace: 'pre-line'}}>{text}</p>
+      <p style={{whiteSpace: 'pre-line'}}>
+        {text}
+        {streaming && <span className="caret" aria-hidden="true" />}
+      </p>
     </div>
+  );
+}
+
+const EVENT_ICON: Record<ChatEvent, string> = {join: 'next', page: 'next', draft: 'spark', approved: 'check', discarded: 'x', start: 'play', auto: 'ring', stop: 'x'};
+
+/** A saved action line: who did what, and when; with a place to go, the whole line is the link. */
+function EventLine({m}: {m: ChatMessage}) {
+  const {href} = useProject();
+  const inner = (
+    <>
+      <Icon name={EVENT_ICON[m.event ?? 'join']} />
+      <span className="one" title={m.text}>
+        {m.text}
+      </span>
+      <time dateTime={m.createdAt}>{dateTime(m.createdAt).slice(11)}</time>
+    </>
+  );
+  return m.link ? (
+    <Link className="evt" href={href(m.link.path, m.link.params)}>
+      {inner}
+    </Link>
+  ) : (
+    <div className="evt">{inner}</div>
   );
 }
 
@@ -136,8 +199,8 @@ const docTitle = (url: string) => {
 
 function Message({m}: {m: ChatMessage}) {
   if (m.role === 'user') return <UserText text={m.text} />;
-  if (m.role === 'event') return <span className="t-3" style={{fontSize: 13}}>{m.text}</span>;
-  return m.text ? <AgentText text={m.text} /> : null;
+  if (m.role === 'event') return <EventLine m={m} />;
+  return m.text ? <AgentText who={m.agent} text={m.text} /> : null;
 }
 
 export function ApprovedCard({title}: {title: string}) {
@@ -156,6 +219,15 @@ export function ApprovedCard({title}: {title: string}) {
 function Composer({onSend, disabled, placeholder}: {onSend: (text: string) => void | Promise<void>; disabled?: boolean; placeholder: string}) {
   const [text, setText] = useState('');
   const ready = text.trim().length > 0 && !disabled;
+  // Enter adds a new line; only the send button sends. The box grows up to 6 lines, then scrolls.
+  const box = useRef<HTMLTextAreaElement | null>(null);
+  const grow = (el: HTMLTextAreaElement | null) => {
+    box.current = el;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  };
+  useEffect(() => grow(box.current), [text]);
   const submit = () => {
     if (!ready) return;
     const t = text.trim();
@@ -173,12 +245,7 @@ function Composer({onSend, disabled, placeholder}: {onSend: (text: string) => vo
         value={text}
         placeholder={placeholder}
         onChange={e => setText(e.target.value)}
-        onKeyDown={e => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            submit();
-          }
-        }}
+        ref={grow}
       />
       <button type="button" className="send" aria-label="Send" aria-disabled={!ready} onClick={submit}>
         <Icon name="up" />

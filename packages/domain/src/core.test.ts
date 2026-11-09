@@ -58,7 +58,7 @@ test('pages are found from the URL path, with or without a base path', () => {
 });
 
 test('macro-F1 and pass judgement', () => {
-  const schema: Schema = {policy: '', fields: [{name: 'f', kind: 'single', values: [{name: 'a', definition: ''}, {name: 'b', definition: ''}]}]};
+  const schema: Schema = {fields: [{name: 'f', kind: 'single', values: [{name: 'a', definition: ''}, {name: 'b', definition: ''}]}]};
   const items = [
     {exampleId: '1', gold: {f: ['a']}, predicted: {f: ['a']}, costUsd: 0.001},
     {exampleId: '2', gold: {f: ['b']}, predicted: {f: ['a']}, costUsd: 0.001},
@@ -97,6 +97,6 @@ test('[Image N] without prompt image N is an error, so deleting an image used in
 
 test('a multi-select answer with the same value twice keeps it once', async () => {
   const {parseOutput} = await import('./labels.ts');
-  const schema: Schema = {policy: '', fields: [{name: 'topic', kind: 'multi', values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}]}]};
+  const schema: Schema = {fields: [{name: 'topic', kind: 'multi', values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}]}]};
   assert.deepEqual(parseOutput('{"topic": ["Food", "Food", "Travel"]}', schema).answer, {topic: ['Food', 'Travel']});
 });

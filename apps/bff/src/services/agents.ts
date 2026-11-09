@@ -1,6 +1,9 @@
 import type {
+  AgentLive,
+  AgentPreset,
   AgentProposal,
   AgentTurnOutput,
+  AgentTurnProgress,
   AgentWorkspaceSnapshot,
   ChatAttachment,
   ChatMessage,
@@ -10,12 +13,45 @@ import type {
 } from '@tsp/contracts';
 import {newId} from '@tsp/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
+import {postEvent} from './chat-events.ts';
 import {agentTools, getPageView} from './page-views.ts';
 
 export type {PageContext};
 
 const busyProjects = new Set<string>();
 export const isAgentBusy = (projectId: string): boolean => busyProjects.has(projectId);
+
+/**
+ * The turn running now, per project: who works, the live line and the reply so far. Kept apart
+ * from the change feed, so a streaming reply doesn't reload the page's state (HTTP: an SSE stream).
+ */
+const live = new Map<string, AgentLive>();
+const liveListeners = new Set<() => void>();
+const setLive = (projectId: string, l: AgentLive | null) => {
+  if (l) live.set(projectId, l);
+  else live.delete(projectId);
+  liveListeners.forEach(fn => fn());
+};
+export const agentLive = (projectId: string): AgentLive | null => live.get(projectId) ?? null;
+export function subscribeAgentLive(listener: () => void): () => void {
+  liveListeners.add(listener);
+  return () => void liveListeners.delete(listener);
+}
+
+/**
+ * A helper that joined to answer keeps answering on that page: the user's next messages there go
+ * straight to it, until they write from another page. Kept per project for this session.
+ */
+const stays = new Map<string, {agent: AgentPreset; page: string}>();
+const pageKey = (page: PageContext) => page.where?.page ?? page.label;
+/** The page's name in action lines: its label without the version or other detail. */
+const pageName = (page: PageContext) => page.label.split(' · ')[0];
+
+/** Which helper answers the next message on this page. */
+export function answeringAgent(projectId: string, page: PageContext): AgentPreset {
+  const s = stays.get(projectId);
+  return s && s.page === pageKey(page) ? s.agent : page.agent;
+}
 
 export async function chatHistory(projectId: string): Promise<ChatMessage[]> {
   return getApp().catalog.find('chat_messages', {projectId}, 'createdAt');
@@ -89,8 +125,16 @@ export async function sendUserMessage(
 ): Promise<AgentProposal | null> {
   busyProjects.add(projectId);
   const started = Date.now();
-  const entry = page.agent;
   const pageId = page.where?.page ?? 'other';
+  // Back from another page: the page's own helper answers again, and the chat says so.
+  const stay = stays.get(projectId);
+  if (stay && stay.page !== pageKey(page)) {
+    stays.delete(projectId);
+    if (stay.agent !== page.agent) await postEvent(projectId, 'page', page.agent, `answers on ${pageName(page)}`);
+  }
+  const turnPage: PageContext = stays.has(projectId) ? {...page, agent: stays.get(projectId)!.agent, intent: 'follow_up'} : page;
+  const entry = turnPage.agent;
+  setLive(projectId, {agent: entry, working: 'Thinking…', reply: null});
   let outcome = 'error';
   tm().event('chat_message_sent', {entry_agent: entry, chars: text.length, attachments: attachments?.length ?? 0});
   const cleanAttachments = attachments?.map(({name, size, url}) => ({name, size, ...(url ? {url} : {})}));
@@ -104,10 +148,26 @@ export async function sendUserMessage(
 
   try {
     const {catalog, agents, gateway} = getApp();
-    const workspace = await loadWorkspaceSnapshot(projectId, page, attachments);
-    const turnOut = await agents.runAgentTurn({userText: text, page, attachments, workspace}, gateway.agentModel(), agentTools(projectId));
+    const workspace = await loadWorkspaceSnapshot(projectId, turnPage, attachments);
+    // Messages are saved the moment they are final; the live line and the streamed reply show
+    // what the turn is doing until then.
+    let saving = Promise.resolve();
+    const progress: AgentTurnProgress = p => {
+      if ('message' in p) {
+        const msg = p.message;
+        saving = saving.then(() =>
+          post(projectId, {role: msg.role, agent: msg.agent, text: msg.text, page: page.label, ...(msg.event ? {event: msg.event} : {}), ...(msg.choices ? {choices: msg.choices} : {})}).then(() => undefined),
+        );
+        setLive(projectId, msg.role === 'agent' ? null : {agent: agentLive(projectId)?.agent ?? entry, working: 'Thinking…', reply: null});
+      } else if ('working' in p) setLive(projectId, {agent: p.agent, working: p.working, reply: null});
+      else setLive(projectId, {agent: p.agent, working: null, reply: p.reply});
+    };
+    const turnOut = await agents.runAgentTurn({userText: text, page: turnPage, attachments, workspace}, gateway.agentModel(), agentTools(projectId), progress);
+    await saving;
     outcome = 'ok';
     recordTurn(turnOut, entry, started);
+    const joined = turnOut.invocations.filter(i => i.from !== 'user').at(-1);
+    if (joined) stays.set(projectId, {agent: joined.to, page: pageKey(page)});
 
     for (const inv of turnOut.invocations) {
       const start: StartRequest = {
@@ -122,16 +182,6 @@ export async function sendUserMessage(
         note: inv.note,
       };
       await catalog.insert('start_requests', start);
-    }
-
-    for (const msg of turnOut.messages) {
-      await post(projectId, {
-        role: msg.role,
-        agent: msg.agent,
-        text: msg.text,
-        page: page.label,
-        ...(msg.choices ? {choices: msg.choices} : {}),
-      });
     }
 
     if (turnOut.proposal) {
@@ -150,12 +200,14 @@ export async function sendUserMessage(
         createdAt: now(),
       };
       await catalog.insert('agent_proposals', proposal);
+      await postEvent(projectId, 'draft', proposal.agent, proposal.kind === 'schema' ? 'put a draft on Schema settings' : `put a draft on ${page.where?.page === 'prompt' && !page.label.startsWith('First') ? 'Edit prompt' : pageName(page)}`, draftLink(proposal.kind, page));
       emitChange();
       return proposal;
     }
     return null;
   } finally {
     busyProjects.delete(projectId);
+    setLive(projectId, null);
     tm().counter('tsp_agent_turns_total', {agent: entry, page: pageId, outcome});
     tm().histogram('tsp_agent_turn_duration_seconds', (Date.now() - started) / 1000, {agent: entry});
     emitChange();
@@ -167,8 +219,8 @@ function recordTurn(out: AgentTurnOutput, entry: string, started: number) {
   const t = tm();
   for (const c of out.modelCalls) t.counter('tsp_agent_model_calls_total', {agent: c.agent, model: c.model});
   for (const f of out.parseFailures) t.counter('tsp_agent_parse_failures_total', {agent: f.agent, intent: f.intent});
-  const handoff = out.invocations.find(i => i.from === 'front_desk');
-  if (handoff) t.counter('tsp_agent_handoffs_total', {from: 'front_desk', to: handoff.to, outcome: 'joined'});
+  const handoff = out.invocations.find(i => i.from !== 'user' && i.from !== 'system');
+  if (handoff) t.counter('tsp_agent_handoffs_total', {from: handoff.from, to: handoff.to, outcome: 'joined'});
   const last = out.invocations[out.invocations.length - 1]?.to ?? entry;
   t.histogram('tsp_agent_tool_calls_per_turn', out.toolCalls.length, {agent: last});
   for (const c of out.toolCalls) {
@@ -187,6 +239,13 @@ function recordTurn(out: AgentTurnOutput, entry: string, started: number) {
   t.event('agent_replied', {agent: last, seconds: (Date.now() - started) / 1000, handoff_to: handoff?.to ?? null, tool_calls: out.toolCalls.length, proposal_kind: out.proposal?.kind ?? null});
 }
 
+/** Where a draft lands: the schema on Setup, a prompt in the editor (or the first prompt). */
+function draftLink(kind: AgentProposal['kind'], page: PageContext) {
+  if (kind === 'schema') return {path: '/setup'};
+  if (page.where?.page === 'prompt_edit') return {path: '/prompt/edit', params: page.where.params};
+  return page.label.startsWith('First') ? {path: '/prompt'} : {path: '/prompt/edit'};
+}
+
 export async function openProposals(projectId: string, kind: AgentProposal['kind']): Promise<AgentProposal[]> {
   return getApp().catalog.find('agent_proposals', {projectId, kind, state: 'open'}, 'createdAt desc');
 }
@@ -202,6 +261,8 @@ export async function closeProposal(p: AgentProposal, state: 'approved' | 'disca
   const fresh = await getApp().catalog.get('agent_proposals', p.id);
   if (fresh && fresh.state !== 'open') return;
   await getApp().catalog.patch('agent_proposals', p.id, {state});
+  // A prompt draft is "approved" when the editor takes it in; the user's own act there is Save.
+  if (p.kind === 'schema') await postEvent(p.projectId, state, 'user', `${state} the schema`, {path: '/setup'});
   tm().counter('tsp_agent_proposals_total', {agent: p.agent, kind: p.kind, outcome: state});
   if (p.kind === 'schema' && state === 'discarded') tm().event('schema_discarded', {revision: 0});
   if (p.kind === 'prompt') tm().event(state === 'approved' ? 'prompt_proposal_approved' : 'prompt_proposal_discarded', state === 'approved' ? {agent: p.agent, edited_before_approve: false} : {agent: p.agent});

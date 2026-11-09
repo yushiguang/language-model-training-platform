@@ -1,11 +1,13 @@
 'use client';
 
 import Link from 'next/link';
-import {createContext, Suspense, useContext, useEffect, useRef, useState, type ReactNode} from 'react';
+import {usePathname} from 'next/navigation';
+import {createContext, Suspense, useContext, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+import {createPortal} from 'react-dom';
 import {NODES} from '@tsp/domain';
 import type {NodeId, PageContext} from '@tsp/contracts';
 import {getRuntimeInfo, type ProjectState} from '@/backend-api';
-import {Icon} from '@/ui';
+import {ActionErrorBanner, clearActionError, Icon} from '@/ui';
 import {AskAi} from './AskAi';
 import {ProjectProvider, useProject} from './ProjectContext';
 import {stepStates} from './steps';
@@ -13,6 +15,7 @@ import {stepStates} from './steps';
 type Ctx = ReturnType<typeof useProject> & {state: ProjectState};
 
 interface Props {
+  /** The step (the shell reads it from the address; kept for readers of the page). */
   node: NodeId;
   /** What Ask AI reads on this page. */
   page: PageContext;
@@ -33,35 +36,58 @@ interface ChatSlot {
   onSend?: (text: string) => Promise<void>;
 }
 
-const ShellCtx = createContext<{open: boolean; setOpen: (o: boolean) => void; page: PageContext; nav: ReactNode}>({open: false, setOpen: () => undefined, page: {label: '', agent: 'front_desk', intent: 'answer', context: {}}, nav: null});
+interface Shell {
+  open: boolean;
+  setOpen: (o: boolean) => void;
+  /** Ask AI is rendered here, beside the main column. */
+  side: HTMLElement | null;
+}
+const ShellCtx = createContext<Shell>({
+  open: false,
+  setOpen: () => undefined,
+  side: null,
+});
+const PageCtx = createContext<PageContext>({
+  label: '',
+  agent: 'front_desk',
+  intent: 'answer',
+  context: {},
+});
 
 /**
- * Every project page (design: "Shell"): a grey page with the top island (project, steps, user; as
- * wide as the content, and moving left with it when Ask AI opens), one fixed page header whose
- * content fades out under it while scrolled, and Ask AI at the bottom right.
+ * The shell of every project page (design: "Shell"), mounted once for all steps: a grey page with
+ * the top island (project, steps, user; as wide as the content, and moving left with it when Ask
+ * AI opens) and Ask AI at the bottom right. The project state and the open state of Ask AI stay
+ * as they are across step changes; until the project has loaded, the panel shows a spinner.
  */
-export function ProjectPage(props: Props) {
+export function ProjectShell({children}: {children: ReactNode}) {
   return (
-    <Suspense fallback={null}>
+    <Suspense fallback={<Loading />}>
       <ProjectProvider>
-        <ShellInner {...props} />
+        <ShellInner>{children}</ShellInner>
       </ProjectProvider>
     </Suspense>
   );
 }
 
-function ShellInner({node, page, chatOpen = false, children}: Props) {
+function ShellInner({children}: {children: ReactNode}) {
   const ctx = useProject();
-  const [open, setOpen] = useState(chatOpen);
-  useEffect(() => setOpen(chatOpen), [chatOpen]);
+  const [open, setOpen] = useState(false);
+  const [side, setSide] = useState<HTMLElement | null>(null);
+  const shell = useMemo(() => ({open, setOpen, side}), [open, side]);
+  const node = nodeFromPath(usePathname());
   if (!ctx.projectId) return <Missing text="No project was chosen." />;
   if (ctx.error) return <Missing text={ctx.error} />;
-  if (!ctx.state) return <div className="k app b" />;
-  const state = ctx.state;
+  const state = ctx.state?.project.id === ctx.projectId ? ctx.state : null;
   return (
-    <ShellCtx.Provider value={{open, setOpen, page, nav: <TopNav state={state} current={node} />}}>
+    <ShellCtx.Provider value={shell}>
       <div className="k app b">
-        <div className="b-body">{children({...ctx, state})}</div>
+        <div className="b-body" ref={setSide}>
+          <main className="b-main">
+            {state ? <TopNav state={state} current={node} /> : <header className="topnav" />}
+            {state ? children : <Loading panel />}
+          </main>
+        </div>
         {!open && (
           <button type="button" className="ask" onClick={() => setOpen(true)}>
             <Icon name="spark" />
@@ -73,26 +99,57 @@ function ShellInner({node, page, chatOpen = false, children}: Props) {
   );
 }
 
+const nodeFromPath = (path: string): NodeId => {
+  const p = path.replace(/\/+$/, '');
+  return (NODES.find(n => p.endsWith(n.path)) ?? NODES[0]).id;
+};
+
+/** The spinner shown in the panel while a step's data loads (design: "Step-Loading"). */
+export function Loading({panel}: {panel?: boolean}) {
+  const spinner = (
+    <div className="loading" role="status" aria-label="Loading">
+      <Icon name="ring" />
+    </div>
+  );
+  return panel ? <div className="container">{spinner}</div> : <div className="k app b">{spinner}</div>;
+}
+
+/** A step page: what Ask AI reads on it, and its content (a `<Frame>`). */
+export function ProjectPage({page, chatOpen = false, children}: Props) {
+  const ctx = useProject();
+  const {setOpen} = useContext(ShellCtx);
+  // A page that starts with Ask AI open (Schema settings) opens it; other pages keep it as it was.
+  useEffect(() => {
+    if (chatOpen) setOpen(true);
+  }, [chatOpen, setOpen]);
+  if (!ctx.state) return null;
+  return <PageCtx.Provider value={page}>{children({...ctx, state: ctx.state})}</PageCtx.Provider>;
+}
+
 /** A page's header and content, with Ask AI beside them when it is open. */
 export function Frame({head, children, chat}: {head: ReactNode; children: ReactNode; chat?: ChatSlot}) {
-  const {open, setOpen, page, nav} = useContext(ShellCtx);
+  const {open, setOpen, side} = useContext(ShellCtx);
+  const page = useContext(PageCtx);
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const on = () => setScrolled(window.scrollY > 0);
     on();
     window.addEventListener('scroll', on, {passive: true});
-    return () => window.removeEventListener('scroll', on);
+    return () => {
+      window.removeEventListener('scroll', on);
+      clearActionError();
+    };
   }, []);
   return (
     <>
-      <main className="b-main">
-        {nav}
-        <div className={`b-head${scrolled ? ' scrolled' : ''}`}>
-          <div className="container">{head}</div>
-        </div>
-        <div className="container">{children}</div>
-      </main>
-      {open && <AskAi page={page} onClose={() => setOpen(false)} {...chat} />}
+      <div className={`b-head${scrolled ? ' scrolled' : ''}`}>
+        <div className="container">{head}</div>
+      </div>
+      <div className="container page-in">
+        <ActionErrorBanner />
+        {children}
+      </div>
+      {open && side && createPortal(<AskAi page={page} onClose={() => setOpen(false)} {...chat} />, side)}
     </>
   );
 }

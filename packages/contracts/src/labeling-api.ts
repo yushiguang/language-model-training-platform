@@ -33,6 +33,8 @@ export interface LabelingTask {
   done: number;
   valid: number;
   invalid: number;
+  /** The part of `invalid` the endpoint's safety filter stopped. Missing on older records. */
+  filtered?: number;
   /** Examples whose call failed after the gateway's retries. */
   failed: number;
   failedExampleIds: string[];
@@ -40,11 +42,14 @@ export interface LabelingTask {
   /** Tokens of the answers this task counts (input + output). Missing on older records. */
   tokens?: number;
   /**
-   * The part of `costUsd` spent by runs started automatically (`RunOptions.auto`): it counts
-   * toward the project's automatic-spend cap, whoever created the task.
+   * The part of `costUsd` spent by runs started automatically (`RunOptions.auto`), whoever
+   * created the task. Recorded for metrics and the audit; there is no automatic-spend cap.
    */
   autoCostUsd?: number;
-  /** Pause when cost passes 120% of this. null = no budget check. */
+  /**
+   * Pause when cost passes 120% of this; null = no budget check. The labeling app supports it,
+   * but the MVP sets none: every start runs with no cost limit and the user stops it with Stop.
+   */
   budgetUsd: number | null;
   /** Examples labeled at once. */
   parallel: number;
@@ -88,8 +93,8 @@ export interface RunOptions {
   /** Started by code without a click: this run's cost is added to `autoCostUsd`. */
   auto?: boolean;
   /**
-   * Budget for this run alone (the estimate an automatic start was checked against): the run
-   * pauses with stopReason 'budget' once its own cost passes 120% of it.
+   * Budget for this run alone: the run pauses with stopReason 'budget' once its own cost passes
+   * 120% of it. Supported, but unused in the MVP (no cost limits).
    */
   budgetUsd?: number;
   /**

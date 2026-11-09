@@ -86,12 +86,18 @@ function SchemaView({state, setPage}: {state: ProjectState; setPage: (p: PageCon
     await saveSetup(state.project.id, {schema: draft, steps: {schema: true, evaluation: setup?.steps.evaluation ?? false, models: setup?.steps.models ?? false}});
     await closeProposal(open, 'approved');
   };
+  // Discarding a draft goes back to the saved schema (or none).
+  const discard = async () => {
+    if (!open) return;
+    await closeProposal(open, 'discarded');
+    setDraft(setup?.schema ?? null);
+  };
   const save = async () => {
     if (!draft) return;
     await saveSetup(state.project.id, {schema: draft, steps: {schema: true, evaluation: setup?.steps.evaluation ?? false, models: setup?.steps.models ?? false}});
   };
   const addField = () => {
-    const d: Schema = draft ?? {policy: '', fields: []};
+    const d: Schema = draft ?? {fields: []};
     const name = uniqueName(d.fields.map(f => f.name), 'new_field');
     setDraft({...d, fields: [...d.fields, {name, kind: 'single', values: [{name: '', definition: ''}, {name: '', definition: ''}]}]});
     setSel(d.fields.length);
@@ -108,7 +114,15 @@ function SchemaView({state, setPage}: {state: ProjectState; setPage: (p: PageCon
     <PageHead
       title="Schema settings"
       actions={
-        dirty ? (
+        isDraft ? (
+          <>
+            <span className="done-at" style={{margin: 0}}>
+              <Badge text="AI draft" icon={false} />
+            </span>
+            <Button label="Discard" kind="ghost" onClick={discard} />
+            <Button label="Approve" kind="primary" disabled={!valid(draft)} onClick={approve} />
+          </>
+        ) : dirty ? (
           <>
             <span className="done-at" style={{margin: 0}}>
               <Badge text="Unsaved changes" tone="warn" icon={false} />
@@ -132,22 +146,13 @@ function SchemaView({state, setPage}: {state: ProjectState; setPage: (p: PageCon
       <Card title="Fields">
         <nav className="vlist" aria-label="Fields">
           {draft.fields.map((f, i) => (
-            <a
-              key={i}
-              className="vrow"
-              href="#"
-              aria-current={i === sel}
-              onClick={e => {
-                e.preventDefault();
-                setSel(i);
-              }}
-            >
+            <button key={i} type="button" className="vrow" aria-current={i === sel} onClick={() => setSel(i)}>
               <Code>{f.name || 'unnamed'}</Code>
               <span>{isDraft && <Badge text="Draft" icon={false} />}</span>
               <span className="t-3" style={{fontSize: 13}}>
                 {count(f)}
               </span>
-            </a>
+            </button>
           ))}
         </nav>
         <div style={{margin: '4px -12px 0'}}>
@@ -297,7 +302,7 @@ function Evaluation({state}: {state: ProjectState}) {
     <div className="grid-split" style={{gridTemplateColumns: '400px 1fr'}}>
       <Card title="Pass rule">
         <div className="opts" role="radiogroup" aria-label="Pass rule">
-          <Opt title="Default" tip="Macro-F1 of every field must reach 0.80" checked={mode === 'default'} onSelect={() => setMode('default')} extra={<><span className="grow" /><Badge text="Recommended" icon={false} /></>} />
+          <Opt title="Default" tip={`Macro-F1 of every field must reach ${DEFAULT_THRESHOLDS.macroF1.toFixed(2)}`} checked={mode === 'default'} onSelect={() => setMode('default')} extra={<><span className="grow" /><Badge text="Recommended" icon={false} /></>} />
           <Opt title="Custom" tip="Choose which checks count and their threshold" checked={mode === 'custom'} onSelect={() => setMode('custom')} />
           <Opt title="None" tip="No scores, so the optimiser cannot run" checked={mode === 'none'} onSelect={() => setMode('none')} />
         </div>
@@ -373,11 +378,11 @@ function Models({state}: {state: ProjectState}) {
               <Field label="Max output tokens">
                 <input className="input" value={m.maxOutputTokens} onChange={e => patch(ep.id, {maxOutputTokens: parseInt(e.target.value) || 1})} />
               </Field>
-              <Field label="Temperature">
+              <Field label="Temperature" off={!ep.supportsTemperature}>
                 {ep.supportsTemperature ? (
                   <input className="input" value={m.temperature ?? 0} onChange={e => patch(ep.id, {temperature: parseFloat(e.target.value) || 0})} />
                 ) : (
-                  <input className="input" value="–" readOnly disabled title="This model does not support temperature" />
+                  <input className="input" value="Not supported" readOnly disabled />
                 )}
               </Field>
             </div>
