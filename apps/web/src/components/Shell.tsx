@@ -151,7 +151,7 @@ export function UserEnd() {
         </span>
       )}
       <span className="avatar" aria-label={user} title={user}>
-        {user.slice(0, 1)}
+        {user.slice(0, 1).toUpperCase()}
       </span>
     </div>
   );
