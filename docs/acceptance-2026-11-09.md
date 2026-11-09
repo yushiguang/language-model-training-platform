@@ -48,6 +48,41 @@ replies render under a generic "AI" label although `msg.agent` is stored — sho
 name. Tool calls are currently recorded only in telemetry and the catalog audit log
 (`agent.tool` entries) and are visible nowhere in the UI.
 
+### Assessment of the current design (internal agent, 2026-11-09)
+
+The history model is right; its presentation is not.
+
+- **One history per project, inherited across pages: keep.** The product concept is "the
+  page is the agent's workspace": one project, one conversation, specialists handing off
+  behind the front desk. Splitting history per page would fragment exactly the continuity
+  that makes handoffs and follow-up questions work, and the page each message came from is
+  already stored on the message. The agents themselves only ever see the last 8 messages
+  (`recentHistory`), so the shared stream does not flood their context either.
+- **Flattening every speaker to "AI" is wrong.** `msg.agent` is stored and then thrown away
+  at render: users cannot tell a front-desk answer from a schema or evaluation specialist's,
+  although the presets have different authority (only some may draft schemas or start paid
+  work). Show the preset name on agent messages; keep the user's messages as they are.
+- **Invisible tool calls are the real gap.** The system already records everything —
+  telemetry counters, `agent_tool_called` events, and audit entries with agent, tool name
+  and args in the catalog — but none of it reaches the one place the user is looking.
+  Combined with silent form editing (a proposal lands in the page's fields with no trace in
+  the conversation), users cannot answer "who changed this, and why". That is a trust and
+  debuggability problem, not a cosmetic one: paid start tools spend money, and their only
+  visible trace today is a reply the model happens to write.
+- **Do not overcorrect.** Dumping every read-only lookup into the chat would bury the
+  conversation; the audit log is the right home for those. The line to draw is the one
+  above: anything that changes page state, saves data, or spends money gets a compact,
+  timestamped line in the stream (including proposal approvals and discards, which are
+  state changes by the user); pure reads stay in the audit log. Persist these lines as
+  `role: 'event'` messages so they survive reloads and appear in the right order, rather
+  than reconstructing them from the audit log at render time.
+- **Two smaller inconsistencies worth fixing with it.** The 8-message window the agents
+  see is invisible to users, who reasonably assume the agent remembers the whole visible
+  conversation; a subtle "the agent sees recent messages" hint or a longer window closes
+  that expectation gap. And because history is project-wide, long projects accumulate one
+  endless stream — day separators (already natural with `createdAt`) keep it scannable
+  without changing the model.
+
 ## 6. Schema approval must live on the main page, not only in the chat
 
 After the schema agent drafts a schema, the only Approve is in the Ask AI panel
