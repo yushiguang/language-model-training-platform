@@ -1,4 +1,4 @@
-# Training Set Platform: Web App (`apps/web`)
+# Sprint: Web App (`apps/web`)
 
 Next.js 16 (static export), styled with a copy of the UI canvas styles (`src/ui/kit.css`; what
 differs from the canvas is in [docs/ui-gaps.md](../../docs/ui-gaps.md)). Pages talk to the backend only through

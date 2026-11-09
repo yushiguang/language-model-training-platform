@@ -1,11 +1,10 @@
 'use client';
 
-import {useRouter, useSearchParams} from 'next/navigation';
+import {useSearchParams} from 'next/navigation';
 import {Suspense, useEffect, useMemo, useState} from 'react';
 import type {Answer, EndpointId, LabelingRun, PromptVersion, Schema, TrainingSet} from '@tsp/contracts';
 import {estimate, MIN_PER_VALUE, recommend, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
-import {useProject} from '@/components/ProjectContext';
 import {modelName, versionScore} from '@/components/prompt/scores';
 import {labelTestSet, predictionsFor, startTrainingSet, stopRun, stopTrainingSet, tick, track, trainingRows, type ProjectState} from '@/backend-api';
 import {Badge, Banner, Button, Card, Code, dateTime, Empty, Hov, Metric, Metrics, num, PageHead, Progress, Select, Tabs} from '@/ui';
@@ -204,8 +203,6 @@ function counts(schema: Schema, rows: Row[]) {
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 function Done({state, split, rows, job}: {state: ProjectState; split: SetKey; rows: Row[]; job: TrainingSet | LabelingRun}) {
-  const router = useRouter();
-  const {href} = useProject();
   const schema = state.setup!.schema!;
   const v = state.versions.find(x => x.id === job.promptVersionId);
   const labeled = rows.filter(r => r.answer);
@@ -237,7 +234,8 @@ function Done({state, split, rows, job}: {state: ProjectState; split: SetKey; ro
     );
   return (
     <>
-      {banner && <Banner text={banner} action={<Button label="Add examples" kind="white" size="sm" onClick={() => router.push(href('/dataset'))} />} />}
+      {/* No "Add examples" action: adding to an existing dataset comes in a later version. */}
+      {banner && <Banner text={banner} />}
       <div style={{display: 'grid', gridTemplateColumns: '360px 1fr', gap: 16, alignItems: 'start'}}>
         <Card title="Run">
           {metrics}

@@ -1,4 +1,4 @@
-import type {Answer, DatasetSnapshot, Example, GoldLabel, RawExample, SamplingTask, Schema} from '@tsp/contracts';
+import type {Answer, DatasetSnapshot, Example, ExampleMedia, GoldLabel, RawExample, SamplingTask, Schema} from '@tsp/contracts';
 import {hashString, newId} from '@tsp/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
 
@@ -94,6 +94,14 @@ export async function startSampleDataset(projectId: string, n: number): Promise<
 
 export async function getSamplePoolSize(): Promise<number> {
   return getApp().examples.available();
+}
+
+/** The media of one example (Gold Labels), or null without a media source. */
+export async function exampleMedia(exampleId: string): Promise<ExampleMedia | null> {
+  const {catalog, media} = getApp();
+  if (!media) return null;
+  const ex = await catalog.get('examples', exampleId);
+  return ex ? media.media(ex.externalId, ex.type) : null;
 }
 
 export function hasBundledGold(): boolean {

@@ -1,6 +1,6 @@
 # Agent Runtime Service Guide (`apps/agents`)
 
-`apps/agents` (`@tsp/agents`) is the standalone Agent Runtime service for the Training Set Platform.
+`apps/agents` (`@tsp/agents`) is the standalone Agent Runtime service for Sprint, the training set platform.
 It is owned and evolved by coding agents working in the public repository, and will later be
 deployed as a dedicated microservice (or ported to Go alongside the BFF).
 

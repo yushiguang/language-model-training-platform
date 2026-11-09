@@ -51,7 +51,7 @@ const telemetry = createTelemetry({
 const gateway = createGateway(platform, {telemetry});
 const catalog = createCatalog(platform.db, {telemetry});
 const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: emitChange, telemetry});
-configureBff({catalog, labeling, gateway, agents: agentRuntime, identity: platform.identity, files: platform.files, examples: platform.examples, standIns: platform.standIns, telemetry});
+configureBff({catalog, labeling, gateway, agents: agentRuntime, identity: platform.identity, files: platform.files, examples: platform.examples, media: platform.media, standIns: platform.standIns, telemetry});
 const web = webTelemetry(telemetry);
 void platform.identity.currentUser().then(u => telemetry.setContext({userId: u.id}));
 
@@ -211,6 +211,7 @@ export const approveNode = timed('approveNode', bff.approveNode);
 export const skipGold = timed('skipGold', bff.skipGold);
 export const saveSetup = timed('saveSetup', bff.saveSetup);
 export const getSamplePoolSize = timed('getSamplePoolSize', bff.getSamplePoolSize);
+export const exampleMedia = timed('exampleMedia', bff.exampleMedia);
 export const startSampleDataset = timed('startSampleDataset', bff.startSampleDataset);
 export const stopSampleDataset = timed('stopSampleDataset', bff.stopSampleDataset);
 export const applySplit = timed('applySplit', bff.applySplit);

@@ -97,7 +97,11 @@ function Gold({state}: {state: ProjectState}) {
   );
 }
 
-/** The example with the features of its own type (design: media on top, one line per feature). */
+/**
+ * The example with the features of its own type (design: media on top, one line per feature).
+ * The media tile shows the item id only, as designed. `exampleMedia` (backend-api) already returns
+ * the cover, frames or video from the platform's media source; showing them here waits for a design.
+ */
 function ExampleCard({ex, n}: {ex: Example; n: number}) {
   const f = (k: string) => {
     const v = ex.features[k];
@@ -159,11 +163,13 @@ function ModelAnswer({state, ex, shown, onToggle}: {state: ProjectState; ex: Exa
     };
   }, [ex.id, state.versions.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const schema = state.setup!.schema!;
+  // No model answer for this example (or still looking): no card at all (design, 2026-11-09).
+  if (!found) return null;
   return (
     <Card
       title="Model answer"
       titleExtra={
-        shown && found ? (
+        shown ? (
           <span className="t-3 one" style={{fontSize: 13}}>
             {found.endpoint} · prompt {found.label}
           </span>
@@ -171,15 +177,7 @@ function ModelAnswer({state, ex, shown, onToggle}: {state: ProjectState; ex: Exa
       }
       actions={<Button label={shown ? 'Hide' : 'Show'} kind="ghost" size="sm" icon="eye" onClick={onToggle} />}
     >
-      {!shown ? null : found === undefined ? (
-        <span className="t-3" style={{fontSize: 13}}>
-          Loading…
-        </span>
-      ) : found === null ? (
-        <span className="t-3" style={{fontSize: 13}}>
-          No model answer yet. It appears once a prompt version has labeled this example.
-        </span>
-      ) : !found.answer ? (
+      {!shown ? null : !found.answer ? (
         <span className="t-3 one" style={{fontSize: 13}} title={found.invalid ?? undefined}>
           The model&apos;s answer was invalid
         </span>

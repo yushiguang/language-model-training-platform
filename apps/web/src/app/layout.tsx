@@ -2,7 +2,7 @@ import type {Metadata} from 'next';
 import './globals.css';
 import {Providers} from './providers';
 
-export const metadata: Metadata = {title: 'Training Set Platform'};
+export const metadata: Metadata = {title: 'Sprint'};
 
 export default function RootLayout({children}: {children: React.ReactNode}) {
   return (

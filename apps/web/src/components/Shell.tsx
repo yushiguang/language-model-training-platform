@@ -33,11 +33,12 @@ interface ChatSlot {
   onSend?: (text: string) => Promise<void>;
 }
 
-const ShellCtx = createContext<{open: boolean; setOpen: (o: boolean) => void; page: PageContext}>({open: false, setOpen: () => undefined, page: {label: '', agent: 'front_desk', intent: 'answer', context: {}}});
+const ShellCtx = createContext<{open: boolean; setOpen: (o: boolean) => void; page: PageContext; nav: ReactNode}>({open: false, setOpen: () => undefined, page: {label: '', agent: 'front_desk', intent: 'answer', context: {}}, nav: null});
 
 /**
- * Every project page (design: "Shell"): a grey page with the floating step bar, one fixed page
- * header whose content fades out under it while scrolled, and Ask AI at the bottom right.
+ * Every project page (design: "Shell"): a grey page with the top island (project, steps, user; as
+ * wide as the content, and moving left with it when Ask AI opens), one fixed page header whose
+ * content fades out under it while scrolled, and Ask AI at the bottom right.
  */
 export function ProjectPage(props: Props) {
   return (
@@ -58,9 +59,8 @@ function ShellInner({node, page, chatOpen = false, children}: Props) {
   if (!ctx.state) return <div className="k app b" />;
   const state = ctx.state;
   return (
-    <ShellCtx.Provider value={{open, setOpen, page}}>
+    <ShellCtx.Provider value={{open, setOpen, page, nav: <TopNav state={state} current={node} />}}>
       <div className="k app b">
-        <TopNav state={state} current={node} />
         <div className="b-body">{children({...ctx, state})}</div>
         {!open && (
           <button type="button" className="ask" onClick={() => setOpen(true)}>
@@ -75,7 +75,7 @@ function ShellInner({node, page, chatOpen = false, children}: Props) {
 
 /** A page's header and content, with Ask AI beside them when it is open. */
 export function Frame({head, children, chat}: {head: ReactNode; children: ReactNode; chat?: ChatSlot}) {
-  const {open, setOpen, page} = useContext(ShellCtx);
+  const {open, setOpen, page, nav} = useContext(ShellCtx);
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const on = () => setScrolled(window.scrollY > 0);
@@ -86,6 +86,7 @@ export function Frame({head, children, chat}: {head: ReactNode; children: ReactN
   return (
     <>
       <main className="b-main">
+        {nav}
         <div className={`b-head${scrolled ? ' scrolled' : ''}`}>
           <div className="container">{head}</div>
         </div>
@@ -98,6 +99,39 @@ export function Frame({head, children, chat}: {head: ReactNode; children: ReactN
 
 function TopNav({state, current}: {state: ProjectState; current: NodeId}) {
   const {href} = useProject();
+  const st = stepStates(state);
+  return (
+    <header className="topnav">
+      <div className="island">
+        <Link className="proj" href="/" title="All projects">
+          <span className="proj-ic" aria-hidden="true">
+            {state.project.name.trim().slice(0, 1).toUpperCase()}
+          </span>
+          <b title={state.project.name}>{state.project.name}</b>
+        </Link>
+        <nav className="stepper" aria-label="Workflow">
+          {NODES.map((n, i) => {
+            const s = st[n.id];
+            return (
+              <span key={n.id} style={{display: 'contents'}}>
+                {i > 0 && <span className="step-sep" aria-hidden="true" />}
+                <Link className={`step${s === 'todo' ? '' : ` ${s}`}`} aria-current={n.id === current ? 'page' : undefined} href={href(n.path)}>
+                  <span className="step-ic">{s === 'done' ? <Icon name="check" /> : s === 'running' ? <Icon name="ring" /> : s === 'attention' ? '!' : i + 1}</span>
+                  {n.label}
+                  {n.optional && <span className="step-opt">optional</span>}
+                </Link>
+              </span>
+            );
+          })}
+        </nav>
+        <UserEnd />
+      </div>
+    </header>
+  );
+}
+
+/** The right end of the top island: the stand-in tag (while stand-ins run) and the user's avatar. */
+export function UserEnd() {
   const [user, setUser] = useState('');
   const [standIns, setStandIns] = useState<string[]>([]);
   const loaded = useRef(false);
@@ -109,44 +143,17 @@ function TopNav({state, current}: {state: ProjectState; current: NodeId}) {
       setStandIns(info.standIns);
     });
   }, []);
-  const st = stepStates(state);
   return (
-    <header className="topnav">
-      <Link className="brand" href="/">
-        <span className="brand-mark" aria-hidden="true">
-          TS
+    <div className="topbar-end">
+      {standIns.length > 0 && (
+        <span className="standin" title={`Stand-ins: ${standIns.join(', ')}`}>
+          Stand-in services
         </span>
-        <span className="brand-t">
-          <small>Training Set Platform</small>
-          <b>{state.project.name}</b>
-        </span>
-      </Link>
-      <nav className="stepper" aria-label="Workflow">
-        {NODES.map((n, i) => {
-          const s = st[n.id];
-          return (
-            <span key={n.id} style={{display: 'contents'}}>
-              {i > 0 && <span className="step-sep" aria-hidden="true" />}
-              <Link className={`step${s === 'todo' ? '' : ` ${s}`}`} aria-current={n.id === current ? 'page' : undefined} href={href(n.path)}>
-                <span className="step-ic">{s === 'done' ? <Icon name="check" /> : s === 'running' ? <Icon name="ring" /> : s === 'attention' ? '!' : i + 1}</span>
-                {n.label}
-                {n.optional && <span className="step-opt">optional</span>}
-              </Link>
-            </span>
-          );
-        })}
-      </nav>
-      <div className="topbar-end">
-        {standIns.length > 0 && (
-          <span className="standin" title={`Stand-ins: ${standIns.join(', ')}`}>
-            Stand-in services
-          </span>
-        )}
-        <span className="avatar" aria-label={user} title={user}>
-          {user.slice(0, 1)}
-        </span>
-      </div>
-    </header>
+      )}
+      <span className="avatar" aria-label={user} title={user}>
+        {user.slice(0, 1)}
+      </span>
+    </div>
   );
 }
 

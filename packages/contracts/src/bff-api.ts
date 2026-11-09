@@ -25,6 +25,7 @@ import type {
   TrainingSet,
 } from './types.ts';
 import type {LabelingTask} from './labeling-api.ts';
+import type {ExampleMedia} from './platform-api.ts';
 
 /**
  * Contract 1: Frontend Web App <-> BFF Service (`@tsp/contracts/bff-api`).
@@ -74,6 +75,8 @@ export interface BffContract {
 
   // Dataset & Gold labels
   getSamplePoolSize(): Promise<number>;
+  /** The media of one example, or null (no media source, or none for this example). */
+  exampleMedia(exampleId: string): Promise<ExampleMedia | null>;
   startSampleDataset(projectId: string, count: number): Promise<DatasetSnapshot | null>;
   stopSampleDataset(projectId: string): void;
   uploadDatasetText(projectId: string, name: string, text: string): Promise<{snapshot?: DatasetSnapshot; error?: string}>;

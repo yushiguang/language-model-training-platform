@@ -6,6 +6,7 @@ import {useEffect, useState} from 'react';
 import {NODES, nodeStatuses} from '@tsp/domain';
 import type {Project} from '@tsp/contracts';
 import {hrefFor} from '@/components/ProjectContext';
+import {UserEnd} from '@/components/Shell';
 import {createProject, listProjects, loadProjectState} from '@/backend-api';
 import {Button, Card, dateTime, Field, PageHead, Table} from '@/ui';
 
@@ -40,18 +41,20 @@ export default function Home() {
 
   return (
     <div className="k app b">
-      <header className="topnav">
-        <span className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            TS
-          </span>
-          <span className="brand-t">
-            <b>Training Set Platform</b>
-          </span>
-        </span>
-      </header>
       <div className="b-body">
         <main className="b-main">
+          <header className="topnav">
+            <div className="island">
+              <span className="proj">
+                <span className="proj-ic" aria-hidden="true">
+                  S
+                </span>
+                <b>Sprint</b>
+              </span>
+              <span />
+              <UserEnd />
+            </div>
+          </header>
           <div className="b-head">
             <div className="container">
               <PageHead title="Projects" />
@@ -64,7 +67,7 @@ export default function Home() {
               </Field>
             </Card>
             {projects && projects.length > 0 && (
-              <Card title="Projects">
+              <Card title="Projects" style={{width: 706}}>
                 <Table
                   cols={[{label: 'Project'}, {label: 'Current step'}, {label: 'Created'}]}
                   first={40}

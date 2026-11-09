@@ -388,6 +388,29 @@ export interface ExampleSource {
   bundledLabels?(): Promise<{externalId: string; answer: Record<string, string[]>}[]>;
 }
 
+/**
+ * What people see of one example (Gold Labels shows it above the features). Draft, 2026-11-09:
+ * the hosting platform's media service is not connected yet. Only for people: the labeling models
+ * get image features through the prompt template, never through this.
+ */
+export interface ExampleMedia {
+  kind: 'video' | 'images';
+  /** A video the browser can play (kind 'video'). */
+  videoUrl?: string;
+  /** The cover or poster image. */
+  coverUrl?: string;
+  /** Still images: a photo-and-text post's images, or key frames of a video. May be empty. */
+  imageUrls: string[];
+  /** Video length in seconds, when known. */
+  durationSec?: number;
+}
+
+/** Media for examples. Every URL must load in the signed-in user's browser. */
+export interface MediaSource {
+  /** The example's media by its external id (item id); null when it has none or it is gone. */
+  media(externalId: string, type: RawExample['type']): Promise<ExampleMedia | null>;
+}
+
 export interface Platform {
   db: DocRuntime;
   models: LabelingModels;
@@ -395,6 +418,11 @@ export interface Platform {
   identity: Identity;
   files: FileStore;
   examples: ExampleSource;
+  /**
+   * Media for people to look at (Gold Labels). Optional: without it pages show the item id only.
+   * Draft interface (2026-11-09); see docs/handover/integration.md, "Media".
+   */
+  media?: MediaSource;
   /**
    * Registered endpoints with their QPM/TPM. Optional: the gateway fills anything missing from its
    * assumed defaults (`apps/llm-gateway/src/registry.ts`).

@@ -1,4 +1,4 @@
-import {NO_TELEMETRY, type AgentRuntimeContract, type CatalogContract, type ExampleSource, type FileStore, type Identity, type LabelingContract, type LlmGatewayContract, type TelemetryPort} from '@tsp/contracts';
+import {NO_TELEMETRY, type AgentRuntimeContract, type CatalogContract, type ExampleSource, type FileStore, type MediaSource, type Identity, type LabelingContract, type LlmGatewayContract, type TelemetryPort} from '@tsp/contracts';
 
 /**
  * What the bff talks to. The bff holds no records of its own: product records live in the
@@ -13,6 +13,8 @@ export interface BffDeps {
   identity: Identity;
   files: FileStore;
   examples: ExampleSource;
+  /** Optional media for people to look at; see `MediaSource`. */
+  media?: MediaSource;
   standIns: string[];
   telemetry?: TelemetryPort;
 }

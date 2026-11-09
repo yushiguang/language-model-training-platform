@@ -1,5 +1,5 @@
 /*
- * The UI kit, copied from the approved design (UI canvas, page "Unified UI", stylesheet kit.css v9).
+ * The UI kit, copied from the approved design (UI canvas, page "Unified UI", stylesheet kit.css v10).
  * Keep it identical to the canvas: change the design first, then copy it here. App-only rules
  * (things the canvas draws with inline styles) live in app.css.
  */
@@ -307,3 +307,14 @@ body{margin:0;background:var(--bg-body)}
 .metrics.v{flex-direction:column;gap:16px}
 .metrics.v>.metric{padding:0}
 .metrics.v>.metric+.metric{border-left:0;border-top:1px solid var(--border);padding-top:16px}
+/* ---------- shell B, top island (2026-11-09): project, steps and user in one panel as wide as the content ---------- */
+.b .topnav{display:block;height:auto;padding:12px 40px 8px;grid-template-columns:none;background:var(--bg-body)}
+.b-main>.topnav{margin:0 -40px}
+.island{max-width:1280px;margin:0 auto;height:56px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:16px;padding:0 12px;background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-full);box-shadow:0 1px 2px rgb(0 0 0 / 4%),0 4px 16px rgb(0 0 0 / 6%)}
+.b .island .stepper{background:none;border:0;box-shadow:none;padding:0}
+.proj{display:flex;align-items:center;gap:10px;min-width:0;text-decoration:none;color:var(--text)}
+.proj b{font-size:14px;line-height:20px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.proj-ic{width:32px;height:32px;border-radius:var(--r-full);background:var(--neutral);display:grid;place-items:center;font-size:13px;font-weight:600;flex:none}
+.b .b-head{top:76px}
+.b-body>.chat{top:12px;margin-top:12px}
+.b.still .b-body>.chat{top:76px;margin-top:0}
