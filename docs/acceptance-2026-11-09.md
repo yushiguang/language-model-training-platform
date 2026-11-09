@@ -136,3 +136,63 @@ The drafted first prompt (acceptance screenshot 5) is generated live by the reas
 through the internal agent adapter, not canned text — it cites the schema values the schema
 agent had just proposed (for example `mild_suggestive`), which only exist in that session.
 On a stand-in build the scripted agent returns fixed drafts instead.
+
+---
+
+# Round 2 (acceptance on sprint-dev v7, project "video")
+
+Owner split as before: item 3 is fixed internally (the media strip is internal media work);
+items 1, 2, 4, 5 are the External Agent's; item 6 is a joint diagnosis, no fix yet.
+
+## R2-1. Setup must show the finished setup, not jump back into schema editing
+
+After finishing Setup, returning to the step lands directly on the schema settings editor
+instead of showing the completed choices (task, schema, thresholds, models) as a summary
+with Edit actions. A finished step should read as done; editing is a deliberate action.
+
+## R2-2. Model answer must start hidden for every example
+
+On Gold Labels the model answer is shown by default, and once shown it stays shown when
+moving to the next example (`showModel` is page-level state). For unbiased labeling the
+answer starts hidden per example; revealing is per example, and the `revealed` flag recorded
+with the gold label must match what the labeler actually saw on that example.
+
+## R2-3. Still thumbnails under the player did nothing (FIXED internally)
+
+The thumbnails are the item's still images (its Cover and Images features, via the media
+source). Clicking one only changed state behind the player iframe, so nothing visibly
+happened. Now: clicking a still switches the main tile to that image, a "Player" button
+switches back, and a caption says what the strip is.
+
+## R2-4. Features on Gold Labels are easy to miss
+
+The example card does render feature rows (text features, plus any other non-image feature),
+but with the pilot data that is only Title / Description / On-screen text under a tall media
+tile, so the page reads as "no features". Make the feature block clearly headed (for example
+a "Features" title with the item's text features), and keep image features represented by
+the still strip rather than silently dropped from the list.
+
+## R2-5. A running optimiser needs a card on the page, and animated event icons
+
+When the workflow starts the optimiser automatically, the Prompt Versions page shows no
+indication anything is running; the only trace is a static chat event line ("Workflow
+started the optimiser on ...") whose icon does not animate. Add a running-optimiser card
+on the page (model, candidates so far, calls, cost, Stop — the run data is already in
+project state), and animate the icon on in-progress event lines in the chat.
+
+## R2-6. Optimiser on the real platform: very slow, one run died with "Failed to fetch"
+
+Diagnosis from the deployed database (project "video", 2026-11-09): the workflow started
+an optimiser run on Model A at 10:00 UTC; it failed at 10:04 with `Last error: Failed to
+fetch` (candidates 0, cost already $5.04), and a Model B run started immediately after,
+still `running` with 0 candidates long afterwards. No optimiser labeling task was ever
+created, so the time goes before the first candidate: parent scoring and the reasoning
+model's reflection call(s), at `maxOutputTokens` 9000 with image-heavy prompts. The browser
+check exercises the optimiser only against the stand-in (scripted model, simulated calls),
+so the real path — streamed agent calls and labeling through the live gateway — is untested
+end to end. Needed: per-phase progress inside a run (which phase, since when), a bounded
+timeout with a surfaced, retryable error for reflection/agent calls instead of an unbounded
+wait, and a real-platform smoke of one optimiser run before the next acceptance round.
+Whether "Failed to fetch" came from the page network or the platform transport needs the
+internal agent's follow-up with the run's browser session; the loop must not silently start
+a second paid run after such a failure without telling the user.

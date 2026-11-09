@@ -113,10 +113,12 @@ const FEATURE_LABEL = new Map(Object.values(FEATURES).flatMap(list => list.map(d
 function ExampleCard({ex, n}: {ex: Example; n: number}) {
   const [media, setMedia] = useState<ExampleMedia | null | undefined>(undefined);
   const [picked, setPicked] = useState(0);
+  const [view, setView] = useState<'player' | 'image'>('player');
   useEffect(() => {
     let live = true;
     setMedia(undefined);
     setPicked(0);
+    setView('player');
     void exampleMedia(ex.id)
       .then(m => live && setMedia(m))
       .catch(() => live && setMedia(null));
@@ -153,7 +155,7 @@ function ExampleCard({ex, n}: {ex: Example; n: number}) {
   return (
     <Card title={`Example ${n}`}>
       <div className="media">
-        {media?.playerUrl ? (
+        {media?.playerUrl && view === 'player' ? (
           <iframe
             src={media.playerUrl}
             title={`Player for item ${ex.externalId}`}
@@ -172,13 +174,19 @@ function ExampleCard({ex, n}: {ex: Example; n: number}) {
           {media?.durationSec ? ` · ${Math.round(media.durationSec)}s` : ''}
         </small>
       </div>
-      {stills.length > 1 && (
-        <div className="row" style={{gap: 6, flexWrap: 'wrap'}}>
+      {(stills.length > 1 || media?.playerUrl) && (
+        <div className="row" style={{gap: 6, flexWrap: 'wrap', alignItems: 'center'}}>
+          {media?.playerUrl && (
+            <button type="button" className="opt" style={{border: '1px solid var(--border)', fontWeight: view === 'player' ? 600 : 400}} aria-label="Show the player" onClick={() => setView('player')}>
+              ▶ Player
+            </button>
+          )}
           {stills.map((u, k) => (
-            <button key={k} type="button" className="copy" style={{padding: 0, visibility: 'visible', outline: k === picked ? '2px solid var(--line-2)' : undefined}} aria-label={`Show image ${k + 1}`} onClick={() => setPicked(k)}>
+            <button key={k} type="button" className="copy" style={{padding: 0, visibility: 'visible', outline: view === 'image' && k === picked ? '2px solid var(--line-2)' : undefined}} aria-label={`Show image ${k + 1}`} onClick={() => { setPicked(k); setView('image'); }}>
               <img src={u} alt="" style={{width: 44, height: 44, objectFit: 'cover', borderRadius: 6, display: 'block'}} />
             </button>
           ))}
+          <span className="small muted">{view === 'player' ? 'Stills from the item — click one to inspect it' : 'Still image — click Player to go back to the video'}</span>
         </div>
       )}
       <div className="kv">
