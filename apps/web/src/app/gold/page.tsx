@@ -2,11 +2,11 @@
 
 import {useRouter} from 'next/navigation';
 import {Fragment, useEffect, useMemo, useRef, useState} from 'react';
-import type {Answer, Example, LabelField} from '@tsp/contracts';
+import type {Answer, Example, ExampleMedia, LabelField} from '@tsp/contracts';
 import {versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
-import {approveNode, predictionsFor, saveGold, type ProjectState} from '@/backend-api';
+import {approveNode, exampleMedia, predictionsFor, saveGold, type ProjectState} from '@/backend-api';
 import {Badge, Banner, Button, Card, Code, dateTime, Empty, Icon, num, PageHead, Tabs} from '@/ui';
 
 type SetKey = 'eval' | 'test';
@@ -99,10 +99,25 @@ function Gold({state}: {state: ProjectState}) {
 
 /**
  * The example with the features of its own type (design: media on top, one line per feature).
- * The media tile shows the item id only, as designed. `exampleMedia` (backend-api) already returns
- * the cover, frames or video from the platform's media source; showing them here waits for a design.
+ * The media tile embeds the player page the platform's media source returns, with the still
+ * images (cover, a photo post's images, or key frames) under it; without a media source it
+ * shows the item id only.
  */
 function ExampleCard({ex, n}: {ex: Example; n: number}) {
+  const [media, setMedia] = useState<ExampleMedia | null | undefined>(undefined);
+  const [picked, setPicked] = useState(0);
+  useEffect(() => {
+    let live = true;
+    setMedia(undefined);
+    setPicked(0);
+    void exampleMedia(ex.id)
+      .then(m => live && setMedia(m))
+      .catch(() => live && setMedia(null));
+    return () => {
+      live = false;
+    };
+  }, [ex.id]);
+  const stills = media ? [...(media.coverUrl ? [media.coverUrl] : []), ...media.imageUrls.filter(u => u !== media.coverUrl)] : [];
   const f = (k: string) => {
     const v = ex.features[k];
     return (Array.isArray(v) ? v.join(', ') : (v ?? '')).trim();
@@ -127,9 +142,34 @@ function ExampleCard({ex, n}: {ex: Example; n: number}) {
   return (
     <Card title={`Example ${n}`}>
       <div className="media">
-        <Icon name={ex.type === 'video' ? 'video' : 'image'} />
-        <small>{ex.externalId}</small>
+        {media?.playerUrl ? (
+          <iframe
+            src={media.playerUrl}
+            title={`Player for item ${ex.externalId}`}
+            style={{position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0}}
+            allow="encrypted-media; picture-in-picture; fullscreen"
+            allowFullScreen
+            loading="lazy"
+          />
+        ) : stills.length ? (
+          <img src={stills[Math.min(picked, stills.length - 1)]} alt="" style={{position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain'}} />
+        ) : (
+          <Icon name={ex.type === 'video' ? 'video' : 'image'} />
+        )}
+        <small>
+          {ex.externalId}
+          {media?.durationSec ? ` · ${Math.round(media.durationSec)}s` : ''}
+        </small>
       </div>
+      {stills.length > 1 && (
+        <div className="row" style={{gap: 6, flexWrap: 'wrap'}}>
+          {stills.map((u, k) => (
+            <button key={k} type="button" className="copy" style={{padding: 0, visibility: 'visible', outline: k === picked ? '2px solid var(--line-2)' : undefined}} aria-label={`Show image ${k + 1}`} onClick={() => setPicked(k)}>
+              <img src={u} alt="" style={{width: 44, height: 44, objectFit: 'cover', borderRadius: 6, display: 'block'}} />
+            </button>
+          ))}
+        </div>
+      )}
       <div className="kv">
         {rows.map(([k, v]) => (
           <Fragment key={k}>
