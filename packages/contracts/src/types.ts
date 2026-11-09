@@ -194,6 +194,8 @@ export interface LabelingRun {
   finishedAt: string | null;
   /** Created by code without a click. */
   auto?: boolean;
+  /** 'optimiser': labeled by an Optimiser run (its dry run, or the eval set). */
+  purpose?: 'eval' | 'optimiser' | 'test';
   /** What runs started by code spent on it (metrics and the audit; there is no cap). */
   autoCostUsd?: number;
   /** Paused for its budget. The MVP sets no budgets, so this stays false; kept for the labeling app's budget support. */
@@ -249,22 +251,72 @@ export interface EvalReport {
   createdAt: string;
 }
 
+/**
+ * The Optimiser's dry run: before a change is labeled on the whole eval set, it is labeled on a
+ * few examples of the optimiser half, next to the version it came from. "Passed" = examples where
+ * every field matches the gold label.
+ */
+export interface DryRunResult {
+  examples: number;
+  passed: number;
+  parentPassed: number;
+  parentId: string;
+  /** Per field: examples with that field right. */
+  fields: {field: string; passed: number; parentPassed: number}[];
+}
+
+/** What an Optimiser run is doing now (the panel's "Now" line). */
+export type OptimiserStep = 'parent' | 'reflect' | 'merge' | 'check' | 'dry_run' | 'full' | 'report';
+
+/** One change the Optimiser tried: a row of the panel's history, newest first in the UI. */
+export interface OptimiserRound {
+  round: number;
+  /** The version made for the change; null when nothing was labeled (failed the Checks, repeated). */
+  versionId: string | null;
+  parentId: string;
+  /** A merge of two versions, or one change from the mistakes. */
+  kind: 'change' | 'merge';
+  change: string;
+  outcome: 'running' | 'kept' | 'dropped' | 'checks' | 'repeat' | 'failed' | 'stopped';
+  /** Kept versions: the score on the held-out half (lowest field macro-F1). */
+  score: number | null;
+  passed: boolean;
+  dryRun: DryRunResult | null;
+  /** Where a failed or stopped round was, so Retry resumes there. */
+  step?: OptimiserStep;
+}
+
 export interface OptimisationRun {
   id: string;
   projectId: string;
   endpoint: EndpointId;
+  /** The version the run started from ("Started from"). */
   startVersionId: string;
+  /** The major number this run's versions use (v4.1, v4.2…). */
+  major: number;
+  maxRounds: number;
+  /** Rounds started so far (a round = one change tried, merges included). */
+  round: number;
   state: JobState;
-  budgetCalls: number;
+  step: OptimiserStep | null;
+  stepStartedAt: string | null;
+  /** The version the current step works on, when there is one. */
+  stepVersionId: string | null;
+  history: OptimiserRound[];
+  /** Labeling calls and cost, for telemetry only (never shown). */
   calls: number;
   candidates: number;
   costUsd: number;
+  /** 'passes' | 'max_rounds' | 'no_new_ideas' | 'user'. */
   stopReason: string | null;
+  /** Failed: one line naming the step and the error. */
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
-  /** Started by code without a click (an agent's start tool or the workflow); shown in Ask AI as an action line. */
+  /** Started by an agent's start tool, after the user asked in Ask AI; shown as an action line. */
   auto?: boolean;
+  /** The training and test sets this run started after a version passed. */
+  trainingSetId?: string | null;
 }
 
 export interface TrainingSet {

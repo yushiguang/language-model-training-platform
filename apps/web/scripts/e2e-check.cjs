@@ -2,7 +2,7 @@
  * End-to-end check of the static build on the stand-ins (100 examples), on the Unified UI pages:
  * a new project through Setup (schema drafted in Ask AI and approved), Dataset (auto sampling),
  * Gold Labels (labeled on the page with the answers bundled with the sample file), the first
- * prompt drafted in Ask AI, scoring and the optimiser until a version passes, an agent question,
+ * prompt drafted in Ask AI, Improve with AI, scoring and Auto Optimise until a version passes, an agent question,
  * an agent start (it runs at once, no card), then the training set watched from a second tab,
  * interrupted by a reload and resumed from the other tab, the test set, the downloads, and the
  * telemetry events and metrics.
@@ -66,6 +66,16 @@ let current = null;
   await shot(page, '1-schema-approved');
   await button(page, 'Next: Evaluation').click();
   await button(page, 'Next: Models').click();
+  await page.getByRole('radiogroup', {name: 'Model'}).waitFor();
+  await page.waitForTimeout(400);
+  await shot(page, '1b-labeling-model');
+  await button(page, 'Next: Dataset').click();
+  await page.waitForURL(/dataset/);
+  // A finished Setup opens on its summary
+  await page.goto(url('/setup/'));
+  await page.getByText('Labeling model', {exact: true}).waitFor();
+  await page.waitForTimeout(400);
+  await shot(page, '1c-setup-summary');
   await button(page, 'Next: Dataset').click();
   log('setup done');
 
@@ -118,20 +128,57 @@ let current = null;
   await page.locator('nav.vlist').waitFor();
   log('scoring started');
 
-  // The optimiser runs until a version passes (Keep improving when the suggestion asks)
-  for (let i = 0; i < 80; i++) {
-    await page.waitForTimeout(4000);
-    const running = await page.locator('nav.vlist').getByText('Running').count();
-    if (!running && (await button(page, 'Make training and test sets').count())) break;
-    const keep = button(page, 'Keep improving');
-    if (!running && (await keep.count()) && !(await page.locator('.card.ai').innerText()).includes('passes')) await keep.click();
-    if (i % 5 === 0) log('versions:', (await page.locator('nav.vlist').innerText()).replace(/\n/g, ' ').slice(0, 120));
+  // Below the bar: Improve with AI puts the Prompt helper's draft in the editor, saved as v1.1
+  const suggestion = async () => ((await page.locator('.card.ai').count()) ? page.locator('.card.ai').first().innerText() : '');
+  for (let i = 0; i < 30 && !(await button(page, 'Improve with AI').count()); i++) await page.waitForTimeout(1000);
+  if ((await button(page, 'Auto Optimise').count()) > 0) {
+    await button(page, 'Improve with AI').first().click();
+    await page.waitForURL(/prompt\/edit/);
+    await page.getByText('Draft from Prompt helper', {exact: true}).waitFor({timeout: 20000});
+    log('improve with AI:', await page.locator('.ed .editor .ed-add').count(), 'lines marked');
+    await shot(page, '5a-improve-draft');
+    await page.getByRole('button', {name: /^Save as v\d+\.\d+$/}).click();
+    await page.waitForURL(/\/prompt\/?\?/);
+  }
+
+  // Auto Optimise until a version passes; a pass starts the training and test sets by itself
+  let optimised = false;
+  for (let i = 0; i < 180; i++) {
+    await page.waitForTimeout(1500);
+    const text = await suggestion();
+    if (/training and test sets started/.test(text) || (await button(page, 'Make training and test sets').count())) break;
+    const panel = page.locator('section[aria-label="Optimiser"]');
+    if (await panel.count()) {
+      if (i % 4 === 0) log('optimiser:', (await panel.innerText()).replace(/\n/g, ' ').slice(0, 160));
+      if (!optimised) await shot(page, '5b-optimiser-running');
+      optimised = true;
+      if (await button(page, 'Retry').count()) throw new Error(`the Optimiser failed: ${await panel.innerText()}`);
+      continue;
+    }
+    const auto = button(page, 'Auto Optimise');
+    if (await auto.count()) {
+      await auto.click();
+      log('auto optimise started');
+    }
   }
   await shot(page, '5-prompt-versions');
-  log('suggestion:', (await page.locator('.card.ai').innerText().catch(() => 'none')).replace(/\n/g, ' | '));
+  log('suggestion:', (await suggestion()).replace(/\n/g, ' | '));
+  log('versions:', (await page.locator('nav.vlist').innerText()).replace(/\n/g, ' '));
+  if (optimised) {
+    await button(page, 'Major').click();
+    await shot(page, '5c-versions-major');
+    await button(page, 'All').click();
+    const dropped = page.locator('nav.vlist').getByText('Dropped', {exact: true}).first();
+    if (await dropped.count()) {
+      await dropped.click();
+      await page.getByText('Dropped after dry run', {exact: true}).first().waitFor();
+      await shot(page, '5d-dropped');
+      await page.locator('nav.vlist button').first().click();
+    }
+  }
 
   // The prompt page for a version: editor, checks and features
-  await page.getByRole('link', {name: 'Edit prompt'}).click();
+  await page.locator('main').getByRole('link', {name: 'Edit prompt', exact: true}).click();
   await page.waitForURL(/prompt\/edit/);
   await page.locator('[aria-label="Checks"]').waitFor();
   log('checks:', (await page.locator('[aria-label="Checks"]').innerText()).replace(/\n/g, ' | '));
@@ -161,11 +208,12 @@ let current = null;
   log('agent start:', tried.split('\n')[0], '|', (await page.locator('aside.chat .evt').allInnerTexts()).map(t => t.replace(/\n/g, ' ')).join(' / '));
   await shot(page, '7b-ask-ai-actions');
 
-  // Training set: start in tab 1
+  // Training set: started by the Optimiser's pass, or here in tab 1
   await page.goto(url('/training-set/'));
-  await button(page, 'Start labeling').click();
+  await page.locator('main').getByText(/Labeling settings|Training set/).first().waitFor();
+  if (await button(page, 'Start labeling').count()) await button(page, 'Start labeling').click();
   await page.locator('main .progress').waitFor();
-  await page.waitForTimeout(4000);
+  await page.waitForTimeout(2000);
   log('tab 1 runs:', await progress(page));
   await shot(page, '8-training-set-labeling');
 
@@ -174,11 +222,13 @@ let current = null;
   watch(tab2);
   await tab2.setViewportSize({width: 1920, height: 1080});
   await tab2.goto(url('/training-set/'));
-  await tab2.waitForTimeout(4000);
+  await tab2.waitForTimeout(3000);
   log('tab 2 sees:', await progress(tab2));
 
   // Reload tab 1 mid-run: the run stops, both tabs show it
-  log('reload tab 1 at:', await progress(page));
+  const stillRunning = !(await tab2.getByRole('tab', {name: /^Training set.*Finished/}).count());
+  log('reload tab 1 at:', await progress(page), stillRunning ? '' : '(already finished)');
+  if (stillRunning) {
   await page.reload();
   await page.locator('main').getByText('Stopped', {exact: true}).waitFor({timeout: 15000});
   await tab2.locator('main').getByText('Stopped', {exact: true}).waitFor({timeout: 15000});
@@ -188,6 +238,7 @@ let current = null;
   await button(tab2, 'Resume').click();
   await page.waitForTimeout(5500);
   log('resumed in tab 2, tab 1 sees:', await progress(page));
+  }
   await tab2.getByRole('tab', {name: /^Training set.*Finished/}).waitFor({timeout: 180000});
   await tab2.waitForTimeout(1000);
   await shot(tab2, '9-training-set-done');
@@ -200,7 +251,7 @@ let current = null;
 
   // Test set: its own labeling; gold labels are kept, the rest come from the model
   await tab2.getByRole('tab', {name: /^Test set/}).click();
-  await button(tab2, 'Start labeling').click();
+  if (await button(tab2, 'Start labeling').count()) await button(tab2, 'Start labeling').click();
   await tab2.getByRole('tab', {name: /^Test set.*Finished/}).waitFor({timeout: 120000});
   await tab2.waitForTimeout(1000);
   await shot(tab2, '10-test-set-done');
@@ -219,7 +270,9 @@ let current = null;
     const ids = JSON.parse(localStorage.getItem('tsp-doc:predictions') || '[]').map(d => d.data._appId);
     const audit = docs('audit_log').map(a => a.action);
     const ts = docs('training_sets').pop();
-    return {state: task.state, done: task.done, total: task.total, failed: task.failed, predictions: preds.length, uniqueExamples: new Set(preds.map(p => p.exampleId)).size, duplicatePredictionIds: ids.length - new Set(ids).size, testTask: testTask && {state: testTask.state, done: testTask.done, total: testTask.total}, trainTotal: ts.trainTotal, toolCalls: tools, autoStarts: audit.filter(a => a === 'auto_start').length, actionLines: docs('chat_messages').filter(m => m.role === 'event' && m.event).length};
+    // A pass from the Optimiser starts the training set with the unlabeled test examples too.
+    const toLabel = ts.trainTotal + (ts.labelTest ? ts.testToLabel ?? 0 : 0);
+    return {state: task.state, done: task.done, total: task.total, failed: task.failed, predictions: preds.length, uniqueExamples: new Set(preds.map(p => p.exampleId)).size, duplicatePredictionIds: ids.length - new Set(ids).size, testTask: testTask && {state: testTask.state, done: testTask.done, total: testTask.total}, trainTotal: toLabel, toolCalls: tools, autoStarts: audit.filter(a => a === 'auto_start').length, actionLines: docs('chat_messages').filter(m => m.role === 'event' && m.event).length};
   });
   log('training task:', JSON.stringify(facts));
   // Telemetry: flush, then read what the stand-in sink kept (events in localStorage, metrics text)

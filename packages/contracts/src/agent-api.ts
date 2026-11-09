@@ -51,6 +51,8 @@ export type AgentToolName =
   | 'get_gold_labels'
   | 'get_predictions'
   | 'check_template'
+  /** Feature descriptions by key (what a feature holds, when it helps, its caveats). */
+  | 'read_feature_info'
   // Start-work tools: paid. They run at once when automatic starts are allowed, else they ask
   // the user with a card in the chat and the turn ends.
   | 'try_template'
@@ -128,22 +130,54 @@ export interface AgentTurnOutput {
 }
 
 export interface OptimiserReflectInput {
+  /** 'change': one change from the parent's mistakes. 'merge': combine `template` with `other`. */
+  mode?: 'change' | 'merge';
   template: string;
+  features: FeatureSelection;
   schema: Schema;
   triedChanges: string[];
   mixUps: MixUp[];
   lowestField: Pick<FieldMetrics, 'field' | 'macroF1'>;
   lowestValue: {field: string; value: string; f1: number} | null;
+  /** Merge only: the second version, and the examples each version gets right that the other misses. */
+  other?: {template: string; features: FeatureSelection; change: string};
   signal?: AbortSignal;
 }
 
 export interface OptimiserReflectOutput {
   template: string;
+  /** Ticked features after the change (unchanged when missing). */
+  features?: FeatureSelection;
   change: string;
+}
+
+/** Improve with AI: the Prompt helper drafts several changes to a version, each with a reason. */
+export interface DraftImprovementInput {
+  version: string;
+  template: string;
+  features: FeatureSelection;
+  schema: Schema;
+  mixUps: MixUp[];
+  lowestField: Pick<FieldMetrics, 'field' | 'macroF1'>;
+  lowestValue: {field: string; value: string; f1: number} | null;
+  /** Mistakes on the eval set, with the gold label and the model's answer. */
+  mistakes: number;
+}
+
+export interface DraftImprovementOutput {
+  template: string;
+  features?: FeatureSelection;
+  /** One line per change, with its reason (shown on hover in the editor and in Ask AI). */
+  changes: {text: string; reason: string}[];
+  /** A few lines for Ask AI. */
+  reply: string;
 }
 
 /** The agent runtime as the bff sees it (implemented by `apps/agents`). */
 export interface AgentRuntimeContract {
   runAgentTurn(input: AgentTurnInput, llm: AgentModel, tools?: AgentToolHost, progress?: AgentTurnProgress): Promise<AgentTurnOutput>;
-  reflectPrompt(input: OptimiserReflectInput, llm: AgentModel): Promise<OptimiserReflectOutput>;
+  /** One Optimiser change (or merge). `tools` lets it read feature descriptions. */
+  reflectPrompt(input: OptimiserReflectInput, llm: AgentModel, tools?: AgentToolHost): Promise<OptimiserReflectOutput>;
+  /** Improve with AI: a draft with several marked changes, for the user to review and save. */
+  draftImprovement(input: DraftImprovementInput, llm: AgentModel, tools?: AgentToolHost): Promise<DraftImprovementOutput>;
 }

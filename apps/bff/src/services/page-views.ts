@@ -1,6 +1,6 @@
 import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@tsp/contracts';
 import {agentStart, isStartTool} from './starts.ts';
-import {checkTemplate, defaultOutputPick, finalRunPlan, pageFromPath, isImageKey, judge, MADE_BY, recommend, settingsHash, versionLabel} from '@tsp/domain';
+import {checkTemplate, defaultOutputPick, finalRunPlan, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, recommend, settingsHash, stepLine, versionLabel} from '@tsp/domain';
 import {getApp} from './app.ts';
 import {loadProjectState} from './projects.ts';
 
@@ -56,7 +56,38 @@ function scoresOf(state: ProjectState, v: PromptVersion) {
 }
 
 function versionRow(state: ProjectState, v: PromptVersion) {
-  return {id: v.id, label: versionLabel(v), madeBy: MADE_BY[v.madeBy] ?? v.madeBy, change: v.change || null, createdAt: v.createdAt, scores: scoresOf(state, v)};
+  const o = optimiserVersions(state.optimisation).get(v.id);
+  const dry = o?.round.dryRun;
+  const parent = dry ? state.versions.find(x => x.id === dry.parentId) : undefined;
+  return {
+    id: v.id,
+    label: versionLabel(v),
+    madeBy: MADE_BY[v.madeBy] ?? v.madeBy,
+    change: v.change || null,
+    createdAt: v.createdAt,
+    scores: scoresOf(state, v),
+    ...(o?.round.outcome === 'dropped' ? {dropped: 'Dropped after dry run: not scored on the eval set'} : {}),
+    ...(dry ? {dryRun: `${versionLabel(v)} passed ${dry.passed} / ${dry.examples}, ${parent ? versionLabel(parent) : 'its parent'} passed ${dry.parentPassed} / ${dry.examples}`} : {}),
+  };
+}
+
+/** The Optimiser run as the progress panel shows it (no cost or time, as on the page). */
+function optimiserView(state: ProjectState) {
+  const o = state.optimisation[0];
+  if (!o) return null;
+  const label = (id: string | null) => (id ? (state.versions.find(v => v.id === id) ? versionLabel(state.versions.find(v => v.id === id)!) : null) : null);
+  const half = state.examples.filter(e => e.split === 'eval' && e.optimiserHalf).length;
+  return {
+    model: modelName(state, o.endpoint),
+    state: o.state,
+    round: o.round,
+    maxRounds: o.maxRounds,
+    startedFrom: label(o.startVersionId),
+    now: o.state === 'running' ? stepLine(o.step, label(o.stepVersionId), Math.min(half, 10)) : null,
+    stopReason: o.stopReason,
+    error: o.error,
+    rounds: o.history.map(r => ({round: r.round, version: label(r.versionId), from: label(r.parentId), kind: r.kind, change: r.change, outcome: r.outcome, lowestFieldMacroF1: r.score == null ? null : r2(r.score), passed: r.passed})),
+  };
 }
 
 function versionDetail(state: ProjectState, v: PromptVersion) {
@@ -155,11 +186,10 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
       });
     }
     case 'prompt': {
-      const running = state.optimisation.find(o => o.state === 'running') ?? state.optimisation[0];
       return base(`${state.versions.length} prompt version(s); the newest is ${state.versions[0] ? versionLabel(state.versions[0]) : 'none'}.`, {
         versions: state.versions.slice(0, 12).map(v => versionRow(state, v)),
         moreVersions: Math.max(0, state.versions.length - 12),
-        optimiser: running ? {model: modelName(state, running.endpoint), state: running.state, candidates: running.candidates, calls: running.calls, budgetCalls: running.budgetCalls, stopReason: running.stopReason} : null,
+        optimiser: optimiserView(state),
         advice: adviceOf(state),
       });
     }
@@ -286,6 +316,11 @@ export function agentTools(projectId: string): AgentToolHost {
           const features = (args.features as PromptVersion['features'] | undefined) ?? v?.features ?? {video: [], photo_text: [], metadata: []};
           const r = checkTemplate(template, features, {schema: state.setup?.schema, types: [...new Set(state.examples.map(e => e.type))], images: v?.images ?? []});
           return {errors: r.errors.map(e => e.message), warnings: r.warnings.map(w => w.message)};
+        }
+        case 'read_feature_info': {
+          const keys = Array.isArray(args.keys) ? args.keys.map(String).slice(0, 30) : [];
+          const info = (await getApp().featureInfo?.describe(keys)) ?? {};
+          return Object.fromEntries(keys.map(k => [k, info[k] ?? {description: 'No description yet.'}]));
         }
         default:
           throw new Error(`Unknown tool ${String(name)}.`);

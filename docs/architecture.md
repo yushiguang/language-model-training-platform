@@ -54,7 +54,7 @@ composition root is the only place that knows which implementation sits behind e
 
 A labeling task runs one prompt version on one model (with fixed settings) over a list of
 examples and stores one prediction per example. The bff creates tasks for four reasons: scoring a
-new version on the eval set (system), labeling an optimiser candidate (system), "Get model answers"
+new version on the eval set (system), the Optimiser's dry runs and eval-set labeling (system), "Get model answers"
 for the test set on Gold Labels (the user approves the cost), and the final run (the user approves
 the cost). Code starts only the cheap work the workflow needs, and only while automatic starts are
 allowed (below).
@@ -70,7 +70,9 @@ came from (gold or model).
 **Automatic paid starts.** Every task starts by itself, with no cost limit and no approval
 (decided 2026-11-06: the exact cost of a task can't be predicted, the platform is there to make
 training faster, and every running task has a Stop button). This covers scoring a new version,
-the optimiser, resuming scoring after a closed page, and the agents' start tools. `dueStarts`
+resuming scoring after a closed page, and the agents' start tools. The Optimiser is the one
+exception: it starts only on the user's Auto Optimise (or an agent's start tool after the user asks
+in Ask AI), never from `tick` (decided 2026-11-09). `dueStarts`
 (`packages/domain/src/auto-start.ts`) says what the workflow would start, and `tick` starts all
 of it. Test answers and the final run start from their page's button. Every automatic start
 writes an `auto_start` audit record.
@@ -105,6 +107,36 @@ createTask ──► runTask (browser lock "labeling:<task>"; a second tab gets 
   while something runs, so a second tab follows a run and sees it pause.
 - **Later (not in the MVP):** a worker outside the browser, ordered claims with heartbeats so
   several runners can share a task, and shared quota records across runners.
+
+## The Optimiser (Auto Optimise)
+
+GEPA, ported to TypeScript (design doc "Prompt optimising in Sprint", 2026-11-09). One run
+improves the prompt on the project's one labeling model, for up to the user's Max rounds
+(default 10). The pure parts are in `packages/domain/src/gepa.ts`; the loop is
+`apps/bff/src/services/optimiser.ts`.
+
+- **Versions.** A run reserves the next major number when it starts; every change it tries is the
+  next minor of that major (v3.1, v3.2…). The editor's Save makes the next minor of the version's
+  own major; Save as new version makes the next major. The catalog assigns every number.
+- **Pool and parent.** The pool is the start version plus the run's kept versions, each scored per
+  example on the optimiser half of the eval set (share of fields right). The parent is drawn from
+  the Pareto front (versions best on at least one example and not dominated), weighted by how
+  many examples each is best on. After every 2 kept versions, two front versions that each win
+  examples the other misses are merged instead.
+- **A round.** The agent runtime writes one change (it may tick or untick a feature after reading
+  feature descriptions with `read_feature_info`) → the editor's Checks run (a failing or repeated
+  change is dropped, unlabeled) → the change is saved and **dry-run** on 10 examples of the
+  optimiser half (half of it when it has fewer than 20), the ones the parent gets wrong first →
+  it goes on only when it passes more of them than the parent → it is labeled on the whole eval
+  set (the dry run's answers are reused) and scored on the held-out half.
+- **Ends** when a version passes (the Prompt step is approved and the training and test sets
+  start with it, test examples without gold included), at Max rounds, after 3 wasted rounds in a
+  row, on Stop, or when a step fails 3 times in a row: the run shows Failed with the step and the
+  error, and nothing else starts until the user presses Retry, which goes on from that step. A
+  run whose page closed shows Paused with Resume.
+- **The record.** `OptimisationRun.history` holds every round (parent, change, outcome, dry-run
+  counts, score); versions stay immutable, and the Versions list derives its Optimiser, Dropped
+  and Running tags from it.
 
 ## Agents: the page is the workspace
 
@@ -157,7 +189,9 @@ application `id` to the store's document id.
 | Agent prompts, handoffs (to known specialists only), read tools per preset | `apps/agents/src/presets.ts`, `apps/agents/src/runtime.ts` |
 | What an agent sees of each page (page views) and the read tools' implementation | `apps/bff/src/services/page-views.ts` |
 | When labeling starts, reports scored on the held-out half of the eval set | `apps/bff/src/services/evaluation.ts`, `work.ts` |
-| Optimiser: GEPA-style loop; candidates are labeled as optimiser tasks | `apps/bff/src/services/optimiser.ts` |
+| Optimiser: Pareto front, parent, merge pair, dry-run pick and comparison | `packages/domain/src/gepa.ts` |
+| Optimiser loop: rounds, retries, Failed and Retry, the training set after a pass | `apps/bff/src/services/optimiser.ts` |
+| Improve with AI (a draft with marked changes, nothing labeled) | `improveWithAi` in `apps/bff/src/services/agents.ts` |
 | Test answers and the final run (train, plus unlabeled test when ticked) as labeling tasks; output rows with their label source | `apps/bff/src/services/training.ts`, `finalRunPlan` in `packages/domain/src/workflow.ts` |
 | What starts without a click | `packages/domain/src/auto-start.ts`, `tick` in `apps/bff/src/services/work.ts` |
 | Agent start tools | `apps/bff/src/services/starts.ts` |
@@ -168,4 +202,5 @@ application `id` to the store's document id.
 - `BffContract` still passes some non-JSON values (a `Map` in `ProjectState`, the full state into
   `tick`) and some client-sent records; a fully serialisable v2 is planned.
 - Dataset sampling still runs in the page's memory.
-- The optimiser loop itself (not its labeling) has no cross-tab lock.
+- The Optimiser loop holds a browser lock per project and model, so a second tab cannot run it
+  twice; like labeling, it runs only while its page is open.

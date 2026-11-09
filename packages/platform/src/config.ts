@@ -1,6 +1,7 @@
 import type {Platform} from '@tsp/contracts';
 import {localDocRuntime} from './standins/local-db.ts';
 import {sampleExamples, sampleMedia} from './standins/sample-examples.ts';
+import {sampleFeatureInfo} from './standins/feature-info.ts';
 import {simulatedModels} from './standins/simulated-models.ts';
 import {scriptedAgent} from './standins/scripted-agent.ts';
 import {browserFiles, localIdentity, localTelemetrySink} from './standins/local.ts';
@@ -21,8 +22,9 @@ export function createPlatform(): Platform {
     files: browserFiles(),
     examples: sampleExamples(process.env.NEXT_PUBLIC_BASE_PATH ?? ''),
     media: sampleMedia(process.env.NEXT_PUBLIC_BASE_PATH ?? ''),
+    featureInfo: sampleFeatureInfo(),
     telemetry: localTelemetrySink(),
-    standIns: ['storage', 'labeling models', 'agent model', 'identity', 'files', 'examples', 'media', 'telemetry'],
+    standIns: ['storage', 'labeling models', 'agent model', 'identity', 'files', 'examples', 'media', 'feature descriptions', 'telemetry'],
   };
 }
 

@@ -19,28 +19,38 @@ export function useChecks(draft: Draft, schema: Schema | null | undefined, types
  * The prompt page (design: "Prompt page"): Prompt template on the left, Checks and Features on
  * the right. Used to write the first version, edit one, or view one.
  */
-export function Workbench({draft, onChange, check, readOnly}: {draft: Draft; onChange: (d: Draft) => void; check: CheckResult; readOnly?: boolean}) {
+export function Workbench({draft, onChange, check, readOnly, added, featureTips}: {draft: Draft; onChange: (d: Draft) => void; check: CheckResult; readOnly?: boolean; added?: Set<number>; featureTips?: Record<string, string>}) {
   const fix = (f: Fix) => onChange({...draft, ...applyFix(draft.template, draft.features, f)});
   return (
     <div className="prompt-grid">
       <Card title="Prompt template" className="fill-scroll" style={{height: '100%'}}>
-        <Editor value={draft.template} onChange={template => onChange({...draft, template})} readOnly={readOnly} />
+        <Editor value={draft.template} onChange={template => onChange({...draft, template})} readOnly={readOnly} added={added} />
       </Card>
       <div className="col" style={{gap: 16, minHeight: 0}}>
         <Checks draft={draft} check={check} onFix={readOnly ? undefined : fix} />
-        <Features features={draft.features} onChange={readOnly ? undefined : features => onChange({...draft, features})} />
+        <Features features={draft.features} onChange={readOnly ? undefined : features => onChange({...draft, features})} tips={featureTips} />
       </div>
     </div>
   );
 }
 
-/** Placeholders show as grey tokens, red when they are not a feature. No autocomplete in the MVP. */
-function Editor({value, onChange, readOnly}: {value: string; onChange: (v: string) => void; readOnly?: boolean}) {
+/**
+ * Placeholders show as grey tokens, red when they are not a feature. No autocomplete in the MVP.
+ * `added`: line numbers a helper's draft added, marked green.
+ */
+function Editor({value, onChange, readOnly, added}: {value: string; onChange: (v: string) => void; readOnly?: boolean; added?: Set<number>}) {
   return (
     <div className="ed-scroll">
       <div className="ed">
         <div className="editor" aria-hidden="true">
-          {highlight(value)}
+          {added?.size
+            ? value.split('\n').map((line, i, all) => (
+                <span key={i}>
+                  {added.has(i) ? <span className="ed-add">{highlight(line)}</span> : highlight(line)}
+                  {i < all.length - 1 ? '\n' : ''}
+                </span>
+              ))
+            : highlight(value)}
           {'\n'}
         </div>
         <label className="sr-only" htmlFor="tpl">
@@ -116,7 +126,7 @@ const SECTIONS: {group: Group; name: string}[] = [
 ];
 
 /** Features: three sections with a select-all box each; clicking a name copies its placeholder. */
-function Features({features, onChange}: {features: FeatureSelection; onChange?: (f: FeatureSelection) => void}) {
+function Features({features, onChange, tips}: {features: FeatureSelection; onChange?: (f: FeatureSelection) => void; tips?: Record<string, string>}) {
   const [copied, copy] = useCopy();
   const scroll = useRef<HTMLDivElement>(null);
   const toggle = (g: Group, key: string) => onChange?.({...features, [g]: features[g].includes(key) ? features[g].filter(k => k !== key) : [...features[g], key]});
@@ -143,7 +153,7 @@ function Features({features, onChange}: {features: FeatureSelection; onChange?: 
                     const ph = `{{${f.key}}}`;
                     return (
                       <div key={f.key} className="row" style={{height: 36, gap: 12}}>
-                        <span className="grow one copy-name" role="button" tabIndex={0} title={copied === ph ? `Copied ${ph}` : `Click to copy ${ph}`} onClick={() => copy(ph)} onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), copy(ph))}>
+                        <span className="grow one copy-name" role="button" tabIndex={0} title={copied === ph ? `Copied ${ph}` : `${tips?.[f.key] ? `${tips[f.key]}\n` : ''}Click to copy ${ph}`} onClick={() => copy(ph)} onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), copy(ph))}>
                           {f.label}
                         </span>
                         <Cb state={features[group].includes(f.key) ? 'on' : 'off'} label={`${f.label}, ${name}`} onToggle={onChange ? () => toggle(group, f.key) : undefined} />

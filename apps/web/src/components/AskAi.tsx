@@ -38,7 +38,7 @@ export function AskAi({
   /** Runs before the message goes to the agent (Setup saves the first message as the task). */
   onSend?: (text: string) => Promise<void>;
 }) {
-  const {projectId} = useProject();
+  const {projectId, state} = useProject();
   const [messages, setMessages] = useState<ChatMessage[]>(() => seen.get(projectId) ?? []);
   const [busy, setBusy] = useState(false);
   const liveTurn = useSyncExternalStore(
@@ -78,6 +78,24 @@ export function AskAi({
   const follow = chips ?? (last?.choices?.length ? last.choices : []);
   const where = {...page, where: {page: pageFromPath(typeof location === 'undefined' ? '/' : location.pathname), params: {}}};
   const answering = liveTurn?.agent ?? answeringAgent(projectId, where);
+  // The newest start line of work that is still running spins (R2-5): scoring and the Optimiser
+  // on Prompt versions, the test set's answers on Gold Labels, the training set.
+  const active = new Set<string>();
+  if (state) {
+    const busy: Record<string, boolean> = {
+      '/prompt': state.runs.some(r => r.state === 'running') || state.optimisation.some(o => o.state === 'running'),
+      '/gold': state.testRuns.some(r => r.state === 'running'),
+      '/training-set': state.trainingSets.some(t => t.state === 'running'),
+    };
+    const done = new Set<string>();
+    for (const m of [...messages].reverse()) {
+      if (m.role !== 'event' || (m.event !== 'start' && m.event !== 'auto') || !m.link) continue;
+      const path = m.link.path;
+      if (done.has(path)) continue;
+      done.add(path);
+      if (busy[path]) active.add(m.id);
+    }
+  }
   const working = busy || !!liveTurn;
 
   return (
@@ -103,7 +121,7 @@ export function AskAi({
         {messages.map((m, i) => (
           <Fragment key={m.id}>
             {dayOf(m.createdAt) !== dayOf(messages[i - 1]?.createdAt ?? (i === 0 ? new Date().toISOString() : m.createdAt)) && <div className="day">{dayOf(m.createdAt)}</div>}
-            <Message m={m} />
+            <Message m={m} active={active.has(m.id)} />
           </Fragment>
         ))}
         {extra}
@@ -157,11 +175,11 @@ function AgentText({who, text, streaming}: {who: AgentPreset | null; text: strin
 const EVENT_ICON: Record<ChatEvent, string> = {join: 'next', page: 'next', draft: 'spark', approved: 'check', discarded: 'x', start: 'play', auto: 'ring', stop: 'x'};
 
 /** A saved action line: who did what, and when; with a place to go, the whole line is the link. */
-function EventLine({m}: {m: ChatMessage}) {
+function EventLine({m, active}: {m: ChatMessage; active?: boolean}) {
   const {href} = useProject();
   const inner = (
     <>
-      <Icon name={EVENT_ICON[m.event ?? 'join']} />
+      <Icon name={active ? 'ring' : EVENT_ICON[m.event ?? 'join']} />
       <span className="one" title={m.text}>
         {m.text}
       </span>
@@ -169,11 +187,11 @@ function EventLine({m}: {m: ChatMessage}) {
     </>
   );
   return m.link ? (
-    <Link className="evt" href={href(m.link.path, m.link.params)}>
+    <Link className={active ? 'evt run' : 'evt'} href={href(m.link.path, m.link.params)}>
       {inner}
     </Link>
   ) : (
-    <div className="evt">{inner}</div>
+    <div className={active ? 'evt run' : 'evt'}>{inner}</div>
   );
 }
 
@@ -197,9 +215,9 @@ const docTitle = (url: string) => {
   return /^[A-Za-z0-9]{12,}$/.test(tail) ? 'Document' : tail.replace(/[-_]+/g, ' ');
 };
 
-function Message({m}: {m: ChatMessage}) {
+function Message({m, active}: {m: ChatMessage; active?: boolean}) {
   if (m.role === 'user') return <UserText text={m.text} />;
-  if (m.role === 'event') return <EventLine m={m} />;
+  if (m.role === 'event') return <EventLine m={m} active={active} />;
   return m.text ? <AgentText who={m.agent} text={m.text} /> : null;
 }
 

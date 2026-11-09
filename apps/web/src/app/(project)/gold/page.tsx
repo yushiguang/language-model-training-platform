@@ -30,7 +30,11 @@ function Gold({state}: {state: ProjectState}) {
   const [pos, setPos] = useState<Record<SetKey, number>>(() => ({eval: firstOpen('eval'), test: firstOpen('test')}));
   const i = Math.min(pos[tab], Math.max(0, list.length - 1));
   const ex = list[i];
-  const [showModel, setShowModel] = useState(true);
+  // The model answer starts hidden on every example; Show reveals it for this example only (R2-2).
+  const [shownFor, setShownFor] = useState<Set<string>>(() => new Set());
+  const showModel = !!ex && shownFor.has(ex.id);
+  // Once shown on an example, the label records that the answer was seen, even if hidden again.
+  const [seen, setSeen] = useState<Set<string>>(() => new Set());
   // Whether this example has a model answer on screen; a label only counts as "model answer
   // seen" when there was one to see.
   const [answerShown, setAnswerShown] = useState<string | null>(null);
@@ -89,8 +93,16 @@ function Gold({state}: {state: ProjectState}) {
         <div style={{display: 'grid', gridTemplateColumns: '520px 1fr', gap: 16, alignItems: 'start'}}>
           <ExampleCard ex={ex} n={i + 1} />
           <div className="col" style={{gap: 16}}>
-            <ModelAnswer key={`m-${ex.id}`} state={state} ex={ex} shown={showModel} onToggle={() => setShowModel(s => !s)} onFound={has => setAnswerShown(has ? ex.id : null)} />
-            <YourAnswer key={`y-${ex.id}`} state={state} ex={ex} modelShown={showModel && answerShown === ex.id} />
+            <ModelAnswer key={`m-${ex.id}`} state={state} ex={ex} shown={showModel} onToggle={() => setShownFor(s => {
+                const n = new Set(s);
+                if (n.has(ex.id)) n.delete(ex.id);
+                else {
+                  n.add(ex.id);
+                  setSeen(x => new Set(x).add(ex.id));
+                }
+                return n;
+              })} onFound={has => setAnswerShown(has ? ex.id : null)} />
+            <YourAnswer key={`y-${ex.id}`} state={state} ex={ex} modelShown={(showModel || seen.has(ex.id)) && answerShown === ex.id} />
           </div>
         </div>
       ) : (

@@ -3,12 +3,12 @@
 import {useRouter, useSearchParams} from 'next/navigation';
 import {Suspense, useEffect, useMemo, useState} from 'react';
 import type {PageContext, PromptVersion} from '@tsp/contracts';
-import {diffLines, diffSummary, MADE_BY, nextVersion, versionLabel} from '@tsp/domain';
+import {ALL_KEYS, diffLines, diffSummary, MADE_BY, nextVersion, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {useChecks, Workbench, type Draft} from '@/components/prompt/Workbench';
 import {useAgentDrafts} from '@/components/prompt/useAgentDrafts';
-import {createVersion, scoreVersion, type ProjectState} from '@/backend-api';
+import {createVersion, featureInfo, scoreVersion, type ProjectState} from '@/backend-api';
 import {Badge, Button, Empty, PageHead} from '@/ui';
 
 export default function EditPage() {
@@ -50,9 +50,28 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
   const [madeBy, setMadeBy] = useState<'user' | 'prompt_agent'>('user');
   const types = useMemo(() => [...new Set(state.examples.map(e => e.type))], [state.examples]);
   const check = useChecks(draft, state.setup?.schema, types);
-  const sum = diffSummary(diffLines(version.template, draft.template));
+  const diff = useMemo(() => diffLines(version.template, draft.template), [version.template, draft.template]);
+  const sum = diffSummary(diff);
   const dirty = draft.template !== base.template || JSON.stringify(draft.features) !== JSON.stringify(base.features);
-  const next = versionLabel(nextVersion(state.versions, version, 'major'));
+  // Save: the next minor of this version's major (v2 -> v2.1). Save as new version: the next major.
+  const reserved = state.optimisation.map(o => o.major ?? 0);
+  const nextMinor = versionLabel(nextVersion(state.versions, version, 'minor'));
+  const fromHelper = madeBy === 'prompt_agent' && dirty;
+  // A helper's draft: the lines it added are marked green.
+  const added = useMemo(() => {
+    if (!fromHelper) return undefined;
+    const out = new Set<number>();
+    let line = 0;
+    for (const d of diff) {
+      if (d.kind === 'add') out.add(line);
+      if (d.kind !== 'del') line++;
+    }
+    return out;
+  }, [diff, fromHelper]);
+  const [tips, setTips] = useState<Record<string, string>>({});
+  useEffect(() => {
+    void featureInfo(ALL_KEYS).then(info => setTips(Object.fromEntries(Object.entries(info).map(([k, i]) => [k, [i.description, i.goodFor, i.caveats].filter(Boolean).join(' ')]))));
+  }, []);
 
   useEffect(() => {
     setPage({
@@ -71,9 +90,9 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
   });
 
   // A failed save shows the page's red banner with Retry (the Button reports it).
-  const save = async () => {
+  const save = async (kind: 'minor' | 'major') => {
     const summary = change || (sum.added || sum.removed ? `${sum.added} line${sum.added === 1 ? '' : 's'} added, ${sum.removed} removed` : 'Features changed');
-    const v = await createVersion(state.project.id, {...draft, parent: version, madeBy, change: summary, kind: 'major', schema: state.setup!.schema!, schemaVersion: state.setup!.schemaVersion});
+    const v = await createVersion(state.project.id, {...draft, parent: version, madeBy, change: summary, kind, schema: state.setup!.schema!, schemaVersion: state.setup!.schemaVersion});
     // Saving is the user's start: the new version is scored right away.
     void scoreVersion(state.project.id, v);
     router.push(href('/prompt'));
@@ -90,16 +109,17 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
     <>
       {dirty && (
         <span className="done-at" style={{margin: 0}}>
-          <Badge text="Unsaved changes" tone="warn" icon={false} />
+          <Badge text={fromHelper ? 'Draft from Prompt helper' : 'Unsaved changes'} tone="warn" icon={false} />
         </span>
       )}
       {dirty && <Button label="Discard" kind="ghost" onClick={discard} />}
-      <Button label={`Save as ${next}`} kind="primary" disabled={!dirty || check.errors.length > 0} title={check.errors.length ? 'Fix the errors in Checks first' : undefined} onClick={save} />
+      <Button label="Save as new version" disabled={!dirty || check.errors.length > 0} title={check.errors.length ? 'Fix the errors in Checks first' : `Saves as v${Math.max(0, ...state.versions.map(x => x.major), ...reserved) + 1}`} onClick={() => save('major')} />
+      <Button label={`Save as ${nextMinor}`} kind="primary" disabled={!dirty || check.errors.length > 0} title={check.errors.length ? 'Fix the errors in Checks first' : undefined} onClick={() => save('minor')} />
     </>
   );
   return (
     <Frame head={<PageHead title={`Prompt ${versionLabel(version)}`} back={{label: 'Prompt versions', href: href('/prompt')}} actions={actions} />}>
-      <Workbench draft={draft} onChange={setDraft} check={check} readOnly={readOnly} />
+      <Workbench draft={draft} onChange={setDraft} check={check} readOnly={readOnly} added={added} featureTips={tips} />
     </Frame>
   );
 }

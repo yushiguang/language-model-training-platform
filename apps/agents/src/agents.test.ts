@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {scriptedAgent} from '@tsp/platform';
-import {partialReply, runAgentTurn} from './runtime.ts';
+import {draftImprovement, partialReply, reflectPrompt, runAgentTurn} from './runtime.ts';
 
 test('runAgentTurn hands off from front_desk to schema_agent and returns a schema proposal', async () => {
   const llm = scriptedAgent();
@@ -138,4 +138,52 @@ test('with progress, the turn reports the live line, the streamed reply and each
   assert.ok(first('reply:evaluation_agent') > first('working:evaluation_agent:Reading the v1 report…'));
   assert.ok(!seen.includes('reply:front_desk'), "a reply that hands off isn't streamed");
   assert.equal(seen.at(-1), 'message:agent');
+});
+
+const optSchema = {fields: [{name: 'format', kind: 'single' as const, values: [{name: 'Vlog', definition: 'a day in a life'}, {name: 'Clip', definition: 'a cut from a longer video'}]}]};
+const optTemplate = 'Label the post.\n\n### 1. format\n  Pick one.\n\n## Output\nJSON';
+const noFeatures = {video: [], photo_text: [], metadata: []};
+const mix = {field: 'format', kind: 'confused' as const, gold: 'Clip', predicted: 'Vlog', count: 5, exampleIds: []};
+
+test('the Optimiser may read feature descriptions before its change, through the tool host', async () => {
+  const llm = scriptedAgent();
+  const asked: string[] = [];
+  let first = true;
+  const reading = {
+    ...llm,
+    chat: async (messages: Parameters<typeof llm.chat>[0], o?: Parameters<typeof llm.chat>[1]) => {
+      if (first) {
+        first = false;
+        return JSON.stringify({tool: {name: 'read_feature_info', args: {keys: ['OCR_Text']}}});
+      }
+      return llm.chat(messages, o);
+    },
+  };
+  const out = await reflectPrompt(
+    {template: optTemplate, features: noFeatures, schema: optSchema, triedChanges: [], mixUps: [mix], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null},
+    reading,
+    {call: async c => (asked.push(c.name), {OCR_Text: {description: 'text on screen'}})},
+  );
+  assert.deepEqual(asked, ['read_feature_info']);
+  assert.match(out.template, /Before choosing Vlog/);
+});
+
+test('merge keeps the rules of both versions', async () => {
+  const a = optTemplate.replace('  Pick one.', '  Pick one.\n  Rule A.');
+  const b = optTemplate.replace('  Pick one.', '  Pick one.\n  Rule B.');
+  const out = await reflectPrompt(
+    {mode: 'merge', template: a, features: noFeatures, schema: optSchema, triedChanges: [], mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, other: {template: b, features: noFeatures, change: 'Rule B'}},
+    scriptedAgent(),
+  );
+  assert.match(out.template, /Rule A\.[\s\S]*Rule B\./);
+});
+
+test('Improve with AI returns a draft with each change and its reason', async () => {
+  const out = await draftImprovement(
+    {version: 'v2', template: optTemplate, features: noFeatures, schema: optSchema, mixUps: [mix], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, mistakes: 5},
+    scriptedAgent(),
+  );
+  assert.equal(out.changes.length, 1);
+  assert.equal(out.changes[0].reason, '5 Clip examples were read as Vlog');
+  assert.ok(out.template.includes(out.changes[0].text));
 });

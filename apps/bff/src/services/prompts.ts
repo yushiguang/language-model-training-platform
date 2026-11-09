@@ -1,4 +1,4 @@
-import type {NewVersion, PromptVersion} from '@tsp/contracts';
+import type {FeatureInfo, NewVersion, PromptVersion} from '@tsp/contracts';
 import {checkTemplate, MADE_BY, versionLabel} from '@tsp/domain';
 import {emitChange, getApp, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
@@ -25,6 +25,7 @@ export async function createVersion(projectId: string, v: NewVersion): Promise<P
     change: v.change,
     schemaVersion: v.schemaVersion,
     kind: v.kind,
+    ...(v.inMajor != null ? {inMajor: v.inMajor} : {}),
   });
   await catalog.audit(projectId, v.madeBy === 'user' ? (await user()).name : v.madeBy, 'prompt.create', {version: versionLabel(version)});
   if (fromDraft) await postEvent(projectId, 'approved', 'user', `saved it as ${versionLabel(version)}`, {path: '/prompt/edit', params: {v: version.id}});
@@ -40,4 +41,9 @@ export async function createVersion(projectId: string, v: NewVersion): Promise<P
   });
   emitChange();
   return version;
+}
+
+/** Feature descriptions by key, for hover text in the editor (empty without a source). */
+export async function featureInfo(keys: string[]): Promise<Record<string, FeatureInfo>> {
+  return (await getApp().featureInfo?.describe(keys)) ?? {};
 }

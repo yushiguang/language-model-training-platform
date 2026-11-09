@@ -370,7 +370,7 @@ export interface Col {
   /** '' = text (left), 'c' = centred value (numbers, status), 'act' = row actions (right). */
   kind?: '' | 'c' | 'act';
 }
-export function Table({cols, rows, first = 28, actWidth = 160}: {cols: Col[]; rows: {key: string; cells: ReactNode[]}[]; first?: number; actWidth?: number}) {
+export function Table({cols, rows, first = 28, actWidth = 160, widths}: {cols: Col[]; rows: {key: string; cells: ReactNode[]}[]; first?: number; actWidth?: number; widths?: (number | 'auto')[]}) {
   return (
     <table className="tbl">
       <colgroup>
@@ -378,7 +378,7 @@ export function Table({cols, rows, first = 28, actWidth = 160}: {cols: Col[]; ro
           <col
             key={i}
             style={{
-              width: i === 0 ? `${first}%` : c.kind === 'act' ? `${actWidth}px` : 'auto',
+              width: widths ? (widths[i] === 'auto' || widths[i] == null ? 'auto' : `${widths[i]}px`) : i === 0 ? `${first}%` : c.kind === 'act' ? `${actWidth}px` : 'auto',
             }}
           />
         ))}
@@ -557,11 +557,13 @@ export function Suggestion({title, text, actions, kicker = true}: {title: string
   );
 }
 
-export function Banner({text, action, tone = 'warn'}: {text: string; action?: ReactNode; tone?: 'warn' | 'err'}) {
+export function Banner({text, action, tone = 'warn', oneLine, style}: {text: string; action?: ReactNode; tone?: 'warn' | 'err'; oneLine?: boolean; style?: CSSProperties}) {
   return (
-    <div className={`banner ${tone}`} role={tone === 'err' ? 'alert' : 'status'}>
+    <div className={`banner ${tone}`} role={tone === 'err' ? 'alert' : 'status'} style={style}>
       <Icon name="alert" />
-      <span className="grow">{text}</span>
+      <span className={oneLine ? 'grow one' : 'grow'} title={oneLine ? text : undefined}>
+        {text}
+      </span>
       {action}
     </div>
   );
@@ -675,6 +677,8 @@ export function useCopy(): [string | null, (text: string) => void] {
 export const num = (x: number) => x.toLocaleString('en-US');
 const pad = (n: number) => String(n).padStart(2, '0');
 /** Every date and time reads 2026.11.06 10:42. */
+/** The time of day of an ISO date, "10:58". */
+export const timeOfDay = (iso: string) => dateTime(iso).slice(-5);
 export const dateTime = (iso: string) => {
   const d = new Date(iso);
   return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;

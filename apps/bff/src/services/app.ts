@@ -1,4 +1,4 @@
-import {NO_TELEMETRY, type AgentRuntimeContract, type CatalogContract, type ExampleSource, type FileStore, type MediaSource, type Identity, type LabelingContract, type LlmGatewayContract, type TelemetryPort} from '@tsp/contracts';
+import {NO_TELEMETRY, type AgentRuntimeContract, type CatalogContract, type ExampleSource, type FeatureInfoSource, type FileStore, type MediaSource, type Identity, type LabelingContract, type LlmGatewayContract, type TelemetryPort} from '@tsp/contracts';
 
 /**
  * What the bff talks to. The bff holds no records of its own: product records live in the
@@ -25,6 +25,8 @@ export interface BffDeps {
   examples: ExampleSource;
   /** Optional media for people to look at; see `MediaSource`. */
   media?: MediaSource;
+  /** Optional feature descriptions (hover text, and the agents' read_feature_info tool). */
+  featureInfo?: FeatureInfoSource;
   standIns: string[];
   telemetry?: TelemetryPort;
   /** Keeps a second tab from running the same optimiser; without it, only this tab is covered. */

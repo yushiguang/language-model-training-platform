@@ -27,7 +27,7 @@ import type {
   TrainingSet,
 } from './types.ts';
 import type {LabelingTask} from './labeling-api.ts';
-import type {ExampleMedia} from './platform-api.ts';
+import type {ExampleMedia, FeatureInfo} from './platform-api.ts';
 
 /**
  * Contract 1: Frontend Web App <-> BFF Service (`@tsp/contracts/bff-api`).
@@ -49,6 +49,8 @@ export interface NewVersion {
   madeBy: Actor;
   change: string;
   kind: 'minor' | 'major';
+  /** An Optimiser change: a minor in the run's own major. */
+  inMajor?: number;
   schema: Schema;
   schemaVersion: number;
 }
@@ -94,8 +96,15 @@ export interface BffContract {
   scoreVersion(projectId: string, version: PromptVersion, only?: EndpointId): Promise<void>;
   tick(state: ProjectState): Promise<void>;
   stopRun(runId: string): void;
-  startOptimiser(projectId: string, endpoint: EndpointId): void;
+  /** Auto Optimise: the user starts a run of up to `maxRounds` changes on the project's model. */
+  startOptimiser(projectId: string, maxRounds: number): Promise<void>;
   stopOptimiser(runId: string): void;
+  /** Retry on a Failed (or paused) run: resumes from the step that failed. */
+  retryOptimiser(runId: string): Promise<void>;
+  /** Improve with AI: the Prompt helper drafts changes to a version and puts them in the editor (no labeling). */
+  improveWithAi(projectId: string, versionId: string): Promise<void>;
+  /** Feature descriptions by key, for hover text (empty without a source). */
+  featureInfo(keys: string[]): Promise<Record<string, FeatureInfo>>;
   predictionsFor(versionId: string, endpoint: EndpointId, settings: ModelSettings): Promise<Map<string, Prediction>>;
 
   // Test set answers (Gold Labels) and the final run (train + test)

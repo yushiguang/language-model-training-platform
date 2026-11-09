@@ -9,6 +9,8 @@ import type {
   AgentTurnProgress,
   OptimiserReflectInput,
   OptimiserReflectOutput,
+  DraftImprovementInput,
+  DraftImprovementOutput,
   AgentModel,
   AgentPreset,
   FeatureSelection,
@@ -112,6 +114,8 @@ function workingLine(name: AgentToolName, args: Record<string, unknown>): string
       return `Reading the ${v ? `${v} ` : ''}answers…`;
     case 'check_template':
       return 'Checking the prompt…';
+    case 'read_feature_info':
+      return 'Reading the feature descriptions…';
     case 'try_template':
       return 'Trying the prompt on a few examples…';
     case 'score_version':
@@ -298,29 +302,71 @@ export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?
 }
 
 /**
- * Runs one reflection step for the GEPA-style prompt optimiser.
+ * A one-shot call (no chat history) that may read feature descriptions first: the model answers
+ * {"tool": {"name": "read_feature_info", "args": {"keys": [...]}}} to read them, up to twice.
  */
-export async function reflectPrompt(input: OptimiserReflectInput, llm: AgentModel): Promise<OptimiserReflectOutput> {
-  const raw = await llm.chat(
-    [
-      {role: 'system', content: systemPrompt('optimiser')},
-      {
-        role: 'user',
-        content: JSON.stringify({
-          preset: 'optimiser',
-          intent: 'reflect',
-          context: {
-            template: input.template,
-            schema: input.schema,
-            tried: input.triedChanges,
-            mixUps: input.mixUps.slice(0, 6),
-            lowestField: input.lowestField,
-            lowestValue: input.lowestValue,
-          },
-        }),
-      },
-    ],
-    {model: presetModel('optimiser'), json: true, signal: input.signal},
+async function withFeatureInfo(llm: AgentModel, preset: AgentPreset | 'optimiser', intent: string, context: Record<string, unknown>, tools?: AgentToolHost, signal?: AbortSignal): Promise<string> {
+  const shape = PRESETS[preset].intents[intent];
+  const toolLine = tools
+    ? `\nTo read what features hold and when they help, answer {"tool": {"name": "read_feature_info", "args": {"keys": string[]}}} first; the result comes back as the next message. At most 2 reads.`
+    : '';
+  const messages: ModelMessage[] = [
+    {role: 'system', content: `${systemPrompt(preset)}\nAnswer shape for "${intent}": ${shape}${toolLine}`},
+    {role: 'user', content: JSON.stringify({preset, intent, context})},
+  ];
+  for (let step = 0; ; step++) {
+    const raw = await llm.chat(messages, {model: presetModel(preset), json: true, signal});
+    const out = parseJsonObject<RawAgentReply>(raw, {} as RawAgentReply);
+    if (!out.tool || !tools || step >= 2) return raw;
+    let result: unknown;
+    if (out.tool.name !== 'read_feature_info') result = {error: `${out.tool.name} is not one of your tools here.`};
+    else {
+      try {
+        result = await tools.call({agent: 'prompt_agent', name: 'read_feature_info', args: out.tool.args ?? {}});
+      } catch (e) {
+        result = {error: (e as Error).message};
+      }
+    }
+    messages.push({role: 'assistant', content: raw}, {role: 'user', content: JSON.stringify({tool_result: {name: out.tool.name, result}}).slice(0, MAX_RESULT_CHARS)});
+  }
+}
+
+/**
+ * One Optimiser step: a change from the parent's mistakes (reflection), or a merge of two
+ * versions that win on different examples. May tick or untick features, with the reason.
+ */
+export async function reflectPrompt(input: OptimiserReflectInput, llm: AgentModel, tools?: AgentToolHost): Promise<OptimiserReflectOutput> {
+  const mode = input.mode ?? 'change';
+  const raw = await withFeatureInfo(
+    llm,
+    'optimiser',
+    mode === 'merge' ? 'merge' : 'reflect',
+    {
+      template: input.template,
+      features: input.features,
+      schema: input.schema,
+      tried: input.triedChanges,
+      mixUps: input.mixUps.slice(0, 6),
+      lowestField: input.lowestField,
+      lowestValue: input.lowestValue,
+      ...(input.other ? {other: input.other} : {}),
+    },
+    tools,
+    input.signal,
   );
-  return parseJsonObject<OptimiserReflectOutput>(raw, {template: input.template, change: ''});
+  const out = parseJsonObject<OptimiserReflectOutput>(raw, {template: input.template, change: ''});
+  return {template: typeof out.template === 'string' ? out.template : input.template, change: typeof out.change === 'string' ? out.change : '', ...(out.features ? {features: out.features} : {})};
+}
+
+/** Improve with AI: the Prompt helper's draft of a version, with every change and its reason. */
+export async function draftImprovement(input: DraftImprovementInput, llm: AgentModel, tools?: AgentToolHost): Promise<DraftImprovementOutput> {
+  const raw = await withFeatureInfo(llm, 'prompt_agent', 'improve', {...input}, tools);
+  const out = parseJsonObject<Partial<DraftImprovementOutput>>(raw, {});
+  const changes = Array.isArray(out.changes) ? out.changes.filter(c => c && typeof c.text === 'string').map(c => ({text: c.text, reason: typeof c.reason === 'string' ? c.reason : ''})) : [];
+  return {
+    template: typeof out.template === 'string' && out.template.trim() ? out.template : input.template,
+    ...(out.features ? {features: out.features} : {}),
+    changes,
+    reply: typeof out.reply === 'string' ? out.reply : '',
+  };
 }

@@ -101,7 +101,8 @@ function ShellInner({children}: {children: ReactNode}) {
 
 const nodeFromPath = (path: string): NodeId => {
   const p = path.replace(/\/+$/, '');
-  return (NODES.find(n => p.endsWith(n.path)) ?? NODES[0]).id;
+  // A step's sub-pages (the prompt editor at /prompt/edit) belong to the step.
+  return (NODES.find(n => p.endsWith(n.path) || p.includes(`${n.path}/`)) ?? NODES[0]).id;
 };
 
 /** The spinner shown in the panel while a step's data loads (design: "Step-Loading"). */

@@ -85,6 +85,20 @@ Gold Labels. Playback is an embedded player page, never a direct video file:
 Media is for people only. The labeling models receive image features through the prompt
 template, and the URLs there must be reachable by the models (see "Endpoints and limits").
 
+## Feature descriptions
+
+`FeatureInfoSource` (`packages/contracts/src/platform-api.ts`) says what each feature holds. The
+Optimiser and the Prompt helper read it with the `read_feature_info` tool before they tick or
+untick a feature, and the prompt editor shows it on hover over a feature name.
+
+1. Implement `describe(keys)` in the internal module: for each feature key (the placeholder name,
+   for example `OCR_Text`) return a `FeatureInfo` with a one-line `description` of what the
+   feature holds, and optionally `goodFor` (when it helps labeling) and `caveats` (often empty,
+   cut, noisy, costly as an image). Leave out keys with no description.
+2. Set `featureInfo` on the `Platform` object and drop `'feature descriptions'` from `standIns`.
+   The stand-in (`packages/platform/src/standins/feature-info.ts`) has made-up descriptions for
+   every catalogue key.
+
 ## Asking for a contract change
 
 A contract is any type or interface in `packages/contracts`. Changing one can break the internal

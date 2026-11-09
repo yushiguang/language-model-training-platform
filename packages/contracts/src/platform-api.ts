@@ -415,6 +415,22 @@ export interface MediaSource {
   media(externalId: string, type: RawExample['type']): Promise<ExampleMedia | null>;
 }
 
+/**
+ * What a feature is and when it helps, for the agents (the Prompt helper and the Optimiser) and
+ * for hover text on feature names. The internal team provides the real text; the repo has a
+ * stand-in with made-up text. See docs/handover/integration.md, "Feature descriptions".
+ */
+export interface FeatureInfo {
+  description: string;
+  goodFor?: string;
+  caveats?: string;
+}
+
+export interface FeatureInfoSource {
+  /** Descriptions by feature key (the placeholder name). Keys with no description are left out. */
+  describe(keys: string[]): Promise<Record<string, FeatureInfo>>;
+}
+
 export interface Platform {
   db: DocRuntime;
   models: LabelingModels;
@@ -427,6 +443,8 @@ export interface Platform {
    * See docs/handover/integration.md, "Media".
    */
   media?: MediaSource;
+  /** Feature descriptions. Optional: without it the agents see feature names only. */
+  featureInfo?: FeatureInfoSource;
   /**
    * Registered endpoints with their QPM/TPM. Optional: the gateway fills anything missing from its
    * assumed defaults (`apps/llm-gateway/src/registry.ts`).

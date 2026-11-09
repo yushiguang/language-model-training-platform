@@ -9,3 +9,4 @@ export * from './workflow.ts';
 export * from './ids.ts';
 export * from './pages.ts';
 export * from './auto-start.ts';
+export * from './gepa.ts';

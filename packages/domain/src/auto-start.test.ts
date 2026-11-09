@@ -65,3 +65,22 @@ test('final run plan: test examples with gold or an answer are never labeled aga
   assert.equal(p.total(true).count, 2);
   assert.ok(p.total(true).costUsd > p.total(false).costUsd);
 });
+
+test('the Optimiser is never due by itself, and its labeling waits for Retry', () => {
+  const scored = state({
+    facts: {goldEvalDone: 2} as ProjectState['facts'],
+    setup: {schema: {fields: []}, models: [{endpoint: 'A', maxOutputTokens: 512, temperature: 0}], thresholds: {macroF1: 0.8}} as unknown as ProjectState['setup'],
+    runs: [{id: 'lt_1', promptVersionId: 'pv_1', endpoint: 'A', state: 'done', done: 2, total: 2, costUsd: 0}] as ProjectState['runs'],
+  });
+  assert.deepEqual(dueStarts(scored), []);
+  const cand = {...version, id: 'pv_2', madeBy: 'optimiser'} as ProjectState['versions'][number];
+  const paused = state({
+    versions: [cand, version],
+    runs: [
+      {id: 'lt_1', promptVersionId: 'pv_1', endpoint: 'A', state: 'done', done: 2, total: 2, costUsd: 0},
+      {id: 'lt_2', promptVersionId: 'pv_2', endpoint: 'A', state: 'paused', done: 1, total: 2, costUsd: 0},
+    ] as ProjectState['runs'],
+    optimisation: [{id: 'op_1', state: 'paused', history: [{versionId: 'pv_2'}]}] as unknown as ProjectState['optimisation'],
+  });
+  assert.deepEqual(dueStarts(paused), []);
+});

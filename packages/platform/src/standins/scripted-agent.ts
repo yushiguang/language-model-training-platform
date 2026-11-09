@@ -45,7 +45,7 @@ function startRequest(t: string) {
   const v = t.match(/\bv\d+(?:\.\d+)?\b/i)?.[0];
   if (/\btry\b/i.test(t)) return {name: 'try_template', model};
   if (/\bscore\b/i.test(t) && v) return {name: 'score_version', version: v, model};
-  if (/\boptimi[sz]er\b/i.test(t) && /\b(run|start)\b/i.test(t)) return {name: 'start_optimiser', model};
+  if ((/\boptimi[sz]er\b/i.test(t) && /\b(run|start)\b/i.test(t)) || /\bauto[- ]?optimi[sz]e\b/i.test(t)) return {name: 'start_optimiser', rounds: Number(t.match(/\b(\d+)\s*rounds?\b/i)?.[1]) || undefined};
   return null;
 }
 
@@ -57,7 +57,7 @@ function promptAgentStart(r: Req) {
   if (!(s.name in r.results)) {
     const template = r.context.pageView?.data?.version?.template ?? r.context.template ?? r.context.pageView?.data?.current?.template;
     const args: Record<string, unknown> =
-      s.name === 'try_template' ? {template: template ?? '', n: 3, ...(s.model ? {model: s.model} : {})} : s.name === 'score_version' ? {version: s.version, ...(s.model ? {model: s.model} : {})} : s.model ? {model: s.model} : {};
+      s.name === 'try_template' ? {template: template ?? '', n: 3, ...(s.model ? {model: s.model} : {})} : s.name === 'score_version' ? {version: s.version, ...(s.model ? {model: s.model} : {})} : s.rounds ? {rounds: s.rounds} : {};
     return {tool: {name: s.name, args}};
   }
   if (res?.error) return {reply: `I couldn't start that: ${res.error}`};
@@ -114,6 +114,7 @@ function schemaAgent(r: Req) {
 }
 
 function promptAgent(r: Req) {
+  if (r.intent === 'improve') return improve(r);
   const start = promptAgentStart(r);
   if (start) return start;
   if (r.intent === 'draft_prompt') {
@@ -176,6 +177,54 @@ function reflect(r: Req) {
   return {template: template.includes(rule) ? template : insertRule(template, r.context.schema.fields[0].name, rule), change: rule};
 }
 
+/** Merge: keeps template's rules and adds the other version's rule lines it lacks, in the same field. */
+function merge(r: Req) {
+  const other = r.context.other;
+  let template: string = r.context.template;
+  if (!other?.template) return reflect(r);
+  let field = '';
+  let added = 0;
+  for (const line of String(other.template).split('\n')) {
+    const h = line.match(/^###\s*\d+\.\s*(\S+)/);
+    if (h) field = h[1];
+    else if (/^  \S/.test(line) && field && !template.includes(line.trim())) {
+      template = insertRule(template, field, line.trim());
+      added++;
+    }
+  }
+  return {template, change: added ? `Merged the rules of two versions (${added} rule${added === 1 ? '' : 's'} added)` : 'Merged two versions'};
+}
+
+/** What a mix-up looks like in a reason line. */
+const mixLine = (m: MixUp) =>
+  m.kind === 'confused' ? `${m.count} ${m.gold} example${m.count === 1 ? ' was' : 's were'} read as ${m.predicted}` : m.kind === 'extra' ? `${m.predicted} was added ${m.count} time${m.count === 1 ? '' : 's'} when it did not apply` : `${m.gold} was missed ${m.count} time${m.count === 1 ? '' : 's'}`;
+
+/** Improve with AI: up to 3 rules from the top mix-ups, each with its reason. */
+function improve(r: Req) {
+  const mixUps: MixUp[] = r.context.mixUps ?? [];
+  let template: string = r.context.template;
+  const changes: {text: string; reason: string}[] = [];
+  for (const m of mixUps) {
+    if (changes.length >= 3) break;
+    const rule = ruleFor(m, r.context.schema);
+    if (template.includes(rule)) continue;
+    template = insertRule(template, m.field, rule);
+    changes.push({text: rule, reason: mixLine(m)});
+  }
+  if (!changes.length) {
+    const rule = 'Read the description and the on-screen text before judging; when unsure, prefer the more common value.';
+    if (!template.includes(rule)) {
+      template = insertRule(template, r.context.schema.fields[0].name, rule);
+      changes.push({text: rule, reason: `${r.context.mistakes ?? 'Some'} examples are still wrong with no clear mix-up`});
+    }
+  }
+  return {
+    reply: changes.length ? `I read the ${r.context.mistakes ?? ''} mistakes in ${r.context.version} and made ${changes.length} change${changes.length === 1 ? '' : 's'}, marked in green in the prompt:`.replace('the  mistakes', 'the mistakes') : `I have no new change for ${r.context.version}.`,
+    template,
+    changes,
+  };
+}
+
 /** A helper that stayed on its page passes on what the front desk would send to another helper. */
 function passOn(r: Req) {
   if (r.intent !== 'follow_up') return null;
@@ -196,7 +245,9 @@ export function scriptedAgent(): AgentModel {
           : req.preset === 'prompt_agent'
             ? promptAgent(req)
             : req.preset === 'optimiser'
-              ? reflect(req)
+              ? req.intent === 'merge'
+                ? merge(req)
+                : reflect(req)
               : evaluationAgent(req);
     return JSON.stringify(out);
   };

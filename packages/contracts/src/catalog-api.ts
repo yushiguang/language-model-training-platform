@@ -54,7 +54,12 @@ export interface CatalogRecords {
 export type CatalogKind = keyof CatalogRecords;
 
 /** A new prompt version before the catalog numbers it. */
-export type NewPromptVersion = Omit<PromptVersion, 'id' | 'major' | 'minor' | 'createdAt'> & {kind: 'minor' | 'major'};
+/**
+ * A new prompt version before the catalog numbers it. `kind`: 'major' = the next major (v5);
+ * 'minor' = the next minor under the parent's major (v4.3), or under `inMajor` when given (an
+ * Optimiser run's first change makes v5.1 under the major it reserved).
+ */
+export type NewPromptVersion = Omit<PromptVersion, 'id' | 'major' | 'minor' | 'createdAt'> & {kind: 'minor' | 'major'; inMajor?: number};
 
 /** A new setup version before the catalog numbers it. */
 export type NewSetupVersion = Omit<SetupVersion, 'id' | 'number' | 'createdAt'>;

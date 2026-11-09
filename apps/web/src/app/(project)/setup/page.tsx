@@ -19,9 +19,13 @@ export default function SetupPage() {
 }
 
 function SetupRouter() {
-  const step = useSearchParams().get('step') ?? '1';
+  const step = useSearchParams().get('step');
+  const {state} = useProject();
+  const steps = state?.setup?.steps;
   if (step === '2') return <EvaluationPage />;
   if (step === '3') return <ModelsPage />;
+  // A finished Setup opens on its summary, with Edit on each part (R2-1).
+  if (step === null && steps?.schema && steps.evaluation && steps.models) return <SummaryPage />;
   return <SchemaPage />;
 }
 
@@ -342,11 +346,11 @@ function Evaluation({state}: {state: ProjectState}) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Setup 3: Labeling models.
+// Setup 3: Labeling model (one per project).
 
 function ModelsPage() {
   return (
-    <ProjectPage node="setup" page={{label: 'Labeling models', agent: 'front_desk', intent: 'answer', hint: 'Ask about the models.', context: {}}}>
+    <ProjectPage node="setup" page={{label: 'Labeling model', agent: 'front_desk', intent: 'answer', hint: 'Ask about the models.', context: {}}}>
       {({state}) => <Models state={state} />}
     </ProjectPage>
   );
@@ -357,39 +361,114 @@ function Models({state}: {state: ProjectState}) {
   const {href} = useProject();
   const s = state.setup;
   const eps = state.endpoints;
-  // The design shows every model with its settings and no way to leave one out (docs/ui-gaps.md).
-  const [models, setModels] = useState<ModelSettings[]>(
-    eps.map(e => s?.models.find(m => m.endpoint === e.id) ?? {endpoint: e.id, maxOutputTokens: 1024, temperature: e.supportsTemperature ? 0 : null}),
-  );
-  const patch = (id: string, p: Partial<ModelSettings>) => setModels(models.map(m => (m.endpoint === id ? {...m, ...p} : m)));
+  // One labeling model per project: the saved one, else the first listed.
+  const saved = s?.models[0];
+  const [ep, setEp] = useState(saved?.endpoint ?? eps[0]?.id);
+  const info = eps.find(e => e.id === ep);
+  const [tokens, setTokens] = useState(String(saved?.maxOutputTokens ?? 1024));
+  const [temp, setTemp] = useState(String(saved?.temperature ?? 0));
   const next = async () => {
+    if (!info) return;
+    const models: ModelSettings[] = [{endpoint: info.id, maxOutputTokens: parseInt(tokens) || 1024, temperature: info.supportsTemperature ? parseFloat(temp) || 0 : null}];
     await saveSetup(state.project.id, {models, steps: {schema: !!s?.steps.schema, evaluation: !!s?.steps.evaluation, models: true}});
-    await approveNode(state.project.id, 'setup');
+    if (!state.project.approvedNodes.includes('setup')) await approveNode(state.project.id, 'setup');
     router.push(href('/dataset'));
   };
-  const head = <PageHead title="Labeling models" back={{label: 'Evaluation settings', href: href('/setup', {step: '2'})}} actions={<Button label="Next: Dataset" kind="primary" disabled={!s?.steps.evaluation} onClick={next} />} />;
+  const head = <PageHead title="Labeling model" back={{label: 'Evaluation settings', href: href('/setup', {step: '2'})}} actions={<Button label="Next: Dataset" kind="primary" disabled={!s?.steps.evaluation || !info} onClick={next} />} />;
   const body = (
-    <div className="grid-2">
-      {eps.map(ep => {
-        const m = models.find(x => x.endpoint === ep.id)!;
-        return (
-          <Card key={ep.id} title={ep.name} titleExtra={<Badge text={ep.badge} icon={false} />} className="form">
-            <div className="row" style={{gap: 16, alignItems: 'flex-end'}}>
-              <Field label="Max output tokens">
-                <input className="input" value={m.maxOutputTokens} onChange={e => patch(ep.id, {maxOutputTokens: parseInt(e.target.value) || 1})} />
-              </Field>
-              <Field label="Temperature" off={!ep.supportsTemperature}>
-                {ep.supportsTemperature ? (
-                  <input className="input" value={m.temperature ?? 0} onChange={e => patch(ep.id, {temperature: parseFloat(e.target.value) || 0})} />
-                ) : (
-                  <input className="input" value="Not supported" readOnly disabled />
-                )}
-              </Field>
-            </div>
-          </Card>
-        );
-      })}
+    <div style={{display: 'grid', gridTemplateColumns: '400px 1fr', gap: 16, alignItems: 'start'}}>
+      <Card title="Model">
+        <div className="opts" role="radiogroup" aria-label="Model">
+          {eps.map(e => (
+            <Opt
+              key={e.id}
+              title={e.name}
+              tip={e.description}
+              checked={e.id === ep}
+              onSelect={() => setEp(e.id)}
+              extra={
+                <>
+                  <span className="grow" />
+                  <Badge text={e.badge} icon={false} />
+                </>
+              }
+            />
+          ))}
+        </div>
+      </Card>
+      <Card title="Settings" className="form">
+        <div className="row" style={{gap: 16, alignItems: 'flex-end'}}>
+          <Field label="Max output tokens">
+            <input className="input" value={tokens} onChange={e => setTokens(e.target.value.replace(/\D/g, ''))} />
+          </Field>
+          {info?.supportsTemperature ? (
+            <Field label="Temperature">
+              <input className="input" value={temp} onChange={e => setTemp(e.target.value)} />
+            </Field>
+          ) : (
+            <Field label={<Hov text="Temperature" tip="This model does not support temperature" />} off>
+              <input className="input" value="Not supported" readOnly disabled />
+            </Field>
+          )}
+        </div>
+      </Card>
     </div>
   );
   return <Frame head={head}>{body}</Frame>;
+}
+
+// ---------------------------------------------------------------------------------------------
+// A finished Setup: one line per part, each with Edit (R2-1).
+
+function SummaryPage() {
+  return (
+    <ProjectPage node="setup" page={{label: 'Setup', agent: 'front_desk', intent: 'answer', hint: 'Ask about the schema, the pass rule or the model.', context: {}}}>
+      {({state}) => <Summary state={state} />}
+    </ProjectPage>
+  );
+}
+
+function Summary({state}: {state: ProjectState}) {
+  const router = useRouter();
+  const {href} = useProject();
+  const s = state.setup!;
+  const fields = s.schema?.fields ?? [];
+  const t = s.thresholds;
+  const f2 = (x: number) => x.toFixed(2);
+  const rule = !t
+    ? 'None: versions are not scored'
+    : t.mode === 'default'
+      ? `Default: Macro-F1 ${f2(t.macroF1)} per field`
+      : [`Custom: Macro-F1 ${f2(t.macroF1)} per field`, t.valueF1 != null && `F1 ${f2(t.valueF1)} per value`, t.precision != null && `precision ${f2(t.precision)}`, t.recall != null && `recall ${f2(t.recall)}`].filter(Boolean).join(', ');
+  const m = s.models[0];
+  const model = m ? `${state.endpoints.find(e => e.id === m.endpoint)?.name ?? m.endpoint} · max ${m.maxOutputTokens} output tokens` : 'Not chosen';
+  const rows = [
+    {name: 'Schema', text: `${fields.length} label field${fields.length === 1 ? '' : 's'}: ${fields.map(f => f.name).join(', ')}`, step: '1'},
+    {name: 'Evaluation', text: rule, step: '2'},
+    {name: 'Labeling model', text: model, step: '3'},
+  ];
+  const next = async () => {
+    if (!state.project.approvedNodes.includes('setup')) await approveNode(state.project.id, 'setup');
+    router.push(href('/dataset'));
+  };
+  return (
+    <Frame head={<PageHead title="Setup" actions={<Button label="Next: Dataset" kind="primary" onClick={next} />} />}>
+      <div style={{width: 800}}>
+        <section className="card" aria-label="Setup" style={{padding: '0 24px', gap: 0}}>
+          {rows.map((r, i) => (
+            <div key={r.name} className="row" style={{height: 64, gap: 12, borderBottom: i < rows.length - 1 ? '1px solid var(--border)' : undefined}}>
+              <span className="chk ok">
+                <Icon name="check" />
+              </span>
+              <b style={{width: 160}}>{r.name}</b>
+              <span className="grow one t-2" title={r.text}>
+                {r.text}
+              </span>
+              <Button label="Edit" kind="ghost" href={href('/setup', {step: r.step})} />
+            </div>
+          ))}
+        </section>
+      </div>
+    </Frame>
+  );
 }

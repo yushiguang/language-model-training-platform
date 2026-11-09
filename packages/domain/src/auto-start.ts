@@ -4,13 +4,14 @@ import {renderPrompt} from './template.ts';
 import {costForTokens} from './workflow.ts';
 
 /**
- * Paid work that starts without a click: scoring a new version, the optimiser, resuming after
- * a closed page, and agent start tools. All of it starts by itself, with no cost limit: the cost
- * can't be predicted exactly, the platform is there to make training faster, and every running
- * task has a Stop button.
+ * Paid work that starts without a click: scoring a new version, resuming after a closed page,
+ * and agent start tools. All of it starts by itself, with no cost limit: the cost can't be
+ * predicted exactly, the platform is there to make training faster, and every running task has a
+ * Stop button. The Optimiser is the exception: only the user starts it (Auto Optimise, decided
+ * 2026-11-09), with a number of rounds.
  */
-/** Optimiser candidates per run. */
-export const OPTIMISER_CANDIDATES = 6;
+/** The rounds box next to Auto Optimise is prefilled with this. */
+export const DEFAULT_MAX_ROUNDS = 10;
 /** The prompt agent's try_template labels at most this many eval examples. */
 export const TRY_TEMPLATE_MAX = 5;
 
@@ -25,10 +26,10 @@ export function evalEstimate(state: ProjectState, version: Pick<PromptVersion, '
   return costForTokens(state.endpoints, endpoint, avg, 150) * (n ?? evalEx.length);
 }
 
-/** About what one optimiser run costs: each candidate is labeled on the eval set. */
-export function optimiserEstimate(state: ProjectState, endpoint: EndpointId, candidates = OPTIMISER_CANDIDATES): number {
+/** At most what one optimiser run costs (for the audit log only): every round labeled on the eval set. */
+export function optimiserEstimate(state: ProjectState, endpoint: EndpointId, rounds = DEFAULT_MAX_ROUNDS): number {
   const v = state.versions[0];
-  return v ? evalEstimate(state, v, endpoint) * candidates : 0;
+  return v ? evalEstimate(state, v, endpoint) * rounds : 0;
 }
 
 /**
@@ -42,7 +43,7 @@ export function autoSpendUsd(state: ProjectState): number {
 }
 
 export interface DueStart {
-  what: 'score' | 'resume' | 'optimiser';
+  what: 'score' | 'resume';
   versionId: string | null;
   endpoint: EndpointId;
   estimateUsd: number;
@@ -51,11 +52,10 @@ export interface DueStart {
 }
 
 /**
- * Paid work the workflow would start now: scoring the newest version on each chosen model,
- * resuming scoring a closed page left, and an optimiser run for a model with no passing version
- * once the eval set is gold-labeled. `tick` starts all of it.
+ * Paid work the workflow would start now: scoring the newest version on the project's model, and
+ * resuming scoring a closed page left. `tick` starts all of it. The Optimiser never starts here.
  */
-export function dueStarts(state: ProjectState, opts: {optimiserBusy?: boolean} = {}): DueStart[] {
+export function dueStarts(state: ProjectState): DueStart[] {
   const out: DueStart[] = [];
   const setup = state.setup;
   if (!setup?.schema) return out;
@@ -63,6 +63,8 @@ export function dueStarts(state: ProjectState, opts: {optimiserBusy?: boolean} =
 
   for (const r of state.runs) {
     if (r.state !== 'paused' || !models.includes(r.endpoint)) continue;
+    // Optimiser labeling resumes with its run (Retry), not by itself.
+    if (state.optimisation.some(o => (o.history ?? []).some(h => h.versionId === r.promptVersionId))) continue;
     const v = state.versions.find(x => x.id === r.promptVersionId);
     if (!v) continue;
     const left = Math.max(0, r.total - r.done);
@@ -70,23 +72,9 @@ export function dueStarts(state: ProjectState, opts: {optimiserBusy?: boolean} =
   }
 
   const latest = state.versions[0];
-  if (!latest) return out;
+  if (!latest || latest.madeBy === 'optimiser') return out;
   for (const m of models) {
     if (!state.runs.some(r => r.promptVersionId === latest.id && r.endpoint === m)) out.push({what: 'score', versionId: latest.id, endpoint: m, estimateUsd: evalEstimate(state, latest, m), key: `score:${latest.id}:${m}`});
-  }
-
-  if (!setup.thresholds) return out;
-  const evalSize = state.snapshot?.split?.eval ?? 0;
-  if (state.facts.goldEvalDone < evalSize || opts.optimiserBusy || state.optimisation.some(o => o.state === 'running')) return out;
-  for (const m of models) {
-    const current = state.reports.filter(r => r.endpoint === m && !r.archivedNow);
-    if (current.some(r => r.passed)) continue;
-    if (!current.find(r => r.promptVersionId === latest.id) && !current[0]) continue;
-    const anchor = state.versions.find(v => v.madeBy !== 'optimiser') ?? latest;
-    if (state.optimisation.some(o => o.endpoint === m && o.startedAt >= anchor.createdAt)) continue;
-    if (state.optimisation.some(o => o.endpoint === m && (o.state === 'paused' || o.state === 'failed'))) continue;
-    out.push({what: 'optimiser', versionId: null, endpoint: m, estimateUsd: optimiserEstimate(state, m), key: `optimiser:${m}:${anchor.id}`});
-    break; // one optimiser at a time
   }
   return out;
 }

@@ -65,13 +65,41 @@ hands-on list `docs/acceptance-2026-11-09.md` are covered by the same pass):
 | Projects page | A project with every step done shows "Finished"; the project finishes by itself once the training set and the test set are done |
 | Stand-in sampling | 400ms per step of 8 examples (was 120ms), so the progress can be seen |
 
+## Done on 2026-11-09: the Optimiser screens
+
+Evelyn approved the canvas boards for one labeling model per project, the finished Setup summary
+(R2-1), Auto Optimise with Max rounds, the Optimiser progress panel, two-level version numbers,
+dropped versions, Failed with Retry, a pass that starts the training and test sets, and Improve
+with AI. What the code does (the boards are U-B-Setup-Models and the U-E-* boards):
+
+| Where | What the code does |
+| --- | --- |
+| Setup, Labeling model | A Model card (one radio per model, its tag on the right, its description on hover) and a Settings card, 400px and the rest |
+| Setup, finished | Opens on the "Setup" summary: Schema, Evaluation and Labeling model, one line each, with Edit; Next: Dataset |
+| Prompt versions, below the bar | AI Suggestion "<field> holds vN back", the top mix-up as its line, and "Improve with AI or Auto Optimise [10] rounds" |
+| Prompt versions, a pass | "Improve with AI" replaces "Keep improving" next to "Make training and test sets" |
+| Versions list | All or Major; Optimiser tag on the run's versions; Best only on the best version when it passes; Running and Dropped tags |
+| Optimiser panel | Replaces the version card while a run is going, failed or paused: Round N / max, Started from, Started at, the Now line with "since" and progress, then every round (Round, Version, Change, Result). Stop, or Retry when Failed |
+| A dropped version | "vX passed a / n" and "vY passed b / n" (hover says what they count), "Dropped after dry run", and the same per field |
+| A pass from the Optimiser | AI Suggestion "vX passes, training and test sets started", "The Optimiser stopped after round N of M. Labeling started with vX.", Go to Training Set |
+| Prompt editor | Save as vN.M (the next minor) and Save as new version (the next major). A helper's draft shows "Draft from Prompt helper" and the lines it added in green |
+| Gold Labels (R2-2) | The model answer starts hidden on every example; Show reveals it for that example only, and the label records that it was seen |
+| Ask AI (R2-5) | The newest start line of work that is still running spins (scoring and the Optimiser, test answers, the training set) |
+
 ## Still different from the canvas
 
 | Where | Canvas | Code | Why |
 | --- | --- | --- | --- |
 | Gold Labels, feature rows | Title, Description, On-screen text, Speech, Creator, Hashtags, Posted, Country and language | The same, plus every other feature the example has; empty rows are left out | Labelers must be able to see every feature (review 2026-11-09) |
-| Ask AI, a paid start line | "Prompt helper started scoring v4" | "Prompt helper started scoring v4 on gpt-5.6-terra" | Two models can be scored separately; the line says which |
-| Ask AI, while the optimiser runs | A few lines | One "Workflow started scoring vN on <model>" line per automatic start, so a long optimiser run adds many lines | Every automatic start is recorded, as decided; grouping them needs a design |
+| Ask AI, a paid start line | "Prompt helper started scoring v4" | "Prompt helper started scoring v4 on gpt-5.6-terra" | The line names the model; with one model per project it could go |
+| Improve with AI, the draft | Removed text struck through in red; each change's reason on hover | Added lines green; removed text is not shown in the editor, and reasons are in the Prompt helper's message in Ask AI | The editor draws its marks under the text box, so nothing in it can be struck through or hovered. Needs an editor that can draw inline marks |
+| Improve with AI, Ask AI | "Improve v2" from the user, then the helper joins | "You asked the Prompt helper to improve v2", the helper's message with each change and its reason, then "Prompt helper put a draft on Edit prompt" | Started from the page's button, so there is no typed message |
+| Optimiser, Paused | Not drawn | A run whose page closed shows "Paused" (grey) and Resume in the panel | Like a paused labeling run |
+| Optimiser, other round results | Running, Dropped after dry run, Failed the Checks, Failed, Stopped | Also "Same as an earlier version" for a change that repeats a version | Not drawn |
+| Optimiser, a failed round's version | Not in the list | Not in the list until Retry goes on with it | As drawn; a version stopped by Stop shows a grey "Stopped" tag |
+| Optimiser, the Now line's progress | Always a bar | A bar only while a labeling step runs (not while the agent writes a change) | There is nothing to count while it writes |
+| Training Set, Labeling settings | Prompt and Model | Prompt only (one model per project); changes the Optimiser dropped are not offered | One model per project |
+| Prompt editor, feature hover | Not drawn | A feature's description shows on hover with "Click to copy" | Feature descriptions come from the feature info source |
 | Ask AI, approved schema | The approved card | The approved card and the line "You approved the schema" | Both are records of the same act |
 | Ask AI, the staying helper | Until the page changes | Until the page changes or the page is reloaded (kept in this browser tab) | Not saved with the project |
 | Step-Loading board | Spinner while the next step loads | Steps switch at once (the state is already loaded); the spinner shows only on the first load | Nothing to wait for |
@@ -85,7 +113,7 @@ hands-on list `docs/acceptance-2026-11-09.md` are covered by the same pass):
 | What | Status |
 | --- | --- |
 | Automatic paid starts | Decided 2026-11-06: every task starts by itself, with no cost limit and no Approve card. The user stops a costly task with its Stop button |
-| Choosing which models to use | Every model listed on Labeling models is used; there is no way to leave one out |
+| Choosing which models to use | One labeling model per project, chosen on Setup (decided 2026-11-09). Comparing models comes later |
 | Reading document links | Links show as chips in Ask AI; the agents' document reading tool is not built yet |
 | Agent replies | The helpers now read model names and version labels the way the pages show them, and their tool notes use the pages' terms. The page view they read still holds cost estimates, so a reply can mention cost |
 

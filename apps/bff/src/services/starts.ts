@@ -1,5 +1,5 @@
 import type {AgentPreset, ChatLink, EndpointId, ProjectState} from '@tsp/contracts';
-import {autoSpendUsd, evalEstimate, optimiserEstimate, TRY_TEMPLATE_MAX, versionLabel} from '@tsp/domain';
+import {autoSpendUsd, DEFAULT_MAX_ROUNDS, evalEstimate, optimiserEstimate, TRY_TEMPLATE_MAX, versionLabel} from '@tsp/domain';
 import {getApp, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {asModel, findVersion, modelName} from './page-views.ts';
@@ -83,14 +83,15 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
     }
     case 'start_optimiser': {
       const endpoint = pickModel();
-      if (state.optimisation.some(o => o.state === 'running')) return {line: '', estimateUsd: 0, run: async () => ({already: 'An optimiser run is already going.'})};
+      if (state.optimisation.some(o => o.state === 'running')) return {line: '', estimateUsd: 0, run: async () => ({already: 'The Optimiser is already running.'})};
+      const rounds = typeof args.rounds === 'number' ? Math.max(1, Math.min(50, Math.round(args.rounds))) : DEFAULT_MAX_ROUNDS;
       return {
-        line: `started the optimiser on ${modelName(state, endpoint)}`,
+        line: `started the Optimiser for up to ${rounds} rounds`,
         link: {path: '/prompt'},
-        estimateUsd: optimiserEstimate(state, endpoint),
+        estimateUsd: optimiserEstimate(state, endpoint, rounds),
         run: async () => {
-          void startOptimiser(projectId, endpoint, {auto: true});
-          return {started: true, note: 'The optimiser tries up to 6 changes; new versions appear on Prompt versions.'};
+          void startOptimiser(projectId, rounds, {auto: true});
+          return {started: true, note: `The Optimiser tries up to ${rounds} changes; each one appears on Prompt versions, with its dry run or scores.`};
         },
       };
     }

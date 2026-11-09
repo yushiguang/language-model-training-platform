@@ -22,7 +22,11 @@ interface WorldOpts {
   test?: number;
   train?: number;
   /** The model's reply for an example (by external id), on its nth call. */
-  answer?: (externalId: string, n: number) => string;
+  answer?: (externalId: string, n: number, prompt: string) => string;
+  /** Pass/fail bar on the lowest field Macro-F1 (no thresholds when missing). */
+  macroF1?: number;
+  /** Gold labels for the eval set, by external id. */
+  gold?: (externalId: string) => string;
   agents?: AgentRuntimeContract;
 }
 
@@ -35,12 +39,12 @@ async function world(prefix: string, opts: WorldOpts = {}) {
     endpoints: () => [endpoint],
     labelingEndpoints: () => [endpoint],
     agentModel: () => ({}),
-    async label(req: {traceId?: string}): Promise<LabelCallResult> {
+    async label(req: {traceId?: string; messages?: unknown}): Promise<LabelCallResult> {
       calls.n++;
       const n = (seen.get(req.traceId ?? '') ?? 0) + 1;
       seen.set(req.traceId ?? '', n);
       await new Promise(r => setTimeout(r, opts.delayMs ?? 1));
-      return {text: opts.answer?.(req.traceId ?? '', n) ?? '{"format": "Vlog"}', inputTokens: 0, outputTokens: 150, costUsd: opts.perCall ?? 0.03, endpointId: 'labeling-A', attempts: 1};
+      return {text: opts.answer?.(req.traceId ?? '', n, JSON.stringify(req.messages ?? '')) ?? '{"format": "Vlog"}', inputTokens: 0, outputTokens: 150, costUsd: opts.perCall ?? 0.03, endpointId: 'labeling-A', attempts: 1};
     },
   } as unknown as LlmGatewayContract;
   const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks()});
@@ -55,17 +59,21 @@ async function world(prefix: string, opts: WorldOpts = {}) {
     standIns: [],
   });
   const projectId = `pr_${prefix}`;
-  await catalog.insert('setup_versions', {id: `sv_${prefix}`, projectId, number: 1, schemaVersion: 1, task: '', schema, thresholds: null, models: [{endpoint: 'A', maxOutputTokens: 150, temperature: null}], steps: {schema: true, evaluation: true, models: true}, createdAt: '', createdBy: ''});
+  await catalog.insert('setup_versions', {id: `sv_${prefix}`, projectId, number: 1, schemaVersion: 1, task: '', schema, thresholds: opts.macroF1 == null ? null : {mode: 'custom', macroF1: opts.macroF1, valueF1: null, invalidRate: null, accuracy: null, minEval: EVAL}, models: [{endpoint: 'A', maxOutputTokens: 150, temperature: null}], steps: {schema: true, evaluation: true, models: true}, createdAt: '', createdBy: ''});
   const nTest = opts.test ?? 0;
   const nTrain = opts.train ?? 0;
   const total = EVAL + nTest + nTrain;
   await catalog.insert('dataset_snapshots', {id: `ds_${prefix}`, projectId, number: 1, source: 'sample', sourceName: 'test', createdAt: '', counts: {rows: total, valid: total, invalid: 0, video: total, photoText: 0}, split: {eval: EVAL, test: nTest, train: nTrain}});
-  const ex = (key: string, split: 'eval' | 'test' | 'train') => ({id: `ex_${prefix}_${key}`, snapshotId: `ds_${prefix}`, externalId: key, type: 'video' as const, title: '', features: {}, split, optimiserHalf: false});
+  const ex = (key: string, split: 'eval' | 'test' | 'train') => ({id: `ex_${prefix}_${key}`, snapshotId: `ds_${prefix}`, externalId: key, type: 'video' as const, title: '', features: {}, split, optimiserHalf: split === 'eval' && Number(key) % 2 === 0});
   await catalog.insertMany('examples', [
     ...Array.from({length: EVAL}, (_, i) => ex(String(i), 'eval')),
     ...Array.from({length: nTest}, (_, i) => ex(`t${i}`, 'test')),
     ...Array.from({length: nTrain}, (_, i) => ex(`r${i}`, 'train')),
   ]);
+  if (opts.gold) {
+    for (let i = 0; i < EVAL; i++)
+      await catalog.insert('gold_labels', {id: `gl_${prefix}_${i}`, projectId, exampleId: `ex_${prefix}_${i}`, schemaVersion: 1, answer: {format: [opts.gold(String(i))]}, source: 'labeled', revealed: false, createdAt: '', createdBy: 'Tester'});
+  }
   await catalog.insert('projects', {id: projectId, name: 'p', createdAt: '', createdBy: '', setupVersionId: `sv_${prefix}`, snapshotId: `ds_${prefix}`, approvedNodes: []});
   const newVersion = () => catalog.createPromptVersion({projectId, template: 'Label this', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
   const state = async () => (await loadProjectState(projectId))!;
@@ -193,6 +201,7 @@ test('a helper that joined keeps answering on its page; on another page the page
       return {invocations: [{from: 'user', to: input.page.agent, intent: input.page.intent, note: ''}], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
     },
     reflectPrompt: async () => ({template: '', change: ''}),
+    draftImprovement: async () => ({template: '', changes: [], reply: ''}),
   } satisfies AgentRuntimeContract;
   const w = await world('b12', {agents});
   const {sendUserMessage, answeringAgent, agentLive} = await import('./agents.ts');
@@ -210,4 +219,93 @@ test('a helper that joined keeps answering on its page; on another page the page
     chat.map(m => (m.role === 'event' ? `-- ${m.text}` : `${m.agent ?? 'user'}: ${m.text}`)),
     ['user: add a value', '-- Labels helper joined to answer', 'schema_agent: Sure.', 'user: and another', 'schema_agent: Again.', '-- Assistant answers on Dataset', 'user: hello', '-- Labels helper joined to answer', 'schema_agent: Sure.'],
   );
+});
+
+/** Gold: Tutorial on 0-7, Vlog on 8-9. The model is right on example i when i < 5 x (rule lines). */
+const goldOf = (id: string) => (Number(id) < 8 ? 'Tutorial' : 'Vlog');
+const ruled = (id: string, _n: number, prompt: string) => {
+  const k = (prompt.match(/RULE/g) ?? []).length;
+  return JSON.stringify({format: Number(id) < 5 * k ? goldOf(id) : 'Vlog'});
+};
+const ruleAgent = (fail: {left: number} = {left: 0}): AgentRuntimeContract => ({
+  runAgentTurn: async () => ({invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []}),
+  async reflectPrompt(input) {
+    if (fail.left > 0) {
+      fail.left--;
+      throw new Error('boom');
+    }
+    const k = (input.template.match(/RULE/g) ?? []).length + 1;
+    return {template: `${input.template}\nRULE ${k}`, change: `rule ${k}`};
+  },
+  draftImprovement: async input => ({template: input.template, changes: [], reply: ''}),
+});
+
+test('Auto Optimise: dry run, full labeling, stops when a version passes; versions are minors of the run major', async () => {
+  const w = await world('b20', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf, train: 3, test: 1});
+  await w.newVersion();
+  const {startOptimiser} = await import('./work.ts');
+  await startOptimiser(w.projectId, 10);
+  const s = await w.state();
+  const run = s.optimisation[0];
+  assert.equal(run.state, 'done');
+  assert.equal(run.stopReason, 'passes');
+  assert.equal(run.major, 2);
+  assert.deepEqual(
+    run.history.map(h => [h.round, h.outcome, h.kind]),
+    [
+      [1, 'kept', 'change'],
+      [2, 'kept', 'change'],
+    ],
+    'the start version is dominated once v2.1 is kept, so round 2 builds on v2.1',
+  );
+  assert.ok(run.history.every(h => h.dryRun && h.dryRun.passed > h.dryRun.parentPassed && h.dryRun.examples === 2));
+  assert.deepEqual(s.versions.map(v => `${v.major}.${v.minor}`), ['2.2', '2.1', '1.0']);
+  assert.ok(s.reports.some(r => r.promptVersionId === run.history[1].versionId && r.passed));
+  const lines = (await w.catalog.find('chat_messages', {projectId: w.projectId}, 'createdAt')).map(m => m.text);
+  assert.ok(lines.includes('Workflow started the training and test sets with v2.2'), lines.join('\n'));
+  assert.ok(run.trainingSetId, 'the training set started with the passing version');
+  assert.equal(s.trainingSets[0]?.promptVersionId, run.history[1].versionId);
+});
+
+test('Auto Optimise: a change that is no better in the dry run is dropped, unlabeled; 3 in a row end the run', async () => {
+  const agents = ruleAgent();
+  agents.reflectPrompt = async input => ({template: `${input.template}\nNOTE ${Math.random()}`, change: 'a note'});
+  const w = await world('b21', {agents, answer: ruled, macroF1: 0.99, gold: goldOf});
+  await w.newVersion();
+  const {startOptimiser} = await import('./work.ts');
+  await startOptimiser(w.projectId, 10);
+  const s = await w.state();
+  const run = s.optimisation[0];
+  assert.equal(run.stopReason, 'no_new_ideas');
+  assert.deepEqual(run.history.map(h => h.outcome), ['dropped', 'dropped', 'dropped']);
+  assert.equal(s.reports.length, 1, 'only the start version is scored');
+  // Each dropped change was labeled on the dry-run examples only.
+  assert.equal(w.calls.n, EVAL + 3 * 2);
+});
+
+test('Auto Optimise: a step that fails 3 times fails the run with the step named; Retry goes on', async () => {
+  const fail = {left: 3};
+  const w = await world('b22', {agents: ruleAgent(fail), answer: ruled, macroF1: 0.99, gold: goldOf});
+  await w.newVersion();
+  const {startOptimiser, retryOptimiser} = await import('./work.ts');
+  await startOptimiser(w.projectId, 10);
+  let run = (await w.state()).optimisation[0];
+  assert.equal(run.state, 'failed');
+  assert.equal(run.error, 'Writing a change to v1 failed after 3 tries: boom');
+  assert.deepEqual(run.history.map(h => [h.outcome, h.step]), [['failed', 'reflect']]);
+  await retryOptimiser(run.id);
+  run = (await w.state()).optimisation[0];
+  assert.equal(run.state, 'done');
+  assert.equal(run.stopReason, 'passes');
+  assert.deepEqual(run.history.map(h => h.outcome), ['kept', 'kept']);
+});
+
+test('Auto Optimise: the round limit ends the run', async () => {
+  const w = await world('b23', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf});
+  await w.newVersion();
+  const {startOptimiser} = await import('./work.ts');
+  await startOptimiser(w.projectId, 1);
+  const run = (await w.state()).optimisation[0];
+  assert.equal(run.stopReason, 'max_rounds');
+  assert.equal(run.round, 1);
 });

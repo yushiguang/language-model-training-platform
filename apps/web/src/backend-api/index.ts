@@ -52,7 +52,7 @@ const telemetry = createTelemetry({
 const gateway = createGateway(platform, {telemetry});
 const catalog = createCatalog(platform.db, {telemetry});
 const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: emitChange, telemetry});
-configureBff({catalog, labeling, gateway, agents: agentRuntime, identity: platform.identity, files: platform.files, examples: platform.examples, media: platform.media, standIns: platform.standIns, telemetry, locks: browserLocks()});
+configureBff({catalog, labeling, gateway, agents: agentRuntime, identity: platform.identity, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, standIns: platform.standIns, telemetry, locks: browserLocks()});
 const web = webTelemetry(telemetry);
 void platform.identity.currentUser().then(u => telemetry.setContext({userId: u.id}));
 
@@ -224,6 +224,9 @@ export const tick = timed('tick', bff.tick);
 export const stopRun = timed('stopRun', bff.stopRun);
 export const startOptimiser = timed('startOptimiser', bff.startOptimiser);
 export const stopOptimiser = timed('stopOptimiser', bff.stopOptimiser);
+export const retryOptimiser = timed('retryOptimiser', bff.retryOptimiser);
+export const improveWithAi = timed('improveWithAi', bff.improveWithAi);
+export const featureInfo = timed('featureInfo', bff.featureInfo);
 export const predictionsFor = timed('predictionsFor', bff.predictionsFor);
 export const labelTestSet = timed('labelTestSet', bff.labelTestSet);
 export const startTrainingSet = timed('startTrainingSet', bff.startTrainingSet);

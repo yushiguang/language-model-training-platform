@@ -6,14 +6,20 @@ import {createCatalog} from './catalog.ts';
 
 const base = {projectId: 'pr_1', template: 't', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user' as const, change: '', schemaVersion: 1};
 
-test('catalog numbers prompt versions from what is stored: every save is the next number', async () => {
+test('catalog numbers prompt versions from what is stored: minors under the parent, majors after the highest', async () => {
   const c = createCatalog(localDocRuntime('cat-1'));
   const v1 = await c.createPromptVersion({...base, parentId: null, kind: 'minor'});
   const v11 = await c.createPromptVersion({...base, parentId: v1.id, kind: 'minor'});
   const v12 = await c.createPromptVersion({...base, parentId: v1.id, kind: 'minor'});
   const v2 = await c.createPromptVersion({...base, parentId: v12.id, kind: 'major'});
   const label = (v: PromptVersion) => `${v.major}.${v.minor}`;
-  assert.deepEqual([v1, v11, v12, v2].map(label), ['1.0', '2.0', '3.0', '4.0']);
+  assert.deepEqual([v1, v11, v12, v2].map(label), ['1.0', '1.1', '1.2', '2.0']);
+  // An Optimiser run that reserved major 3: its changes are 3.1, 3.2; a user's new major is 4.
+  await c.insert('optimisation_runs', {id: 'op_1', projectId: 'pr_1', major: 3} as never);
+  const o1 = await c.createPromptVersion({...base, parentId: v2.id, kind: 'minor', inMajor: 3});
+  const o2 = await c.createPromptVersion({...base, parentId: o1.id, kind: 'minor', inMajor: 3});
+  const u = await c.createPromptVersion({...base, parentId: v2.id, kind: 'major'});
+  assert.deepEqual([o1, o2, u].map(label), ['3.1', '3.2', '4.0']);
 });
 
 test('catalog patch changes only the given fields; findByIds returns the asked records', async () => {

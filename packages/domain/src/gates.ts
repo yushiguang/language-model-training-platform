@@ -24,7 +24,9 @@ export function gate(node: NodeId, f: WorkflowFacts): Gate {
       const s = f.setup;
       if (!s?.steps.schema) return {ready: false, reason: 'Approve the labels first.'};
       if (!s.steps.evaluation) return {ready: false, reason: 'Choose how good the labels must be.'};
-      if (!s.steps.models || !s.models.length) return {ready: false, reason: 'Pick at least one model.'};
+      // One labeling model per project in the MVP (decided 2026-11-09). The list shape stays, so
+      // comparing models can come back without a migration.
+      if (!s.steps.models || s.models.length !== 1) return {ready: false, reason: 'Pick a model.'};
       return {ready: true, reason: null};
     }
     case 'dataset': {

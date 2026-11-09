@@ -188,22 +188,27 @@ export function recommend(s: ProjectState, optimiserRunning: EndpointId | null):
   if (optimiserRunning)
     return {
       kind: 'wait',
-      title: `The optimiser is improving the prompt for Model ${optimiserRunning}`,
-      reasons: ['No version passes yet. New versions appear below as they are scored.'],
+      title: 'The Optimiser is improving the prompt',
+      reasons: ['No version passes yet. Each change it tries appears in the versions list.'],
       versionId: null,
       endpoint: optimiserRunning,
     };
   const best = [...current].sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1)[0];
   if (!best) return {kind: 'score_first', title: 'Score a version on the eval set', reasons: ['Labeling runs on the eval set, then scores appear here.'], versionId: latest.id, endpoint: null};
   const mu = best.metrics.mixUps[0];
+  // The card's title names what holds the best version back; its one line names the top mix-up.
   return {
     kind: 'keep_improving',
-    title: 'Keep improving the prompt',
+    title: `${best.metrics.lowestField.field} holds ${name(best.promptVersionId)} back`,
     reasons: [
+      mu
+        ? mu.kind === 'confused'
+          ? `${mu.gold} is often read as ${mu.predicted}`
+          : mu.kind === 'extra'
+            ? `${mu.predicted} is often added when it does not apply`
+            : `${mu.gold} is often missed`
+        : `Best so far is ${name(best.promptVersionId)}${whyBelow(best.metrics, t, evalSize)}`,
       `Best so far is ${name(best.promptVersionId)}${whyBelow(best.metrics, t, evalSize)}`,
-      ...(mu
-        ? [`The most common mix-up: ${mu.kind === 'confused' ? `${mu.gold} tagged as ${mu.predicted}` : mu.kind === 'extra' ? `${mu.predicted} added when not needed` : `${mu.gold} missed`} (${mu.count}).`]
-        : []),
     ],
     versionId: best.promptVersionId,
     endpoint: best.endpoint,

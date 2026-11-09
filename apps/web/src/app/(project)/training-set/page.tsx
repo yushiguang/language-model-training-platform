@@ -86,11 +86,14 @@ function Training({state, vParam, mParam}: {state: ProjectState; vParam: string 
 /** Labeling settings (design: 706 wide, two 320 px selects, Start labeling). */
 function Settings({state, split, vParam, mParam}: {state: ProjectState; split: SetKey; vParam: string | null; mParam: EndpointId | null}) {
   const setup = state.setup!;
-  const versions = state.versions.filter(v => v.schemaVersion === setup.schemaVersion);
+  // Changes the Optimiser dropped after their dry run are not offered.
+  const dropped = new Set(state.optimisation.flatMap(o => o.history.filter(h => h.outcome !== 'kept' && h.versionId).map(h => h.versionId!)));
+  const versions = state.versions.filter(v => v.schemaVersion === setup.schemaVersion && !dropped.has(v.id));
   const list = versions.length ? versions : state.versions;
   const a = recommend(state, null);
   const [vId, setV] = useState(list.find(v => v.id === vParam)?.id ?? (a.kind === 'make_training_set' || a.kind === 'no_eval' ? a.versionId : null) ?? list[0].id);
-  const [ep, setEp] = useState<EndpointId>(setup.models.find(m => m.endpoint === mParam)?.endpoint ?? (a.kind === 'make_training_set' || a.kind === 'no_eval' ? a.endpoint : null) ?? setup.models[0].endpoint);
+  // One labeling model per project (Setup).
+  const ep: EndpointId = setup.models.find(m => m.endpoint === mParam)?.endpoint ?? setup.models[0].endpoint;
   const [err, setErr] = useState<string | null>(null);
   const v = list.find(x => x.id === vId)!;
   const label = (x: PromptVersion) => {
@@ -116,9 +119,6 @@ function Settings({state, split, vParam, mParam}: {state: ProjectState; split: S
         <div className="row" style={{gap: 16, alignItems: 'flex-end'}}>
           <div style={{width: 320}}>
             <Select label="Prompt" value={vId} onChange={setV} options={list.map(x => ({value: x.id, label: label(x)}))} />
-          </div>
-          <div style={{width: 320}}>
-            <Select label="Model" value={ep} onChange={x => setEp(x as EndpointId)} options={setup.models.map(m => ({value: m.endpoint, label: modelName(state, m.endpoint)}))} />
           </div>
         </div>
         {err && (

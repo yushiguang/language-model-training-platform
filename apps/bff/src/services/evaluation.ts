@@ -51,11 +51,28 @@ export async function labelEvalSet(
   endpoint: EndpointId,
   examples: Example[],
   purpose: 'eval' | 'optimiser' = 'eval',
-  opts: {auto?: boolean} = {},
+  opts: {auto?: boolean; onTask?: (taskId: string) => void} = {},
+): Promise<LabelingTask | null> {
+  const exampleIds = examples.filter(e => e.split === 'eval').map(e => e.id);
+  return labelExamples(projectId, setup, version, endpoint, exampleIds, purpose, opts);
+}
+
+/**
+ * Labels some examples with one version on one model (the eval set, or the Optimiser's dry run):
+ * reuses the task for the same examples when there is one, else creates one. Answers are shared
+ * by version + model + settings + example, so a later task over more examples reuses them.
+ */
+export async function labelExamples(
+  projectId: string,
+  setup: SetupVersion,
+  version: PromptVersion,
+  endpoint: EndpointId,
+  exampleIds: string[],
+  purpose: 'eval' | 'optimiser',
+  opts: {auto?: boolean; onTask?: (taskId: string) => void} = {},
 ): Promise<LabelingTask | null> {
   const {labeling, user} = getApp();
   const settings = settingsFor(setup, endpoint);
-  const exampleIds = examples.filter(e => e.split === 'eval').map(e => e.id);
   let task = await findTask(projectId, version, endpoint, settingsHash(settings), exampleIds, ['eval', 'optimiser']);
   if (task?.state === 'done') return task;
   task ??= await labeling.createTask({
@@ -69,6 +86,7 @@ export async function labelEvalSet(
     // 'auto' marks scoring code started without a click.
     createdBy: purpose === 'optimiser' ? 'optimiser' : opts.auto ? 'auto' : (await user()).name,
   });
+  opts.onTask?.(task.id);
   const trigger = opts.auto || purpose === 'optimiser' ? 'system' : 'user';
   const run = opts.auto ? {auto: true} : {};
   if (task.state === 'needs_attention') return labeling.retryFailed(task.id, trigger, run);

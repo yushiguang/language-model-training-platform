@@ -11,7 +11,8 @@ import type {
   Schema,
   StartRequest,
 } from '@tsp/contracts';
-import {newId} from '@tsp/domain';
+import {fieldsRight, newId, settingsHash, versionLabel} from '@tsp/domain';
+import {loadProjectState} from './projects.ts';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {agentTools, getPageView} from './page-views.ts';
@@ -267,4 +268,61 @@ export async function closeProposal(p: AgentProposal, state: 'approved' | 'disca
   if (p.kind === 'schema' && state === 'discarded') tm().event('schema_discarded', {revision: 0});
   if (p.kind === 'prompt') tm().event(state === 'approved' ? 'prompt_proposal_approved' : 'prompt_proposal_discarded', state === 'approved' ? {agent: p.agent, edited_before_approve: false} : {agent: p.agent});
   emitChange();
+}
+
+/**
+ * Improve with AI: the Prompt helper drafts a few changes to a version from its mistakes, each
+ * with a reason. The draft goes into the editor (an open prompt proposal) with the changes
+ * marked; nothing is labeled until the user saves it.
+ */
+export async function improveWithAi(projectId: string, versionId: string): Promise<void> {
+  const {catalog, agents, gateway, labeling} = getApp();
+  const state = await loadProjectState(projectId);
+  const v = state?.versions.find(x => x.id === versionId);
+  const setup = state?.setup;
+  if (!state || !v || !setup?.schema) throw new Error('The version was not found.');
+  const report = state.reports.find(r => r.promptVersionId === v.id && !r.archivedNow);
+  if (!report) throw new Error(`${versionLabel(v)} has no scores yet.`);
+  const settings = setup.models.find(m => m.endpoint === report.endpoint);
+  const answers = settings ? await labeling.predictions(v.id, report.endpoint, settingsHash(settings)) : new Map();
+  const schema = setup.schema;
+  const mistakes = state.examples.filter(e => e.split === 'eval' && state.gold.has(e.id) && fieldsRight(schema, state.gold.get(e.id)!.answer, answers.get(e.id)?.answer ?? null).length < schema.fields.length).length;
+  busyProjects.add(projectId);
+  setLive(projectId, {agent: 'prompt_agent', working: `Reading the ${versionLabel(v)} mistakes…`, reply: null});
+  await postEvent(projectId, 'start', 'user', `asked the Prompt helper to improve ${versionLabel(v)}`, {path: '/prompt'});
+  let outcome = 'error';
+  try {
+    const m = report.metrics;
+    const out = await agents.draftImprovement(
+      {version: versionLabel(v), template: v.template, features: v.features, schema, mixUps: m.mixUps.slice(0, 8), lowestField: m.lowestField, lowestValue: m.lowestValue, mistakes},
+      gateway.agentModel(),
+      agentTools(projectId),
+    );
+    for (const prev of await openProposals(projectId, 'prompt')) await catalog.patch('agent_proposals', prev.id, {state: 'discarded'});
+    const change = out.changes.map(c => c.text).join('; ') || 'Improved with AI';
+    const proposal: AgentProposal = {
+      id: newId('ap'),
+      projectId,
+      agent: 'prompt_agent',
+      kind: 'prompt',
+      payload: {template: out.template, features: out.features ?? v.features, change, changes: out.changes, baseVersionId: v.id},
+      brief: `Improve ${versionLabel(v)}`,
+      state: 'open',
+      createdAt: now(),
+    };
+    await catalog.insert('agent_proposals', proposal);
+    const lines = out.changes.map(c => `- ${c.text}${c.reason ? `: ${c.reason}` : ''}`).join('\n');
+    // Each change with its reason (the editor can't show reasons on hover).
+    const intro = out.reply || `Here is a draft with ${out.changes.length} change${out.changes.length === 1 ? '' : 's'} to ${versionLabel(v)}, marked in green in the prompt:`;
+    await post(projectId, {role: 'agent', agent: 'prompt_agent', text: lines ? `${intro}\n${lines}` : intro, page: 'Edit prompt'});
+    await postEvent(projectId, 'draft', 'prompt_agent', 'put a draft on Edit prompt', {path: '/prompt/edit', params: {v: v.id}});
+    tm().counter('tsp_agent_proposals_total', {agent: 'prompt_agent', kind: 'prompt', outcome: 'shown'});
+    tm().event('prompt_proposal_shown', {agent: 'prompt_agent'});
+    outcome = 'ok';
+  } finally {
+    busyProjects.delete(projectId);
+    setLive(projectId, null);
+    tm().counter('tsp_agent_turns_total', {agent: 'prompt_agent', page: 'prompt', outcome});
+    emitChange();
+  }
 }

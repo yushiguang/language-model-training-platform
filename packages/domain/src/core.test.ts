@@ -73,12 +73,17 @@ test('macro-F1 and pass judgement', () => {
   assert.equal(judge(m, DEFAULT_THRESHOLDS, 30).passed, false);
 });
 
-test('versions: every save makes the next single number, whichever version it came from', () => {
+test('versions: Save makes the next minor, Save as new version the next major, an Optimiser run its reserved major', () => {
   const all = [{major: 1, minor: 0}, {major: 1, minor: 4}, {major: 2, minor: 0}];
-  assert.deepEqual(nextVersion(all, {major: 1}, 'minor'), {major: 3, minor: 0});
+  assert.deepEqual(nextVersion(all, {major: 1}, 'minor'), {major: 1, minor: 5});
+  assert.deepEqual(nextVersion(all, {major: 2}, 'minor'), {major: 2, minor: 1});
   assert.deepEqual(nextVersion(all, {major: 1}, 'major'), {major: 3, minor: 0});
   assert.deepEqual(nextVersion([], null, 'minor'), {major: 1, minor: 0});
+  // An Optimiser run reserved v3: its first change is v3.1, and a user's new major skips to v4.
+  assert.deepEqual(nextVersion(all, {major: 2}, 'minor', {inMajor: 3}), {major: 3, minor: 1});
+  assert.deepEqual(nextVersion(all, {major: 2}, 'major', {reserved: [3]}), {major: 4, minor: 0});
   assert.equal(versionLabel({major: 13, minor: 0}), 'v13');
+  assert.equal(versionLabel({major: 4, minor: 2}), 'v4.2');
 });
 
 test('diff', () => {

@@ -37,6 +37,7 @@ export const runView = (t: LabelingTask): LabelingRun => ({
   startedAt: t.startedAt ?? t.createdAt,
   finishedAt: t.finishedAt,
   auto: t.createdBy === 'auto',
+  purpose: t.purpose === 'training' ? undefined : t.purpose,
   autoCostUsd: t.autoCostUsd ?? 0,
   overBudget: t.state === 'paused' && t.stopReason === 'budget',
 });

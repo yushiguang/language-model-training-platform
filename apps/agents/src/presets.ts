@@ -34,9 +34,10 @@ export const TOOL_SPECS: Record<AgentToolName, {args: string; returns: string}> 
   get_gold_labels: {args: '{"split"?: "eval" | "test", "limit"?: up to 20}', returns: 'gold labels people gave'},
   get_predictions: {args: '{"version": a label like "v4", "model": a model name, "mixedUpOnly"?: boolean, "limit"?: up to 20}', returns: "the model's answers on the eval set next to the gold labels"},
   check_template: {args: '{"template": string, "features"?: {"video": [], "photo_text": [], "metadata": []}}', returns: 'the editor checks (errors and warnings) for a prompt'},
+  read_feature_info: {args: '{"keys": feature keys like "OCR_Text"}', returns: 'what each feature holds, when it helps, and its caveats'},
   try_template: {args: '{"template"?: string (default: the newest version), "features"?: {"video": [], "photo_text": [], "metadata": []}, "model"?: a model name, "n"?: up to 5}', returns: "PAID, small: the model's answers on n eval examples next to their gold labels; nothing is saved"},
   score_version: {args: '{"version": a label like "v4", "model"?: a model name}', returns: 'PAID: starts scoring a saved version on the eval set; its scores appear on Prompt versions when it finishes'},
-  start_optimiser: {args: '{"model": a model name}', returns: 'PAID: starts the optimiser for a model; new versions appear on Prompt versions'},
+  start_optimiser: {args: '{"rounds"?: how many changes to try, 1 to 50 (default 10)}', returns: 'PAID: starts the Optimiser (Auto Optimise) on the project\'s model; each change it tries appears on Prompt versions'},
 };
 
 /** Tools that spend money. They start at once; the user stops them from the page. */
@@ -81,11 +82,12 @@ export const PRESETS: Record<AgentPreset | 'optimiser', Preset> = {
     intents: {
       draft_prompt: '{"reply": string, "template": string, "features": {"video": string[], "photo_text": string[], "metadata": string[]}}',
       revise_prompt: '{"reply": string, "template": string, "change": string}',
+      improve: '{"reply": string, "template": string, "features"?: {"video": string[], "photo_text": string[], "metadata": string[]}, "changes": [{"text": string, "reason": string}]}',
       explain_version: '{"reply": string}',
       follow_up: `{"reply": string, "template"?: string, "change"?: string} (template and change only when the prompt changes), plus ${PASS_ON}`,
     },
-    tools: [...READ_ALL, 'check_template', 'try_template', 'score_version', 'start_optimiser'],
-    system: `${common}\nYou are the prompt agent. Prompts are templates: example features go in as {{Key}} placeholders (keys from the catalogue in the context; no spaces). Never add, remove or rename placeholders when revising. The output section must ask for JSON with exactly the schema's field names and values.`,
+    tools: [...READ_ALL, 'check_template', 'read_feature_info', 'try_template', 'score_version', 'start_optimiser'],
+    system: `${common}\nYou are the prompt agent. Prompts are templates: example features go in as {{Key}} placeholders (keys from the catalogue in the context; no spaces). Never add, remove or rename placeholders when revising, except in "improve", where you may tick or untick a feature (and add or remove its placeholder line) when the mistakes point to it; read the feature descriptions with read_feature_info before you do. Image features cost more per call: add one only when the mistakes point to what is in the picture. The output section must ask for JSON with exactly the schema's field names and values. In "improve", make a few targeted changes and give each a one-line reason that cites the mistakes (for example "5 Clips were read as Vlog").`,
   },
   evaluation_agent: {
     name: agentName('evaluation_agent'),
@@ -99,9 +101,12 @@ export const PRESETS: Record<AgentPreset | 'optimiser', Preset> = {
     name: 'Optimiser',
     model: 'gpt-5.6-terra',
     observes: ['the parent prompt', 'its mix-ups on the optimiser half of the eval set'],
-    intents: {reflect: '{"template": string, "change": string}'},
-    tools: [],
-    system: `You improve a labeling prompt. Read the mix-ups and make ONE small, targeted change to the template (usually one rule line in the field's section). Keep every {{Key}} placeholder exactly as it is. "change" is a one-line summary in plain words. Answer with one JSON object only.`,
+    intents: {
+      reflect: '{"template": string, "features"?: {"video": string[], "photo_text": string[], "metadata": string[]}, "change": string}',
+      merge: '{"template": string, "features"?: {"video": string[], "photo_text": string[], "metadata": string[]}, "change": string}',
+    },
+    tools: ['read_feature_info'],
+    system: `You improve a labeling prompt. In "reflect", read the mix-ups and make ONE small, targeted change: usually one rule line in the field's section, or ticking or unticking one feature (then add or remove its {{Key}} line too, and say why, for example "untick Creator Bio: it was empty in 9 of 12 mistakes"). Otherwise keep every {{Key}} placeholder exactly as it is. In "merge", combine "template" and "other.template" into one prompt that keeps the rules of both. "change" is a one-line summary in plain words. Answer with one JSON object only.`,
   },
 };
 

@@ -63,8 +63,10 @@ export function createCatalog(db: DocRuntime, opts: {telemetry?: TelemetryPort} 
       const all = await repo.find<PromptVersion>('prompt_versions', {projectId: v.projectId});
       const parent = v.parentId ? (all.find(x => x.id === v.parentId) ?? null) : null;
       if (v.parentId && !parent) throw new Error('The version this was edited from no longer exists.');
-      const n = nextVersion(all, parent, v.kind);
-      const {kind: _kind, ...rest} = v;
+      // Majors reserved by Optimiser runs are taken even before their first change is saved.
+      const runs = v.kind === 'major' ? await repo.find<{major?: number}>('optimisation_runs', {projectId: v.projectId}) : [];
+      const n = nextVersion(all, parent, v.kind, {inMajor: v.inMajor, reserved: runs.map(r => r.major ?? 0)});
+      const {kind: _kind, inMajor: _inMajor, ...rest} = v;
       const version: PromptVersion = {...rest, id: catalogId('prompt_versions'), major: n.major, minor: n.minor, createdAt: now()};
       await repo.insert('prompt_versions', version);
       return version;
