@@ -7,12 +7,12 @@ import {chatHistory, isAgentBusy, sendUserMessage, subscribeChanges} from '@/bac
 import {Badge, Button, Icon, LinkChip, Suggestion} from '@/ui';
 import {useProject} from './ProjectContext';
 
-/** A Lark Doc link pasted into the chat (the agents read it with their Lark Doc tool). */
-const LARK = /https?:\/\/[^\s]*(?:larksuite|larkoffice|feishu)\.[a-z]+\/[^\s]+/gi;
+/** A document link pasted into the chat, shown as a chip (the text still goes to the agent as-is). */
+const DOC_LINK = /https?:\/\/[^\s]+\/(?:docx|docs|wiki)\/[^\s]+/gi;
 
 /**
- * Ask AI (design: "Ask AI panel"): the only way users give the agents anything, as text or Lark
- * Doc links. One conversation per project; the agent reads the page it is opened on.
+ * Ask AI (design: "Ask AI panel"): the only way users give the agents anything, as text or
+ * document links. One conversation per project; the agent reads the page it is opened on.
  */
 export function AskAi({
   page,
@@ -114,24 +114,24 @@ function AgentText({text}: {text: string}) {
   );
 }
 
-/** The user's text with each Lark Doc link shown as a chip. */
+/** The user's text with each document link shown as a chip. */
 function UserText({text}: {text: string}) {
-  const links = text.match(LARK) ?? [];
-  const rest = text.replace(LARK, '').trim();
+  const links = text.match(DOC_LINK) ?? [];
+  const rest = text.replace(DOC_LINK, '').trim();
   return (
     <div className="msg-u">
       {rest}
       {links.map((l, i) => (
         <span key={i} style={{display: 'block'}}>
-          <LinkChip text={larkTitle(l)} />
+          <LinkChip text={docTitle(l)} />
         </span>
       ))}
     </div>
   );
 }
-const larkTitle = (url: string) => {
+const docTitle = (url: string) => {
   const tail = decodeURIComponent(url.split(/[?#]/)[0].split('/').filter(Boolean).pop() ?? '');
-  return /^[A-Za-z0-9]{12,}$/.test(tail) ? 'Lark Doc' : tail.replace(/[-_]+/g, ' ');
+  return /^[A-Za-z0-9]{12,}$/.test(tail) ? 'Document' : tail.replace(/[-_]+/g, ' ');
 };
 
 function Message({m}: {m: ChatMessage}) {

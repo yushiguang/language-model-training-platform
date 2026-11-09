@@ -25,7 +25,7 @@ function SetupRouter() {
   return <SchemaPage />;
 }
 
-const FIRST = 'Tell me what your model should do. You can paste Lark Doc links.';
+const FIRST = 'Tell me what your model should do. You can paste document links.';
 const count = (f: LabelField) => `${f.kind === 'single' ? 'Single' : 'Multi'} · ${f.values.length}`;
 
 // ---------------------------------------------------------------------------------------------
@@ -177,7 +177,7 @@ function SchemaView({state, setPage}: {state: ProjectState; setPage: (p: PageCon
       chat={{
         extra: cards.length ? <>{cards}</> : undefined,
         first: FIRST,
-        placeholder: draft?.fields.length ? 'Ask about this page' : 'Describe your task or paste a Lark Doc link',
+        placeholder: draft?.fields.length ? 'Ask about this page' : 'Describe your task or paste a document link',
         onSend: async (text: string) => {
           if (!setup?.task) await saveSetup(state.project.id, {task: text});
         },
