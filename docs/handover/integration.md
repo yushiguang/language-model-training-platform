@@ -40,7 +40,7 @@ The internal module exports `createPlatform()` returning the `Platform` object f
 | `identity: Identity` | The signed-in user (id, name, email, organization) | `localIdentity` |
 | `files: FileStore` | Uploads for prompt images and chat attachments; returns a URL the model can fetch | `browserFiles` (data URLs) |
 | `examples: ExampleSource` | The prepared examples file (50 to 100 examples with features) and id lookup | `sampleExamples` |
-| `media?: MediaSource` | **Draft, not connected yet.** The video, cover and still images of one example by item id, for people to look at on Gold Labels (see "Media") | `sampleMedia` (made-up pictures, no video) |
+| `media?: MediaSource` | The player page and still images of one example by item id, for people to look at on Gold Labels (see "Media") | `sampleMedia` (made-up pictures, no player) |
 | `endpoints?: EndpointConfig[]` | Registered endpoints with real limits (next section) | not set: assumed limits |
 | `telemetry?: TelemetrySink` | Takes product events (`pushEvents`, batches of `TelemetryEvent`) and metrics as Prometheus text (`pushMetrics`) and forwards them to the company's telemetry system. Must not throw; slow is fine (the app buffers) | `localTelemetrySink` (`localStorage`); not set: kept in memory only |
 | `standIns: string[]` | Names shown in the header while any stand-in is in use; empty in production | all |
@@ -68,17 +68,19 @@ examples never go in this repo.
 
 ## Media
 
-`MediaSource` (`packages/contracts/src/platform-api.ts`) is a first draft, written before the
-hosting platform's video interface exists. When that interface is ready:
+`MediaSource` (`packages/contracts/src/platform-api.ts`) feeds the player and still images on
+Gold Labels. Playback is an embedded player page, never a direct video file:
 
 1. Implement `media(externalId, type)` in the internal module: return an `ExampleMedia` with a
-   `videoUrl` the user's browser can play (videos), a `coverUrl`, still `imageUrls` (key frames,
-   or a photo-and-text post's images) and `durationSec` when known; return `null` when the item
-   has no media. Set `media` on the `Platform` object and drop `'media'` from `standIns`.
+   `playerUrl` the Gold Labels page loads in an iframe (the item's official embed player, or a
+   fallback viewer when the item is no longer publicly playable — the adapter may probe
+   availability first), a `coverUrl`, still `imageUrls` (key frames, or a photo-and-text post's
+   images) and `durationSec` when known; return `null` when the item has no media. Set `media`
+   on the `Platform` object and drop `'media'` from `standIns`.
 2. If the real interface needs more than this (signed URLs that expire, several renditions,
    access checks), ask for a contract change (next section) instead of working around the type.
-3. The Gold Labels page shows only the item id today; showing the media is a design decision.
-   `exampleMedia(exampleId)` in `apps/web/src/backend-api` already returns what the source gives.
+3. `exampleMedia(exampleId)` in `apps/web/src/backend-api` returns what the source gives; the
+   Gold Labels page embeds `playerUrl` and shows the still images under it.
 
 Media is for people only. The labeling models receive image features through the prompt
 template, and the URLs there must be reachable by the models (see "Endpoints and limits").

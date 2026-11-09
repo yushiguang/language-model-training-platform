@@ -389,14 +389,18 @@ export interface ExampleSource {
 }
 
 /**
- * What people see of one example (Gold Labels shows it above the features). Draft, 2026-11-09:
- * the hosting platform's media service is not connected yet. Only for people: the labeling models
- * get image features through the prompt template, never through this.
+ * What people see of one example (Gold Labels shows it above the features). Only for people:
+ * the labeling models get image features through the prompt template, never through this.
+ *
+ * There is deliberately no direct video file URL: playback uses an embedded player page, not
+ * a media file. The adapter decides which player (the item's official embed player, or a
+ * fallback viewer when the item is no longer publicly playable) and may check availability
+ * before answering; the page just loads `playerUrl` in an iframe.
  */
 export interface ExampleMedia {
   kind: 'video' | 'images';
-  /** A video the browser can play (kind 'video'). */
-  videoUrl?: string;
+  /** URL of the player page to embed in an iframe; plays videos and photo posts alike. */
+  playerUrl?: string;
   /** The cover or poster image. */
   coverUrl?: string;
   /** Still images: a photo-and-text post's images, or key frames of a video. May be empty. */
@@ -420,7 +424,7 @@ export interface Platform {
   examples: ExampleSource;
   /**
    * Media for people to look at (Gold Labels). Optional: without it pages show the item id only.
-   * Draft interface (2026-11-09); see docs/handover/integration.md, "Media".
+   * See docs/handover/integration.md, "Media".
    */
   media?: MediaSource;
   /**
