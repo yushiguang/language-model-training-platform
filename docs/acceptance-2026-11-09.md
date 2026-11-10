@@ -180,6 +180,97 @@ started the optimiser on ...") whose icon does not animate. Add a running-optimi
 on the page (model, candidates so far, calls, cost, Stop — the run data is already in
 project state), and animate the icon on in-progress event lines in the chat.
 
+## R3-1. Dashed-underline hints never show, and are overused
+
+`Hov` (`apps/web/src/ui/index.tsx`) renders a dashed underline with `cursor: help` but
+relies on the native `title` attribute, which in practice shows nothing for these spans
+(and is unreachable by keyboard/touch). Replace it with the custom tooltip the editor
+already uses for removed-text hovers (positioned popover), and trim the vocabulary: only
+genuinely non-obvious terms get the treatment (Filtered, Failed, rounds, distribution
+warnings), not everyday words.
+
+## R3-2. Long user messages overflow the chat bubble
+
+A long unbroken string (a pasted prompt as JSON, see the acceptance screenshot) spills
+past the grey user bubble. User message text needs wrapping (`overflow-wrap: anywhere`
+and `min-width: 0` on the bubble column) in Ask AI message rendering.
+
+## R3-3. The agent cannot see the editor's unsaved feature selection
+
+Partly implemented and currently broken: the prompt editor page sends the draft template
+in its page context (`apps/web/src/app/(project)/prompt/edit/page.tsx`) but not
+`draft.features`, so when a user asks "update the prompt based on currently selected
+features", the agent truthfully answers that it cannot see them. Send the full draft —
+template and feature selection (and images) — in the page context on both prompt pages,
+and confirm the page view's `unsaved` block carries them to the agent.
+
+## R3-4. Project list needs a loading state
+
+The home page sits blank/empty while the project list loads. Show a loading indicator
+(skeleton rows or a spinner with "Loading projects") until the first list arrives, and an
+error state if it fails.
+
+## R3-5. Buttons that fetch or navigate still freeze without feedback
+
+Round 1 item 7 covered buttons that run work; the gap remains on buttons that fetch data
+or jump pages: the click lands, nothing moves for a while, then the page changes. Users
+cannot tell a slow request from a hang. Every such button needs the pending treatment
+(spinner/disable, then navigate), and page loads need the panel loading state from item 9
+of round 1 — audit navigation and fetch buttons across pages, not only submit actions.
+
+## R3-6. "Improve with AI" must open the Ask AI panel
+
+Clicking Improve with AI navigates to the prompt editor but leaves the panel closed and
+nothing animates; a new user does not know the helper is working there or what to do next.
+Any navigation that starts (or continues) agent work must open the Ask AI panel on arrival
+(and show the working line), so the user lands where the action is.
+
+## R3-7. Auto Optimise from a non-best version needs a confirmation
+
+If the user starts Auto Optimise from a version that is not the highest-scoring minor of
+its major line, ask first with a dialog: continue from the selected version, or switch the
+base to the best-scoring minor of that major. Default the dialog's primary action to the
+best-scoring minor. "Best" is by the current report scores on the project's model.
+
+## R3-8. Prompt Versions layout jumps when cards change
+
+The version list and detail cards change size as their content changes, shifting the whole
+page (it reads as a screen jolt). Give the version list a stable height and animate detail
+card changes (height/content transition). The exact treatment is the External Agent's
+choice; the requirement is no layout shift of surrounding content while interacting.
+
+## R3-9. Why optimisation gains look small and random (analysis, with asks)
+
+Three compounding causes, in likely order:
+
+1. **The optimiser reflects without seeing examples.** `OptimiserReflectInput` carries the
+   template, features, schema, tried changes, the top mix-ups and the lowest field/value —
+   aggregate confusion pairs only, never the actual mistaken examples (their text features,
+   the gold answer, what the model answered). Changes are therefore generic ("clarify the
+   boundary") rather than aimed at the specific items being missed. Ask: include a bounded
+   set of the parent's wrong examples (say up to 8: external id, text features, gold,
+   predicted) in the reflect input for 'change' mode, and say in the system prompt that
+   changes must cite them.
+2. **Small, noisy halves.** A 50-example eval gives a 10-example dry run and 25 held-out;
+   one example is 10 points of dry-run score, so keep/drop decisions are close to coin
+   flips, and the gold itself is model-produced (agreement has a ceiling well under 1.0).
+   Nothing to code here beyond not pretending precision; the dry-run size could scale with
+   the optimiser half (for example half of it, capped at 20).
+3. **Ceiling of a decent base prompt.** When v1 already separates the easy classes, the
+   remaining errors are boundary cases (weak vs strong) where single targeted changes
+   trade one class against another; expect slow, non-monotonic progress and say so in the
+   progress panel (rounds tried, best so far) instead of implying steady improvement.
+
+## R3-10. Agents act too eagerly; converse and confirm first
+
+Across pages the agents move straight to drafting, editing the form, or proposing starts
+when intent is ambiguous. Adjust the preset system prompts and runtime guidance: when a
+request is underspecified or several readings are plausible, ask one short clarifying
+question first (and wait), summarise what they are about to change before a proposal that
+rewrites a lot, and never treat a question ("what does X mean", "why did F1 drop") as an
+instruction to change something. Existing approval gates stay; this is about not rushing
+to them.
+
 ## R2-6. Optimiser on the real platform: very slow, one run died with "Failed to fetch"
 
 Diagnosis from the deployed database (project "video", 2026-11-09): the workflow started
