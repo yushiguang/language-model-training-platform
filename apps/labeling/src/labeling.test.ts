@@ -6,7 +6,7 @@ import {localDocRuntime} from '@tsp/platform';
 import {createLabeling} from './labeling.ts';
 import {memoryLocks} from './locks.ts';
 
-const schema: Schema = {policy: '', fields: [{name: 'format', kind: 'single', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}]};
+const schema: Schema = {fields: [{name: 'format', kind: 'single', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}]};
 
 async function setup(n: number, prefix: string) {
   const db = localDocRuntime(prefix);

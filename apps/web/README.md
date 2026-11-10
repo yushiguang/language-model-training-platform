@@ -1,6 +1,7 @@
-# Training Set Platform: Web App (`apps/web`)
+# Sprint: Web App (`apps/web`)
 
-Next.js 16 (static export) + Astryx Neutral + ECharts. Pages talk to the backend only through
+Next.js 16 (static export), styled with a copy of the UI canvas styles (`src/ui/kit.css`; what
+differs from the canvas is in [docs/ui-gaps.md](../../docs/ui-gaps.md)). Pages talk to the backend only through
 `src/backend-api/`, which also wires all apps together; everything runs in the browser during the
 MVP (see [docs/handover/integration.md](../../docs/handover/integration.md)).
 

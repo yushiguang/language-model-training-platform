@@ -388,6 +388,65 @@ export interface ExampleSource {
   bundledLabels?(): Promise<{externalId: string; answer: Record<string, string[]>}[]>;
 }
 
+/**
+ * What people see of one example (Gold Labels shows it above the features). Only for people:
+ * the labeling models get image features through the prompt template, never through this.
+ *
+ * There is deliberately no direct video file URL: playback uses an embedded player page, not
+ * a media file. The adapter decides which player (the item's official embed player, or a
+ * fallback viewer when the item is no longer publicly playable) and may check availability
+ * before answering; the page just loads `playerUrl` in an iframe.
+ */
+export interface ExampleMedia {
+  kind: 'video' | 'images';
+  /** URL of the player page to embed in an iframe; plays videos and photo posts alike. */
+  playerUrl?: string;
+  /** The cover or poster image. */
+  coverUrl?: string;
+  /** Still images: a photo-and-text post's images, or key frames of a video. May be empty. */
+  imageUrls: string[];
+  /** Video length in seconds, when known. */
+  durationSec?: number;
+}
+
+/** Media for examples. Every URL must load in the signed-in user's browser. */
+export interface MediaSource {
+  /** The example's media by its external id (item id); null when it has none or it is gone. */
+  media(externalId: string, type: RawExample['type']): Promise<ExampleMedia | null>;
+}
+
+/**
+ * What a feature is and when it helps, for the agents (the Prompt helper and the Optimiser) and
+ * for hover text on feature names. The internal team provides the real text; the repo has a
+ * stand-in with made-up text. See docs/handover/integration.md, "Feature descriptions".
+ */
+export interface FeatureInfo {
+  description: string;
+  goodFor?: string;
+  caveats?: string;
+}
+
+export interface FeatureInfoSource {
+  /** Descriptions by feature key (the placeholder name). Keys with no description are left out. */
+  describe(keys: string[]): Promise<Record<string, FeatureInfo>>;
+}
+
+/** A document a user linked in Ask AI, as plain text (headings kept as lines). */
+export interface LinkedDocument {
+  title: string;
+  text: string;
+}
+
+/**
+ * Reads the documents users link in Ask AI (the internal document service), for the helpers'
+ * `read_doc` tool. The internal agent implements it; the repo's stand-in reads nothing. See
+ * docs/handover/integration.md, "Document links".
+ */
+export interface DocumentSource {
+  /** The document at `url` as the signed-in user may see it; null when it cannot be read. */
+  read(url: string): Promise<LinkedDocument | null>;
+}
+
 export interface Platform {
   db: DocRuntime;
   models: LabelingModels;
@@ -395,6 +454,15 @@ export interface Platform {
   identity: Identity;
   files: FileStore;
   examples: ExampleSource;
+  /**
+   * Media for people to look at (Gold Labels). Optional: without it pages show the item id only.
+   * See docs/handover/integration.md, "Media".
+   */
+  media?: MediaSource;
+  /** Feature descriptions. Optional: without it the agents see feature names only. */
+  featureInfo?: FeatureInfoSource;
+  /** Document links in Ask AI. Optional: without it the helpers say they cannot open links. */
+  documents?: DocumentSource;
   /**
    * Registered endpoints with their QPM/TPM. Optional: the gateway fills anything missing from its
    * assumed defaults (`apps/llm-gateway/src/registry.ts`).

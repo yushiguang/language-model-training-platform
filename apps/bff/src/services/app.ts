@@ -1,10 +1,20 @@
-import {NO_TELEMETRY, type AgentRuntimeContract, type CatalogContract, type ExampleSource, type FileStore, type Identity, type LabelingContract, type LlmGatewayContract, type TelemetryPort} from '@tsp/contracts';
+import {NO_TELEMETRY, type AgentRuntimeContract, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type MediaSource, type Identity, type LabelingContract, type LlmGatewayContract, type TelemetryPort} from '@tsp/contracts';
 
 /**
  * What the bff talks to. The bff holds no records of its own: product records live in the
  * catalog, labeling tasks and predictions in labeling, model calls go through the llm-gateway.
  * The composition root (`apps/web/src/backend-api`) builds these and calls `configureBff` once.
  */
+/**
+ * One runner per piece of work across the tabs of this browser (the Web Locks API in the browser,
+ * an in-memory lock in tests). Same shape as the labeling app's task locks.
+ */
+export interface WorkLocks {
+  /** Runs fn while holding the lock, or returns null at once when someone else holds it. */
+  run<T>(name: string, fn: () => Promise<T>): Promise<T | null>;
+  isHeld(name: string): Promise<boolean>;
+}
+
 export interface BffDeps {
   catalog: CatalogContract;
   labeling: LabelingContract;
@@ -13,11 +23,20 @@ export interface BffDeps {
   identity: Identity;
   files: FileStore;
   examples: ExampleSource;
+  /** Optional media for people to look at; see `MediaSource`. */
+  media?: MediaSource;
+  /** Optional feature descriptions (hover text, and the agents' read_feature_info tool). */
+  featureInfo?: FeatureInfoSource;
+  /** Optional document reading for links in Ask AI (the helpers' read_doc tool). */
+  documents?: DocumentSource;
   standIns: string[];
   telemetry?: TelemetryPort;
+  /** Keeps a second tab from running the same optimiser; without it, only this tab is covered. */
+  locks?: WorkLocks;
 }
 
 export interface App extends BffDeps {
+  locks: WorkLocks;
   user: () => Promise<{id: string; name: string}>;
   tm: TelemetryPort;
 }
@@ -26,8 +45,27 @@ let app: App | null = null;
 
 export function configureBff(deps: BffDeps): void {
   let user: Promise<{id: string; name: string}> | null = null;
-  app = {...deps, tm: deps.telemetry ?? NO_TELEMETRY, user: () => (user ??= deps.identity.currentUser())};
+  app = {...deps, locks: deps.locks ?? memoryWorkLocks(), tm: deps.telemetry ?? NO_TELEMETRY, user: () => (user ??= deps.identity.currentUser())};
 }
+
+function memoryWorkLocks(): WorkLocks {
+  const held = new Set<string>();
+  return {
+    async run(name, fn) {
+      if (held.has(name)) return null;
+      held.add(name);
+      try {
+        return await fn();
+      } finally {
+        held.delete(name);
+      }
+    },
+    isHeld: async name => held.has(name),
+  };
+}
+
+/** The lock an optimiser run on one model holds for as long as it runs, in any tab. */
+export const optimiserLock = (projectId: string, endpoint: string) => `optimiser:${projectId}:${endpoint}`;
 
 export function getApp(): App {
   if (!app) throw new Error('The bff is not configured: call configureBff() first.');

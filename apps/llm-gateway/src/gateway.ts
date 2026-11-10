@@ -126,6 +126,10 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
           done('aborted');
           throw e;
         }
+        if (kind === 'filtered') {
+          done('filtered');
+          throw e;
+        }
         if (kind === 'rejected') {
           done('rejected');
           throw e instanceof LlmCallError ? e : new LlmCallError('rejected', (e as Error).message ?? String(e));
@@ -203,7 +207,7 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
           if (kind === 'rate_limited') limiter.onRateLimited(retryAfter ?? delays[Math.min(attempt, delays.length - 1)] ?? 1000);
           permit.release(started ? input + Math.ceil(chars / 4) : undefined);
           tm.counter('tsp_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose: ep.purpose, outcome: kind});
-          if (started || kind === 'aborted' || kind === 'rejected' || attempt >= delays.length) throw e;
+          if (started || kind === 'aborted' || kind === 'rejected' || kind === 'filtered' || attempt >= delays.length) throw e;
           tm.counter('tsp_llm_retries_total', {endpoint: ep.id, purpose: ep.purpose, reason: kind});
           await sleep(Math.max(delays[attempt], retryAfter ?? 0), o.signal);
         }

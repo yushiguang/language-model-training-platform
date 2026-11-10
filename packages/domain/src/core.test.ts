@@ -1,9 +1,9 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {applyFix, checkTemplate, diffLines, renderPrompt} from './template.ts';
+import {applyFix, checkTemplate, diffLines, diffWords, renderPrompt, withReasons} from './template.ts';
 import {pageFromPath} from './pages.ts';
 import {computeMetrics, judge, DEFAULT_THRESHOLDS} from './metrics.ts';
-import {nextVersion} from './versions.ts';
+import {nextVersion, versionLabel} from './versions.ts';
 import type {Schema} from '@tsp/contracts';
 
 const sel = {video: ['Description', 'Frame'], photo_text: ['Description', 'Title'], metadata: ['Language']};
@@ -58,7 +58,7 @@ test('pages are found from the URL path, with or without a base path', () => {
 });
 
 test('macro-F1 and pass judgement', () => {
-  const schema: Schema = {policy: '', fields: [{name: 'f', kind: 'single', values: [{name: 'a', definition: ''}, {name: 'b', definition: ''}]}]};
+  const schema: Schema = {fields: [{name: 'f', kind: 'single', values: [{name: 'a', definition: ''}, {name: 'b', definition: ''}]}]};
   const items = [
     {exampleId: '1', gold: {f: ['a']}, predicted: {f: ['a']}, costUsd: 0.001},
     {exampleId: '2', gold: {f: ['b']}, predicted: {f: ['a']}, costUsd: 0.001},
@@ -73,11 +73,17 @@ test('macro-F1 and pass judgement', () => {
   assert.equal(judge(m, DEFAULT_THRESHOLDS, 30).passed, false);
 });
 
-test('versions: save is next minor in its line, save as is next major', () => {
+test('versions: Save makes the next minor, Save as new version the next major, an Optimiser run its reserved major', () => {
   const all = [{major: 1, minor: 0}, {major: 1, minor: 4}, {major: 2, minor: 0}];
   assert.deepEqual(nextVersion(all, {major: 1}, 'minor'), {major: 1, minor: 5});
+  assert.deepEqual(nextVersion(all, {major: 2}, 'minor'), {major: 2, minor: 1});
   assert.deepEqual(nextVersion(all, {major: 1}, 'major'), {major: 3, minor: 0});
   assert.deepEqual(nextVersion([], null, 'minor'), {major: 1, minor: 0});
+  // An Optimiser run reserved v3: its first change is v3.1, and a user's new major skips to v4.
+  assert.deepEqual(nextVersion(all, {major: 2}, 'minor', {inMajor: 3}), {major: 3, minor: 1});
+  assert.deepEqual(nextVersion(all, {major: 2}, 'major', {reserved: [3]}), {major: 4, minor: 0});
+  assert.equal(versionLabel({major: 13, minor: 0}), 'v13');
+  assert.equal(versionLabel({major: 4, minor: 2}), 'v4.2');
 });
 
 test('diff', () => {
@@ -96,6 +102,24 @@ test('[Image N] without prompt image N is an error, so deleting an image used in
 
 test('a multi-select answer with the same value twice keeps it once', async () => {
   const {parseOutput} = await import('./labels.ts');
-  const schema: Schema = {policy: '', fields: [{name: 'topic', kind: 'multi', values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}]}]};
+  const schema: Schema = {fields: [{name: 'topic', kind: 'multi', values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}]}]};
   assert.deepEqual(parseOutput('{"topic": ["Food", "Food", "Travel"]}', schema).answer, {topic: ['Food', 'Travel']});
+});
+
+test('change marks: word-level diff with removed text before added text', () => {
+  const a = 'Creator: {{Creator_Nick_Name}} · {{Creator_Bio}}\nVlog: own day';
+  const b = 'Creator: {{Creator_Nick_Name}}\nVlog: own day; not a cut';
+  const d = diffWords(a, b);
+  assert.deepEqual(d, [
+    {kind: 'same', text: 'Creator: {{Creator_Nick_Name}}'},
+    {kind: 'del', text: ' · {{Creator_Bio}}'},
+    {kind: 'same', text: '\nVlog: own day'},
+    {kind: 'add', text: '; not a cut'},
+  ]);
+  assert.equal(d.filter(s => s.kind !== 'del').map(s => s.text).join(''), b);
+  const r = withReasons(d, [{text: 'not a cut from someone else', reason: '5 Clips were read as Vlog'}, {text: 'Untick Creator Bio', reason: 'Bio was empty'}]);
+  assert.equal(r[3].reason, '5 Clips were read as Vlog');
+  assert.equal(r[1].reason, 'Bio was empty');
+  assert.equal(diffWords('same', 'same').length, 1);
+  assert.deepEqual(diffWords('a b c d', 'a x y d').map(s => s.kind), ['same', 'del', 'add', 'same']);
 });

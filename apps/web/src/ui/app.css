@@ -1,0 +1,84 @@
+/*
+ * App-only rules: what the canvas draws with inline styles or does not need (a live textarea,
+ * focus rings, screen-reader text). Keep kit.css identical to the design.
+ */
+html, body { min-height: 100%; }
+body { font-family: var(--sans); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+button:focus-visible, a:focus-visible, [tabindex]:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.input:focus, .select select:focus { border-color: var(--text); outline: none; }
+
+/* Ask AI on a live page: as tall as the window below the step bar. */
+.chat { height: calc(100vh - 36px); }
+.chat-in textarea { flex: 1; min-width: 0; border: 0; outline: none; resize: none; background: none; font: inherit; color: var(--text); line-height: 20px; padding: 6px 0; height: 32px; max-height: 132px; overflow-y: auto; scrollbar-width: none; }
+.chat-in textarea::-webkit-scrollbar { display: none; }
+.chat-in textarea::placeholder { color: var(--text-3); }
+.chat-in textarea:focus-visible { outline: none; }
+.send[aria-disabled=true] { opacity: .5; cursor: default; }
+.send { cursor: pointer; }
+
+/* Links that look like nothing (list rows, tabs). */
+.k a.plain { color: inherit; text-decoration: none; }
+
+/* A two-column card grid whose cards keep their own height. */
+.grid-split { display: grid; gap: 16px; align-items: start; }
+
+/* Prompt template: a live textarea over the highlighted text (the canvas draws only the text). */
+.ed-scroll { flex: 1 1 0; min-height: 0; overflow: auto; scrollbar-width: none; padding-bottom: 32px; }
+.ed-scroll::-webkit-scrollbar { display: none; }
+.ed { position: relative; }
+.ed .editor, .ed textarea { font-family: var(--mono); font-size: 13px; line-height: 22px; white-space: pre-wrap; overflow-wrap: anywhere; letter-spacing: 0; }
+.ed .editor .ed-add { background: #e6f4ea; border-radius: 4px; box-shadow: 0 0 0 2px #e6f4ea; }
+.ed .editor .ed-add.why { border-bottom: 1px dashed var(--text-3); }
+/* Removed text: a small red space that takes no room (negative margins), so the text keeps its place. */
+.ed .editor .ed-del { padding: 2px 6px; margin: 0 -6px; background: #fdecec; box-shadow: inset 0 0 0 1px #f3b4ae; border-radius: 4px; }
+.ed .ed-pop { position: absolute; z-index: 3; display: flex; flex-direction: column; gap: 4px; width: max-content; max-width: 380px; padding: 10px 12px; background: #fff; border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-med); font-family: var(--sans); font-size: 13px; line-height: 20px; color: var(--text); white-space: normal; pointer-events: none; }
+.ed .ed-pop-k { font-size: 12px; line-height: 16px; color: var(--text-3); }
+.ed .ed-pop-del { font-family: var(--mono); white-space: pre-wrap; color: #b42318; background: #fdecec; border-radius: 4px; padding: 2px 6px; }
+.ed .ed-pop-why { color: var(--text-2); }
+.ed textarea { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; outline: none; resize: none; overflow: hidden; background: transparent; color: transparent; caret-color: var(--text); }
+.ed textarea:focus-visible { outline: none; }
+.ed textarea::placeholder { color: var(--text-3); }
+/* Tokens keep their glyphs where the textarea has them: the chip padding is drawn with shadows. */
+.ed .tok { display: inline; padding: 0; line-height: 22px; box-shadow: -5px 0 0 var(--bg-muted), 5px 0 0 var(--bg-muted); }
+.ed .tok.bad { box-shadow: -5px 0 0 var(--err-bg), 5px 0 0 var(--err-bg); }
+
+/* A list card that fills its grid area and scrolls inside, whatever its length. */
+.card.fill > .vlist { contain: size; }
+.k a.vrow { cursor: pointer; }
+.k .copy-name { cursor: copy; }
+
+/* A failed action's banner sits above the page content; a new step's content fades in (150ms). */
+.err-slot { display: contents; }
+@keyframes k-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.page-in { animation: k-fade-in 150ms ease-out; }
+
+/* List rows that select something are buttons (the canvas draws them as links). */
+button.vrow { width: 100%; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+
+/* Long unbroken text (a pasted prompt or JSON) wraps inside the chat bubbles (R3-2). */
+.chat .chat-m > * { min-width: 0; }
+.chat .msg-u, .chat .msg-a p, .chat .msg-a li { overflow-wrap: anywhere; word-break: break-word; }
+
+/* The hint popover (R3-1), the same look as the editor's change popover. */
+.tip-pop { position: fixed; z-index: 100; display: block; width: max-content; max-width: 320px; padding: 10px 12px; background: #fff; border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-med); font-family: var(--sans); font-size: 13px; line-height: 20px; font-weight: 400; color: var(--text-2); white-space: normal; text-align: left; pointer-events: none; }
+.hov:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+/* Loading placeholders (R3-4) */
+.skel { display: inline-block; height: 12px; border-radius: 6px; background: var(--bg-muted); vertical-align: middle; }
+.load-note { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; font-weight: 400; }
+.load-note svg.i { width: 14px; height: 14px; animation: k-spin 1s linear infinite; }
+.k .btn .lp { display: contents; }
+.k .btn .lp svg.i { animation: k-spin 1s linear infinite; }
+/* Prompt versions: one layout (R3-8). The right column is as high as the list; its detail card scrolls inside. */
+.pv-right { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.pv-right > .card.fill-scroll { overflow-y: auto; scrollbar-width: none; }
+.pv-right > .card.fill-scroll::-webkit-scrollbar { display: none; }
+.pv-right > .card.fill-scroll > * { flex: none; }
+.pv-empty { height: 200px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: var(--bg-muted); font-size: 13px; }
+/* Dialog (design: U-F-Optimise-Confirm). */
+.dlg-scrim { position: fixed; inset: 0; z-index: 50; background: rgb(0 0 0 / 24%); display: flex; align-items: center; justify-content: center; }
+.dlg { width: 480px; max-width: calc(100vw - 32px); background: #fff; border-radius: 16px; box-shadow: var(--shadow-med); padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+.dlg .card-t { font-size: 17px; line-height: 24px; }
+.dlg p { margin: 0; color: var(--text-2); font-size: 14px; line-height: 22px; }
+.dlg .dlg-acts { gap: 8px; justify-content: flex-end; padding-top: 16px; }

@@ -1,7 +1,9 @@
 import type {AgentModel, RawExample} from './platform-api.ts';
 import type {
   AgentPreset,
+  Answer,
   ChatAttachment,
+  ChatEvent,
   ChatMessage,
   FeatureSelection,
   FieldMetrics,
@@ -50,6 +52,10 @@ export type AgentToolName =
   | 'get_gold_labels'
   | 'get_predictions'
   | 'check_template'
+  /** Feature descriptions by key (what a feature holds, when it helps, its caveats). */
+  | 'read_feature_info'
+  /** A document the user linked in Ask AI, as text. */
+  | 'read_doc'
   // Start-work tools: paid. They run at once when automatic starts are allowed, else they ask
   // the user with a card in the chat and the turn ends.
   | 'try_template'
@@ -80,7 +86,14 @@ export interface AgentEmittedMessage {
   agent: AgentPreset | null;
   text: string;
   choices?: string[];
+  event?: ChatEvent;
 }
+
+/**
+ * Live progress of a turn, reported while it runs: a message as soon as it is final (the host
+ * saves it then), what an agent is doing (`working`), and its reply as it streams (`reply`).
+ */
+export type AgentTurnProgress = (p: {message: AgentEmittedMessage} | {agent: AgentPreset; working: string} | {agent: AgentPreset; reply: string}) => void;
 
 export type AgentProposalDraft =
   | {
@@ -119,23 +132,79 @@ export interface AgentTurnOutput {
   parseFailures: {agent: AgentPreset; intent: string}[];
 }
 
+/** One example a helper may read and cite (R3-9). Always from the optimiser half, never the held-out half. */
+export interface ExampleBrief {
+  externalId: string;
+  /** Text features the prompt uses, each cut to about 300 characters. */
+  features: Record<string, string>;
+  /**
+   * Up to 2 image URLs of the example (cover or frames; review finding 8), sent to the model as
+   * images after the text, so a mistake whose cause is in the picture can be seen.
+   */
+  images?: string[];
+  gold: Answer;
+  /** The model's answer (in a merge: from the version that misses it); null when it gave no valid answer. */
+  predicted: Answer | null;
+  /** Merge only: the version that gets this example right ('template': the first, 'other': the second). */
+  rightIn?: 'template' | 'other';
+}
+
 export interface OptimiserReflectInput {
+  /** 'change': one change from the parent's mistakes. 'merge': combine `template` with `other`. */
+  mode?: 'change' | 'merge';
   template: string;
+  features: FeatureSelection;
   schema: Schema;
   triedChanges: string[];
   mixUps: MixUp[];
   lowestField: Pick<FieldMetrics, 'field' | 'macroF1'>;
   lowestValue: {field: string; value: string; f1: number} | null;
+  /**
+   * Change: up to 8 examples of the optimiser half the parent gets wrong, worst first. Merge: up to
+   * 4 examples each version gets right that the other misses (`rightIn`).
+   */
+  examples?: ExampleBrief[];
+  /** Merge only: the second version. */
+  other?: {template: string; features: FeatureSelection; change: string};
   signal?: AbortSignal;
 }
 
 export interface OptimiserReflectOutput {
   template: string;
+  /** Ticked features after the change (unchanged when missing). */
+  features?: FeatureSelection;
   change: string;
+}
+
+/** Improve with AI: the Prompt helper drafts several changes to a version, each with a reason. */
+export interface DraftImprovementInput {
+  version: string;
+  template: string;
+  features: FeatureSelection;
+  schema: Schema;
+  mixUps: MixUp[];
+  lowestField: Pick<FieldMetrics, 'field' | 'macroF1'>;
+  lowestValue: {field: string; value: string; f1: number} | null;
+  /** Mistakes on the eval set, with the gold label and the model's answer. */
+  mistakes: number;
+  /** Up to 8 examples of the optimiser half the version gets wrong, worst first (never the held-out half). */
+  examples?: ExampleBrief[];
+}
+
+export interface DraftImprovementOutput {
+  template: string;
+  features?: FeatureSelection;
+  /** One entry per change: `text` quotes the words it adds (or removes); `reason` shows on hover over its mark in the editor and in Ask AI. */
+  changes: {text: string; reason: string}[];
+  /** A few lines for Ask AI. */
+  reply: string;
 }
 
 /** The agent runtime as the bff sees it (implemented by `apps/agents`). */
 export interface AgentRuntimeContract {
-  runAgentTurn(input: AgentTurnInput, llm: AgentModel, tools?: AgentToolHost): Promise<AgentTurnOutput>;
-  reflectPrompt(input: OptimiserReflectInput, llm: AgentModel): Promise<OptimiserReflectOutput>;
+  runAgentTurn(input: AgentTurnInput, llm: AgentModel, tools?: AgentToolHost, progress?: AgentTurnProgress): Promise<AgentTurnOutput>;
+  /** One Optimiser change (or merge). `tools` lets it read feature descriptions. */
+  reflectPrompt(input: OptimiserReflectInput, llm: AgentModel, tools?: AgentToolHost): Promise<OptimiserReflectOutput>;
+  /** Improve with AI: a draft with several marked changes, for the user to review and save. */
+  draftImprovement(input: DraftImprovementInput, llm: AgentModel, tools?: AgentToolHost): Promise<DraftImprovementOutput>;
 }

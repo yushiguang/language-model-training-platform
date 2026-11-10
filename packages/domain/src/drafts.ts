@@ -13,9 +13,6 @@ export function draftTemplate(schema: Schema, task: string): {template: string; 
     .join(', ');
   const template = `You are a content analyst for a short-video platform. ${task ? task.trim().replace(/\.?$/, '.') : 'Read the post and tag it.'}
 
-## Policy
-${schema.policy}
-
 ## Input
 Title: {{Title}}
 Description: {{Description}}
@@ -63,8 +60,6 @@ export function insertRule(template: string, fieldName: string, rule: string): s
 }
 
 export const SAMPLE_SCHEMA: Schema = {
-  policy:
-    "Judge the poster's own contribution. Words spoken by guests in a clip are not the poster's view. Before choosing Discussion, check that the poster added their own view. A Clip with no added comment is not Discussion. If the post sells something without saying it is an ad, primary_value is Ecosystem issue.",
   fields: [
     {
       name: 'primary_value',
@@ -72,8 +67,8 @@ export const SAMPLE_SCHEMA: Schema = {
       values: [
         {name: 'Entertainment', definition: 'fun, emotion or story; nothing usable left afterwards'},
         {name: 'Practical', definition: 'something the viewer can act on'},
-        {name: 'Discussion', definition: "the poster's own view, inviting replies"},
-        {name: 'Ecosystem issue', definition: 'spam, misleading claims, undisclosed ads'},
+        {name: 'Discussion', definition: "the poster's own added view, inviting replies (a clip with no added comment is not Discussion)"},
+        {name: 'Ecosystem issue', definition: 'spam, misleading claims, or selling something without saying it is an ad'},
       ],
     },
     {

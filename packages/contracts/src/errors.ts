@@ -1,9 +1,10 @@
 /**
  * Shared error type for model calls. Platform adapters should throw `LlmCallError` so the gateway
  * can tell a busy endpoint (retry later) from a rejected request (never retry).
- * Any other thrown error is treated as `server` (retryable).
+ * `filtered`: the endpoint's safety filter stopped the answer (never retried; labeling saves the
+ * example as filtered instead of failed). Any other thrown error is treated as `server` (retryable).
  */
-export type LlmErrorKind = 'rate_limited' | 'server' | 'timeout' | 'rejected' | 'aborted';
+export type LlmErrorKind = 'rate_limited' | 'server' | 'timeout' | 'rejected' | 'filtered' | 'aborted';
 
 export class LlmCallError extends Error {
   readonly kind: LlmErrorKind;

@@ -1,4 +1,4 @@
-import type {ExampleSource, RawExample} from '@tsp/contracts';
+import type {ExampleMedia, ExampleSource, MediaSource, RawExample} from '@tsp/contracts';
 
 interface SampleFile {
   examples: RawExample[];
@@ -41,7 +41,7 @@ export function sampleExamples(base = ''): ExampleSource {
       }
       const picked = all.slice(0, n);
       for (let i = 0; i < picked.length; i += 8) {
-        await sleep(120, signal);
+        await sleep(400, signal);
         onProgress?.(Math.min(picked.length, i + 8));
       }
       return picked;
@@ -52,6 +52,26 @@ export function sampleExamples(base = ''): ExampleSource {
     },
     async bundledLabels() {
       return (await loadSampleFile(base)).labels;
+    },
+  };
+}
+
+/**
+ * Stand-in media: the made-up pictures the sample file names in its Cover, Frame and Images
+ * features. There is no video. The real media service replaces this (docs/handover/integration.md).
+ */
+export function sampleMedia(base = ''): MediaSource {
+  const list = (v: string | string[] | undefined): string[] => (Array.isArray(v) ? v : v ? [v] : []);
+  const url = (u: string) => (/^(https?:|data:|\/)/.test(u) ? u : `${base}/${u}`);
+  return {
+    async media(externalId) {
+      const ex = (await loadSampleFile(base)).examples.find(e => e.externalId === externalId);
+      if (!ex) return null;
+      const imageUrls = [...list(ex.features.Frame), ...list(ex.features.Images)].map(url);
+      const cover = list(ex.features.Cover)[0];
+      if (!cover && !imageUrls.length) return null;
+      const m: ExampleMedia = {kind: ex.type === 'video' ? 'video' : 'images', imageUrls, ...(cover ? {coverUrl: url(cover)} : {})};
+      return m;
     },
   };
 }

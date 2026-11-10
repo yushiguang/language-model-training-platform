@@ -2,6 +2,7 @@ export * from './services/app.ts';
 export * from './services/agents.ts';
 export * from './services/dataset.ts';
 export * from './services/evaluation.ts';
+export * from './services/mismatches.ts';
 export * from './services/optimiser.ts';
 export * from './services/projects.ts';
 export * from './services/prompts.ts';

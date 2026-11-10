@@ -21,3 +21,28 @@ jobs:
       # Typecheck, unit tests and the boundary check (who may import what).
       - run: npm run check
       - run: npm run build
+
+  # The whole workflow in a browser on the stand-ins (apps/web/scripts/e2e-check.cjs, about 4 minutes).
+  # Screenshots are kept as a build artifact.
+  e2e:
+    runs-on: ubuntu-latest
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm install --no-save playwright@1.63.0 serve@14.2.6
+      - run: npx playwright install --with-deps chromium
+      - run: |
+          npx serve apps/web/out -l 4173 > /dev/null 2>&1 &
+          sleep 5
+          node apps/web/scripts/e2e-check.cjs http://localhost:4173 e2e-shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: e2e-shots

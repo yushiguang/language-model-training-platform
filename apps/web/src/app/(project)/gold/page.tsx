@@ -1,0 +1,504 @@
+'use client';
+
+import {useGo} from '@/components/nav';
+import {useSearchParams} from 'next/navigation';
+import {Fragment, Suspense, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+import type {Answer, Example, ExampleMedia, LabelField, MismatchList} from '@tsp/contracts';
+import {FEATURES, versionLabel} from '@tsp/domain';
+import {Frame, ProjectPage} from '@/components/Shell';
+import {useProject} from '@/components/ProjectContext';
+import {approveNode, exampleMedia, mismatches, predictionsFor, reviewGold, saveGold, type ProjectState} from '@/backend-api';
+import {Badge, Banner, Button, Card, Code, dateTime, Empty, Hov, Icon, num, PageHead, Tabs} from '@/ui';
+
+type SetKey = 'eval' | 'test' | 'mismatch';
+
+export default function GoldPage() {
+  return (
+    <Suspense fallback={null}>
+      <GoldRouter />
+    </Suspense>
+  );
+}
+
+function GoldRouter() {
+  const q = useSearchParams();
+  return (
+    <ProjectPage node="gold" page={{label: 'Gold Labels', agent: 'front_desk', intent: 'answer', hint: "If an example doesn't fit any value, tell me and I'll bring in the schema agent.", context: {}}}>
+      {({state}) => <Gold state={state} tabParam={q.get('tab')} />}
+    </ProjectPage>
+  );
+}
+
+/**
+ * The Mismatches list for the picked version (review finding 2). It reads saved answers only, so it
+ * reloads when scores or gold labels change, and after each keep or change.
+ */
+function useMismatches(state: ProjectState, versionId: string | null): [MismatchList | null, () => void] {
+  const [list, setList] = useState<MismatchList | null>(null);
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    let live = true;
+    void mismatches(state.project.id, versionId).then(m => live && setList(m));
+    return () => {
+      live = false;
+    };
+  }, [state.project.id, versionId, state.contextId, state.reports.length, state.versions.length, n]);
+  return [list, () => setN(x => x + 1)];
+}
+
+const sameValues = (a: string[] = [], b: string[] = []) => a.length === b.length && [...a].sort().join('|') === [...b].sort().join('|');
+
+function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null}) {
+  const go = useGo();
+  const {href} = useProject();
+  const [cmp, setCmp] = useState<string | null>(null);
+  const [mm, reloadMm] = useMismatches(state, cmp);
+  const byId = useMemo(() => new Map(state.examples.map(e => [e.id, e])), [state.examples]);
+  const sets = useMemo(
+    () => ({
+      eval: state.examples.filter(e => e.split === 'eval'),
+      test: state.examples.filter(e => e.split === 'test'),
+      mismatch: (mm?.items ?? []).map(x => byId.get(x.exampleId)!).filter(Boolean),
+    }),
+    [state.examples, mm, byId],
+  );
+  // "Review labels" on Prompt versions opens the Mismatches tab.
+  const [tab, setTab] = useState<SetKey>(tabParam === 'mismatches' ? 'mismatch' : 'eval');
+  useEffect(() => {
+    if (tabParam === 'mismatches') setTab('mismatch');
+  }, [tabParam]);
+  const list = sets[tab];
+  const firstOpen = (k: SetKey) => (k === 'mismatch' ? 0 : Math.max(0, sets[k].findIndex(e => !state.gold.has(e.id))));
+  // Opens on the first example without a gold label; it stays put while labels save. On
+  // Mismatches, a kept or changed example leaves the list and the next one takes its place.
+  const [pos, setPos] = useState<Record<SetKey, number>>(() => ({eval: firstOpen('eval'), test: firstOpen('test'), mismatch: 0}));
+  const i = Math.min(pos[tab], Math.max(0, list.length - 1));
+  const ex = list[i];
+  const onMismatch = tab === 'mismatch';
+  // The model answer starts hidden on every example; Show reveals it for this example only (R2-2).
+  // On Mismatches it shows from the start.
+  const [shownFor, setShownFor] = useState<Set<string>>(() => new Set());
+  const showModel = !!ex && (onMismatch || shownFor.has(ex.id));
+  // Once shown on an example, the label records that the answer was seen, even if hidden again.
+  const [seen, setSeen] = useState<Set<string>>(() => new Set());
+  // The model's answer for the example on screen (null: none, or invalid); a label only counts as
+  // "model answer seen" when there was one to see.
+  const [model, setModel] = useState<{exampleId: string; answer: Answer | null} | null>(null);
+  const modelAnswer = model && ex && model.exampleId === ex.id ? model.answer : null;
+  const evalDone = state.facts.goldEvalDone >= sets.eval.length && sets.eval.length > 0;
+  const move = (n: number) => setPos(p => ({...p, [tab]: n}));
+  const versionId = mm?.versionId ?? null;
+  const item = onMismatch && ex ? mm?.items.find(x => x.exampleId === ex.id) : undefined;
+  const gold = ex ? state.gold.get(ex.id)?.answer : undefined;
+  const diff = onMismatch && gold && modelAnswer ? new Set(state.setup!.schema!.fields.filter(f => !sameValues(gold[f.name], modelAnswer[f.name])).map(f => f.name)) : new Set<string>();
+  const review = async (outcome: 'kept' | 'changed', answer?: Answer) => {
+    if (!ex || !versionId) return;
+    await reviewGold(state.project.id, ex.id, versionId, outcome, answer);
+    reloadMm();
+  };
+
+  const head = (
+    <PageHead
+      title="Gold Labels"
+      actions={
+        <>
+          {list.length > 0 && (
+            <>
+              <Button label="" ariaLabel="Previous" kind="ghost" icon="left" disabled={i === 0} onClick={() => move(i - 1)} />
+              <span className="t-2" style={{fontSize: 13, minWidth: 56, textAlign: 'center'}}>
+                {num(i + 1)} of {num(list.length)}
+              </span>
+              <Button label="" ariaLabel="Next" kind="ghost" icon="right" disabled={i >= list.length - 1} onClick={() => move(i + 1)} />
+            </>
+          )}
+          <Button
+            label="Next: Prompt Engineering"
+            kind="primary"
+            disabled={!evalDone}
+            title={evalDone ? undefined : 'Label every eval example first. Gold labels on the test set are optional.'}
+            onClick={async () => {
+              await approveNode(state.project.id, 'gold');
+              await go(href('/prompt'));
+            }}
+          />
+        </>
+      }
+    />
+  );
+
+  if (!state.snapshot?.split || !state.setup?.schema)
+    return (
+      <Frame head={<PageHead title="Gold Labels" />}>
+        <Empty title="No examples to label yet" text="Split the dataset first, then label the eval set here." />
+      </Frame>
+    );
+
+  const picked = mm?.versions.find(v => v.id === versionId);
+  return (
+    <Frame head={head}>
+      {state.staleGold.size > 0 && <Banner text={`The schema changed. ${num(state.staleGold.size)} labels were made under the old schema and need a quick re-check.`} />}
+      <Tabs
+        label="Sets"
+        selected={tab}
+        onSelect={setTab}
+        items={[
+          {key: 'eval', label: 'Eval set', count: `${num(state.facts.goldEvalDone)} / ${num(sets.eval.length)}`},
+          {key: 'test', label: 'Test set', count: `${num(state.facts.goldTestDone)} / ${num(sets.test.length)}`},
+          // Once a version has answers on the whole eval set.
+          ...(mm?.versions.length ? [{key: 'mismatch' as const, label: 'Mismatches', count: num(mm.items.length)}] : []),
+        ]}
+      />
+      {ex ? (
+        <div style={{display: 'grid', gridTemplateColumns: '520px 1fr', gap: 16, alignItems: 'start'}}>
+          <ExampleCard ex={ex} n={onMismatch ? sets.eval.indexOf(ex) + 1 : i + 1} extra={item ? <Hov text={`Wrong in ${item.wrongIn} of ${item.of} versions`} tip="The examples wrong in the most versions come first" /> : undefined} />
+          <div className="col" style={{gap: 16}}>
+            <ModelAnswer
+              key={`m-${ex.id}-${versionId ?? ''}`}
+              state={state}
+              ex={ex}
+              versionId={versionId}
+              picker={mm?.versions.length ? {versions: mm.versions, onPick: setCmp} : undefined}
+              shown={showModel}
+              toggle={!onMismatch}
+              diff={diff}
+              onToggle={() =>
+                setShownFor(s => {
+                  const n = new Set(s);
+                  if (n.has(ex.id)) n.delete(ex.id);
+                  else {
+                    n.add(ex.id);
+                    setSeen(x => new Set(x).add(ex.id));
+                  }
+                  return n;
+                })
+              }
+              onFound={answer => setModel({exampleId: ex.id, answer})}
+            />
+            <YourAnswer
+              key={`y-${ex.id}-${tab}`}
+              state={state}
+              ex={ex}
+              modelShown={(showModel || seen.has(ex.id)) && !!modelAnswer}
+              review={onMismatch && picked ? {modelAnswer, onKeep: () => review('kept'), onChange: a => review('changed', a)} : undefined}
+            />
+          </div>
+        </div>
+      ) : onMismatch ? (
+        mm && <Empty title="No mismatches left" text={`Every label ${picked?.label ?? 'the model'} disagrees with has been checked.`} />
+      ) : (
+        <Empty title="No examples in this set" text="Change the split on the Dataset page to add some." />
+      )}
+    </Frame>
+  );
+}
+
+/**
+ * The example with the features of its own type (design: media on top, one line per feature).
+ * The media tile embeds the player page the platform's media source returns, with the still
+ * images (cover, a photo post's images, or key frames) under it; without a media source it
+ * shows the item id only.
+ */
+const SHOWN = new Set(['Title', 'Description', 'OCR_Text', 'ASR', 'Creator_Nick_Name', 'Creator_Bio', 'Hashtags', 'Create_Time', 'Country_Code', 'Language', 'POI_Name', 'POI_Info', 'Interest_V3', 'Summary']);
+const IMAGE_KEYS = new Set(Object.values(FEATURES).flatMap(list => list.filter(d => d.isImage).map(d => d.key)));
+const FEATURE_LABEL = new Map(Object.values(FEATURES).flatMap(list => list.map(d => [d.key, d.label] as const)));
+
+function ExampleCard({ex, n, extra}: {ex: Example; n: number; extra?: ReactNode}) {
+  const [media, setMedia] = useState<ExampleMedia | null | undefined>(undefined);
+  const [picked, setPicked] = useState(0);
+  const [view, setView] = useState<'player' | 'image'>('player');
+  useEffect(() => {
+    let live = true;
+    setMedia(undefined);
+    setPicked(0);
+    setView('player');
+    void exampleMedia(ex.id)
+      .then(m => live && setMedia(m))
+      .catch(() => live && setMedia(null));
+    return () => {
+      live = false;
+    };
+  }, [ex.id]);
+  const stills = media ? [...(media.coverUrl ? [media.coverUrl] : []), ...media.imageUrls.filter(u => u !== media.coverUrl)] : [];
+  const f = (k: string) => {
+    const v = ex.features[k];
+    return (Array.isArray(v) ? v.join(', ') : (v ?? '')).trim();
+  };
+  const joined = (...parts: string[]) => parts.filter(Boolean).join(' · ');
+  const posted = f('Create_Time');
+  const rows: [string, string][] = (
+    [
+      ['Title', ex.title || f('Title')],
+      ['Description', f('Description')],
+      ['On-screen text', f('OCR_Text')],
+      ['Speech', f('ASR')],
+      ['Creator', joined(f('Creator_Nick_Name'), f('Creator_Bio'))],
+      ['Hashtags', f('Hashtags')],
+      ['Posted', posted ? dateTime(posted.replace(' ', 'T')) : ''],
+      ['Country, language', joined(f('Country_Code'), f('Language'))],
+      ['Place', joined(f('POI_Name'), f('POI_Info'))],
+      ['Interest', f('Interest_V3')],
+      ['Summary', f('Summary')],
+      // Every other feature the example has, under its catalogue name, so nothing is hidden.
+      ...Object.keys(ex.features)
+        .filter(k => !SHOWN.has(k) && !IMAGE_KEYS.has(k) && !/(^|_)(url|urls|id)$/i.test(k))
+        .map(k => [FEATURE_LABEL.get(k) ?? k.replace(/_/g, ' '), f(k)]),
+    ] as [string, string][]
+  ).filter(([, v]) => v);
+  return (
+    <Card title={`Example ${n}`} titleExtra={extra ? <span className="t-3" style={{fontSize: 13}}>{extra}</span> : undefined}>
+      <div className="media">
+        {media?.playerUrl && view === 'player' ? (
+          <iframe
+            src={media.playerUrl}
+            title={`Player for item ${ex.externalId}`}
+            style={{position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0}}
+            allow="encrypted-media; picture-in-picture; fullscreen"
+            allowFullScreen
+            loading="lazy"
+          />
+        ) : stills.length ? (
+          <img src={stills[Math.min(picked, stills.length - 1)]} alt="" style={{position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain'}} />
+        ) : (
+          <Icon name={ex.type === 'video' ? 'video' : 'image'} />
+        )}
+        <small>
+          {ex.externalId}
+          {media?.durationSec ? ` · ${Math.round(media.durationSec)}s` : ''}
+        </small>
+      </div>
+      {(stills.length > 1 || media?.playerUrl) && (
+        <div className="row" style={{gap: 6, flexWrap: 'wrap', alignItems: 'center'}}>
+          {media?.playerUrl && (
+            <button type="button" className="opt" style={{border: '1px solid var(--border)', fontWeight: view === 'player' ? 600 : 400}} aria-label="Show the player" onClick={() => setView('player')}>
+              ▶ Player
+            </button>
+          )}
+          {stills.map((u, k) => (
+            <button key={k} type="button" className="copy" style={{padding: 0, visibility: 'visible', outline: view === 'image' && k === picked ? '2px solid var(--line-2)' : undefined}} aria-label={`Show image ${k + 1}`} onClick={() => { setPicked(k); setView('image'); }}>
+              <img src={u} alt="" style={{width: 44, height: 44, objectFit: 'cover', borderRadius: 6, display: 'block'}} />
+            </button>
+          ))}
+          <span className="small muted">{view === 'player' ? 'Stills from the item — click one to inspect it' : 'Still image — click Player to go back to the video'}</span>
+        </div>
+      )}
+      <div className="kv">
+        {rows.map(([k, v]) => (
+          <Fragment key={k}>
+            <span>{k}</span>
+            <span title={v}>{v}</span>
+          </Fragment>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+const CHIP = {cursor: 'default', background: 'var(--bg-muted)', borderColor: 'transparent'} as const;
+const CHIP_DIFF = {cursor: 'default', background: '#fdecec', borderColor: 'transparent', color: '#b42318'} as const;
+
+/**
+ * The model's answer, from the version picked in the card (review finding 2; default: the best
+ * scored version with answers on the whole eval set). Before any version has those, it is the
+ * newest version with an answer for this example, with no picker.
+ */
+function ModelAnswer({
+  state,
+  ex,
+  versionId,
+  picker,
+  shown,
+  toggle,
+  diff,
+  onToggle,
+  onFound,
+}: {
+  state: ProjectState;
+  ex: Example;
+  versionId: string | null;
+  picker?: {versions: MismatchList['versions']; onPick: (id: string) => void};
+  shown: boolean;
+  toggle: boolean;
+  diff: Set<string>;
+  onToggle: () => void;
+  onFound: (answer: Answer | null) => void;
+}) {
+  const [found, setFound] = useState<{answer: Answer | null; invalid: string | null; label: string; endpoint: string} | null | undefined>(undefined);
+  useEffect(() => {
+    let live = true;
+    void (async () => {
+      const candidates = versionId ? state.versions.filter(v => v.id === versionId) : [...state.versions].reverse();
+      for (const v of candidates)
+        for (const m of state.setup!.models) {
+          const p = (await predictionsFor(v.id, m.endpoint, m)).get(ex.id);
+          if (p) {
+            if (live) onFound(p.answer);
+            if (live) setFound({answer: p.answer, invalid: p.invalidReason, label: versionLabel(v), endpoint: state.endpoints.find(e => e.id === m.endpoint)?.name ?? m.endpoint});
+            return;
+          }
+        }
+      if (live) {
+        onFound(null);
+        setFound(null);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [ex.id, versionId, state.versions.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const schema = state.setup!.schema!;
+  // No model answer for this example (or still looking) and nothing to pick: no card at all (design, 2026-11-09).
+  if (found === undefined || (!found && !picker)) return null;
+  const pick = picker && versionId && (
+    <span className="select" style={{width: 132}}>
+      <select aria-label="Compare with" style={{height: 32}} value={versionId} onChange={e => picker.onPick(e.target.value)}>
+        {picker.versions.map(v => (
+          <option key={v.id} value={v.id}>
+            {v.label}
+            {v.best ? ' (best)' : ''}
+          </option>
+        ))}
+      </select>
+      <Icon name="chev" />
+    </span>
+  );
+  return (
+    <Card
+      title="Model answer"
+      titleExtra={
+        shown && found && !picker ? (
+          <span className="t-3 one" style={{fontSize: 13}}>
+            {found.endpoint} · prompt {found.label}
+          </span>
+        ) : undefined
+      }
+      actions={
+        <div className="row" style={{gap: 8}}>
+          {pick}
+          {toggle && <Button label={shown ? 'Hide' : 'Show'} kind="ghost" size="sm" icon="eye" onClick={onToggle} />}
+        </div>
+      }
+    >
+      {!shown ? null : !found ? (
+        <span className="t-3 one" style={{fontSize: 13}}>
+          No answer from this version for this example
+        </span>
+      ) : !found.answer ? (
+        <span className="t-3 one" style={{fontSize: 13}} title={found.invalid ?? undefined}>
+          The model&apos;s answer was invalid
+        </span>
+      ) : (
+        <div className="col" style={{gap: 12}}>
+          {schema.fields.map(fl => (
+            <div key={fl.name} className="row" style={{gap: 12}}>
+              <span style={{width: 128, flex: 'none'}}>
+                <Code>{fl.name}</Code>
+              </span>
+              {(found.answer![fl.name] ?? []).map(v => (
+                <span key={v} className="ch" style={diff.has(fl.name) ? CHIP_DIFF : CHIP}>
+                  {v}
+                </span>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+const kindText = (f: LabelField) => (f.kind === 'single' ? 'Single-select' : `Multi-select, ${f.min ?? 1} to ${f.max ?? f.values.length}`);
+const same = (a: Answer, b: Answer) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+
+/**
+ * Picking values saves the answer as soon as every field has one (no Save button in the design).
+ * On Mismatches (`review`), the card keeps the label or takes the model's answer, and a third
+ * answer picked on the chips is recorded as a change too.
+ */
+function YourAnswer({
+  state,
+  ex,
+  modelShown,
+  review,
+}: {
+  state: ProjectState;
+  ex: Example;
+  modelShown: boolean;
+  review?: {modelAnswer: Answer | null; onKeep: () => Promise<void>; onChange: (a: Answer) => Promise<void>};
+}) {
+  const schema = state.setup!.schema!;
+  const saved = state.gold.get(ex.id);
+  const [answer, setAnswer] = useState<Answer>(saved?.answer ?? {});
+  const savedRef = useRef(saved);
+  savedRef.current = saved;
+  const complete = schema.fields.every(f => (answer[f.name]?.length ?? 0) >= (f.kind === 'single' ? 1 : (f.min ?? 1)));
+  const isSaved = !!saved && same(saved.answer, answer);
+  const reviewRef = useRef(review);
+  reviewRef.current = review;
+
+  // A complete answer saves a moment after the last click. Moving to another example (which
+  // unmounts this card) saves at once instead of dropping the answer.
+  const pending = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (!complete || (savedRef.current && same(savedRef.current.answer, answer))) return;
+    const save = () => {
+      pending.current = null;
+      if (reviewRef.current) void reviewRef.current.onChange(answer);
+      else void saveGold(state.project.id, ex.id, state.setup!.schemaVersion, answer, modelShown);
+    };
+    pending.current = save;
+    const id = setTimeout(save, 300);
+    return () => clearTimeout(id);
+  }, [answer, complete]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => pending.current?.(), []);
+
+  const pick = (f: LabelField, value: string) => {
+    const cur = answer[f.name] ?? [];
+    if (f.kind === 'single') return setAnswer({...answer, [f.name]: [value]});
+    const next = cur.includes(value) ? cur.filter(v => v !== value) : cur.length >= (f.max ?? 99) ? cur : [...cur, value];
+    setAnswer({...answer, [f.name]: next});
+  };
+  return (
+    <Card
+      title="Your answer"
+      titleExtra={
+        isSaved && !review ? (
+          <span className="done-at" style={{margin: 0}}>
+            <Badge text="Saved" tone="ok" />
+          </span>
+        ) : undefined
+      }
+      actions={
+        review ? (
+          <div className="row" style={{gap: 8}}>
+            <Button label="Keep my label" size="sm" disabled={!isSaved} onClick={review.onKeep} />
+            <Button label="Use the model's answer" size="sm" disabled={!review.modelAnswer} onClick={() => review.onChange(review.modelAnswer!)} />
+          </div>
+        ) : undefined
+      }
+    >
+      <div className="col" style={{gap: 28}}>
+        {schema.fields.map(f => (
+          <div key={f.name} className="col" style={{gap: 10}}>
+            <div className="row" style={{gap: 8}}>
+              <Code>{f.name}</Code>
+              <span className="t-3" style={{fontSize: 13}}>
+                {kindText(f)}
+              </span>
+            </div>
+            <div className="chs" role="group" aria-label={f.name}>
+              {f.values.map(v => {
+                const on = (answer[f.name] ?? []).includes(v.name);
+                return (
+                  <button key={v.name} type="button" className="ch" aria-pressed={on} title={v.definition} onClick={() => pick(f, v.name)}>
+                    {on && <Icon name="check" />}
+                    {v.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}

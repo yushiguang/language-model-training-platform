@@ -104,7 +104,7 @@ export function checkTemplate(template: string, sel: FeatureSelection, opts: {sc
         code: 'unknown_key',
         key,
         line,
-        message: near ? `{{${key}}} isn't a feature. Did you mean {{${near}}}?` : `{{${key}}} isn't a feature.`,
+        message: near ? `{{${key}}} is not a feature. Did you mean ${labelOf(near)}?` : `{{${key}}} is not a feature`,
         fixes: near ? [{label: 'Replace', fix: {kind: 'replace', from: `{{${key}}}`, to: `{{${near}}}`}}] : [],
       });
     } else if (!tickedAnywhere(sel, key)) {
@@ -114,7 +114,7 @@ export function checkTemplate(template: string, sel: FeatureSelection, opts: {sc
         code: 'not_ticked',
         key,
         line,
-        message: `{{${key}}} is in the prompt but isn't ticked, so it would load nothing.`,
+        message: `{{${key}}} is in the template but not ticked`,
         fixes: groups.map(g => ({label: groups.length > 1 ? `Tick for ${g === 'video' ? 'video' : g === 'photo_text' ? 'photo&text' : 'metadata'}` : 'Tick', fix: {kind: 'tick', group: g, key}})),
       });
     } else matched++;
@@ -130,7 +130,7 @@ export function checkTemplate(template: string, sel: FeatureSelection, opts: {sc
       severity: 'error',
       code: 'unused_feature',
       key,
-      message: `${label} is ticked${where} but isn't in the prompt.`,
+      message: `${label} is ticked${where} but not in the template`,
       fixes: [
         {label: 'Insert', fix: {kind: 'insert', key}},
         {label: 'Untick', fix: {kind: 'untick', groups: [...groups], key}},
@@ -311,6 +311,102 @@ export function diffLines(a: string, b: string): DiffLine[] {
   }
   while (i < x.length) out.push({kind: 'del', text: x[i++]});
   while (j < y.length) out.push({kind: 'add', text: y[j++]});
+  return out;
+}
+
+/**
+ * Change marks in the prompt editor (design 2026-11-10): a word-level diff, so a change inside a
+ * line is marked where it is. Placeholders stay whole. Very long prompts fall back to lines.
+ */
+export type MarkSeg = {kind: 'same' | 'add' | 'del'; text: string; reason?: string};
+
+const TOKEN = /\{\{[A-Za-z0-9_]+\}\}|[\p{L}\p{N}_']+|[^\s\p{L}\p{N}_']|[ \t]+|\n/gu;
+
+export function diffWords(a: string, b: string): MarkSeg[] {
+  let x: string[] = a.match(TOKEN) ?? [];
+  let y: string[] = b.match(TOKEN) ?? [];
+  if (x.length * y.length > 4_000_000) {
+    x = a.split(/(?<=\n)/);
+    y = b.split(/(?<=\n)/);
+  }
+  // Common prefix and suffix first: most edits are small.
+  let p = 0;
+  while (p < x.length && p < y.length && x[p] === y[p]) p++;
+  let q = 0;
+  while (q < x.length - p && q < y.length - p && x[x.length - 1 - q] === y[y.length - 1 - q]) q++;
+  const xs = x.slice(p, x.length - q);
+  const ys = y.slice(p, y.length - q);
+  const dp = Array.from({length: xs.length + 1}, () => new Uint32Array(ys.length + 1));
+  for (let i = xs.length - 1; i >= 0; i--) for (let j = ys.length - 1; j >= 0; j--) dp[i][j] = xs[i] === ys[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const out: MarkSeg[] = [];
+  const push = (kind: MarkSeg['kind'], text: string) => {
+    const last = out[out.length - 1];
+    if (last && last.kind === kind) last.text += text;
+    else out.push({kind, text});
+  };
+  if (p) push('same', x.slice(0, p).join(''));
+  let i = 0;
+  let j = 0;
+  while (i < xs.length && j < ys.length) {
+    if (xs[i] === ys[j]) push('same', xs[i++]), j++;
+    else if (dp[i + 1][j] >= dp[i][j + 1]) push('del', xs[i++]);
+    else push('add', ys[j++]);
+  }
+  while (i < xs.length) push('del', xs[i++]);
+  while (j < ys.length) push('add', ys[j++]);
+  if (q) push('same', x.slice(x.length - q).join(''));
+  // Within one change, removed text comes before added text.
+  const final: MarkSeg[] = [];
+  for (let k = 0; k < out.length; ) {
+    if (out[k].kind === 'same') {
+      final.push(out[k++]);
+      continue;
+    }
+    let del = '';
+    let add = '';
+    for (; k < out.length; k++) {
+      const seg = out[k];
+      // A space kept between two changed words belongs to the change.
+      if (seg.kind === 'same') {
+        if (/^[ \t]+$/.test(seg.text) && out[k + 1] && out[k + 1].kind !== 'same') (del += seg.text), (add += seg.text);
+        else break;
+      } else if (seg.kind === 'del') del += seg.text;
+      else add += seg.text;
+    }
+    if (del) final.push({kind: 'del', text: del});
+    if (add) final.push({kind: 'add', text: add});
+  }
+  return final;
+}
+
+/**
+ * Gives each change (a run of added and removed text) a reason: the helper's change whose words
+ * overlap it most, else the change in the same position when the counts match. Changes the user
+ * made by hand get none.
+ */
+export function withReasons(segs: MarkSeg[], changes: {text: string; reason: string}[], prefix = ''): MarkSeg[] {
+  if (!changes.length) return segs;
+  const words = (t: string) => new Set((t.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(w => w.length > 2));
+  const hunks: number[][] = [];
+  segs.forEach((s, k) => {
+    if (s.kind === 'same') return;
+    const prev = segs[k - 1];
+    if (prev && prev.kind !== 'same' && hunks.length) hunks[hunks.length - 1].push(k);
+    else hunks.push([k]);
+  });
+  const out = segs.map(s => ({...s}));
+  hunks.forEach((h, n) => {
+    const w = words(h.map(k => segs[k].text).join(' '));
+    let best = -1;
+    let score = 0;
+    changes.forEach((c, ci) => {
+      const cw = words(c.text);
+      const hit = [...cw].filter(x => w.has(x)).length / Math.max(1, Math.min(cw.size, w.size));
+      if (hit > score) (score = hit), (best = ci);
+    });
+    if (score < 0.5) best = hunks.length === changes.length ? n : -1;
+    if (best >= 0 && changes[best].reason) for (const k of h) out[k].reason = prefix + changes[best].reason;
+  });
   return out;
 }
 

@@ -28,7 +28,7 @@ export function parseOutput(text: string, schema: Schema): {answer: Answer | nul
 }
 
 /** Model settings that change answers. Predictions are reused only for the same hash. */
-export const settingsHash = (s: ModelSettings) => hashString(`${s.maxOutputTokens}|${s.temperature ?? 'na'}`);
+export const settingsHash = (s: ModelSettings) => hashString(`${s.maxOutputTokens}|${s.temperature ?? 'na'}${s.pass && s.pass > 1 ? `|pass${s.pass}` : ''}`);
 
 /** Evaluation context = schema version + eval examples + their gold labels. Thresholds re-judge without new labeling. */
 export function contextIdFor(schemaVersion: number, evalExamples: Example[], gold: Map<string, GoldLabel>): string {

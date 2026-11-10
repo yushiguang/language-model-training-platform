@@ -58,14 +58,15 @@ export const METRICS = {
   tsp_agent_turns_total: {type: 'counter', help: 'User messages answered', labels: ['agent', 'page', 'outcome']},
   tsp_agent_turn_duration_seconds: {type: 'histogram', help: 'User message to last reply', labels: ['agent'], buckets: BUCKETS.CALL},
   tsp_agent_model_calls_total: {type: 'counter', help: 'Model calls in turns, tool loops included', labels: ['agent', 'model']},
-  tsp_agent_handoffs_total: {type: 'counter', help: 'Front desk handoffs', labels: ['from', 'to', 'outcome']},
+  tsp_agent_handoffs_total: {type: 'counter', help: 'Handoffs to a helper (from the front desk, or passed on by a helper that stayed)', labels: ['from', 'to', 'outcome']},
   tsp_agent_tool_calls_total: {type: 'counter', help: 'Agent tool calls', labels: ['agent', 'tool', 'outcome']},
   tsp_agent_tool_duration_seconds: {type: 'histogram', help: 'One tool call', labels: ['tool'], buckets: BUCKETS.SHORT},
   tsp_agent_tool_calls_per_turn: {type: 'histogram', help: 'Tool calls in one turn', labels: ['agent'], buckets: BUCKETS.COUNT},
   tsp_agent_parse_failures_total: {type: 'counter', help: "Answers that weren't the asked JSON", labels: ['agent', 'intent']},
   tsp_agent_proposals_total: {type: 'counter', help: 'Proposals by outcome', labels: ['agent', 'kind', 'outcome']},
   tsp_optimiser_runs_total: {type: 'counter', help: 'Optimiser runs by outcome', labels: ['slot', 'outcome']},
-  tsp_optimiser_candidates_total: {type: 'counter', help: 'Optimiser candidates by result', labels: ['slot', 'result']},
+  tsp_optimiser_candidates_total: {type: 'counter', help: 'Optimiser rounds by result (kept, dropped after the dry run, failed the Checks, repeated)', labels: ['slot', 'result']},
+  tsp_optimiser_step_failures_total: {type: 'counter', help: 'Optimiser steps that errored (each try)', labels: ['step']},
   // catalog and storage
   tsp_catalog_operations_total: {type: 'counter', help: 'Catalog operations', labels: ['collection', 'op', 'outcome']},
   tsp_catalog_operation_duration_seconds: {type: 'histogram', help: 'One catalog operation', labels: ['collection', 'op'], buckets: BUCKETS.SHORT},
@@ -78,7 +79,6 @@ export const METRICS = {
   tsp_bff_project_state_load_seconds: {type: 'histogram', help: 'loadProjectState, which every page calls', labels: [], buckets: BUCKETS.SHORT},
   tsp_gate_actions_total: {type: 'counter', help: 'Gate approvals, skips and refusals', labels: ['node', 'action']},
   tsp_auto_starts_total: {type: 'counter', help: 'Automatic paid starts and what was decided', labels: ['what', 'decision']},
-  tsp_cost_confirms_total: {type: 'counter', help: 'Cost confirms shown, accepted, cancelled', labels: ['what', 'outcome']},
   tsp_stale_writes_rejected_total: {type: 'counter', help: 'Writes based on an old read that were refused', labels: ['collection']},
   // web
   tsp_web_page_views_total: {type: 'counter', help: 'Page views', labels: ['page']},
@@ -100,23 +100,24 @@ export type MetricName = keyof typeof METRICS;
  */
 export const LABEL_VALUES: Record<string, readonly string[]> = {
   purpose: ['labeling', 'chat'],
-  outcome: ['ok', 'error', 'rate_limited', 'server', 'timeout', 'rejected', 'aborted', 'gave_up', 'shown', 'accepted', 'cancelled', 'approved', 'discarded', 'joined', 'passes', 'no_new_ideas', 'budget', 'stopped', 'failed'],
+  outcome: ['ok', 'error', 'rate_limited', 'server', 'timeout', 'rejected', 'filtered', 'aborted', 'gave_up', 'shown', 'accepted', 'cancelled', 'approved', 'discarded', 'joined', 'passes', 'no_new_ideas', 'budget', 'max_rounds', 'stopped', 'failed'],
   reason: ['rate_limited', 'server', 'timeout', 'user', 'budget', 'failures', 'closed', 'none'],
   kind: ['input', 'output', 'reasoning', 'qpm', 'tpm', 'concurrency', 'script', 'asset', 'backend', 'image', 'schema', 'prompt', 'other'],
   assumed: ['true', 'false'],
   task_purpose: ['eval', 'optimiser', 'test', 'training'],
   trigger: ['system', 'user'],
   state: ['queued', 'running', 'paused', 'needs_attention', 'done', 'stopped', 'failed'],
-  result: ['valid', 'invalid', 'failed', 'kept', 'rejected', 'placeholders_changed'],
+  result: ['valid', 'invalid', 'filtered', 'failed', 'kept', 'rejected', 'placeholders_changed', 'dropped', 'checks', 'repeat'],
+  step: ['parent', 'reflect', 'merge', 'check', 'dry_run', 'full', 'report', 'confirm'],
   agent: ['front_desk', 'schema_agent', 'prompt_agent', 'evaluation_agent'],
-  from: ['front_desk'],
+  from: ['front_desk', 'schema_agent', 'prompt_agent', 'evaluation_agent'],
   to: ['schema_agent', 'prompt_agent', 'evaluation_agent'],
-  intent: ['answer', 'propose_schema', 'revise_schema', 'draft_prompt', 'revise_prompt', 'explain_version', 'explain_report', 'reflect'],
-  tool: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions', 'check_template', 'try_template', 'score_version', 'start_optimiser'],
+  intent: ['answer', 'propose_schema', 'revise_schema', 'check_schema', 'draft_prompt', 'revise_prompt', 'explain_version', 'explain_report', 'reflect', 'merge', 'improve'],
+  tool: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions', 'check_template', 'read_feature_info', 'read_doc', 'try_template', 'score_version', 'start_optimiser'],
   page: ['projects', 'setup', 'dataset', 'gold', 'prompt', 'prompt_edit', 'compare', 'report', 'training', 'other'],
   slot: ['A', 'B'],
-  what: ['score', 'resume', 'optimiser', 'try_template', 'score_version', 'start_optimiser', 'final_run', 'test_answers'],
-  decision: ['started', 'asked_off', 'asked_over_single_cap', 'asked_over_project_cap', 'asked_paused_over_budget'],
+  what: ['score', 'resume', 'optimiser', 'try_template', 'score_version', 'start_optimiser', 'final_run', 'test_answers', 'training_after_pass'],
+  decision: ['started'],
   node: ['setup', 'dataset', 'gold', 'prompt', 'training'],
   action: ['approve', 'refused', 'skip'],
   collection: ['projects', 'setup_versions', 'dataset_snapshots', 'examples', 'gold_labels', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'training_sets', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'recommendations', 'audit_log'],
@@ -154,7 +155,6 @@ export interface EventProps {
   schema_changed_after_labels: {gold_labels_needing_recheck: Num; reports_archived: Num};
   thresholds_saved: {mode: 'default' | 'custom' | 'none'; changed: string};
   models_saved: {slots: 'A' | 'B' | 'both'; temperature_changed: boolean};
-  auto_start_switched: {on: boolean};
   // Dataset
   sample_started: {requested: Num};
   sample_finished: {fetched: Num; seconds: Num; outcome: 'done' | 'stopped' | 'failed'};
@@ -165,6 +165,7 @@ export interface EventProps {
   model_answer_revealed: {split: string; had_answer: boolean};
   gold_label_saved: {split: string; revealed: boolean; seconds_on_example: Num; matches_model: boolean | null; was_recheck: boolean};
   gold_labels_uploaded: {source: 'file' | 'bundled'; saved: Num; skipped: Num};
+  gold_mismatch_reviewed: {outcome: 'kept' | 'changed'};
   gold_skipped: {eval_done: Num; eval_total: Num};
   test_answers_requested: {estimate_usd: Num; examples: Num};
   // Prompt Engineering
@@ -179,9 +180,9 @@ export interface EventProps {
   compare_opened: Record<string, never>;
   advice_shown: {kind: string};
   advice_followed: {kind: string; seconds_after_shown: Num};
-  optimiser_started: {slot: Slot; trigger: string; resumed: boolean};
+  optimiser_started: {slot: Slot; trigger: string; resumed: boolean; max_rounds: Num};
   optimiser_stopped_by_user: {slot: Slot; candidates: Num; cost_usd: Num};
-  optimiser_ended: {slot: Slot; outcome: string; candidates: Num; kept: Num; cost_usd: Num; best_lowest_field_macro_f1: Num | null};
+  optimiser_ended: {slot: Slot; outcome: string; rounds: Num; candidates: Num; kept: Num; cost_usd: Num; best_lowest_field_macro_f1: Num | null};
   rerun_requested: {version_id: Id; slot: Slot};
   // Training and test sets
   final_run_confirm_shown: {train: Num; test_to_label: Num; test_with_gold: Num; test_with_answers: Num; estimate_usd: Num; evaluated: boolean};
@@ -200,9 +201,6 @@ export interface EventProps {
   prompt_proposal_shown: {agent: string};
   prompt_proposal_approved: {agent: string; edited_before_approve: boolean};
   prompt_proposal_discarded: {agent: string};
-  start_card_shown: {tool: string; estimate_usd: Num};
-  start_card_accepted: {tool: string; estimate_usd: Num};
-  start_card_cancelled: {tool: string; estimate_usd: Num};
   auto_started: {what: string; estimate_usd: Num; project_auto_spend_usd: Num};
   // Problems
   error_shown: {code: string; where: string};
@@ -234,7 +232,6 @@ export const EVENT_PROP_KEYS: {[E in EventName]: readonly (keyof EventProps[E] &
   schema_changed_after_labels: ['gold_labels_needing_recheck', 'reports_archived'],
   thresholds_saved: ['mode', 'changed'],
   models_saved: ['slots', 'temperature_changed'],
-  auto_start_switched: ['on'],
   // Dataset
   sample_started: ['requested'],
   sample_finished: ['fetched', 'seconds', 'outcome'],
@@ -245,6 +242,7 @@ export const EVENT_PROP_KEYS: {[E in EventName]: readonly (keyof EventProps[E] &
   model_answer_revealed: ['split', 'had_answer'],
   gold_label_saved: ['split', 'revealed', 'seconds_on_example', 'matches_model', 'was_recheck'],
   gold_labels_uploaded: ['source', 'saved', 'skipped'],
+  gold_mismatch_reviewed: ['outcome'],
   gold_skipped: ['eval_done', 'eval_total'],
   test_answers_requested: ['estimate_usd', 'examples'],
   // Prompt Engineering
@@ -259,9 +257,9 @@ export const EVENT_PROP_KEYS: {[E in EventName]: readonly (keyof EventProps[E] &
   compare_opened: [],
   advice_shown: ['kind'],
   advice_followed: ['kind', 'seconds_after_shown'],
-  optimiser_started: ['slot', 'trigger', 'resumed'],
+  optimiser_started: ['slot', 'trigger', 'resumed', 'max_rounds'],
   optimiser_stopped_by_user: ['slot', 'candidates', 'cost_usd'],
-  optimiser_ended: ['slot', 'outcome', 'candidates', 'kept', 'cost_usd', 'best_lowest_field_macro_f1'],
+  optimiser_ended: ['slot', 'outcome', 'rounds', 'candidates', 'kept', 'cost_usd', 'best_lowest_field_macro_f1'],
   rerun_requested: ['version_id', 'slot'],
   // Training and test sets
   final_run_confirm_shown: ['train', 'test_to_label', 'test_with_gold', 'test_with_answers', 'estimate_usd', 'evaluated'],
@@ -280,9 +278,6 @@ export const EVENT_PROP_KEYS: {[E in EventName]: readonly (keyof EventProps[E] &
   prompt_proposal_shown: ['agent'],
   prompt_proposal_approved: ['agent', 'edited_before_approve'],
   prompt_proposal_discarded: ['agent'],
-  start_card_shown: ['tool', 'estimate_usd'],
-  start_card_accepted: ['tool', 'estimate_usd'],
-  start_card_cancelled: ['tool', 'estimate_usd'],
   auto_started: ['what', 'estimate_usd', 'project_auto_spend_usd'],
   // Problems
   error_shown: ['code', 'where'],

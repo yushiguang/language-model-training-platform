@@ -35,11 +35,12 @@ The internal module exports `createPlatform()` returning the `Platform` object f
 | Field | What it must do | Stand-in |
 |---|---|---|
 | `db: DocRuntime` | Document collections: add, get, set, partial update with `DocFieldValue` (increment, arrayUnion, arrayRemove, delete), delete, find, query with filters and offset paging, polling subscribe, batch writes. `createdAt` is server time | `localDocRuntime` (`localStorage`) |
-| `models: LabelingModels` | One labeling call per example (`chat`, `chatStream`) on slot A or B; returns text and token usage. Throw `LlmCallError` (or an error with an HTTP `status`) so the gateway can tell busy from rejected | `simulatedModels` |
+| `models: LabelingModels` | One labeling call per example (`chat`, `chatStream`) on slot A or B; returns text and token usage. Throw `LlmCallError` (or an error with an HTTP `status`) so the gateway can tell busy from rejected; throw `LlmCallError('filtered', …)` when the endpoint's safety filter stops the answer (Prompt versions shows it as Filtered) | `simulatedModels` |
 | `agent: AgentModel` | Agent chat (`chat`, `complete` with usage and thinking, `chatStream`, `models()`) | `scriptedAgent` |
 | `identity: Identity` | The signed-in user (id, name, email, organization) | `localIdentity` |
 | `files: FileStore` | Uploads for prompt images and chat attachments; returns a URL the model can fetch | `browserFiles` (data URLs) |
 | `examples: ExampleSource` | The prepared examples file (50 to 100 examples with features) and id lookup | `sampleExamples` |
+| `media?: MediaSource` | The player page and still images of one example by item id, for people to look at on Gold Labels (see "Media") | `sampleMedia` (made-up pictures, no player) |
 | `endpoints?: EndpointConfig[]` | Registered endpoints with real limits (next section) | not set: assumed limits |
 | `telemetry?: TelemetrySink` | Takes product events (`pushEvents`, batches of `TelemetryEvent`) and metrics as Prometheus text (`pushMetrics`) and forwards them to the company's telemetry system. Must not throw; slow is fine (the app buffers) | `localTelemetrySink` (`localStorage`); not set: kept in memory only |
 | `standIns: string[]` | Names shown in the header while any stand-in is in use; empty in production | all |
@@ -64,6 +65,53 @@ replies carry `Retry-After`, and that uploaded image URLs are reachable by the l
 The MVP dataset is a prepared file in the format of `apps/web/public/sample-data/examples.json`.
 Upload it to the file store and build with `NEXT_PUBLIC_EXAMPLES_URL` set to its URL. Real
 examples never go in this repo.
+
+## Media
+
+`MediaSource` (`packages/contracts/src/platform-api.ts`) feeds the player and still images on
+Gold Labels. Playback is an embedded player page, never a direct video file:
+
+1. Implement `media(externalId, type)` in the internal module: return an `ExampleMedia` with a
+   `playerUrl` the Gold Labels page loads in an iframe (the item's official embed player, or a
+   fallback viewer when the item is no longer publicly playable — the adapter may probe
+   availability first), a `coverUrl`, still `imageUrls` (key frames, or a photo-and-text post's
+   images) and `durationSec` when known; return `null` when the item has no media. Set `media`
+   on the `Platform` object and drop `'media'` from `standIns`.
+2. If the real interface needs more than this (signed URLs that expire, several renditions,
+   access checks), ask for a contract change (next section) instead of working around the type.
+3. `exampleMedia(exampleId)` in `apps/web/src/backend-api` returns what the source gives; the
+   Gold Labels page embeds `playerUrl` and shows the still images under it.
+
+Media is for people only. The labeling models receive image features through the prompt
+template, and the URLs there must be reachable by the models (see "Endpoints and limits").
+
+## Feature descriptions
+
+`FeatureInfoSource` (`packages/contracts/src/platform-api.ts`) says what each feature holds. The
+Optimiser and the Prompt helper read it with the `read_feature_info` tool before they tick or
+untick a feature, and the prompt editor shows it on hover over a feature name.
+
+1. Implement `describe(keys)` in the internal module: for each feature key (the placeholder name,
+   for example `OCR_Text`) return a `FeatureInfo` with a one-line `description` of what the
+   feature holds, and optionally `goodFor` (when it helps labeling) and `caveats` (often empty,
+   cut, noisy, costly as an image). Leave out keys with no description.
+2. Set `featureInfo` on the `Platform` object and drop `'feature descriptions'` from `standIns`.
+   The stand-in (`packages/platform/src/standins/feature-info.ts`) has made-up descriptions for
+   every catalogue key.
+
+## Document links
+
+`DocumentSource` (`packages/contracts/src/platform-api.ts`) lets the helpers read a document the
+user links in Ask AI (for example a labeling guide). They call the `read_doc` tool with the link;
+the bff passes it to `Platform.documents` and cuts the text at 20,000 characters. The stand-in
+(`packages/platform/src/standins/documents.ts`) opens nothing, and the helper asks for the text.
+
+1. Implement `read(url)` in the internal module: for a link to the internal document service,
+   return a `LinkedDocument` with its `title` and its `text` (plain text or Markdown; tables as
+   text), read as the signed-in user so a person never sees a document they can't open. Return
+   `null` for a link it can't read (another host, no access, deleted).
+2. Set `documents` on the `Platform` object and drop `'document links'` from `standIns`.
+3. Images in a document are not read in this version; say so in the text if they matter.
 
 ## Asking for a contract change
 

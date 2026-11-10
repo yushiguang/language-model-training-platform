@@ -1,6 +1,6 @@
 # Agent Runtime Service Guide (`apps/agents`)
 
-`apps/agents` (`@tsp/agents`) is the standalone Agent Runtime service for the Training Set Platform.
+`apps/agents` (`@tsp/agents`) is the standalone Agent Runtime service for Sprint, the training set platform.
 It is owned and evolved by coding agents working in the public repository, and will later be
 deployed as a dedicated microservice (or ported to Go alongside the BFF).
 
@@ -22,9 +22,8 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
      calls per turn; a tool not on the preset's list is refused; results are cut at 12,000
      characters. Changes are still proposals in the answer.
    - **Start tools** (`START_TOOLS`: `try_template`, `score_version`, `start_optimiser`) spend
-     money and are marked PAID in the prompt. The host runs them within the automatic-start caps,
-     or answers `{"asked_user": true}` and shows the user an Approve card; after that answer the
-     runtime ends the turn (no more tools).
+     money and are marked PAID in the prompt. The host runs them at once (no cost limit, no
+     approval); the user stops them from the page.
    - The output lists the model calls and the answers that weren't JSON, for metrics.
 2. **Specialist agent presets (`src/presets.ts`)**:
    - `front_desk`: Answers questions about the current page and hands off to specialists.

@@ -1,14 +1,9 @@
 'use client';
 
-import {useMemo} from 'react';
-import {applyFix, checkTemplate, type CheckResult, type Fix} from '@tsp/domain';
-import type {FeatureSelection, PromptImage, Schema} from '@tsp/contracts';
-import {uploadAsset} from '@/backend-api';
-import {Icon} from '@/ui';
-import {FeaturesPanel} from './FeaturesPanel';
-import {PromptEditor} from './PromptEditor';
-import {PromptPreview} from './PromptPreview';
-import type {ProjectState} from '@/backend-api';
+import {useMemo, useRef, useState, type MouseEvent, type ReactNode} from 'react';
+import {ALL_KEYS, applyFix, checkTemplate, FEATURES, labelOf, placeholderKeys, type CheckResult, type Fix, type MarkSeg} from '@tsp/domain';
+import type {ExampleType, FeatureSelection, PromptImage, Schema} from '@tsp/contracts';
+import {Badge, Button, Card, Cb, CheckRow, useCopy} from '@/ui';
 
 export interface Draft {
   template: string;
@@ -16,102 +11,194 @@ export interface Draft {
   images: PromptImage[];
 }
 
-export function useChecks(draft: Draft, schema: Schema | null | undefined, types: ('video' | 'photo_text')[]): CheckResult {
-  return useMemo(
-    () => checkTemplate(draft.template, draft.features, {schema, types, images: draft.images, costNote: 'Image features make up most of the cost of each call; the estimate under the button counts them.'}),
-    [draft.template, draft.features, draft.images, schema, types],
-  );
+export function useChecks(draft: Draft, schema: Schema | null | undefined, types: ExampleType[]): CheckResult {
+  return useMemo(() => checkTemplate(draft.template, draft.features, {schema, types, images: draft.images}), [draft.template, draft.features, draft.images, schema, types]);
 }
 
-/** Editor + prompt images + checks on the left, features on the right. Used by "start" and "edit". */
-export function Workbench({draft, onChange, check, readOnly, hint, state}: {draft: Draft; onChange: (d: Draft) => void; check: CheckResult; readOnly?: boolean; hint?: React.ReactNode; state?: ProjectState}) {
+/**
+ * The prompt page (design: "Prompt page"): Prompt template on the left, Checks and Features on
+ * the right. Used to write the first version, edit one, or view one.
+ */
+export function Workbench({draft, onChange, check, readOnly, marks, featureTips}: {draft: Draft; onChange: (d: Draft) => void; check: CheckResult; readOnly?: boolean; marks?: MarkSeg[]; featureTips?: Record<string, string>}) {
   const fix = (f: Fix) => onChange({...draft, ...applyFix(draft.template, draft.features, f)});
-  const addImage = async (file: File) => {
-    const {url} = await uploadAsset(file);
-    const images = [...draft.images, {name: file.name, url, size: file.size}];
-    onChange({...draft, images, template: draft.template + (draft.template.endsWith('\n') ? '' : '\n') + `[Image ${images.length}]`});
-  };
   return (
     <div className="prompt-grid">
-      <div className="col" style={{gap: 16}}>
-        <div className="col">
-          <div className="row">
-            <span style={{fontWeight: 500}}>Prompt template</span>
-            <span className="small muted">
-              Type {'{{'} to pick a feature. <span className="ph img">Image</span> placeholders put images at that spot.
-            </span>
-            {hint}
-            {!readOnly && (
-              <label className="right row" style={{gap: 6, cursor: 'pointer', fontWeight: 500}}>
-                <Icon name="image" /> Add image
-                <input type="file" accept="image/*" className="sr-only" onChange={e => e.target.files?.[0] && void addImage(e.target.files[0])} />
-              </label>
-            )}
-          </div>
-          <PromptEditor value={draft.template} onChange={template => onChange({...draft, template})} features={draft.features} readOnly={readOnly} />
-          {draft.images.length > 0 && (
-            <div className="row" style={{gap: 8}}>
-              {draft.images.map((img, i) => (
-                <div key={i} className="img-card">
-                  <img src={img.url} alt="" />
-                  <span className="col" style={{gap: 0}}>
-                    <b>Image {i + 1}</b>
-                    <span className="small muted">
-                      {img.name} · {Math.round(img.size / 1024)} KB
-                    </span>
-                  </span>
-                  {!readOnly && (
-                    <button className="copy" style={{visibility: 'visible'}} aria-label={`Remove image ${i + 1}`} onClick={() => onChange({...draft, images: draft.images.filter((_, k) => k !== i)})}>
-                      ×
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        {state && <PromptPreview draft={draft} state={state} />}
-        <Checks check={check} onFix={readOnly ? undefined : fix} />
+      <Card title="Prompt template" className="fill-scroll" style={{height: '100%'}}>
+        <Editor value={draft.template} onChange={template => onChange({...draft, template})} readOnly={readOnly} marks={marks} />
+      </Card>
+      <div className="col" style={{gap: 16, minHeight: 0}}>
+        <Checks draft={draft} check={check} onFix={readOnly ? undefined : fix} />
+        <Features features={draft.features} onChange={readOnly ? undefined : features => onChange({...draft, features})} tips={featureTips} />
       </div>
-      <FeaturesPanel features={draft.features} onChange={features => onChange({...draft, features})} readOnly={readOnly} />
     </div>
   );
 }
 
-export function Checks({check, onFix}: {check: CheckResult; onFix?: (f: Fix) => void}) {
-  const {errors, warnings} = check;
-  const summary = errors.length ? `${errors.length} error${errors.length > 1 ? 's' : ''} · ${warnings.length} warning${warnings.length === 1 ? '' : 's'}` : `No errors · ${warnings.length} warning${warnings.length === 1 ? '' : 's'}`;
+/**
+ * Placeholders show as grey tokens, red when they are not a feature. No autocomplete in the MVP.
+ * `marks` (design 2026-11-10): added text has a green background; removed text is a small red
+ * space that takes no room, so the text lines up with the text box. The marks are drawn under the
+ * text box; hovering finds the mark under the pointer and shows what was removed and why.
+ */
+function Editor({value, onChange, readOnly, marks}: {value: string; onChange: (v: string) => void; readOnly?: boolean; marks?: MarkSeg[]}) {
+  const box = useRef<HTMLDivElement>(null);
+  const [tip, setTip] = useState<{i: number; x: number; y: number} | null>(null);
+  const shown = marks?.some(m => m.kind !== 'same') ? marks : undefined;
+  const hover = (e: MouseEvent) => {
+    if (!shown || !box.current) return;
+    const el = document.elementsFromPoint(e.clientX, e.clientY).find(n => n instanceof HTMLElement && n.dataset.mark) as HTMLElement | undefined;
+    const i = el ? Number(el.dataset.mark) : -1;
+    const m = shown[i];
+    if (!el || !m || (m.kind === 'add' && !m.reason)) return setTip(null);
+    if (tip?.i === i) return;
+    const r = el.getClientRects()[0] ?? el.getBoundingClientRect();
+    const o = box.current.getBoundingClientRect();
+    setTip({i, x: Math.max(0, r.left - o.left - 14), y: r.bottom - o.top + 6});
+  };
+  const t = tip && shown?.[tip.i];
   return (
-    <div className="card" aria-label="Checks">
-      <div className="row">
-        <h2>Checks</h2>
-        <span className={errors.length ? '' : 'muted'} style={errors.length ? {color: 'var(--err)', fontWeight: 500} : undefined}>
-          {summary}
-        </span>
-      </div>
-      {!errors.length && <span className="row small" style={{gap: 8}}>
-        <span className="tick"><Icon name="check" size={12} /></span>
-        All {check.matched} placeholders match ticked features.
-      </span>}
-      <div>
-        {errors.map((e, i) => (
-          <div className="issue" key={`e${i}`}>
-            <span className="dot-err" aria-label="Error">
-              !
-            </span>
-            <span className="grow">{e.message}</span>
-            {onFix && e.fixes.map(f => <button key={f.label} className="opt" style={{border: '1px solid var(--line-2)'}} onClick={() => onFix(f.fix)}>{f.label}</button>)}
+    <div className="ed-scroll">
+      <div className="ed" ref={box}>
+        <div className="editor" aria-hidden="true">
+          {shown
+            ? shown.map((m, i) =>
+                m.kind === 'same' || (m.kind === 'add' && !m.text.trim()) ? (
+                  <span key={i}>{highlight(m.text)}</span>
+                ) : m.kind === 'add' ? (
+                  <span key={i} data-mark={i} className={`ed-add${m.reason ? ' why' : ''}`}>
+                    {highlight(m.text)}
+                  </span>
+                ) : (
+                  <span key={i} data-mark={i} className="ed-del" />
+                ),
+              )
+            : highlight(value)}
+          {'\n'}
+        </div>
+        <label className="sr-only" htmlFor="tpl">
+          Prompt template
+        </label>
+        <textarea id="tpl" value={value} readOnly={readOnly} spellCheck={false} placeholder={readOnly ? undefined : 'Paste your prompt, or ask AI to draft one'} onChange={e => onChange(e.target.value)} onMouseMove={shown ? hover : undefined} onMouseLeave={() => setTip(null)} />
+        {t && (
+          <div className="ed-pop" role="tooltip" style={{left: tip.x, top: tip.y}}>
+            {t.kind === 'del' && (
+              <>
+                <span className="ed-pop-k">Removed</span>
+                <span className="ed-pop-del">{withTokens(t.text.trim() ? t.text : '(spaces or line breaks)')}</span>
+              </>
+            )}
+            {t.reason && <span className="ed-pop-why">{t.reason}</span>}
           </div>
-        ))}
-        {warnings.map((w, i) => (
-          <div className="issue" key={`w${i}`}>
-            <span className="dot-warn" aria-label="Warning">
-              !
-            </span>
-            <span className="grow muted">{w.message}</span>
-          </div>
-        ))}
+        )}
       </div>
     </div>
+  );
+}
+
+function highlight(text: string): ReactNode[] {
+  const out: ReactNode[] = [];
+  let last = 0;
+  for (const m of text.matchAll(/\{\{([A-Za-z0-9_]+)\}\}/g)) {
+    out.push(text.slice(last, m.index));
+    out.push(
+      <span key={m.index} className={`tok${ALL_KEYS.includes(m[1]) ? '' : ' bad'}`}>
+        {m[0]}
+      </span>,
+    );
+    last = m.index! + m[0].length;
+  }
+  out.push(text.slice(last));
+  return out;
+}
+
+/** A message with its {{placeholders}} drawn as tokens (red when they are not a feature). */
+function withTokens(text: string): ReactNode {
+  const parts = text.split(/(\{\{[A-Za-z0-9_]+\}\})/);
+  return parts.map((p, i) =>
+    /^\{\{/.test(p) ? (
+      <span key={i} className={`tok${ALL_KEYS.includes(p.slice(2, -2)) ? '' : ' bad'}`} style={{textDecoration: 'none', verticalAlign: 1}}>
+        {p}
+      </span>
+    ) : (
+      p
+    ),
+  );
+}
+
+/**
+ * Checks (design: green tick, amber warning or red error, one Fix per error). Warnings that the
+ * design does not draw (image cost, values not named in the prompt) are left out: see docs/ui-gaps.md.
+ */
+function Checks({draft, check, onFix}: {draft: Draft; check: CheckResult; onFix?: (f: Fix) => void}) {
+  const n = check.errors.length;
+  const oneType = check.warnings.some(w => w.code === 'one_type_only');
+  const used = [...placeholderKeys(draft.template)];
+  const onlyPhoto = used.filter(k => draft.features.photo_text.includes(k) && !draft.features.video.includes(k)).map(labelOf);
+  const onlyVideo = used.filter(k => draft.features.video.includes(k) && !draft.features.photo_text.includes(k)).map(labelOf);
+  const and = (l: string[]) => (l.length > 1 ? `${l.slice(0, -1).join(', ')} and ${l[l.length - 1]}` : l[0]);
+  const oneTip = [onlyPhoto.length ? `${and(onlyPhoto)} load${onlyPhoto.length === 1 ? 's' : ''} only for photo and text` : '', onlyVideo.length ? `${and(onlyVideo)} only for video` : ''].filter(Boolean).join('; ') + '. Examples of the other type leave those lines out.';
+  const oneCount = onlyPhoto.length + onlyVideo.length;
+  return (
+    <Card title="Checks" className="tight" titleExtra={n ? <Badge text={`${n} error${n > 1 ? 's' : ''}`} tone="err" icon={false} /> : undefined}>
+      <div>
+        {check.errors.map((e, i) => (
+          <CheckRow key={`e${i}`} tone="err" text={withTokens(e.message)} tip={e.message} fix={onFix && e.fixes[0] ? <Button label="Fix" kind="secondary" size="sm" title={e.fixes[0].label} onClick={() => onFix(e.fixes[0].fix)} /> : undefined} />
+        ))}
+        {!n && <CheckRow tone={check.matched ? 'ok' : 'warn'} text={check.matched ? `All ${check.matched} placeholders match ticked features` : 'No placeholders in the template yet'} />}
+        {oneType && oneCount > 0 && <CheckRow tone="warn" text={`${oneCount} placeholder${oneCount > 1 ? 's' : ''} load${oneCount > 1 ? '' : 's'} for one type only`} tip={oneTip} />}
+      </div>
+    </Card>
+  );
+}
+
+type Group = keyof FeatureSelection;
+const SECTIONS: {group: Group; name: string}[] = [
+  {group: 'video', name: 'Video'},
+  {group: 'photo_text', name: 'Photo and text'},
+  {group: 'metadata', name: 'Metadata'},
+];
+
+/** Features: three sections with a select-all box each; clicking a name copies its placeholder. */
+function Features({features, onChange, tips}: {features: FeatureSelection; onChange?: (f: FeatureSelection) => void; tips?: Record<string, string>}) {
+  const [copied, copy] = useCopy();
+  const scroll = useRef<HTMLDivElement>(null);
+  const toggle = (g: Group, key: string) => onChange?.({...features, [g]: features[g].includes(key) ? features[g].filter(k => k !== key) : [...features[g], key]});
+  return (
+    <Card title="Features" className="fill-scroll">
+      <div ref={scroll} className="ed-scroll" style={{paddingBottom: 24}}>
+        <div className="col" style={{gap: 20}}>
+          {SECTIONS.map(({group, name}) => {
+            const keys = FEATURES[group].map(f => f.key);
+            const on = keys.filter(k => features[group].includes(k)).length;
+            const all = on === keys.length ? 'on' : on === 0 ? 'off' : 'mixed';
+            return (
+              <div key={group} className="col" style={{gap: 0}}>
+                <div className="row" style={{height: 40, gap: 12, borderBottom: '1px solid var(--border)'}}>
+                  <b style={{fontSize: 13}} className="grow">
+                    {name}
+                  </b>
+                  <span title="Select all">
+                    <Cb state={all} label={`Select all ${name}`} onToggle={onChange ? () => onChange({...features, [group]: all === 'on' ? [] : keys}) : undefined} />
+                  </span>
+                </div>
+                <div className="col" style={{gap: 0, paddingTop: 4}}>
+                  {FEATURES[group].map(f => {
+                    const ph = `{{${f.key}}}`;
+                    return (
+                      <div key={f.key} className="row" style={{height: 36, gap: 12}}>
+                        <span className="grow one copy-name" role="button" tabIndex={0} title={copied === ph ? `Copied ${ph}` : `${tips?.[f.key] ? `${tips[f.key]}\n` : ''}Click to copy ${ph}`} onClick={() => copy(ph)} onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), copy(ph))}>
+                          {f.label}
+                        </span>
+                        <Cb state={features[group].includes(f.key) ? 'on' : 'off'} label={`${f.label}, ${name}`} onToggle={onChange ? () => toggle(group, f.key) : undefined} />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </Card>
   );
 }

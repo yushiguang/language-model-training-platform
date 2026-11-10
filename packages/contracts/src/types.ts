@@ -24,8 +24,11 @@ export interface LabelField {
   values: LabelValue[];
 }
 
+/**
+ * The label fields. There is no separate policy text (removed 2026-11-09): each value's one-line
+ * definition and the prompt carry the rules.
+ */
 export interface Schema {
-  policy: string;
   fields: LabelField[];
 }
 
@@ -36,7 +39,12 @@ export interface Thresholds {
   mode: 'default' | 'custom';
   /** Always on: the main score. Lowest macro-F1 across fields must reach it. */
   macroF1: number;
+  /** Per value. null = off. */
   valueF1: number | null;
+  /** Per value (added 2026-11-06). Missing on older records = off. */
+  precision?: number | null;
+  recall?: number | null;
+  /** Not shown in the MVP UI (2026-11-04); kept for older records. */
   invalidRate: number | null;
   accuracy: number | null;
   minEval: number;
@@ -47,6 +55,11 @@ export interface ModelSettings {
   maxOutputTokens: number;
   /** null when the model does not support temperature. */
   temperature: number | null;
+  /**
+   * A second labeling of the same examples (2): the Optimiser's confirmation of a pass. It is part
+   * of the answers' key, so the answers are fresh; never sent to the model.
+   */
+  pass?: number;
 }
 
 export interface SetupVersion {
@@ -61,12 +74,6 @@ export interface SetupVersion {
   thresholds: Thresholds | null;
   models: ModelSettings[];
   steps: {schema: boolean; evaluation: boolean; models: boolean};
-  /**
-   * "Start paid labeling automatically" (Setup step 3). On: scoring new versions, the optimiser,
-   * resuming after a closed page and agent start tools start by themselves, within the fixed caps.
-   * Off: each asks first. Missing on older records = on.
-   */
-  autoStart?: boolean;
   createdAt: string;
   createdBy: string;
 }
@@ -106,6 +113,20 @@ export interface DatasetSnapshot {
   createdAt: string;
   counts: {rows: number; valid: number; invalid: number; video: number; photoText: number};
   split: {eval: number; test: number; train: number} | null;
+}
+
+/**
+ * Gold Labels' Mismatches tab: eval examples where a version's saved answer differs from the gold
+ * label, wrong in the most versions first. `versions`: the versions with answers on the whole eval
+ * set (the picker), `versionId`: the one compared. `wrongEverywhere`: open examples wrong in every
+ * one of them (2 or more). `reviewed`: decisions made on the tab so far.
+ */
+export interface MismatchList {
+  versions: {id: string; label: string; score: number | null; best?: boolean}[];
+  versionId: string | null;
+  items: {exampleId: string; wrongIn: number; of: number}[];
+  wrongEverywhere: number;
+  reviewed: number;
 }
 
 export interface GoldLabel {
@@ -157,7 +178,11 @@ export interface Prediction {
   output: string;
   answer: Answer | null;
   invalidReason: string | null;
+  /** The endpoint's safety filter stopped the answer (`answer` is null). */
+  filtered?: boolean;
   costUsd: number;
+  /** Input + output tokens of the call (reasoning included). Missing on older records. */
+  tokens?: number;
   createdAt: string;
 }
 
@@ -172,15 +197,27 @@ export interface LabelingRun {
   state: JobState;
   done: number;
   total: number;
+  /** Valid answers saved (examples that got a label). */
+  valid?: number;
+  /** Answers saved that did not match the schema (filtered ones included). */
+  invalid?: number;
+  /** Examples the endpoint's safety filter stopped. */
+  filtered?: number;
+  /** Examples whose call failed after the gateway's retries. */
+  failed?: number;
   costUsd: number;
+  /** Tokens used by this run's answers (Training Set: "Total tokens"). */
+  tokens?: number;
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
   /** Created by code without a click. */
   auto?: boolean;
-  /** What runs started by code spent on it (counts toward the automatic-spend cap). */
+  /** 'optimiser': labeled by an Optimiser run (its dry run, or the eval set). */
+  purpose?: 'eval' | 'optimiser' | 'test';
+  /** What runs started by code spent on it (metrics and the audit; there is no cap). */
   autoCostUsd?: number;
-  /** Paused because a run's cost passed 120% of its estimate: resuming always asks. */
+  /** Paused for its budget. The MVP sets no budgets, so this stays false; kept for the labeling app's budget support. */
   overBudget?: boolean;
 }
 
@@ -233,22 +270,77 @@ export interface EvalReport {
   createdAt: string;
 }
 
+/**
+ * The Optimiser's dry run: before a change is labeled on the whole eval set, it is labeled on a
+ * few examples of the optimiser half, next to the version it came from. "Passed" = examples where
+ * every field matches the gold label.
+ */
+export interface DryRunResult {
+  examples: number;
+  passed: number;
+  parentPassed: number;
+  parentId: string;
+  /** Per field: examples with that field right. */
+  fields: {field: string; passed: number; parentPassed: number}[];
+}
+
+/** What an Optimiser run is doing now (the panel's "Now" line). */
+export type OptimiserStep = 'parent' | 'reflect' | 'merge' | 'check' | 'dry_run' | 'full' | 'report' | 'confirm';
+
+/** One change the Optimiser tried: a row of the panel's history, newest first in the UI. */
+export interface OptimiserRound {
+  round: number;
+  /** The version made for the change; null when nothing was labeled (failed the Checks, repeated). */
+  versionId: string | null;
+  parentId: string;
+  /** A merge of two versions, or one change from the mistakes. */
+  kind: 'change' | 'merge';
+  change: string;
+  outcome: 'running' | 'kept' | 'dropped' | 'checks' | 'repeat' | 'failed' | 'stopped';
+  /** Kept versions: the score on the held-out half (lowest field macro-F1). */
+  score: number | null;
+  passed: boolean;
+  dryRun: DryRunResult | null;
+  /**
+   * A pass is confirmed by labeling the held-out half a second time (decided 2026-11-10): the
+   * second labeling's score, and whether it passes too. Only a confirmed pass ends the run.
+   */
+  confirm?: {score: number; passed: boolean} | null;
+  /** Where a failed or stopped round was, so Retry resumes there. */
+  step?: OptimiserStep;
+}
+
 export interface OptimisationRun {
   id: string;
   projectId: string;
   endpoint: EndpointId;
+  /** The version the run started from ("Started from"). */
   startVersionId: string;
+  /** The major number this run's versions use (v4.1, v4.2…). */
+  major: number;
+  maxRounds: number;
+  /** Rounds started so far (a round = one change tried, merges included). */
+  round: number;
   state: JobState;
-  budgetCalls: number;
+  step: OptimiserStep | null;
+  stepStartedAt: string | null;
+  /** The version the current step works on, when there is one. */
+  stepVersionId: string | null;
+  history: OptimiserRound[];
+  /** Labeling calls and cost, for telemetry only (never shown). */
   calls: number;
   candidates: number;
   costUsd: number;
+  /** 'passes' | 'max_rounds' | 'no_new_ideas' | 'user'. */
   stopReason: string | null;
+  /** Failed: one line naming the step and the error. */
   error: string | null;
   startedAt: string;
   finishedAt: string | null;
-  /** Started by code without a click (counts toward the automatic-spend cap). */
+  /** Started by an agent's start tool, after the user asked in Ask AI; shown as an action line. */
   auto?: boolean;
+  /** The training and test sets this run started after a version passed. */
+  trainingSetId?: string | null;
 }
 
 export interface TrainingSet {
@@ -281,6 +373,8 @@ export interface TrainingSet {
   /** Examples whose model call failed after all retries ("Retry failed" re-runs them). */
   failed: number;
   costUsd: number;
+  /** Tokens used by the run's answers (Training Set: "Total tokens"). */
+  tokens?: number;
   estimateUsd: number;
   error: string | null;
   startedAt: string;
@@ -324,33 +418,44 @@ export interface ChatAttachment {
   content?: string;
 }
 
+/**
+ * What a grey action line in Ask AI records (`role: 'event'`): a helper joined, a draft was put
+ * on a page, the user approved or discarded it, paid work started (by a helper, or automatically
+ * by the workflow), the user stopped work, or the page's own helper answers again.
+ */
+export type ChatEvent = 'join' | 'draft' | 'approved' | 'discarded' | 'start' | 'auto' | 'stop' | 'page';
+
+/** Where an action line leads: a step page and its query (the page adds the project). */
+export interface ChatLink {
+  path: string;
+  params?: Record<string, string>;
+}
+
+/** A turn while it runs, for Ask AI (not saved): who works, what it is doing, the reply so far. */
+export interface AgentLive {
+  agent: AgentPreset;
+  /** A plain line such as "Reading the v4 report…"; null once the reply streams. */
+  working: string | null;
+  /** The reply streamed so far. */
+  reply: string | null;
+}
+
 export interface ChatMessage {
   id: string;
   projectId: string;
   role: 'user' | 'agent' | 'event';
   agent: AgentPreset | null;
   text: string;
+  /** Action lines only: what happened, for the line's icon. */
+  event?: ChatEvent;
+  /** Action lines only: the page where it happened; the whole line links there. */
+  link?: ChatLink;
   /** Quick replies the user can tap. */
   choices?: string[];
   /** Files attached to this message. */
   attachments?: ChatAttachment[];
-  /** An agent asked to start paid work and needs the user's approval (Approve / Cancel). */
-  startCard?: StartCard;
   page: string;
   createdAt: string;
-}
-
-/** A paid start an agent asked for, waiting for the user's approval in the chat. */
-export interface StartCard {
-  tool: 'try_template' | 'score_version' | 'start_optimiser';
-  agent: AgentPreset;
-  /** What the buttons say, e.g. "Score v1.3 on Model A". */
-  label: string;
-  estimateUsd: number;
-  args: Record<string, unknown>;
-  /** Why it asks: the switch is off, or a fixed cap applies. */
-  reason: 'off' | 'over_single_cap' | 'over_project_cap';
-  state: 'open' | 'approved' | 'cancelled';
 }
 
 export interface AgentProposal {
@@ -444,6 +549,10 @@ export interface PageView {
 export interface SamplingTask {
   id: string;
   projectId: string;
+  /** 'upload': loading the features of an uploaded file's item IDs (Dataset, "Loading features"). Missing = 'sample'. */
+  kind?: 'sample' | 'upload';
+  /** Upload only: the file's name. */
+  fileName?: string;
   total: number;
   fetched: number;
   startedAt: string;

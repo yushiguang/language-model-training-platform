@@ -1,4 +1,5 @@
 import type {
+  AgentLive,
   AgentProposal,
   Answer,
   ChatAttachment,
@@ -51,7 +52,7 @@ const telemetry = createTelemetry({
 const gateway = createGateway(platform, {telemetry});
 const catalog = createCatalog(platform.db, {telemetry});
 const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: emitChange, telemetry});
-configureBff({catalog, labeling, gateway, agents: agentRuntime, identity: platform.identity, files: platform.files, examples: platform.examples, standIns: platform.standIns, telemetry});
+configureBff({catalog, labeling, gateway, agents: agentRuntime, identity: platform.identity, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, standIns: platform.standIns, telemetry, locks: browserLocks()});
 const web = webTelemetry(telemetry);
 void platform.identity.currentUser().then(u => telemetry.setContext({userId: u.id}));
 
@@ -211,6 +212,7 @@ export const approveNode = timed('approveNode', bff.approveNode);
 export const skipGold = timed('skipGold', bff.skipGold);
 export const saveSetup = timed('saveSetup', bff.saveSetup);
 export const getSamplePoolSize = timed('getSamplePoolSize', bff.getSamplePoolSize);
+export const exampleMedia = timed('exampleMedia', bff.exampleMedia);
 export const startSampleDataset = timed('startSampleDataset', bff.startSampleDataset);
 export const stopSampleDataset = timed('stopSampleDataset', bff.stopSampleDataset);
 export const applySplit = timed('applySplit', bff.applySplit);
@@ -218,11 +220,16 @@ export const saveGold = timed('saveGold', bff.saveGold);
 export const importBundledGold = timed('importBundledGold', bff.importBundledGold);
 export const createVersion = timed('createVersion', bff.createVersion);
 export const scoreVersion = timed('scoreVersion', bff.scoreVersion);
-export const scoreNewVersion = timed('scoreNewVersion', bff.scoreNewVersion);
 export const tick = timed('tick', bff.tick);
 export const stopRun = timed('stopRun', bff.stopRun);
 export const startOptimiser = timed('startOptimiser', bff.startOptimiser);
 export const stopOptimiser = timed('stopOptimiser', bff.stopOptimiser);
+export const retryOptimiser = timed('retryOptimiser', bff.retryOptimiser);
+export const improveWithAi = timed('improveWithAi', bff.improveWithAi);
+export const checkLabels = timed('checkLabels', bff.checkLabels);
+export const mismatches = timed('mismatches', bff.mismatches);
+export const reviewGold = timed('reviewGold', bff.reviewGold);
+export const featureInfo = timed('featureInfo', bff.featureInfo);
 export const predictionsFor = timed('predictionsFor', bff.predictionsFor);
 export const labelTestSet = timed('labelTestSet', bff.labelTestSet);
 export const startTrainingSet = timed('startTrainingSet', bff.startTrainingSet);
@@ -231,15 +238,17 @@ export const trainingRows = timed('trainingRows', bff.trainingRows);
 export const chatHistory = timed('chatHistory', bff.chatHistory);
 export const sendUserMessage = timed('sendUserMessage', bff.sendUserMessage);
 export const openProposals = timed('openProposals', bff.openProposals);
+export const proposals = timed('proposals', bff.proposals);
 export const closeProposal = timed('closeProposal', bff.closeProposal);
 const uploadDatasetText = timed('uploadDatasetText', bff.uploadDatasetText);
 export const uploadGold = timed('uploadGold', bff.uploadGold);
 export const isAgentBusy = bff.isAgentBusy;
-export const answerStartCard = timed('answerStartCard', bff.answerStartCard);
-/** Paid starts waiting for a click, with their cost (Setup's switch is off, or a cap applies). */
-export const waitingStarts = bff.waitingStarts;
+export const agentLive = bff.agentLive;
+export const subscribeAgentLive = bff.subscribeAgentLive;
+export const answeringAgent = bff.answeringAgent;
 
 export type {
+  AgentLive,
   AgentProposal,
   Answer,
   ChatAttachment,

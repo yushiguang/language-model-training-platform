@@ -1,5 +1,7 @@
 import type {
   Actor,
+  AgentLive,
+  AgentPreset,
   AgentProposal,
   Answer,
   ChatAttachment,
@@ -25,6 +27,7 @@ import type {
   TrainingSet,
 } from './types.ts';
 import type {LabelingTask} from './labeling-api.ts';
+import type {ExampleMedia, FeatureInfo} from './platform-api.ts';
 
 /**
  * Contract 1: Frontend Web App <-> BFF Service (`@tsp/contracts/bff-api`).
@@ -35,7 +38,7 @@ import type {LabelingTask} from './labeling-api.ts';
  * microservice deployments, it swaps to `fetch()` calls against the remote Go BFF service.
  */
 
-export type SetupPatch = Partial<Pick<SetupVersion, 'task' | 'schema' | 'thresholds' | 'models' | 'steps' | 'autoStart'>>;
+export type SetupPatch = Partial<Pick<SetupVersion, 'task' | 'schema' | 'thresholds' | 'models' | 'steps'>>;
 
 export interface NewVersion {
   template: string;
@@ -46,6 +49,8 @@ export interface NewVersion {
   madeBy: Actor;
   change: string;
   kind: 'minor' | 'major';
+  /** An Optimiser change: a minor in the run's own major. */
+  inMajor?: number;
   schema: Schema;
   schemaVersion: number;
 }
@@ -74,6 +79,8 @@ export interface BffContract {
 
   // Dataset & Gold labels
   getSamplePoolSize(): Promise<number>;
+  /** The media of one example, or null (no media source, or none for this example). */
+  exampleMedia(exampleId: string): Promise<ExampleMedia | null>;
   startSampleDataset(projectId: string, count: number): Promise<DatasetSnapshot | null>;
   stopSampleDataset(projectId: string): void;
   uploadDatasetText(projectId: string, name: string, text: string): Promise<{snapshot?: DatasetSnapshot; error?: string}>;
@@ -87,15 +94,20 @@ export interface BffContract {
   createVersion(projectId: string, v: NewVersion): Promise<PromptVersion>;
   /** A click on Score, Resume or Rerun: always starts (the user's start). */
   scoreVersion(projectId: string, version: PromptVersion, only?: EndpointId): Promise<void>;
-  /**
-   * After Save or Create: scores the new version on each model where an automatic start is
-   * allowed (Setup's switch and the caps); the others wait for a click.
-   */
-  scoreNewVersion(projectId: string): Promise<{started: EndpointId[]; waiting: EndpointId[]}>;
   tick(state: ProjectState): Promise<void>;
   stopRun(runId: string): void;
-  startOptimiser(projectId: string, endpoint: EndpointId): void;
+  /**
+   * Auto Optimise: the user starts a run of up to `maxRounds` changes on the project's model,
+   * from the version selected in the list (`startVersionId`; left out: the best scored version).
+   */
+  startOptimiser(projectId: string, maxRounds: number, startVersionId?: string): Promise<void>;
   stopOptimiser(runId: string): void;
+  /** Retry on a Failed (or paused) run: resumes from the step that failed. */
+  retryOptimiser(runId: string): Promise<void>;
+  /** Improve with AI: the Prompt helper drafts changes to a version and puts them in the editor (no labeling). */
+  improveWithAi(projectId: string, versionId: string): Promise<void>;
+  /** Feature descriptions by key, for hover text (empty without a source). */
+  featureInfo(keys: string[]): Promise<Record<string, FeatureInfo>>;
   predictionsFor(versionId: string, endpoint: EndpointId, settings: ModelSettings): Promise<Map<string, Prediction>>;
 
   // Test set answers (Gold Labels) and the final run (train + test)
@@ -104,15 +116,19 @@ export interface BffContract {
   startTrainingSet(projectId: string, version: PromptVersion, endpoint: EndpointId, report: EvalReport | null, estimateUsd: number, opts?: {labelTest?: boolean; existing?: TrainingSet}): Promise<TrainingSet>;
   stopTrainingSet(tsId: string): void;
 
-  // Paid starts: what waits for a click, and Approve / Cancel on an agent's start card
-  waitingStarts(state: ProjectState): {what: 'score' | 'resume' | 'optimiser'; versionId: string | null; endpoint: EndpointId; estimateUsd: number; key: string; reason: string}[];
-  answerStartCard(projectId: string, messageId: string, approve: boolean): Promise<void>;
   trainingRows(tsId: string): Promise<TrainingRow[]>;
 
   // Assistant & proposals
   chatHistory(projectId: string): Promise<ChatMessage[]>;
   isAgentBusy(projectId: string): boolean;
+  /** The turn running now, if any: who works, what it is doing, the reply so far (HTTP: SSE). */
+  agentLive(projectId: string): AgentLive | null;
+  subscribeAgentLive(listener: () => void): () => void;
+  /** Which helper answers the next message on this page: one that joined on it stays until the page changes. */
+  answeringAgent(projectId: string, page: PageContext): AgentPreset;
   sendUserMessage(projectId: string, text: string, page: PageContext, attachments?: ChatAttachment[]): Promise<AgentProposal | null>;
   openProposals(projectId: string, kind: AgentProposal['kind']): Promise<AgentProposal[]>;
+  /** Open and approved proposals, oldest first (Ask AI cards). */
+  proposals(projectId: string, kind: AgentProposal['kind']): Promise<AgentProposal[]>;
   closeProposal(p: AgentProposal, state: 'approved' | 'discarded'): Promise<void>;
 }

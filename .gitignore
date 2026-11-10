@@ -7,3 +7,7 @@ node_modules/
 
 # Internal overlay directory (managed in a separate repository)
 /internal/
+
+# End-to-end screenshots (apps/web/scripts/e2e-check.cjs); CI keeps them as a build artifact
+/docs/e2e/
+/e2e-shots/

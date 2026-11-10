@@ -17,17 +17,18 @@ function whyBelow(m: Metrics, t: Thresholds, evalCount: number): string {
 
 export const MADE_BY: Record<Actor, string> = {
   user: 'You',
-  prompt_agent: 'Prompt agent',
+  prompt_agent: 'Prompt helper',
   optimiser: 'Optimiser',
-  schema_agent: 'Schema agent',
+  schema_agent: 'Labels helper',
   system: 'System',
 };
 
+/** The helpers' names in Ask AI (plain words; the presets keep their technical ids). */
 const AGENT_NAMES: Record<AgentPreset, string> = {
-  front_desk: 'Front desk',
-  schema_agent: 'Schema agent',
-  prompt_agent: 'Prompt agent',
-  evaluation_agent: 'Evaluation agent',
+  front_desk: 'Assistant',
+  schema_agent: 'Labels helper',
+  prompt_agent: 'Prompt helper',
+  evaluation_agent: 'Scores helper',
 };
 
 export const agentName = (preset: AgentPreset): string => AGENT_NAMES[preset];
@@ -165,44 +166,49 @@ export function recommend(s: ProjectState, optimiserRunning: EndpointId | null):
   const passing = current.filter(r => r.passed);
   const name = (id: string) => versionLabel(s.versions.find(v => v.id === id)!);
   if (passing.length) {
-    const cheapest = [...passing].sort((a, b) => a.metrics.costPer1000 - b.metrics.costPer1000 || b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1)[0];
-    const m = cheapest.metrics;
+    // The best score wins, as on Training Set (review finding 11); cost only breaks a tie.
+    const pick = [...passing].sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1 || a.metrics.costPer1000 - b.metrics.costPer1000)[0];
+    const m = pick.metrics;
     const reasons = [
-      `All ${m.fields.length} fields are at ${t.macroF1.toFixed(2)} or higher${s.setup!.models.length > 1 ? ` on Model ${cheapest.endpoint}` : ''}${t.valueF1 != null ? `, and every value is above ${t.valueF1.toFixed(2)}` : ''}.`,
+      `All ${m.fields.length} fields are at ${t.macroF1.toFixed(2)} or higher${s.setup!.models.length > 1 ? ` on Model ${pick.endpoint}` : ''}${t.valueF1 != null ? `, and every value is above ${t.valueF1.toFixed(2)}` : ''}.`,
     ];
-    const other = s.setup!.models.find(x => x.endpoint !== cheapest.endpoint);
+    const other = s.setup!.models.find(x => x.endpoint !== pick.endpoint);
     if (other) {
       const best = current.filter(r => r.endpoint === other.endpoint).sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1)[0];
       if (best && !best.passed) reasons.push(`Model ${other.endpoint} is not there yet: its best${whyBelow(best.metrics, t, evalSize)}`);
-      else if (best?.passed) reasons.push(`Model ${cheapest.endpoint} costs less per 1,000 examples.`);
     }
     return {
       kind: 'make_training_set',
-      title: `Make the training and test sets with ${name(cheapest.promptVersionId)}${s.setup!.models.length > 1 ? ` on Model ${cheapest.endpoint}` : ''}`,
+      title: `Make the training and test sets with ${name(pick.promptVersionId)}${s.setup!.models.length > 1 ? ` on Model ${pick.endpoint}` : ''}`,
       reasons,
-      versionId: cheapest.promptVersionId,
-      endpoint: cheapest.endpoint,
+      versionId: pick.promptVersionId,
+      endpoint: pick.endpoint,
     };
   }
   if (optimiserRunning)
     return {
       kind: 'wait',
-      title: `The optimiser is improving the prompt for Model ${optimiserRunning}`,
-      reasons: ['No version passes yet. New versions appear below as they are scored.'],
+      title: 'The Optimiser is improving the prompt',
+      reasons: ['No version passes yet. Each change it tries appears in the versions list.'],
       versionId: null,
       endpoint: optimiserRunning,
     };
   const best = [...current].sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1)[0];
   if (!best) return {kind: 'score_first', title: 'Score a version on the eval set', reasons: ['Labeling runs on the eval set, then scores appear here.'], versionId: latest.id, endpoint: null};
   const mu = best.metrics.mixUps[0];
+  // The card's title names what holds the best version back; its one line names the top mix-up.
   return {
     kind: 'keep_improving',
-    title: 'Keep improving the prompt',
+    title: `${best.metrics.lowestField.field} holds ${name(best.promptVersionId)} back`,
     reasons: [
+      mu
+        ? mu.kind === 'confused'
+          ? `${mu.gold} is often read as ${mu.predicted}`
+          : mu.kind === 'extra'
+            ? `${mu.predicted} is often added when it does not apply`
+            : `${mu.gold} is often missed`
+        : `Best so far is ${name(best.promptVersionId)}${whyBelow(best.metrics, t, evalSize)}`,
       `Best so far is ${name(best.promptVersionId)}${whyBelow(best.metrics, t, evalSize)}`,
-      ...(mu
-        ? [`The most common mix-up: ${mu.kind === 'confused' ? `${mu.gold} tagged as ${mu.predicted}` : mu.kind === 'extra' ? `${mu.predicted} added when not needed` : `${mu.gold} missed`} (${mu.count}).`]
-        : []),
     ],
     versionId: best.promptVersionId,
     endpoint: best.endpoint,
