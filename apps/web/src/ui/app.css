@@ -29,6 +29,13 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible, input:focus-vis
 .ed { position: relative; }
 .ed .editor, .ed textarea { font-family: var(--mono); font-size: 13px; line-height: 22px; white-space: pre-wrap; overflow-wrap: anywhere; letter-spacing: 0; }
 .ed .editor .ed-add { background: #e6f4ea; border-radius: 4px; box-shadow: 0 0 0 2px #e6f4ea; }
+.ed .editor .ed-add.why { border-bottom: 1px dashed var(--text-3); }
+/* Removed text: a small red space that takes no room (negative margins), so the text keeps its place. */
+.ed .editor .ed-del { padding: 2px 6px; margin: 0 -6px; background: #fdecec; box-shadow: inset 0 0 0 1px #f3b4ae; border-radius: 4px; }
+.ed .ed-pop { position: absolute; z-index: 3; display: flex; flex-direction: column; gap: 4px; width: max-content; max-width: 380px; padding: 10px 12px; background: #fff; border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-med); font-family: var(--sans); font-size: 13px; line-height: 20px; color: var(--text); white-space: normal; pointer-events: none; }
+.ed .ed-pop-k { font-size: 12px; line-height: 16px; color: var(--text-3); }
+.ed .ed-pop-del { font-family: var(--mono); white-space: pre-wrap; color: #b42318; background: #fdecec; border-radius: 4px; padding: 2px 6px; }
+.ed .ed-pop-why { color: var(--text-2); }
 .ed textarea { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; outline: none; resize: none; overflow: hidden; background: transparent; color: transparent; caret-color: var(--text); }
 .ed textarea:focus-visible { outline: none; }
 .ed textarea::placeholder { color: var(--text-3); }

@@ -135,9 +135,22 @@ let current = null;
     await button(page, 'Improve with AI').first().click();
     await page.waitForURL(/prompt\/edit/);
     await page.getByText('Draft from Prompt helper', {exact: true}).waitFor({timeout: 20000});
-    log('improve with AI:', await page.locator('.ed .editor .ed-add').count(), 'lines marked');
+    log('improve with AI:', await page.locator('.ed .editor .ed-add').count(), 'changes marked');
+    // Hovering a change shows its reason (the marks sit under the text box)
+    const why = page.locator('.ed .editor .ed-add.why').first();
+    if (await why.count()) {
+      const b = (await why.evaluate(el => {
+        const r = el.getClientRects()[0];
+        return {x: r.left + 4, y: r.top + r.height / 2};
+      }));
+      await page.mouse.move(b.x, b.y);
+      await page.locator('.ed-pop').waitFor({timeout: 5000});
+      log('change reason on hover:', await page.locator('.ed-pop').innerText());
+    } else throw new Error('the helper draft has no change with a reason');
     await shot(page, '5a-improve-draft');
-    await page.getByRole('button', {name: /^Save as v\d+\.\d+$/}).click();
+    await page.mouse.move(5, 5);
+    if (!(await page.getByRole('button', {name: /^Save as v\d+$/}).count())) throw new Error('Save as vN (next major) is missing');
+    await page.getByRole('button', {name: 'Save', exact: true}).click();
     await page.waitForURL(/\/prompt\/?\?/);
   }
 
@@ -182,7 +195,29 @@ let current = null;
   await page.waitForURL(/prompt\/edit/);
   await page.locator('[aria-label="Checks"]').waitFor();
   log('checks:', (await page.locator('[aria-label="Checks"]').innerText()).replace(/\n/g, ' | '));
+  log('opened version marks:', await page.locator('.ed .editor [data-mark]').count(), (await page.locator('.ph-actions .badge').allInnerTexts()).join(', ') || '(no badge)');
   await shot(page, '6-prompt-edit');
+  // Your own edits: removed text is a red space, and hovering it shows what was removed
+  const tpl = page.locator('#tpl');
+  const before = await tpl.inputValue();
+  const cut = before.match(/[^\n.]{20,}\. /)?.[0];
+  if (!cut) throw new Error('no sentence to remove in the prompt');
+  await tpl.fill(before.replace(cut, ''));
+  await page.getByText('Unsaved changes', {exact: true}).waitFor();
+  const del = page.locator('.ed .editor .ed-del').first();
+  await del.waitFor({state: 'attached'});
+  const at = await del.evaluate(el => {
+    const r = el.getClientRects()[0];
+    return {x: r.left + r.width / 2, y: r.top + r.height / 2};
+  });
+  await page.mouse.move(at.x, at.y);
+  await page.locator('.ed-pop').waitFor({timeout: 5000});
+  const pop = await page.locator('.ed-pop').innerText();
+  if (!pop.startsWith('Removed') || !pop.includes(cut.trim().slice(0, 15))) throw new Error(`the removed-text hover is wrong: ${pop}`);
+  log('removed text on hover:', pop.replace(/\n/g, ' | '));
+  await shot(page, '6b-prompt-edit-removed');
+  await page.mouse.move(5, 5);
+  await button(page, 'Discard').click();
 
   // An agent question: the evaluation agent reads the report with a tool
   await page.goto(url('/prompt/'));

@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {applyFix, checkTemplate, diffLines, renderPrompt} from './template.ts';
+import {applyFix, checkTemplate, diffLines, diffWords, renderPrompt, withReasons} from './template.ts';
 import {pageFromPath} from './pages.ts';
 import {computeMetrics, judge, DEFAULT_THRESHOLDS} from './metrics.ts';
 import {nextVersion, versionLabel} from './versions.ts';
@@ -104,4 +104,22 @@ test('a multi-select answer with the same value twice keeps it once', async () =
   const {parseOutput} = await import('./labels.ts');
   const schema: Schema = {fields: [{name: 'topic', kind: 'multi', values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}]}]};
   assert.deepEqual(parseOutput('{"topic": ["Food", "Food", "Travel"]}', schema).answer, {topic: ['Food', 'Travel']});
+});
+
+test('change marks: word-level diff with removed text before added text', () => {
+  const a = 'Creator: {{Creator_Nick_Name}} · {{Creator_Bio}}\nVlog: own day';
+  const b = 'Creator: {{Creator_Nick_Name}}\nVlog: own day; not a cut';
+  const d = diffWords(a, b);
+  assert.deepEqual(d, [
+    {kind: 'same', text: 'Creator: {{Creator_Nick_Name}}'},
+    {kind: 'del', text: ' · {{Creator_Bio}}'},
+    {kind: 'same', text: '\nVlog: own day'},
+    {kind: 'add', text: '; not a cut'},
+  ]);
+  assert.equal(d.filter(s => s.kind !== 'del').map(s => s.text).join(''), b);
+  const r = withReasons(d, [{text: 'not a cut from someone else', reason: '5 Clips were read as Vlog'}, {text: 'Untick Creator Bio', reason: 'Bio was empty'}]);
+  assert.equal(r[3].reason, '5 Clips were read as Vlog');
+  assert.equal(r[1].reason, 'Bio was empty');
+  assert.equal(diffWords('same', 'same').length, 1);
+  assert.deepEqual(diffWords('a b c d', 'a x y d').map(s => s.kind), ['same', 'del', 'add', 'same']);
 });

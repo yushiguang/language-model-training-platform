@@ -313,7 +313,7 @@ export async function improveWithAi(projectId: string, versionId: string): Promi
     await catalog.insert('agent_proposals', proposal);
     const lines = out.changes.map(c => `- ${c.text}${c.reason ? `: ${c.reason}` : ''}`).join('\n');
     // Each change with its reason (the editor can't show reasons on hover).
-    const intro = out.reply || `Here is a draft with ${out.changes.length} change${out.changes.length === 1 ? '' : 's'} to ${versionLabel(v)}, marked in green in the prompt:`;
+    const intro = out.reply || `Here is a draft with ${out.changes.length} change${out.changes.length === 1 ? '' : 's'} to ${versionLabel(v)}. Added text is green and a removed part is a red space; hover one to see why:`;
     await post(projectId, {role: 'agent', agent: 'prompt_agent', text: lines ? `${intro}\n${lines}` : intro, page: 'Edit prompt'});
     await postEvent(projectId, 'draft', 'prompt_agent', 'put a draft on Edit prompt', {path: '/prompt/edit', params: {v: v.id}});
     tm().counter('tsp_agent_proposals_total', {agent: 'prompt_agent', kind: 'prompt', outcome: 'shown'});

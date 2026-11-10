@@ -219,7 +219,7 @@ function improve(r: Req) {
     }
   }
   return {
-    reply: changes.length ? `I read the ${r.context.mistakes ?? ''} mistakes in ${r.context.version} and made ${changes.length} change${changes.length === 1 ? '' : 's'}, marked in green in the prompt:`.replace('the  mistakes', 'the mistakes') : `I have no new change for ${r.context.version}.`,
+    reply: changes.length ? `I read the ${r.context.mistakes ?? ''} mistakes in ${r.context.version} and made ${changes.length} change${changes.length === 1 ? '' : 's'}. Added text is green and a removed part is a red space; hover one to see why:`.replace('the  mistakes', 'the mistakes') : `I have no new change for ${r.context.version}.`,
     template,
     changes,
   };

@@ -1,7 +1,7 @@
 'use client';
 
-import {useMemo, useRef, type ReactNode} from 'react';
-import {ALL_KEYS, applyFix, checkTemplate, FEATURES, labelOf, placeholderKeys, type CheckResult, type Fix} from '@tsp/domain';
+import {useMemo, useRef, useState, type MouseEvent, type ReactNode} from 'react';
+import {ALL_KEYS, applyFix, checkTemplate, FEATURES, labelOf, placeholderKeys, type CheckResult, type Fix, type MarkSeg} from '@tsp/domain';
 import type {ExampleType, FeatureSelection, PromptImage, Schema} from '@tsp/contracts';
 import {Badge, Button, Card, Cb, CheckRow, useCopy} from '@/ui';
 
@@ -19,12 +19,12 @@ export function useChecks(draft: Draft, schema: Schema | null | undefined, types
  * The prompt page (design: "Prompt page"): Prompt template on the left, Checks and Features on
  * the right. Used to write the first version, edit one, or view one.
  */
-export function Workbench({draft, onChange, check, readOnly, added, featureTips}: {draft: Draft; onChange: (d: Draft) => void; check: CheckResult; readOnly?: boolean; added?: Set<number>; featureTips?: Record<string, string>}) {
+export function Workbench({draft, onChange, check, readOnly, marks, featureTips}: {draft: Draft; onChange: (d: Draft) => void; check: CheckResult; readOnly?: boolean; marks?: MarkSeg[]; featureTips?: Record<string, string>}) {
   const fix = (f: Fix) => onChange({...draft, ...applyFix(draft.template, draft.features, f)});
   return (
     <div className="prompt-grid">
       <Card title="Prompt template" className="fill-scroll" style={{height: '100%'}}>
-        <Editor value={draft.template} onChange={template => onChange({...draft, template})} readOnly={readOnly} added={added} />
+        <Editor value={draft.template} onChange={template => onChange({...draft, template})} readOnly={readOnly} marks={marks} />
       </Card>
       <div className="col" style={{gap: 16, minHeight: 0}}>
         <Checks draft={draft} check={check} onFix={readOnly ? undefined : fix} />
@@ -36,27 +36,60 @@ export function Workbench({draft, onChange, check, readOnly, added, featureTips}
 
 /**
  * Placeholders show as grey tokens, red when they are not a feature. No autocomplete in the MVP.
- * `added`: line numbers a helper's draft added, marked green.
+ * `marks` (design 2026-11-10): added text has a green background; removed text is a small red
+ * space that takes no room, so the text lines up with the text box. The marks are drawn under the
+ * text box; hovering finds the mark under the pointer and shows what was removed and why.
  */
-function Editor({value, onChange, readOnly, added}: {value: string; onChange: (v: string) => void; readOnly?: boolean; added?: Set<number>}) {
+function Editor({value, onChange, readOnly, marks}: {value: string; onChange: (v: string) => void; readOnly?: boolean; marks?: MarkSeg[]}) {
+  const box = useRef<HTMLDivElement>(null);
+  const [tip, setTip] = useState<{i: number; x: number; y: number} | null>(null);
+  const shown = marks?.some(m => m.kind !== 'same') ? marks : undefined;
+  const hover = (e: MouseEvent) => {
+    if (!shown || !box.current) return;
+    const el = document.elementsFromPoint(e.clientX, e.clientY).find(n => n instanceof HTMLElement && n.dataset.mark) as HTMLElement | undefined;
+    const i = el ? Number(el.dataset.mark) : -1;
+    const m = shown[i];
+    if (!el || !m || (m.kind === 'add' && !m.reason)) return setTip(null);
+    if (tip?.i === i) return;
+    const r = el.getClientRects()[0] ?? el.getBoundingClientRect();
+    const o = box.current.getBoundingClientRect();
+    setTip({i, x: Math.max(0, r.left - o.left - 14), y: r.bottom - o.top + 6});
+  };
+  const t = tip && shown?.[tip.i];
   return (
     <div className="ed-scroll">
-      <div className="ed">
+      <div className="ed" ref={box}>
         <div className="editor" aria-hidden="true">
-          {added?.size
-            ? value.split('\n').map((line, i, all) => (
-                <span key={i}>
-                  {added.has(i) ? <span className="ed-add">{highlight(line)}</span> : highlight(line)}
-                  {i < all.length - 1 ? '\n' : ''}
-                </span>
-              ))
+          {shown
+            ? shown.map((m, i) =>
+                m.kind === 'same' || (m.kind === 'add' && !m.text.trim()) ? (
+                  <span key={i}>{highlight(m.text)}</span>
+                ) : m.kind === 'add' ? (
+                  <span key={i} data-mark={i} className={`ed-add${m.reason ? ' why' : ''}`}>
+                    {highlight(m.text)}
+                  </span>
+                ) : (
+                  <span key={i} data-mark={i} className="ed-del" />
+                ),
+              )
             : highlight(value)}
           {'\n'}
         </div>
         <label className="sr-only" htmlFor="tpl">
           Prompt template
         </label>
-        <textarea id="tpl" value={value} readOnly={readOnly} spellCheck={false} placeholder={readOnly ? undefined : 'Paste your prompt, or ask AI to draft one'} onChange={e => onChange(e.target.value)} />
+        <textarea id="tpl" value={value} readOnly={readOnly} spellCheck={false} placeholder={readOnly ? undefined : 'Paste your prompt, or ask AI to draft one'} onChange={e => onChange(e.target.value)} onMouseMove={shown ? hover : undefined} onMouseLeave={() => setTip(null)} />
+        {t && (
+          <div className="ed-pop" role="tooltip" style={{left: tip.x, top: tip.y}}>
+            {t.kind === 'del' && (
+              <>
+                <span className="ed-pop-k">Removed</span>
+                <span className="ed-pop-del">{withTokens(t.text.trim() ? t.text : '(spaces or line breaks)')}</span>
+              </>
+            )}
+            {t.reason && <span className="ed-pop-why">{t.reason}</span>}
+          </div>
+        )}
       </div>
     </div>
   );

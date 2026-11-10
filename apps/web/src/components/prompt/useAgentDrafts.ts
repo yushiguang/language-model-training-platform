@@ -5,15 +5,15 @@ import type {FeatureSelection} from '@tsp/contracts';
 import {closeProposal, openProposals, subscribeChanges, type ProjectState} from '@/backend-api';
 
 /** Loads the prompt agent's latest open draft into the editor, where the user reviews and saves it. */
-export function useAgentDrafts(state: ProjectState, apply: (d: {template: string; features?: FeatureSelection; change?: string}) => void) {
+export function useAgentDrafts(state: ProjectState, apply: (d: {template: string; features?: FeatureSelection; change?: string; changes?: {text: string; reason: string}[]}) => void) {
   useEffect(() => {
     let alive = true;
     const check = async () => {
       const list = await openProposals(state.project.id, 'prompt');
       if (!alive || !list[0]) return;
-      const payload = list[0].payload as {template?: string; features?: FeatureSelection; change?: string};
+      const payload = list[0].payload as {template?: string; features?: FeatureSelection; change?: string; changes?: {text: string; reason: string}[]};
       await closeProposal(list[0], 'approved');
-      if (payload.template) apply({template: payload.template, features: payload.features, change: payload.change});
+      if (payload.template) apply({template: payload.template, features: payload.features, change: payload.change, changes: payload.changes});
     };
     void check();
     const off = subscribeChanges(() => void check());

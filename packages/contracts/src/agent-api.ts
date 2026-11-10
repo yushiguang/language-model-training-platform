@@ -167,7 +167,7 @@ export interface DraftImprovementInput {
 export interface DraftImprovementOutput {
   template: string;
   features?: FeatureSelection;
-  /** One line per change, with its reason (shown on hover in the editor and in Ask AI). */
+  /** One entry per change: `text` quotes the words it adds (or removes); `reason` shows on hover over its mark in the editor and in Ask AI. */
   changes: {text: string; reason: string}[];
   /** A few lines for Ask AI. */
   reply: string;

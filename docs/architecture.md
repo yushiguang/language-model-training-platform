@@ -117,9 +117,12 @@ improves the prompt on the project's one labeling model, for up to the user's Ma
 
 - **Versions.** A run reserves the next major number when it starts; every change it tries is the
   next minor of that major (v3.1, v3.2…). The editor's Save (the main button) makes the next minor
-  of the version's own major; Save as vN makes the next major, written without ".0" (designed
-  2026-11-10; the code still says "Save as vN.M" and "Save as new version"). The catalog assigns
-  every number.
+  of the version's own major; Save as vN makes the next major, written without ".0"
+  (2026-11-10). The catalog assigns every number.
+- **Change marks.** The editor diffs word by word (`diffWords` in `packages/domain/src/template.ts`)
+  and gives each change a reason with `withReasons`: the helper's change that shares its words, or
+  for an Optimiser version, the round's change line. The marks are drawn under the text box; the
+  editor finds the mark under the pointer with `elementsFromPoint` to show the hover.
 - **Pool and parent.** The pool is the start version plus the run's kept versions, each scored per
   example on the optimiser half of the eval set (share of fields right). The parent is drawn from
   the Pareto front (versions best on at least one example and not dominated), weighted by how
