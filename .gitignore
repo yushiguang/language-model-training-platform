@@ -1,0 +1,11 @@
+# Local editor and agent configuration
+.cursor/
+.DS_Store
+
+# Root-level local tooling dependencies
+/node_modules/
+/package.json
+/package-lock.json
+
+# Internal overlay directory (managed in a separate repository)
+/internal/
