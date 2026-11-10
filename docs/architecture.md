@@ -116,8 +116,10 @@ improves the prompt on the project's one labeling model, for up to the user's Ma
 `apps/bff/src/services/optimiser.ts`.
 
 - **Versions.** A run reserves the next major number when it starts; every change it tries is the
-  next minor of that major (v3.1, v3.2…). The editor's Save makes the next minor of the version's
-  own major; Save as new version makes the next major. The catalog assigns every number.
+  next minor of that major (v3.1, v3.2…). The editor's Save (the main button) makes the next minor
+  of the version's own major; Save as vN makes the next major, written without ".0" (designed
+  2026-11-10; the code still says "Save as vN.M" and "Save as new version"). The catalog assigns
+  every number.
 - **Pool and parent.** The pool is the start version plus the run's kept versions, each scored per
   example on the optimiser half of the eval set (share of fields right). The parent is drawn from
   the Pareto front (versions best on at least one example and not dominated), weighted by how

@@ -32,7 +32,7 @@ These code choices are approved but not drawn, because they are small or follow 
 - Evaluation settings: the Checks card shows only when Custom is chosen.
 - Gold Labels: an answer saves as soon as every field has a value.
 - First prompt: the empty editor says "Paste your prompt, or ask AI to draft one".
-- Prompt page, a version with no edits: Save as vN shows but is disabled.
+- Prompt page, a version with no edits: the Save buttons show but are disabled (2026-11-10: Save and Save as vN, see below).
 - Checks: Fix runs the first fix of the error (Replace, Tick or Insert); other warnings are not shown.
 - Prompt versions: the newest version is selected; with evaluation off there is no chart and the
   suggestion is "Make the training and test sets with vN"; when nothing passes it says "No version
@@ -92,9 +92,10 @@ with AI. What the code does (the boards are U-B-Setup-Models and the U-E-* board
 | --- | --- | --- | --- |
 | Gold Labels, feature rows | Title, Description, On-screen text, Speech, Creator, Hashtags, Posted, Country and language | The same, plus every other feature the example has; empty rows are left out | Labelers must be able to see every feature (review 2026-11-09) |
 | Ask AI, a paid start line | "Prompt helper started scoring v4" | "Prompt helper started scoring v4 on gpt-5.6-terra" | The line names the model; with one model per project it could go |
-| Improve with AI, the draft | Removed text struck through in red; each change's reason on hover | Added lines green; removed text is not shown in the editor, and reasons are in the Prompt helper's message in Ask AI | The editor draws its marks under the text box, so nothing in it can be struck through or hovered. Needs an editor that can draw inline marks |
+| Prompt editor, change marks | Added text green; removed text is a small red space, and hovering it shows what was removed (and the reason, for a helper's or the Optimiser's change). Marks show for a helper's draft, for your own unsaved edits, and on an Optimiser version against its parent (redrawn 2026-11-10) | Added lines green for a helper's draft only; removed text is not shown, and reasons are in the Prompt helper's message in Ask AI | Not coded yet (waits for the go). The marks must sit above the text box so they can be hovered |
+| Prompt editor, Save buttons | Save (main, the next minor of the opened version, its number on hover) and Save as vN (the next major, written as "v3", not "v3.0"); with no edits, both are off and there is no Discard (2026-11-10) | Save as vN.M (main) and Save as new version | Not coded yet (waits for the go) |
 | Improve with AI, Ask AI | "Improve v2" from the user, then the helper joins | "You asked the Prompt helper to improve v2", the helper's message with each change and its reason, then "Prompt helper put a draft on Edit prompt" | Started from the page's button, so there is no typed message |
-| Optimiser, Paused | Not drawn | A run whose page closed shows "Paused" (grey) and Resume in the panel | Like a paused labeling run |
+| Optimiser, Paused | Not drawn | A run whose page closed shows "Paused" (grey) and Resume in the panel. A second tab on the same page watches a run that is still going (one run per project); if the first tab closed, it shows Paused and nothing resumes until Resume is pressed | Like a paused labeling run; accepted by Evelyn on 2026-11-10 |
 | Optimiser, other round results | Running, Dropped after dry run, Failed the Checks, Failed, Stopped | Also "Same as an earlier version" for a change that repeats a version | Not drawn |
 | Optimiser, a failed round's version | Not in the list | Not in the list until Retry goes on with it | As drawn; a version stopped by Stop shows a grey "Stopped" tag |
 | Optimiser, the Now line's progress | Always a bar | A bar only while a labeling step runs (not while the agent writes a change) | There is nothing to count while it writes |
