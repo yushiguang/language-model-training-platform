@@ -1,72 +1,56 @@
-# Monorepo Agent Guide
+# Repository guide
 
-This repository is organized as a **service-aligned monorepo**. Every top-level directory under
-`apps/` and `packages/` corresponds to a distinct architectural boundary that runs in-process for
-the MVP and splits cleanly into standalone microservices in production.
+An npm workspaces monorepo. Each folder in `apps/` is one future service; `packages/` holds what
+they share. In the MVP everything runs in the browser as one static site, wired together in one
+place (`apps/web/src/backend-api`). Later a service can move behind HTTP without its callers
+changing, because apps only talk through the contracts in `@tsp/contracts`.
 
-## Global Rules
+## Rules
 
-- **English only.** All documentation, commit messages, and code comments must be written in English.
-- **No internal identifiers or secrets.** Never commit keys, tokens, internal URLs, internal package
-  scopes, or internal product names to this public repository.
-- **Real examples never go in this repository.** Prepared example pools are loaded via
-  `NEXT_PUBLIC_EXAMPLES_URL`; only synthetic sample data lives in `apps/web/public/sample-data/`.
-- **Verification before pushing:**
-  ```bash
-  cd apps/web
-  npm run typecheck && npm test && npm run build
-  ```
+- **English only** in code, comments, docs and commit messages.
+- **Nothing internal.** Never commit keys, tokens, internal URLs, internal package scopes or
+  internal product names. The public model names (`gpt-5.x`) are fine.
+- **No real examples.** Real data is loaded from `NEXT_PUBLIC_EXAMPLES_URL`; only the made-up
+  sample in `apps/web/public/sample-data/` lives here.
+- **Stay inside your boundary.** `npm run check:boundaries` fails when a package imports something
+  it may not (table below), in any source file of an app or package (scripts and config too;
+  static, side-effect and dynamic imports and `require`), or when an alias in a tsconfig or
+  `next.config.mjs` points somewhere else. Apps never import each other.
+- **A contract change is its own change.** Changing a type in `packages/contracts` affects the
+  internal adapters too: say so in the PR title and description (see the handover guide).
+- **No content in telemetry.** Metrics and events carry counts, ids, enums and durations only
+  (`packages/contracts/src/telemetry.ts`); never prompt or chat text, features, names or emails.
+  The telemetry app enforces it: label values and event props are allowlisted there.
+- **Check before pushing:** `npm run check && npm run build`. For changes to labeling, the
+  bff or pages, also run the browser check: `node apps/web/scripts/e2e-check.cjs` against a
+  served build (needs Playwright with Chromium).
 
-## Directory Layout and Microservice Mapping
+## Layout
 
-```
-language-model-training-platform/
-  packages/
-    contracts/      (@tsp/contracts) Shared domain types, pure rules, and the 3 service contracts
-    infra/          (@tsp/infra)     Default local/browser stand-ins for infrastructure interfaces
-  apps/
-    web/                             1. Frontend SPA (Next.js static export + Astryx)
-    agents/         (@tsp/agents)    2. Stateless Agent Runtime & 5 specialist agent presets
-    bff/            (@tsp/bff)       3. BFF orchestration & data repository service
-  docs/                              Architecture and integration handover documentation
-```
+| Folder | Package | What it is | May import |
+|---|---|---|---|
+| `packages/contracts` | `@tsp/contracts` | Types and every service contract. No logic | nothing |
+| `packages/domain` | `@tsp/domain` | Pure rules: templates, metrics, gates, versions, estimates | contracts |
+| `packages/platform` | `@tsp/platform` | Stand-ins for the hosting platform, `DocRepo` over the document store | contracts, domain |
+| `apps/llm-gateway` | `@tsp/llm-gateway` | Every model call: endpoint registry, QPM/TPM limits, retries | contracts, domain |
+| `apps/catalog` | `@tsp/catalog` | Product records (projects, versions, reports, ...): CRUD, version numbers | contracts, domain, platform |
+| `apps/labeling` | `@tsp/labeling` | Labeling tasks and predictions: runs, failures, resume | contracts, domain, platform |
+| `apps/agents` | `@tsp/agents` | Agent presets and runtime, hand-written, no framework | contracts, domain |
+| `apps/bff` | `@tsp/bff` | What pages call: workflow, decides when labeling starts, builds reports | contracts, domain |
+| `apps/telemetry` | `@tsp/telemetry` | Prometheus-style metrics and product events, sent to the platform's sink | contracts |
+| `apps/web` | `@tsp/web` | Next.js static site. Pages call `@/backend-api` only | contracts, domain, `@/backend-api`, `@/ui`, `@/components` |
+| `apps/web/src/backend-api` | | The composition root: builds every app and wires them | anything |
 
-### Why the repository is split this way
+`@tsp/platform-impl` is the one injection point: it resolves to the stand-ins by default and to
+the internal adapters in the internal build. Only the composition root imports it.
 
-1. **`packages/contracts` (`@tsp/contracts`) — Shared Objects, Pure Rules & IDL Equivalent**
-   - Holds all domain entities (`types.ts`), pure validation/scoring functions (`template.ts`,
-     `metrics.ts`, `gates.ts`, `versions.ts`, `workflow.ts`), and the three service contracts:
-     - `bff-api.ts`: Frontend (`apps/web`) <-> BFF (`apps/bff`)
-     - `agent-api.ts`: BFF (`apps/bff`) <-> Agent Runtime (`apps/agents`)
-     - `infra-api.ts`: BFF / Agents <-> Infrastructure (`packages/infra`)
-   - Has zero I/O and zero framework dependencies. When backend services are written in Go, this
-     package serves as the source-of-truth specification (IDL).
+Per-folder guides: each app and package has its own `AGENTS.md`.
 
-2. **`apps/web` — Frontend Service (Owned by External Coding Agents)**
-   - Next.js App Router static export (`app/`, `components/`, `ui/`) plus the BFF client boundary
-     (`src/backend-api/`).
-   - Pages and components under `src/app/` and `src/components/` may **only** import from
-     `@tsp/contracts` (or `@/core/*`), `@/backend-api`, and `@/ui`. They must never import
-     `@tsp/bff`, `@tsp/agents`, or `@tsp/infra` directly.
+## Who changes what
 
-3. **`apps/agents` (`@tsp/agents`) — Agent Runtime Service (Owned by External Coding Agents)**
-   - Stateless runtime that implements `@tsp/contracts/agent-api` (`runAgentTurn` and
-     `reflectPrompt`).
-   - Owns the 5 agent presets (`front_desk`, `schema_agent`, `prompt_agent`, `evaluation_agent`,
-     `optimiser`), multi-turn context assembly, specialist handoffs, and output validation/repair
-     loops.
-   - Must remain completely free of database (`Repo`) or UI dependencies; it communicates with the
-     LLM solely through the `AgentModel` interface passed in by the caller.
+The public repo is changed by coding agents without internal access ("external") and by the
+internal team's agent ("internal"), which also keeps an overlay of adapters outside this repo.
 
-4. **`apps/bff` (`@tsp/bff`) — BFF Orchestration Service (Maintained for Go Migration)**
-   - Implements `BffContract` (`@tsp/contracts/bff-api`).
-   - Owns persistence (`src/data/repo.ts`), workflow state loading, dataset splitting, online
-     labeling/training-set execution loops, and dispatches assistant turns to `@tsp/agents`.
-   - In the MVP this runs in-process; in production it is replaced by a standalone Go BFF service
-     without requiring any changes to `apps/web` or `apps/agents`.
-
-5. **`packages/infra` (`@tsp/infra`) — Infrastructure Stand-ins**
-   - Implements `@tsp/contracts/infra-api` (`DocRuntime`, `LabelingModels`, `AgentModel`,
-     `Identity`, `FileStore`, `ExampleSource`) using local browser stand-ins so the public repo
-     works out of the box. Real company adapters are injected at `packages/infra/src/config.ts`
-     during internal builds.
+- External: everything in this repo, including contracts, plus the stand-ins and tests.
+- Internal: the adapters behind `@tsp/platform-impl`, registered endpoints with real QPM/TPM,
+  deployment. Details and the change-request flow: `docs/handover/integration.md`.

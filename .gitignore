@@ -2,10 +2,8 @@
 .cursor/
 .DS_Store
 
-# Root-level local tooling dependencies
-/node_modules/
-/package.json
-/package-lock.json
+# Dependencies (npm workspaces install at the root)
+node_modules/
 
 # Internal overlay directory (managed in a separate repository)
 /internal/

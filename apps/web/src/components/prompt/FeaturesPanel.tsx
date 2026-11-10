@@ -1,8 +1,8 @@
 'use client';
 
 import {useEffect, useRef, useState} from 'react';
-import {FEATURES, ITEM_ROWS} from '@/core/catalogue';
-import type {FeatureSelection} from '@/core/types';
+import {FEATURES, ITEM_ROWS} from '@tsp/domain';
+import type {FeatureSelection} from '@tsp/contracts';
 import {Icon} from '@/ui';
 
 type Group = keyof FeatureSelection;

@@ -1,4 +1,4 @@
-import type { RawExample } from './infra-api';
+import type {AgentModel, RawExample} from './platform-api.ts';
 import type {
   AgentPreset,
   ChatAttachment,
@@ -7,8 +7,9 @@ import type {
   FieldMetrics,
   MixUp,
   PageContext,
+  PageView,
   Schema,
-} from './types';
+} from './types.ts';
 
 /**
  * Contract 2: BFF <-> Agent Runtime Service (`@tsp/contracts/agent-api`).
@@ -31,7 +32,41 @@ export interface AgentWorkspaceSnapshot {
   history: Pick<ChatMessage, 'role' | 'agent' | 'text' | 'page' | 'createdAt'>[];
   /** Example posts resolved from IDs mentioned in user attachments. */
   attachedExamples?: RawExample[];
+  /** The page the user is on, as the agent sees it. Sent with every turn. */
+  pageView: PageView | null;
 }
+
+/**
+ * Read tools: an agent explores the project beyond the current page, the way a coding agent
+ * reads files in a repo. They run as the signed-in user, change nothing and cost nothing.
+ * Changes stay proposals (a schema or a template in the answer). Start-work tools come later.
+ */
+export type AgentToolName =
+  | 'get_page_view'
+  | 'list_versions'
+  | 'get_version'
+  | 'get_report'
+  | 'get_examples'
+  | 'get_gold_labels'
+  | 'get_predictions'
+  | 'check_template'
+  // Start-work tools: paid. They run at once when automatic starts are allowed, else they ask
+  // the user with a card in the chat and the turn ends.
+  | 'try_template'
+  | 'score_version'
+  | 'start_optimiser';
+
+export interface AgentToolCall {
+  agent: AgentPreset;
+  name: AgentToolName;
+  args: Record<string, unknown>;
+}
+
+/** Runs read tools for the agent runtime. In-process now; a callback to the bff's API when split. */
+export interface AgentToolHost {
+  call(call: AgentToolCall): Promise<unknown>;
+}
+
 
 export interface AgentTurnInput {
   userText: string;
@@ -77,6 +112,11 @@ export interface AgentTurnOutput {
   messages: AgentEmittedMessage[];
   /** Optional schema or prompt proposal produced by the specialist agent. */
   proposal: AgentProposalDraft | null;
+  /** Read tools the agents called during this turn, in order (also written to the audit log by the host). */
+  toolCalls: {agent: AgentPreset; name: string; args: Record<string, unknown>; ok: boolean; ms: number}[];
+  /** Model calls in this turn (tool loops included), and answers that weren't the asked JSON. For metrics. */
+  modelCalls: {agent: AgentPreset; model: string}[];
+  parseFailures: {agent: AgentPreset; intent: string}[];
 }
 
 export interface OptimiserReflectInput {
@@ -92,4 +132,10 @@ export interface OptimiserReflectInput {
 export interface OptimiserReflectOutput {
   template: string;
   change: string;
+}
+
+/** The agent runtime as the bff sees it (implemented by `apps/agents`). */
+export interface AgentRuntimeContract {
+  runAgentTurn(input: AgentTurnInput, llm: AgentModel, tools?: AgentToolHost): Promise<AgentTurnOutput>;
+  reflectPrompt(input: OptimiserReflectInput, llm: AgentModel): Promise<OptimiserReflectOutput>;
 }

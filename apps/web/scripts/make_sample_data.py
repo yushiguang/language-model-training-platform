@@ -60,11 +60,13 @@ def frames(i, n):
 
 examples, labels = [], []
 idx = 0
-for rep in range(2):
-    for p in POSTS:
+# 100 examples: the size of an MVP dataset (50 to 100).
+SUFFIX = ["", " (part 2)", " (part 3)"]
+for rep in range(3):
+    for p in POSTS[: (20 if rep == 2 else len(POSTS))]:
         title, desc, ocr, asr, pv, fmt, topics, typ = p
-        if rep == 1:
-            title = title + (" (part 2)" if typ == "video" else " · update")
+        if rep:
+            title = title + (SUFFIX[rep] if typ == "video" else [" · update", " · update 2"][rep - 1])
         idx += 1
         ext = f"{7340000000 + idx * 7919}"
         name = f"{random.choice(FIRST)}.{random.choice(SECOND)}"

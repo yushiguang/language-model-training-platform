@@ -1,4 +1,4 @@
-import type {MixUp} from '@/core/types';
+import type {MixUp} from '@tsp/contracts';
 
 export const mixUpKey = (m: MixUp) => `${m.field}|${m.kind}|${m.gold}|${m.predicted}`;
 export const mixUpText = (m: MixUp) => (m.kind === 'confused' ? `${m.gold} → ${m.predicted}` : m.kind === 'extra' ? `Extra: ${m.predicted}` : `Missed: ${m.gold}`);
