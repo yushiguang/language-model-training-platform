@@ -3,6 +3,7 @@ import {agentStart, isStartTool} from './starts.ts';
 import {checkTemplate, defaultOutputPick, dryRunSize, finalRunPlan, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, recommend, settingsHash, stepLine, versionLabel} from '@tsp/domain';
 import {getApp} from './app.ts';
 import {loadProjectState} from './projects.ts';
+import {mismatches} from './mismatches.ts';
 
 /**
  * Page views: each page as the agent sees it, built from the same saved data the page shows.
@@ -245,6 +246,19 @@ export async function getPageView(projectId: string, loc: PageLocation, unsaved:
   if (!state) return {page: loc.page, title: TITLES[loc.page], summary: 'The project was not found.', data: {}};
   const view = build(state, loc, unsaved, await answeredTest(state, loc.page));
   if (!state.setup) view.data.note = 'Setup is not finished yet.';
+  // Review finding 2: where the model disagrees with gold labels. Counts only; say which side is
+  // right never (the user decides on Gold Labels' Mismatches tab).
+  if (loc.page === 'gold' || loc.page === 'prompt') {
+    const m = await mismatches(projectId);
+    if (m.versionId)
+      view.data.mismatches = {
+        comparedWith: m.versions.find(v => v.id === m.versionId)?.label,
+        count: m.items.length,
+        wrongInEveryVersion: m.wrongEverywhere,
+        reviewedSoFar: m.reviewed,
+        note: 'Gold Labels has a Mismatches tab for these. Give counts only, never which side is right.',
+      };
+  }
   return view;
 }
 

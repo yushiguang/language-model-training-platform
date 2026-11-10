@@ -1,45 +1,101 @@
 'use client';
 
 import {useGo} from '@/components/nav';
-import {Fragment, useEffect, useMemo, useRef, useState} from 'react';
-import type {Answer, Example, ExampleMedia, LabelField} from '@tsp/contracts';
+import {useSearchParams} from 'next/navigation';
+import {Fragment, Suspense, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+import type {Answer, Example, ExampleMedia, LabelField, MismatchList} from '@tsp/contracts';
 import {FEATURES, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
-import {approveNode, exampleMedia, predictionsFor, saveGold, type ProjectState} from '@/backend-api';
-import {Badge, Banner, Button, Card, Code, dateTime, Empty, Icon, num, PageHead, Tabs} from '@/ui';
+import {approveNode, exampleMedia, mismatches, predictionsFor, reviewGold, saveGold, type ProjectState} from '@/backend-api';
+import {Badge, Banner, Button, Card, Code, dateTime, Empty, Hov, Icon, num, PageHead, Tabs} from '@/ui';
 
-type SetKey = 'eval' | 'test';
+type SetKey = 'eval' | 'test' | 'mismatch';
 
 export default function GoldPage() {
   return (
+    <Suspense fallback={null}>
+      <GoldRouter />
+    </Suspense>
+  );
+}
+
+function GoldRouter() {
+  const q = useSearchParams();
+  return (
     <ProjectPage node="gold" page={{label: 'Gold Labels', agent: 'front_desk', intent: 'answer', hint: "If an example doesn't fit any value, tell me and I'll bring in the schema agent.", context: {}}}>
-      {({state}) => <Gold state={state} />}
+      {({state}) => <Gold state={state} tabParam={q.get('tab')} />}
     </ProjectPage>
   );
 }
 
-function Gold({state}: {state: ProjectState}) {
+/**
+ * The Mismatches list for the picked version (review finding 2). It reads saved answers only, so it
+ * reloads when scores or gold labels change, and after each keep or change.
+ */
+function useMismatches(state: ProjectState, versionId: string | null): [MismatchList | null, () => void] {
+  const [list, setList] = useState<MismatchList | null>(null);
+  const [n, setN] = useState(0);
+  useEffect(() => {
+    let live = true;
+    void mismatches(state.project.id, versionId).then(m => live && setList(m));
+    return () => {
+      live = false;
+    };
+  }, [state.project.id, versionId, state.contextId, state.reports.length, state.versions.length, n]);
+  return [list, () => setN(x => x + 1)];
+}
+
+const sameValues = (a: string[] = [], b: string[] = []) => a.length === b.length && [...a].sort().join('|') === [...b].sort().join('|');
+
+function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null}) {
   const go = useGo();
   const {href} = useProject();
-  const sets = useMemo(() => ({eval: state.examples.filter(e => e.split === 'eval'), test: state.examples.filter(e => e.split === 'test')}), [state.examples]);
-  const [tab, setTab] = useState<SetKey>('eval');
+  const [cmp, setCmp] = useState<string | null>(null);
+  const [mm, reloadMm] = useMismatches(state, cmp);
+  const byId = useMemo(() => new Map(state.examples.map(e => [e.id, e])), [state.examples]);
+  const sets = useMemo(
+    () => ({
+      eval: state.examples.filter(e => e.split === 'eval'),
+      test: state.examples.filter(e => e.split === 'test'),
+      mismatch: (mm?.items ?? []).map(x => byId.get(x.exampleId)!).filter(Boolean),
+    }),
+    [state.examples, mm, byId],
+  );
+  // "Review labels" on Prompt versions opens the Mismatches tab.
+  const [tab, setTab] = useState<SetKey>(tabParam === 'mismatches' ? 'mismatch' : 'eval');
+  useEffect(() => {
+    if (tabParam === 'mismatches') setTab('mismatch');
+  }, [tabParam]);
   const list = sets[tab];
-  const firstOpen = (k: SetKey) => Math.max(0, sets[k].findIndex(e => !state.gold.has(e.id)));
-  // Opens on the first example without a gold label; it stays put while labels save.
-  const [pos, setPos] = useState<Record<SetKey, number>>(() => ({eval: firstOpen('eval'), test: firstOpen('test')}));
+  const firstOpen = (k: SetKey) => (k === 'mismatch' ? 0 : Math.max(0, sets[k].findIndex(e => !state.gold.has(e.id))));
+  // Opens on the first example without a gold label; it stays put while labels save. On
+  // Mismatches, a kept or changed example leaves the list and the next one takes its place.
+  const [pos, setPos] = useState<Record<SetKey, number>>(() => ({eval: firstOpen('eval'), test: firstOpen('test'), mismatch: 0}));
   const i = Math.min(pos[tab], Math.max(0, list.length - 1));
   const ex = list[i];
+  const onMismatch = tab === 'mismatch';
   // The model answer starts hidden on every example; Show reveals it for this example only (R2-2).
+  // On Mismatches it shows from the start.
   const [shownFor, setShownFor] = useState<Set<string>>(() => new Set());
-  const showModel = !!ex && shownFor.has(ex.id);
+  const showModel = !!ex && (onMismatch || shownFor.has(ex.id));
   // Once shown on an example, the label records that the answer was seen, even if hidden again.
   const [seen, setSeen] = useState<Set<string>>(() => new Set());
-  // Whether this example has a model answer on screen; a label only counts as "model answer
-  // seen" when there was one to see.
-  const [answerShown, setAnswerShown] = useState<string | null>(null);
+  // The model's answer for the example on screen (null: none, or invalid); a label only counts as
+  // "model answer seen" when there was one to see.
+  const [model, setModel] = useState<{exampleId: string; answer: Answer | null} | null>(null);
+  const modelAnswer = model && ex && model.exampleId === ex.id ? model.answer : null;
   const evalDone = state.facts.goldEvalDone >= sets.eval.length && sets.eval.length > 0;
   const move = (n: number) => setPos(p => ({...p, [tab]: n}));
+  const versionId = mm?.versionId ?? null;
+  const item = onMismatch && ex ? mm?.items.find(x => x.exampleId === ex.id) : undefined;
+  const gold = ex ? state.gold.get(ex.id)?.answer : undefined;
+  const diff = onMismatch && gold && modelAnswer ? new Set(state.setup!.schema!.fields.filter(f => !sameValues(gold[f.name], modelAnswer[f.name])).map(f => f.name)) : new Set<string>();
+  const review = async (outcome: 'kept' | 'changed', answer?: Answer) => {
+    if (!ex || !versionId) return;
+    await reviewGold(state.project.id, ex.id, versionId, outcome, answer);
+    reloadMm();
+  };
 
   const head = (
     <PageHead
@@ -77,6 +133,7 @@ function Gold({state}: {state: ProjectState}) {
       </Frame>
     );
 
+  const picked = mm?.versions.find(v => v.id === versionId);
   return (
     <Frame head={head}>
       {state.staleGold.size > 0 && <Banner text={`The schema changed. ${num(state.staleGold.size)} labels were made under the old schema and need a quick re-check.`} />}
@@ -87,24 +144,47 @@ function Gold({state}: {state: ProjectState}) {
         items={[
           {key: 'eval', label: 'Eval set', count: `${num(state.facts.goldEvalDone)} / ${num(sets.eval.length)}`},
           {key: 'test', label: 'Test set', count: `${num(state.facts.goldTestDone)} / ${num(sets.test.length)}`},
+          // Once a version has answers on the whole eval set.
+          ...(mm?.versions.length ? [{key: 'mismatch' as const, label: 'Mismatches', count: num(mm.items.length)}] : []),
         ]}
       />
       {ex ? (
         <div style={{display: 'grid', gridTemplateColumns: '520px 1fr', gap: 16, alignItems: 'start'}}>
-          <ExampleCard ex={ex} n={i + 1} />
+          <ExampleCard ex={ex} n={onMismatch ? sets.eval.indexOf(ex) + 1 : i + 1} extra={item ? <Hov text={`Wrong in ${item.wrongIn} of ${item.of} versions`} tip="The examples wrong in the most versions come first" /> : undefined} />
           <div className="col" style={{gap: 16}}>
-            <ModelAnswer key={`m-${ex.id}`} state={state} ex={ex} shown={showModel} onToggle={() => setShownFor(s => {
-                const n = new Set(s);
-                if (n.has(ex.id)) n.delete(ex.id);
-                else {
-                  n.add(ex.id);
-                  setSeen(x => new Set(x).add(ex.id));
-                }
-                return n;
-              })} onFound={has => setAnswerShown(has ? ex.id : null)} />
-            <YourAnswer key={`y-${ex.id}`} state={state} ex={ex} modelShown={(showModel || seen.has(ex.id)) && answerShown === ex.id} />
+            <ModelAnswer
+              key={`m-${ex.id}-${versionId ?? ''}`}
+              state={state}
+              ex={ex}
+              versionId={versionId}
+              picker={mm?.versions.length ? {versions: mm.versions, onPick: setCmp} : undefined}
+              shown={showModel}
+              toggle={!onMismatch}
+              diff={diff}
+              onToggle={() =>
+                setShownFor(s => {
+                  const n = new Set(s);
+                  if (n.has(ex.id)) n.delete(ex.id);
+                  else {
+                    n.add(ex.id);
+                    setSeen(x => new Set(x).add(ex.id));
+                  }
+                  return n;
+                })
+              }
+              onFound={answer => setModel({exampleId: ex.id, answer})}
+            />
+            <YourAnswer
+              key={`y-${ex.id}-${tab}`}
+              state={state}
+              ex={ex}
+              modelShown={(showModel || seen.has(ex.id)) && !!modelAnswer}
+              review={onMismatch && picked ? {modelAnswer, onKeep: () => review('kept'), onChange: a => review('changed', a)} : undefined}
+            />
           </div>
         </div>
+      ) : onMismatch ? (
+        mm && <Empty title="No mismatches left" text={`Every label ${picked?.label ?? 'the model'} disagrees with has been checked.`} />
       ) : (
         <Empty title="No examples in this set" text="Change the split on the Dataset page to add some." />
       )}
@@ -122,7 +202,7 @@ const SHOWN = new Set(['Title', 'Description', 'OCR_Text', 'ASR', 'Creator_Nick_
 const IMAGE_KEYS = new Set(Object.values(FEATURES).flatMap(list => list.filter(d => d.isImage).map(d => d.key)));
 const FEATURE_LABEL = new Map(Object.values(FEATURES).flatMap(list => list.map(d => [d.key, d.label] as const)));
 
-function ExampleCard({ex, n}: {ex: Example; n: number}) {
+function ExampleCard({ex, n, extra}: {ex: Example; n: number; extra?: ReactNode}) {
   const [media, setMedia] = useState<ExampleMedia | null | undefined>(undefined);
   const [picked, setPicked] = useState(0);
   const [view, setView] = useState<'player' | 'image'>('player');
@@ -165,7 +245,7 @@ function ExampleCard({ex, n}: {ex: Example; n: number}) {
     ] as [string, string][]
   ).filter(([, v]) => v);
   return (
-    <Card title={`Example ${n}`}>
+    <Card title={`Example ${n}`} titleExtra={extra ? <span className="t-3" style={{fontSize: 13}}>{extra}</span> : undefined}>
       <div className="media">
         {media?.playerUrl && view === 'player' ? (
           <iframe
@@ -213,46 +293,96 @@ function ExampleCard({ex, n}: {ex: Example; n: number}) {
   );
 }
 
-function ModelAnswer({state, ex, shown, onToggle, onFound}: {state: ProjectState; ex: Example; shown: boolean; onToggle: () => void; onFound: (hasAnswer: boolean) => void}) {
+const CHIP = {cursor: 'default', background: 'var(--bg-muted)', borderColor: 'transparent'} as const;
+const CHIP_DIFF = {cursor: 'default', background: '#fdecec', borderColor: 'transparent', color: '#b42318'} as const;
+
+/**
+ * The model's answer, from the version picked in the card (review finding 2; default: the best
+ * scored version with answers on the whole eval set). Before any version has those, it is the
+ * newest version with an answer for this example, with no picker.
+ */
+function ModelAnswer({
+  state,
+  ex,
+  versionId,
+  picker,
+  shown,
+  toggle,
+  diff,
+  onToggle,
+  onFound,
+}: {
+  state: ProjectState;
+  ex: Example;
+  versionId: string | null;
+  picker?: {versions: MismatchList['versions']; onPick: (id: string) => void};
+  shown: boolean;
+  toggle: boolean;
+  diff: Set<string>;
+  onToggle: () => void;
+  onFound: (answer: Answer | null) => void;
+}) {
   const [found, setFound] = useState<{answer: Answer | null; invalid: string | null; label: string; endpoint: string} | null | undefined>(undefined);
   useEffect(() => {
     let live = true;
     void (async () => {
-      // The newest version that has an answer for this example, models in setup order.
-      for (const v of [...state.versions].reverse())
+      const candidates = versionId ? state.versions.filter(v => v.id === versionId) : [...state.versions].reverse();
+      for (const v of candidates)
         for (const m of state.setup!.models) {
           const p = (await predictionsFor(v.id, m.endpoint, m)).get(ex.id);
           if (p) {
-            if (live) onFound(!!p.answer);
+            if (live) onFound(p.answer);
             if (live) setFound({answer: p.answer, invalid: p.invalidReason, label: versionLabel(v), endpoint: state.endpoints.find(e => e.id === m.endpoint)?.name ?? m.endpoint});
             return;
           }
         }
       if (live) {
-        onFound(false);
+        onFound(null);
         setFound(null);
       }
     })();
     return () => {
       live = false;
     };
-  }, [ex.id, state.versions.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ex.id, versionId, state.versions.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const schema = state.setup!.schema!;
-  // No model answer for this example (or still looking): no card at all (design, 2026-11-09).
-  if (!found) return null;
+  // No model answer for this example (or still looking) and nothing to pick: no card at all (design, 2026-11-09).
+  if (found === undefined || (!found && !picker)) return null;
+  const pick = picker && versionId && (
+    <span className="select" style={{width: 132}}>
+      <select aria-label="Compare with" style={{height: 32}} value={versionId} onChange={e => picker.onPick(e.target.value)}>
+        {picker.versions.map(v => (
+          <option key={v.id} value={v.id}>
+            {v.label}
+            {v.best ? ' (best)' : ''}
+          </option>
+        ))}
+      </select>
+      <Icon name="chev" />
+    </span>
+  );
   return (
     <Card
       title="Model answer"
       titleExtra={
-        shown ? (
+        shown && found && !picker ? (
           <span className="t-3 one" style={{fontSize: 13}}>
             {found.endpoint} · prompt {found.label}
           </span>
         ) : undefined
       }
-      actions={<Button label={shown ? 'Hide' : 'Show'} kind="ghost" size="sm" icon="eye" onClick={onToggle} />}
+      actions={
+        <div className="row" style={{gap: 8}}>
+          {pick}
+          {toggle && <Button label={shown ? 'Hide' : 'Show'} kind="ghost" size="sm" icon="eye" onClick={onToggle} />}
+        </div>
+      }
     >
-      {!shown ? null : !found.answer ? (
+      {!shown ? null : !found ? (
+        <span className="t-3 one" style={{fontSize: 13}}>
+          No answer from this version for this example
+        </span>
+      ) : !found.answer ? (
         <span className="t-3 one" style={{fontSize: 13}} title={found.invalid ?? undefined}>
           The model&apos;s answer was invalid
         </span>
@@ -264,7 +394,7 @@ function ModelAnswer({state, ex, shown, onToggle, onFound}: {state: ProjectState
                 <Code>{fl.name}</Code>
               </span>
               {(found.answer![fl.name] ?? []).map(v => (
-                <span key={v} className="ch" style={{cursor: 'default', background: 'var(--bg-muted)', borderColor: 'transparent'}}>
+                <span key={v} className="ch" style={diff.has(fl.name) ? CHIP_DIFF : CHIP}>
                   {v}
                 </span>
               ))}
@@ -279,8 +409,22 @@ function ModelAnswer({state, ex, shown, onToggle, onFound}: {state: ProjectState
 const kindText = (f: LabelField) => (f.kind === 'single' ? 'Single-select' : `Multi-select, ${f.min ?? 1} to ${f.max ?? f.values.length}`);
 const same = (a: Answer, b: Answer) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
 
-/** Picking values saves the answer as soon as every field has one (no Save button in the design). */
-function YourAnswer({state, ex, modelShown}: {state: ProjectState; ex: Example; modelShown: boolean}) {
+/**
+ * Picking values saves the answer as soon as every field has one (no Save button in the design).
+ * On Mismatches (`review`), the card keeps the label or takes the model's answer, and a third
+ * answer picked on the chips is recorded as a change too.
+ */
+function YourAnswer({
+  state,
+  ex,
+  modelShown,
+  review,
+}: {
+  state: ProjectState;
+  ex: Example;
+  modelShown: boolean;
+  review?: {modelAnswer: Answer | null; onKeep: () => Promise<void>; onChange: (a: Answer) => Promise<void>};
+}) {
   const schema = state.setup!.schema!;
   const saved = state.gold.get(ex.id);
   const [answer, setAnswer] = useState<Answer>(saved?.answer ?? {});
@@ -288,6 +432,8 @@ function YourAnswer({state, ex, modelShown}: {state: ProjectState; ex: Example; 
   savedRef.current = saved;
   const complete = schema.fields.every(f => (answer[f.name]?.length ?? 0) >= (f.kind === 'single' ? 1 : (f.min ?? 1)));
   const isSaved = !!saved && same(saved.answer, answer);
+  const reviewRef = useRef(review);
+  reviewRef.current = review;
 
   // A complete answer saves a moment after the last click. Moving to another example (which
   // unmounts this card) saves at once instead of dropping the answer.
@@ -296,7 +442,8 @@ function YourAnswer({state, ex, modelShown}: {state: ProjectState; ex: Example; 
     if (!complete || (savedRef.current && same(savedRef.current.answer, answer))) return;
     const save = () => {
       pending.current = null;
-      void saveGold(state.project.id, ex.id, state.setup!.schemaVersion, answer, modelShown);
+      if (reviewRef.current) void reviewRef.current.onChange(answer);
+      else void saveGold(state.project.id, ex.id, state.setup!.schemaVersion, answer, modelShown);
     };
     pending.current = save;
     const id = setTimeout(save, 300);
@@ -314,10 +461,18 @@ function YourAnswer({state, ex, modelShown}: {state: ProjectState; ex: Example; 
     <Card
       title="Your answer"
       titleExtra={
-        isSaved ? (
+        isSaved && !review ? (
           <span className="done-at" style={{margin: 0}}>
             <Badge text="Saved" tone="ok" />
           </span>
+        ) : undefined
+      }
+      actions={
+        review ? (
+          <div className="row" style={{gap: 8}}>
+            <Button label="Keep my label" size="sm" disabled={!isSaved} onClick={review.onKeep} />
+            <Button label="Use the model's answer" size="sm" disabled={!review.modelAnswer} onClick={() => review.onChange(review.modelAnswer!)} />
+          </div>
         ) : undefined
       }
     >

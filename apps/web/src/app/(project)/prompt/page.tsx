@@ -2,14 +2,14 @@
 
 import {useGo} from '@/components/nav';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode} from 'react';
-import type {Answer, EndpointId, LabelingRun, OptimisationRun, OptimiserRound, PageContext, PromptVersion} from '@tsp/contracts';
+import type {Answer, EndpointId, LabelingRun, MismatchList, OptimisationRun, OptimiserRound, PageContext, PromptVersion} from '@tsp/contracts';
 import {DEFAULT_MAX_ROUNDS, dryRunSize, optimiserVersions, recommend, stepLine, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage, useOpenAskAi} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {ScoreChart} from '@/components/prompt/ScoreChart';
 import {useChecks, Workbench, type Draft} from '@/components/prompt/Workbench';
 import {useAgentDrafts} from '@/components/prompt/useAgentDrafts';
-import {approveNode, createVersion, improveWithAi, predictionsFor, retryOptimiser, scoreVersion, startOptimiser, stopOptimiser, stopRun, tick, type ProjectState} from '@/backend-api';
+import {approveNode, createVersion, improveWithAi, mismatches, predictionsFor, retryOptimiser, scoreVersion, startOptimiser, stopOptimiser, stopRun, tick, type ProjectState} from '@/backend-api';
 import {Badge, Banner, Below, Button, Card, Code, dateTime, Dialog, Empty, Hov, Icon, Metric, num, One, PageHead, Passed, Progress, reportActionError, Score, Seg, Suggestion, Table, timeOfDay} from '@/ui';
 import {LabelDistribution, labelCounts} from '@/components/LabelDistribution';
 import {fieldRows, modelName, reportFor, runsFor, versionScore} from '@/components/prompt/scores';
@@ -572,6 +572,15 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
   const go = useGo();
   const [rounds, setRounds] = useState(String(DEFAULT_MAX_ROUNDS));
   const a = recommend(state, null);
+  // Review finding 2: where the model disagrees with gold labels (saved answers only, nothing labeled).
+  const [mm, setMm] = useState<MismatchList | null>(null);
+  useEffect(() => {
+    let live = true;
+    if (a.kind === 'keep_improving') void mismatches(state.project.id).then(m => live && setMm(m));
+    return () => {
+      live = false;
+    };
+  }, [state.project.id, a.kind, state.contextId, state.reports.length, state.optimisation[0]?.state]); // eslint-disable-line react-hooks/exhaustive-deps
   const name = (id: string | null) => (id ? versionLabel(state.versions.find(v => v.id === id)!) : '');
   const latest = state.versions[0];
   const openAskAi = useOpenAskAi();
@@ -605,6 +614,9 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
   let title: string;
   let text: string;
   let acts: React.ReactNode;
+  const lastRun = state.optimisation[0];
+  const disagree = !!mm && !lastRun && mm.reviewed === 0 && mm.items.length > 0;
+  const wrongEverywhere = !!mm && lastRun?.state === 'done' && lastRun.stopReason !== 'passes' && mm.wrongEverywhere > 0;
   if (a.kind === 'make_training_set' && passedBy && a.versionId === passedBy) {
     title = `${name(passedBy)} passes, training and test sets started`;
     text = `The Optimiser stopped after round ${done!.round} of ${done!.maxRounds}. Labeling started with ${name(passedBy)}.`;
@@ -632,6 +644,22 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
     title = a.title;
     text = 'Scores need gold labels for the eval set.';
     acts = <Button label="Go to Gold Labels" kind="primary" onClick={() => go(href('/gold'))} />;
+  } else if (a.kind === 'keep_improving' && a.versionId && mm && (disagree || wrongEverywhere)) {
+    // The helpers point to the Mismatches tab right after the first score (before any review or
+    // Optimiser run), and when Auto Optimise ends without a pass. Counts only: they never say
+    // which side is right.
+    title = disagree ? `The model disagrees with ${mm.items.length} of your labels` : `${mm.wrongEverywhere} examples were wrong in every version`;
+    text = disagree ? 'Check them in Gold Labels first, so the Optimiser learns from the right labels' : 'Check your labels for them in Gold Labels';
+    acts = (
+      <div className="row" style={{gap: 8}}>
+        <Button label="Auto Optimise" onClick={auto} />
+        <input className="input sm" style={{width: 56, textAlign: 'center'}} value={rounds} inputMode="numeric" aria-label="Max rounds" onChange={e => setRounds(e.target.value.replace(/\D/g, '').slice(0, 2))} />
+        <span style={{fontSize: 13, color: 'var(--text-2)'}}>
+          <Hov text="rounds" tip="Most rounds to try. Each round tries one change to the prompt" />
+        </span>
+        <Button label="Review labels" kind="primary" onClick={() => go(href('/gold', {tab: 'mismatches'}))} />
+      </div>
+    );
   } else if (a.kind === 'keep_improving' && a.versionId) {
     title = a.title;
     text = a.reasons[0] ?? '';

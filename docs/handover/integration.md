@@ -99,6 +99,20 @@ untick a feature, and the prompt editor shows it on hover over a feature name.
    The stand-in (`packages/platform/src/standins/feature-info.ts`) has made-up descriptions for
    every catalogue key.
 
+## Document links
+
+`DocumentSource` (`packages/contracts/src/platform-api.ts`) lets the helpers read a document the
+user links in Ask AI (for example a labeling guide). They call the `read_doc` tool with the link;
+the bff passes it to `Platform.documents` and cuts the text at 20,000 characters. The stand-in
+(`packages/platform/src/standins/documents.ts`) opens nothing, and the helper asks for the text.
+
+1. Implement `read(url)` in the internal module: for a link to the internal document service,
+   return a `LinkedDocument` with its `title` and its `text` (plain text or Markdown; tables as
+   text), read as the signed-in user so a person never sees a document they can't open. Return
+   `null` for a link it can't read (another host, no access, deleted).
+2. Set `documents` on the `Platform` object and drop `'document links'` from `standIns`.
+3. Images in a document are not read in this version; say so in the text if they matter.
+
 ## Asking for a contract change
 
 A contract is any type or interface in `packages/contracts`. Changing one can break the internal

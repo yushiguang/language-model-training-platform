@@ -105,6 +105,21 @@ round 3") and 10 ("Prompt versions: one layout"). What the code does:
 | R3-9 Optimiser | The panel shows "Best so far" (score and version). The helpers read up to 8 wrong examples of the optimiser half (never the held-out half), text features cut to about 300 characters; a merge reads up to 4 examples each version wins. The dry run is half of the optimiser half, at most 20 |
 | R3-10 Helpers | A question gets an answer and never a draft; an unclear request gets one short question first; a big rewrite starts with a one-line summary |
 
+## Done on 2026-11-10: fixes from the MVP review
+
+Canvas rows 11 ("Fixes from the MVP review") and 12 ("Mismatches on Gold Labels"). What the code does:
+
+| Item | What the code does |
+| --- | --- |
+| Step bar (finding 9) | Gold Labels says "recommended" |
+| Dataset (finding 10) | AI Suggestion "Check the labels against your data" with Check labels. The Labels helper joins in Ask AI, reads 20 random examples (never the held-out half; images as content parts), answers, may put a draft on Schema settings, and keeps answering on Dataset |
+| Prompt versions | "Score" with the precise term on hover, for the big number and the field column |
+| Optimiser (finding 6) | A passing version is confirmed by labeling the held-out half again ("Confirming v3.5: labeling the held-out half again"); a pass the second labeling misses shows "Not confirmed" with its score on hover, and the run goes on |
+| Improve with AI | One line in Ask AI: "I made 3 changes to v2. Hover each mark to see why." |
+| Training Set (findings 12, 18) | No banner for rare values (the legend marks them). The test set says how many rows carry the model's answer, not a gold label, with why on hover |
+| Gold Labels (finding 2) | The Model answer card picks the version to compare with (default: the best scored version with answers on the whole eval set). A Mismatches tab lists the eval examples where that version disagrees with the gold label, wrong in the most versions first, with the model's answer shown and the different field in red. "Keep my label" and "Use the model's answer" (or a third answer on the chips) take the example off the list and are recorded |
+| Prompt versions (finding 2) | The AI Suggestion "The model disagrees with N of your labels" right after the first score, and "N examples were wrong in every version" when Auto Optimise ends without a pass; Review labels opens the Mismatches tab |
+
 ## Still different from the canvas
 
 | Where | Canvas | Code | Why |
@@ -113,7 +128,7 @@ round 3") and 10 ("Prompt versions: one layout"). What the code does:
 | Prompt editor, a change's reason | Shown on hover over the change | Shown on hover, matched to the change by its words (else by order when the counts match); a change with no match shows no reason | The helper names each change by its words, not by a position in the prompt |
 | Gold Labels, feature rows | Title, Description, On-screen text, Speech, Creator, Hashtags, Posted, Country and language | The same, plus every other feature the example has; empty rows are left out | Labelers must be able to see every feature (review 2026-11-09) |
 | Ask AI, a paid start line | "Prompt helper started scoring v4" | "Prompt helper started scoring v4 on gpt-5.6-terra" | The line names the model; with one model per project it could go |
-| Improve with AI, Ask AI | "Improve v2" from the user, then the helper joins | "You asked the Prompt helper to improve v2", the helper's message with each change and its reason, then "Prompt helper put a draft on Edit prompt" | Started from the page's button, so there is no typed message |
+| Improve with AI, Ask AI | "Improve v2" from the user, then the helper joins | "You asked the Prompt helper to improve v2", the one-line reply (U-H-Improve-Reply), then "Prompt helper put a draft on Edit prompt" | Started from the page's button, so there is no typed message |
 | Optimiser, Paused | Not drawn | A run whose page closed shows "Paused" (grey) and Resume in the panel. A second tab on the same page watches a run that is still going (one run per project); if the first tab closed, it shows Paused and nothing resumes until Resume is pressed | Like a paused labeling run; accepted by Evelyn on 2026-11-10 |
 | Optimiser, other round results | Running, Dropped after dry run, Failed the Checks, Failed, Stopped | Also "Same as an earlier version" for a change that repeats a version | Not drawn |
 | Optimiser, a failed round's version | Not in the list | Not in the list until Retry goes on with it | As drawn; a version stopped by Stop shows a grey "Stopped" tag |
@@ -134,8 +149,10 @@ round 3") and 10 ("Prompt versions: one layout"). What the code does:
 | --- | --- |
 | Automatic paid starts | Decided 2026-11-06: every task starts by itself, with no cost limit and no Approve card. The user stops a costly task with its Stop button |
 | Choosing which models to use | One labeling model per project, chosen on Setup (decided 2026-11-09). Comparing models comes later |
-| Reading document links | Links show as chips in Ask AI; the agents' document reading tool is not built yet |
-| Agent replies | The helpers now read model names and version labels the way the pages show them, and their tool notes use the pages' terms. The page view they read still holds cost estimates, so a reply can mention cost |
+| Reading document links | The helpers read a linked document with the `read_doc` tool. The public build's stand-in opens nothing, so the helper asks for the pasted text; the internal agent connects the real document service (docs/handover/integration.md) |
+| Agent replies | The helpers read model names and version labels the way the pages show them. The page views hold no cost or time, and the helpers' rules say never to mention either (MVP review finding 16) |
+| Gold Labels, a version with no answer for an example | The Model answer card keeps its version picker and says "No answer from this version for this example" (not drawn) |
+| Gold Labels, no mismatches left | The Mismatches tab shows "No mismatches left" with the usual empty-state look (not drawn) |
 
 ## Tech changes
 

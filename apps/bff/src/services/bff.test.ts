@@ -406,3 +406,37 @@ test('Check labels: the Labels helper joins, reads a sample without the held-out
     [`user: Check the labels against ${20 - heldOut.size} examples of my data`, '-- Labels helper joined to answer', 'schema_agent: Checked.'],
   );
 });
+
+test('Mismatches: versions with answers on the whole eval set, wrong in the most versions first; keep or change leaves the list, and is recorded', async () => {
+  // v1 answers Vlog everywhere; v2 (one RULE) is right on 0-4. Gold: Tutorial on 0-7, Vlog on 8-9.
+  const w = await world('b30', {answer: ruled, macroF1: 0.99, gold: goldOf});
+  await w.newVersion();
+  await tick(await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
+  await w.catalog.createPromptVersion({projectId: w.projectId, template: 'Label this\nRULE 1', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
+  await tick(await w.state());
+  await until(async () => (await w.state()).reports.length === 2, 'v2 scored');
+  const {mismatches, reviewGold} = await import('./mismatches.ts');
+  const s = await w.state();
+  const id = (k: number) => `ex_b30_${k}`;
+  let m = await mismatches(w.projectId);
+  assert.equal(m.versions.length, 2);
+  const best = s.versions[0];
+  assert.equal(m.versionId, best.id, 'the best scored version is compared by default');
+  assert.deepEqual(m.items.map(x => x.exampleId), [5, 6, 7].map(id), 'v2 is wrong on 5-7');
+  assert.ok(m.items.every(x => x.wrongIn === 2 && x.of === 2));
+  assert.equal(m.wrongEverywhere, 3);
+  const v1 = s.versions[1].id;
+  m = await mismatches(w.projectId, v1);
+  assert.deepEqual(m.items.map(x => x.exampleId), [5, 6, 7, 0, 1, 2, 3, 4].map(id), 'examples wrong in both versions come first');
+  await reviewGold(w.projectId, id(5), best.id, 'kept');
+  await reviewGold(w.projectId, id(6), best.id, 'changed', {format: ['Vlog']});
+  m = await mismatches(w.projectId);
+  assert.deepEqual(m.items.map(x => x.exampleId), [id(7)]);
+  assert.equal(m.reviewed, 2);
+  const after = await w.state();
+  assert.deepEqual(after.gold.get(id(6))!.answer, {format: ['Vlog']});
+  assert.equal(after.gold.get(id(5))!.id, s.gold.get(id(5))!.id, 'keeping a label saves no new label');
+  const log = await w.catalog.find('audit_log', {projectId: w.projectId, action: 'gold.review'});
+  assert.deepEqual(log.map(l => (l.data as {outcome: string}).outcome).sort(), ['changed', 'kept']);
+});

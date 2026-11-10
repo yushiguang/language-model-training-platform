@@ -115,6 +115,20 @@ export interface DatasetSnapshot {
   split: {eval: number; test: number; train: number} | null;
 }
 
+/**
+ * Gold Labels' Mismatches tab: eval examples where a version's saved answer differs from the gold
+ * label, wrong in the most versions first. `versions`: the versions with answers on the whole eval
+ * set (the picker), `versionId`: the one compared. `wrongEverywhere`: open examples wrong in every
+ * one of them (2 or more). `reviewed`: decisions made on the tab so far.
+ */
+export interface MismatchList {
+  versions: {id: string; label: string; score: number | null; best?: boolean}[];
+  versionId: string | null;
+  items: {exampleId: string; wrongIn: number; of: number}[];
+  wrongEverywhere: number;
+  reviewed: number;
+}
+
 export interface GoldLabel {
   id: string;
   projectId: string;

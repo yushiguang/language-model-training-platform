@@ -87,6 +87,13 @@ let current = null;
   await page.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent === 'Next: Gold Labels' && !b.disabled), null, {timeout: 10000});
   log('dataset:', (await page.locator('main .legend').innerText()).replace(/\s+/g, ' '));
   await shot(page, '2-dataset');
+  // The label check (review finding 10): the Labels helper reads a sample in Ask AI
+  if ((await page.locator('header .step-opt').innerText()) !== 'recommended') throw new Error('Gold Labels should say recommended');
+  await button(page, 'Check labels').click();
+  await page.locator('aside.chat').getByText('Labels helper joined to answer').waitFor({timeout: 10000});
+  await page.locator('aside.chat .msg-a').last().getByText(/^I read \d+ examples/).waitFor({timeout: 20000});
+  log('label check:', (await page.locator('aside.chat .msg-a').last().innerText()).replace(/\n/g, ' ').slice(0, 160));
+  await shot(page, '2b-label-check');
   await next.click();
 
   // Gold Labels: every eval example and some test examples, picked on the page
@@ -128,8 +135,33 @@ let current = null;
   await page.locator('nav.vlist').waitFor();
   log('scoring started');
 
-  // Below the bar: Improve with AI puts the Prompt helper's draft in the editor, saved as v1.1
   const suggestion = async () => ((await page.locator('.card.ai').count()) ? page.locator('.card.ai').first().innerText() : '');
+  // Right after the first score, the model disagrees with some gold labels: Review labels opens
+  // Gold Labels' Mismatches tab (review finding 2). One label is kept, one takes the model's answer.
+  for (let i = 0; i < 30 && !(await button(page, 'Review labels').count()) && !(await button(page, 'Improve with AI').count()); i++) await page.waitForTimeout(1000);
+  if (await button(page, 'Review labels').count()) {
+    log('suggestion:', (await suggestion()).replace(/\n/g, ' | '));
+    await shot(page, '4b-disagree');
+    await button(page, 'Review labels').click();
+    await page.waitForURL(/gold/);
+    const tab = page.getByRole('tab', {name: /^Mismatches/});
+    await tab.waitFor();
+    const before = +((await tab.innerText()).match(/(\d+)\s*$/) || [0, 0])[1];
+    await page.getByLabel('Compare with').waitFor();
+    log('mismatches:', before, '· compare with', await page.getByLabel('Compare with').locator('option:checked').innerText());
+    await shot(page, '4c-mismatches');
+    await button(page, 'Keep my label').click();
+    await page.waitForFunction(n => +((document.querySelector('[role=tab][aria-selected=true]')?.textContent ?? '').match(/(\d+)\s*$/) || [0, 0])[1] === n - 1, before, {timeout: 10000});
+    if (before > 1) {
+      await button(page, "Use the model's answer").click();
+      await page.waitForFunction(n => +((document.querySelector('[role=tab][aria-selected=true]')?.textContent ?? '').match(/(\d+)\s*$/) || [0, 0])[1] === n - 2, before, {timeout: 10000});
+    }
+    log('mismatches after review:', await tab.innerText());
+    await page.goto(url('/prompt/'));
+    await page.locator('nav.vlist').waitFor();
+  }
+
+  // Below the bar: Improve with AI puts the Prompt helper's draft in the editor, saved as v1.1
   for (let i = 0; i < 30 && !(await button(page, 'Improve with AI').count()); i++) await page.waitForTimeout(1000);
   if ((await button(page, 'Auto Optimise').count()) > 0) {
     await button(page, 'Improve with AI').first().click();

@@ -165,6 +165,7 @@ export interface EventProps {
   model_answer_revealed: {split: string; had_answer: boolean};
   gold_label_saved: {split: string; revealed: boolean; seconds_on_example: Num; matches_model: boolean | null; was_recheck: boolean};
   gold_labels_uploaded: {source: 'file' | 'bundled'; saved: Num; skipped: Num};
+  gold_mismatch_reviewed: {outcome: 'kept' | 'changed'};
   gold_skipped: {eval_done: Num; eval_total: Num};
   test_answers_requested: {estimate_usd: Num; examples: Num};
   // Prompt Engineering
@@ -241,6 +242,7 @@ export const EVENT_PROP_KEYS: {[E in EventName]: readonly (keyof EventProps[E] &
   model_answer_revealed: ['split', 'had_answer'],
   gold_label_saved: ['split', 'revealed', 'seconds_on_example', 'matches_model', 'was_recheck'],
   gold_labels_uploaded: ['source', 'saved', 'skipped'],
+  gold_mismatch_reviewed: ['outcome'],
   gold_skipped: ['eval_done', 'eval_total'],
   test_answers_requested: ['estimate_usd', 'examples'],
   // Prompt Engineering
