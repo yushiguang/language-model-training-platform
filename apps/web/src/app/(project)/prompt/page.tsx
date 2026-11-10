@@ -277,6 +277,9 @@ function majors(scored: {v: PromptVersion; s: {score: number; passed: boolean} |
     });
 }
 
+const SCORE_TIP = "The lowest field's Macro-F1: how well the model finds each value, every value counting the same";
+const FIELD_TIP = "The field's Macro-F1: how well the model finds each of its values, every value counting the same";
+
 const ROUND_RESULT: Record<OptimiserRound['outcome'], {text: string; tone?: 'run' | 'err'} | null> = {
   running: {text: 'Running', tone: 'run'},
   kept: null,
@@ -336,6 +339,14 @@ function OptimiserPanel({state, run, box}: {state: ProjectState; run: Optimisati
         <One key="c" text={r.change || 'Writing a change'} />,
         res ? (
           <Badge key="r" text={res.text} tone={res.tone ?? 'gray'} icon={res.tone === 'run' || res.tone === 'err'} />
+        ) : r.score != null && r.passed && r.confirm && !r.confirm.passed ? (
+          // A pass the second labeling of the held-out half did not confirm (review finding 6).
+          <span key="r" className="row" style={{gap: 8, justifyContent: 'center'}}>
+            <Score v={r.score} ok />
+            <span className="badge b-gray">
+              <Hov text="Not confirmed" tip={`The second labeling of the held-out half scored ${r.confirm.score.toFixed(2)}, below the bar`} />
+            </span>
+          </span>
         ) : r.score != null ? (
           <Score key="r" v={r.score} ok={r.passed} />
         ) : (
@@ -534,7 +545,7 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
   return (
     <Card className={box.className} style={box.style}>
       <div style={{display: 'flex', alignItems: 'flex-end', gap: 16, paddingBottom: 16}}>
-        <Metric label="Macro-F1" value={rep.metrics.lowestField.macroF1.toFixed(2)} unit={`/ ${+t.macroF1.toFixed(2)}`} tone={rep.passed ? 'ok' : 'err'} size="lg" />
+        <Metric label={<Hov text="Score" tip={SCORE_TIP} />} value={rep.metrics.lowestField.macroF1.toFixed(2)} unit={`/ ${+t.macroF1.toFixed(2)}`} tone={rep.passed ? 'ok' : 'err'} size="lg" />
         <div style={{display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 9}}>
           {rep.passed ? <Passed /> : <Below />}
           <span className="t-3" style={{fontSize: 13}}>
@@ -544,7 +555,7 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
         {actions}
       </div>
       <Table
-        cols={[{label: 'Field'}, {label: 'F1', kind: 'c'}, {label: 'Precision', kind: 'c'}, {label: 'Recall', kind: 'c'}, {label: 'Result', kind: 'c'}]}
+        cols={[{label: 'Field'}, {label: <Hov text="Score" tip={FIELD_TIP} />, kind: 'c'}, {label: 'Precision', kind: 'c'}, {label: 'Recall', kind: 'c'}, {label: 'Result', kind: 'c'}]}
         rows={rows.map(r => ({key: r.field, cells: [<Code key="f">{r.field}</Code>, <Score key="s" v={r.f1} ok={r.passed} />, r.precision.toFixed(2), r.recall.toFixed(2), r.passed ? <Passed key="p" /> : <Below key="b" />]}))}
       />
     </Card>
@@ -590,7 +601,7 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
   };
   // The newest run that passed and started the training and test sets.
   const done = state.optimisation[0];
-  const passedBy = done?.state === 'done' && done.stopReason === 'passes' && done.trainingSetId ? done.history.filter(h => h.passed).at(-1)?.versionId : null;
+  const passedBy = done?.state === 'done' && done.stopReason === 'passes' && done.trainingSetId ? done.history.filter(h => h.passed && h.confirm?.passed !== false).at(-1)?.versionId : null;
   let title: string;
   let text: string;
   let acts: React.ReactNode;

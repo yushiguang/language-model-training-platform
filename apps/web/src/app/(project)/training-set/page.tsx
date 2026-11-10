@@ -8,7 +8,7 @@ import {Frame, ProjectPage} from '@/components/Shell';
 import {LabelDistribution, labelCounts} from '@/components/LabelDistribution';
 import {modelName, versionScore} from '@/components/prompt/scores';
 import {labelTestSet, predictionsFor, startTrainingSet, stopRun, stopTrainingSet, tick, track, trainingRows, type ProjectState} from '@/backend-api';
-import {Badge, Banner, Button, Card, Code, dateTime, Empty, Hov, Metric, Metrics, num, PageHead, Progress, Select, Tabs} from '@/ui';
+import {Badge, Button, Card, Code, dateTime, Empty, Hov, Metric, Metrics, num, PageHead, Progress, Select, Tabs} from '@/ui';
 
 type SetKey = 'train' | 'test';
 type SetState = 'todo' | 'running' | 'stopped' | 'done';
@@ -202,13 +202,6 @@ function Done({state, split, rows, job}: {state: ProjectState; split: SetKey; ro
   const v = state.versions.find(x => x.id === job.promptVersionId);
   const labeled = rows.filter(r => r.answer);
   const c = useMemo(() => labelCounts(schema, labeled.map(r => r.answer)), [rows]); // eslint-disable-line react-hooks/exhaustive-deps
-  const low = c.flatMap(f => f.values).filter(x => x.n > 0 && x.n < MIN_PER_VALUE).length;
-  const none = c.flatMap(f => f.values).filter(x => x.n === 0).length;
-  const parts = [
-    low ? `${plural(low, 'value has', 'values have')} fewer than ${MIN_PER_VALUE} examples` : '',
-    none ? (low ? `${plural(none, 'has', 'have')} none` : `${plural(none, 'value has', 'values have')} no examples`) : '',
-  ].filter(Boolean);
-  const banner = split === 'train' && parts.length ? `${parts.join(' and ')}, so the model you train may learn them poorly` : null;
   const tokens = (job as {tokens?: number}).tokens ?? 0;
   const finishedAt = job.finishedAt ?? job.startedAt;
   const fromGold = labeled.filter(r => r.source === 'gold').length;
@@ -230,7 +223,15 @@ function Done({state, split, rows, job}: {state: ProjectState; split: SetKey; ro
   return (
     <>
       {/* No "Add examples" action: adding to an existing dataset comes in a later version. */}
-      {banner && <Banner text={banner} />}
+      {/* No banner for rare values: the legend under the distribution already marks them (review finding 18). */}
+      {split === 'test' && labeled.length - fromGold > 0 && (
+        <div className="t-3" style={{fontSize: 13, paddingBottom: 12}}>
+          <Hov
+            text={`${plural(labeled.length - fromGold, "row carries the model's answer", "rows carry the model's answer")}, not a gold label`}
+            tip="A model tested on these rows is measured against this labeling, not against the truth. Give them gold labels in Gold Labels for a true test"
+          />
+        </div>
+      )}
       <div style={{display: 'grid', gridTemplateColumns: '360px 1fr', gap: 16, alignItems: 'start'}}>
         <Card title="Run">
           {metrics}

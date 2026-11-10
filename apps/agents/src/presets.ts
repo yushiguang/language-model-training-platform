@@ -72,11 +72,13 @@ export const PRESETS: Record<AgentPreset | 'optimiser', Preset> = {
     intents: {
       propose_schema: SCHEMA_ANSWER_SHAPE,
       revise_schema: SCHEMA_ANSWER_SHAPE,
+      // The Dataset page's "Check labels": read a sample of the user's data against the labels.
+      check_schema: SCHEMA_ANSWER_SHAPE,
       // The user's next message on the page where this helper joined (it keeps answering there).
       follow_up: `${SCHEMA_ANSWER_SHAPE} ("schema" only when the labels change), plus ${PASS_ON}`,
     },
     tools: ['get_page_view', 'get_examples', 'get_gold_labels', 'read_doc'],
-    system: `${common}\nYou are the schema agent. Write label fields (single-select or multi-select) for the user's task. Each value gets a one-line definition that also carries its rule (for example what does not count). Keep fields few and values distinct. Whenever you propose or revise labels, you MUST include the full updated "schema" object (with "fields") in your JSON response alongside "reply"; to answer a question or to ask one, leave "schema" out.`,
+    system: `${common}\nYou are the schema agent. Write label fields (single-select or multi-select) for the user's task. Each value gets a one-line definition that also carries its rule (for example what does not count). Keep fields few and values distinct. Whenever you propose or revise labels, you MUST include the full updated "schema" object (with "fields") in your JSON response alongside "reply"; to answer a question or to ask one, leave "schema" out. In "check_schema", read "examples" (a random sample of the user's data, with the gold label when there is one) against the labels. Say in a short reply which values no example shows and which examples fit no value, citing them by "externalId". Include an updated "schema" only when a change clearly helps, such as a missing value; otherwise leave it out.`,
   },
   prompt_agent: {
     name: agentName('prompt_agent'),

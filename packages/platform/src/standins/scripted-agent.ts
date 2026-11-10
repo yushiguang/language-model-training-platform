@@ -102,6 +102,7 @@ function schemaAgent(r: Req) {
       schema,
     };
   }
+  if (r.intent === 'check_schema') return checkSchema(schema, (r.context.examples ?? []) as {externalId: string; gold?: Record<string, string[]>}[]);
   const t = r.userText ?? '';
   if (isQuestion(t)) return {reply: `The labels have ${schema.fields.length} fields: ${schema.fields.map(f => `${f.name} (${f.values.length} values)`).join(', ')}. Tell me what to change and I'll draft it.`};
   if (isVague(t)) return {reply: '', question: 'Which field should I change, and how?'};
@@ -119,6 +120,19 @@ function schemaAgent(r: Req) {
     return {reply: `I renamed ${rename[1]} to ${rename[2]}.`, schema};
   }
   return {reply: 'I can add, rename or remove values and fields. Tell me which field to change, for example "add Unboxing to format".'};
+}
+
+/** The label check: which values no sampled example shows (by their gold labels), and how many examples have none yet. */
+function checkSchema(schema: Schema, examples: {externalId: string; gold?: Record<string, string[]>}[]) {
+  const seen = new Set(examples.flatMap(e => Object.entries(e.gold ?? {}).flatMap(([f, vs]) => vs.map(v => `${f}=${v}`))));
+  const withGold = examples.filter(e => e.gold).length;
+  if (!withGold) return {reply: `I read ${examples.length} examples. None has a gold label yet, so I can't say which values never show up. Every example seems to fit the labels; give a few gold labels and ask again to check each value.`};
+  const unseen = schema.fields.flatMap(f => f.values.filter(v => !seen.has(`${f.name}=${v.name}`)).map(v => `${v.name} (${f.name})`));
+  return {
+    reply: unseen.length
+      ? `I read ${examples.length} examples, ${withGold} with gold labels. No example is ${unseen.slice(0, 4).join(', ')}${unseen.length > 4 ? ` or ${unseen.length - 4} more` : ''}. If those values are rare in your data, the model will have few to learn from; keep them only if you need them.`
+      : `I read ${examples.length} examples, ${withGold} with gold labels. Every value shows up, and every example fits a value. I changed nothing.`,
+  };
 }
 
 function promptAgent(r: Req) {
@@ -234,7 +248,7 @@ function improve(r: Req) {
     }
   }
   return {
-    reply: changes.length ? `I read the ${r.context.mistakes ?? ''} mistakes in ${r.context.version} and made ${changes.length} change${changes.length === 1 ? '' : 's'}. Added text is green and a removed part is a red space; hover one to see why:`.replace('the  mistakes', 'the mistakes') : `I have no new change for ${r.context.version}.`,
+    reply: changes.length ? `I made ${changes.length} change${changes.length === 1 ? '' : 's'} to ${r.context.version}. Hover each mark to see why.` : `I have no new change for ${r.context.version}.`,
     template,
     changes,
   };

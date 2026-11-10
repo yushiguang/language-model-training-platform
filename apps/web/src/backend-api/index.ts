@@ -226,6 +226,7 @@ export const startOptimiser = timed('startOptimiser', bff.startOptimiser);
 export const stopOptimiser = timed('stopOptimiser', bff.stopOptimiser);
 export const retryOptimiser = timed('retryOptimiser', bff.retryOptimiser);
 export const improveWithAi = timed('improveWithAi', bff.improveWithAi);
+export const checkLabels = timed('checkLabels', bff.checkLabels);
 export const featureInfo = timed('featureInfo', bff.featureInfo);
 export const predictionsFor = timed('predictionsFor', bff.predictionsFor);
 export const labelTestSet = timed('labelTestSet', bff.labelTestSet);

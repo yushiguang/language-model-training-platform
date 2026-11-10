@@ -204,7 +204,8 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
   const shape = PRESETS[to].intents[intent] ?? '{"reply": string}';
   const messages: ModelMessage[] = [
     {role: 'system', content: `${systemPrompt(to)}\nAnswer shape for "${intent}": ${shape}${toolBlurb(to, tools.host)}`},
-    {role: 'user', content: JSON.stringify(body)},
+    // Example images (the label check) go as content parts, like the Optimiser's wrong examples.
+    {role: 'user', content: withImages(body)},
   ];
   let retried = false;
   // A refused or extra call still counts as a step, so a model that keeps asking can't loop.
@@ -325,7 +326,7 @@ export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?
  * The request as text, then the examples' images (finding 8): each example's images follow a
  * line naming it, and the JSON keeps only how many images it has.
  */
-function withImages(body: {preset: string; intent: string; context: Record<string, unknown>}): string | ContentPart[] {
+function withImages(body: {preset: string; intent: string; context: Record<string, unknown>} & Record<string, unknown>): string | ContentPart[] {
   const {context} = body;
   const examples = Array.isArray(context.examples) ? (context.examples as ExampleBrief[]) : [];
   if (!examples.some(e => e.images?.length)) return JSON.stringify(body);

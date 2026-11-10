@@ -11,7 +11,7 @@ import type {
   Schema,
   StartRequest,
 } from '@tsp/contracts';
-import {fieldsRight, newId, promptKeys, settingsHash, versionLabel, wrongExamples} from '@tsp/domain';
+import {agentName, exampleBrief, fieldsRight, newId, promptKeys, settingsHash, versionLabel, wrongExamples} from '@tsp/domain';
 import {loadProjectState} from './projects.ts';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
@@ -126,6 +126,8 @@ export async function sendUserMessage(
   text: string,
   page: PageContext,
   attachments?: ChatAttachment[],
+  /** A helper the user called by a button: it joins with a line and keeps answering on this page. */
+  join?: boolean,
 ): Promise<AgentProposal | null> {
   busyProjects.add(projectId);
   const started = Date.now();
@@ -136,6 +138,7 @@ export async function sendUserMessage(
     stays.delete(projectId);
     if (stay.agent !== page.agent) await postEvent(projectId, 'page', page.agent, `answers on ${pageName(page)}`);
   }
+  if (join) stays.delete(projectId);
   const turnPage: PageContext = stays.has(projectId) ? {...page, agent: stays.get(projectId)!.agent, intent: 'follow_up'} : page;
   const entry = turnPage.agent;
   setLive(projectId, {agent: entry, working: 'Thinking…', reply: null});
@@ -149,6 +152,7 @@ export async function sendUserMessage(
     page: page.label,
     ...(cleanAttachments?.length ? {attachments: cleanAttachments} : {}),
   });
+  if (join) await post(projectId, {role: 'event', agent: null, event: 'join', text: `${agentName(page.agent)} joined to answer`, page: page.label});
 
   try {
     const {catalog, agents, gateway} = getApp();
@@ -172,6 +176,7 @@ export async function sendUserMessage(
     recordTurn(turnOut, entry, started);
     const joined = turnOut.invocations.filter(i => i.from !== 'user').at(-1);
     if (joined) stays.set(projectId, {agent: joined.to, page: pageKey(page)});
+    else if (join) stays.set(projectId, {agent: page.agent, page: pageKey(page)});
 
     for (const inv of turnOut.invocations) {
       const start: StartRequest = {
@@ -278,6 +283,27 @@ export async function closeProposal(p: AgentProposal, state: 'approved' | 'disca
  * with a reason. The draft goes into the editor (an open prompt proposal) with the changes
  * marked; nothing is labeled until the user saves it.
  */
+/** How many examples the label check reads. */
+export const CHECK_SAMPLE = 20;
+
+/**
+ * Dataset's "Check labels" (review finding 10): the Labels helper reads a random sample of the
+ * examples against the labels, answers in Ask AI and may put a draft on Schema settings. The
+ * held-out half never reaches it.
+ */
+export async function checkLabels(projectId: string, page: PageContext): Promise<AgentProposal | null> {
+  const state = await loadProjectState(projectId);
+  if (!state?.setup?.schema) throw new Error('Set the labels first.');
+  const pool = state.examples.filter(e => !(e.split === 'eval' && !e.optimiserHalf));
+  const sample = [...pool].sort(() => Math.random() - 0.5).slice(0, CHECK_SAMPLE);
+  const examples = sample.map(e => {
+    const gold = state.gold.get(e.id)?.answer;
+    const {gold: _g, predicted: _p, ...b} = exampleBrief(e, Object.keys(e.features), gold ?? {}, null);
+    return gold ? {...b, gold} : b;
+  });
+  return sendUserMessage(projectId, `Check the labels against ${sample.length} examples of my data`, {...page, agent: 'schema_agent', intent: 'check_schema', context: {...page.context, examples}}, undefined, true);
+}
+
 export async function improveWithAi(projectId: string, versionId: string): Promise<void> {
   const {catalog, agents, gateway, labeling} = getApp();
   const state = await loadProjectState(projectId);
@@ -318,10 +344,10 @@ export async function improveWithAi(projectId: string, versionId: string): Promi
       createdAt: now(),
     };
     await catalog.insert('agent_proposals', proposal);
-    const lines = out.changes.map(c => `- ${c.text}${c.reason ? `: ${c.reason}` : ''}`).join('\n');
-    // Each change with its reason (the editor can't show reasons on hover).
-    const intro = out.reply || `Here is a draft with ${out.changes.length} change${out.changes.length === 1 ? '' : 's'} to ${versionLabel(v)}. Added text is green and a removed part is a red space; hover one to see why:`;
-    await post(projectId, {role: 'agent', agent: 'prompt_agent', text: lines ? `${intro}\n${lines}` : intro, page: 'Edit prompt'});
+    // One line: the reasons sit on the marks in the editor, so the chat does not repeat them.
+    const n = out.changes.length;
+    const text = n ? `I made ${n} change${n === 1 ? '' : 's'} to ${versionLabel(v)}. Hover each mark to see why.` : `I have no new change for ${versionLabel(v)}.`;
+    await post(projectId, {role: 'agent', agent: 'prompt_agent', text, page: 'Edit prompt'});
     await postEvent(projectId, 'draft', 'prompt_agent', 'put a draft on Edit prompt', {path: '/prompt/edit', params: {v: v.id}});
     tm().counter('tsp_agent_proposals_total', {agent: 'prompt_agent', kind: 'prompt', outcome: 'shown'});
     tm().event('prompt_proposal_shown', {agent: 'prompt_agent'});

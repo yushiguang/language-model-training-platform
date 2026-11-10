@@ -376,3 +376,33 @@ test('read_doc: a link that cannot be opened says so, so the helper asks for the
   const out = (await agentTools(w.projectId).call({agent: 'schema_agent', name: 'read_doc', args: {url: 'https://docs.example.com/docx/abc'}})) as {error?: string};
   assert.match(out.error ?? '', /cannot be opened/);
 });
+
+test('Check labels: the Labels helper joins, reads a sample without the held-out half, and keeps answering on Dataset', async () => {
+  const seen: {agent: string; intent: string; ids: string[]}[] = [];
+  const agents = {
+    async runAgentTurn(input, _llm, _tools, progress) {
+      const ids = ((input.page.context.examples ?? []) as {externalId: string}[]).map(e => e.externalId);
+      seen.push({agent: input.page.agent, intent: input.page.intent, ids});
+      progress?.({message: {role: 'agent', agent: input.page.agent, text: 'Checked.'}});
+      return {invocations: [{from: 'user', to: input.page.agent, intent: input.page.intent, note: ''}], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
+    },
+    reflectPrompt: async () => ({template: '', change: ''}),
+    draftImprovement: async () => ({template: '', changes: [], reply: ''}),
+  } satisfies AgentRuntimeContract;
+  const w = await world('b29', {agents, test: 4, train: 6});
+  const {checkLabels, answeringAgent} = await import('./agents.ts');
+  const dataset = {label: 'Dataset', agent: 'front_desk' as const, intent: 'answer', context: {}, where: {page: 'dataset' as const, params: {}}};
+  await checkLabels(w.projectId, dataset);
+  const s = (await loadProjectState(w.projectId))!;
+  const heldOut = new Set(s.examples.filter(e => e.split === 'eval' && !e.optimiserHalf).map(e => e.externalId));
+  assert.equal(seen[0].agent, 'schema_agent');
+  assert.equal(seen[0].intent, 'check_schema');
+  assert.equal(seen[0].ids.length, 20 - heldOut.size);
+  assert.ok(heldOut.size > 0 && seen[0].ids.every(id => !heldOut.has(id)), 'no held-out example reaches the helper');
+  assert.equal(answeringAgent(w.projectId, dataset), 'schema_agent');
+  const chat = await w.catalog.find('chat_messages', {projectId: w.projectId}, 'createdAt');
+  assert.deepEqual(
+    chat.map(m => (m.role === 'event' ? `-- ${m.text}` : `${m.agent ?? 'user'}: ${m.text}`)),
+    [`user: Check the labels against ${20 - heldOut.size} examples of my data`, '-- Labels helper joined to answer', 'schema_agent: Checked.'],
+  );
+});

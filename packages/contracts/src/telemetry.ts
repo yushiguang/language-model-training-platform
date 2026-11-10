@@ -112,7 +112,7 @@ export const LABEL_VALUES: Record<string, readonly string[]> = {
   agent: ['front_desk', 'schema_agent', 'prompt_agent', 'evaluation_agent'],
   from: ['front_desk', 'schema_agent', 'prompt_agent', 'evaluation_agent'],
   to: ['schema_agent', 'prompt_agent', 'evaluation_agent'],
-  intent: ['answer', 'propose_schema', 'revise_schema', 'draft_prompt', 'revise_prompt', 'explain_version', 'explain_report', 'reflect', 'merge', 'improve'],
+  intent: ['answer', 'propose_schema', 'revise_schema', 'check_schema', 'draft_prompt', 'revise_prompt', 'explain_version', 'explain_report', 'reflect', 'merge', 'improve'],
   tool: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions', 'check_template', 'read_feature_info', 'read_doc', 'try_template', 'score_version', 'start_optimiser'],
   page: ['projects', 'setup', 'dataset', 'gold', 'prompt', 'prompt_edit', 'compare', 'report', 'training', 'other'],
   slot: ['A', 'B'],

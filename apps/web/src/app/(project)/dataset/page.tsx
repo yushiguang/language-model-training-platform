@@ -2,19 +2,22 @@
 
 import {useGo} from '@/components/nav';
 import {useEffect, useRef, useState} from 'react';
+import type {PageContext} from '@tsp/contracts';
 import {gate} from '@tsp/domain';
-import {Frame, ProjectPage} from '@/components/Shell';
+import {Frame, ProjectPage, useOpenAskAi} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
-import {applySplit, approveNode, getSamplePoolSize, startSampleDataset, stopSampleDataset, uploadDatasetFile, type ProjectState} from '@/backend-api';
-import {Badge, Button, Card, CenterProgress, dateTime, Empty, Field, LinkChip, Metric, Metrics, num, PageHead} from '@/ui';
+import {applySplit, approveNode, checkLabels, getSamplePoolSize, startSampleDataset, stopSampleDataset, uploadDatasetFile, type ProjectState} from '@/backend-api';
+import {Badge, Button, Card, CenterProgress, dateTime, Empty, Field, LinkChip, Metric, Metrics, num, PageHead, reportActionError, Suggestion} from '@/ui';
 
 export default function DatasetPage() {
   return (
-    <ProjectPage node="dataset" page={{label: 'Dataset', agent: 'front_desk', intent: 'answer', hint: 'Ask how big the eval and test sets should be.', context: {}}}>
+    <ProjectPage node="dataset" page={PAGE}>
       {({state}) => <Dataset state={state} />}
     </ProjectPage>
   );
 }
+
+const PAGE: PageContext = {label: 'Dataset', agent: 'front_desk', intent: 'answer', hint: 'Ask how big the eval and test sets should be.', context: {}};
 
 function Dataset({state}: {state: ProjectState}) {
   const snap = state.snapshot;
@@ -46,7 +49,24 @@ function Dataset({state}: {state: ProjectState}) {
   return (
     <Frame head={head}>
       <Ready state={state} flush={flush} onValid={setSplitOk} />
+      {state.setup?.schema && <CheckLabels state={state} />}
     </Frame>
+  );
+}
+
+/** Review finding 10: the Labels helper reads a sample of the data against the labels, in Ask AI. */
+function CheckLabels({state}: {state: ProjectState}) {
+  const openAskAi = useOpenAskAi();
+  const check = () => {
+    openAskAi();
+    checkLabels(state.project.id, {...PAGE, where: {page: 'dataset', params: {}}}).catch(e => reportActionError(`Check labels failed: ${(e as Error).message}`, check));
+  };
+  return (
+    <div style={{paddingTop: 16}}>
+      <section className="card ai" aria-label="AI Suggestion">
+        <Suggestion title="Check the labels against your data" text="The Labels helper reads 20 examples and says which values never show up and which examples fit no value" actions={<Button label="Check labels" onClick={check} />} />
+      </section>
+    </div>
   );
 }
 
