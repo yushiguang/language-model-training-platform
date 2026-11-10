@@ -90,7 +90,7 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
         link: {path: '/prompt'},
         estimateUsd: optimiserEstimate(state, endpoint, rounds),
         run: async () => {
-          void startOptimiser(projectId, rounds, {auto: true});
+          void startOptimiser(projectId, rounds, undefined, {auto: true});
           return {started: true, note: `The Optimiser tries up to ${rounds} changes; each one appears on Prompt versions, with its dry run or scores.`};
         },
       };

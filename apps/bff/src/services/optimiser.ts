@@ -1,7 +1,9 @@
-import type {EndpointId, FeatureSelection, Prediction, OptimisationRun, OptimiserRound, OptimiserStep, ProjectState, PromptVersion, SetupVersion} from '@tsp/contracts';
+import type {EndpointId, ExampleBrief, FeatureSelection, Prediction, OptimisationRun, OptimiserRound, OptimiserStep, ProjectState, PromptVersion, Schema, SetupVersion} from '@tsp/contracts';
 import {
+  BRIEF_WINS,
   checkTemplate,
   compareDryRun,
+  exampleBrief,
   dryRunSize,
   exampleScore,
   mergePair,
@@ -10,8 +12,10 @@ import {
   pickDryRun,
   pickParent,
   placeholderKeys,
+  promptKeys,
   settingsHash,
   versionLabel,
+  wrongExamples,
   type PoolEntry,
 } from '@tsp/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
@@ -76,16 +80,52 @@ class StepFailed extends Error {
 const aborted = () => new DOMException('Stopped', 'AbortError');
 const isAbort = (e: unknown) => (e as Error)?.name === 'AbortError';
 
-/** Starts a new run: reserves the next major for its versions. */
-export async function newRun(projectId: string, endpoint: EndpointId, maxRounds: number, opts: {auto?: boolean} = {}): Promise<OptimisationRun> {
+/**
+ * What the helper reads with a change or a merge (R3-9, D3): optimiser-half examples only. A change
+ * gets the parent's wrong examples, worst first; a merge gets the examples each version gets right
+ * that the other misses, up to 4 each.
+ */
+function briefs(state: ProjectState, schema: Schema, half: string[], parent: PromptVersion, other: PromptVersion | null, answers: Map<string, Map<string, Prediction>>, entries: PoolEntry[]): ExampleBrief[] {
+  const halfSet = new Set(half);
+  const exs = state.examples.filter(e => halfSet.has(e.id));
+  const gold = new Map(exs.filter(e => state.gold.has(e.id)).map(e => [e.id, state.gold.get(e.id)!.answer]));
+  const mine = answers.get(parent.id) ?? new Map<string, Prediction>();
+  if (!other) return wrongExamples(schema, exs, promptKeys(parent), gold, new Map([...mine].map(([id, p]) => [id, p.answer])));
+  const a = entries.find(x => x.id === parent.id)?.scores;
+  const b = entries.find(x => x.id === other.id)?.scores;
+  if (!a || !b) return [];
+  const theirs = answers.get(other.id) ?? new Map<string, Prediction>();
+  const keys = new Set([...promptKeys(parent), ...promptKeys(other)]);
+  const wins = (x: Map<string, number>, y: Map<string, number>, by: 'template' | 'other', preds: Map<string, Prediction>) =>
+    exs
+      .filter(e => (x.get(e.id) ?? 0) > (y.get(e.id) ?? 0) && gold.has(e.id))
+      .slice(0, BRIEF_WINS)
+      .map(e => exampleBrief(e, keys, gold.get(e.id)!, preds.get(e.id)?.answer ?? null, by));
+  // `predicted` is the answer of the version that misses the example.
+  return [...wins(a, b, 'template', theirs), ...wins(b, a, 'other', mine)];
+}
+
+/** The version with the highest current score on the model, if any is scored. */
+function bestScored(state: ProjectState, endpoint: EndpointId): PromptVersion | undefined {
+  const scored = state.reports.filter(r => r.endpoint === endpoint && !r.archivedNow).sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1);
+  return scored.map(r => state.versions.find(v => v.id === r.promptVersionId)).find(v => !!v);
+}
+
+/**
+ * Starts a new run: reserves the next major for its versions. It starts from `startVersionId`
+ * (R3-7: the version selected in the list), else from the best scored version, else the newest.
+ */
+export async function newRun(projectId: string, endpoint: EndpointId, maxRounds: number, opts: {auto?: boolean; startVersionId?: string} = {}): Promise<OptimisationRun> {
   const {catalog} = getApp();
   const state = (await loadProjectState(projectId))!;
+  const start = opts.startVersionId ? state.versions.find(v => v.id === opts.startVersionId) : bestScored(state, endpoint);
+  if (opts.startVersionId && !start) throw new Error('The selected version was not found.');
   const top = Math.max(0, ...state.versions.map(v => v.major), ...state.optimisation.map(o => o.major ?? 0));
   const run: OptimisationRun = {
     id: newId('op'),
     projectId,
     endpoint,
-    startVersionId: state.versions[0].id,
+    startVersionId: (start ?? state.versions[0]).id,
     major: top + 1,
     maxRounds,
     round: 0,
@@ -253,6 +293,7 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
         await putRound(round);
 
         const m = await scoreOnOptimiserHalf(setup, parent, endpoint, state.examples, state.gold);
+        const examples = briefs(state, schema, half, parent, other, answers, entries);
         const out = await step(other ? 'merge' : 'reflect', parent, () =>
           agents.reflectPrompt(
             {
@@ -264,6 +305,7 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
               mixUps: m.mixUps,
               lowestField: m.lowestField,
               lowestValue: m.lowestValue,
+              examples,
               ...(other ? {other: {template: other.template, features: other.features, change: other.change}} : {}),
               signal,
             },

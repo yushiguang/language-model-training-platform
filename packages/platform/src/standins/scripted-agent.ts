@@ -88,6 +88,11 @@ function frontDesk(r: Req) {
   return {reply: `On this page you can ${r.context.pageHint ?? 'follow the steps on the left'}. Ask me about anything you see, or tell me what to change.`};
 }
 
+/** A question gets an answer only, never a draft (R3-10). */
+const isQuestion = (t: string) => !/^(please\b|(can|could|would|will) you\b)/i.test(t.trim()) && /\?\s*$|^(what|why|how|which|where|when|does|do|is|are)\b/i.test(t.trim());
+/** Too short to know what to change: the helper asks one question first. */
+const isVague = (t: string) => /^(please )?(improve|fix|change|update|better|rewrite)( it| this| the prompt| the labels)?( please)?[.!]?$/i.test(t.trim());
+
 function schemaAgent(r: Req) {
   const schema: Schema = structuredClone((r.context.schema as Schema) ?? SAMPLE_SCHEMA);
   if (r.intent === 'propose_schema') {
@@ -97,6 +102,8 @@ function schemaAgent(r: Req) {
     };
   }
   const t = r.userText ?? '';
+  if (isQuestion(t)) return {reply: `The labels have ${schema.fields.length} fields: ${schema.fields.map(f => `${f.name} (${f.values.length} values)`).join(', ')}. Tell me what to change and I'll draft it.`};
+  if (isVague(t)) return {reply: '', question: 'Which field should I change, and how?'};
   const add = t.match(/add (?:a |the )?(?:value )?["“]?([^"”]+?)["”]? (?:to|in) (\w+)/i);
   if (add) {
     const field = schema.fields.find(f => f.name.toLowerCase() === add[2].toLowerCase());
@@ -117,12 +124,19 @@ function promptAgent(r: Req) {
   if (r.intent === 'improve') return improve(r);
   const start = promptAgentStart(r);
   if (start) return start;
+  const t = (r.userText ?? '').trim();
+  if (t && r.intent !== 'explain_version' && isQuestion(t) && (r.context.template != null || !r.context.version)) {
+    const draft = String(r.context.template ?? '');
+    const keys = [...new Set([...draft.matchAll(/\{\{\s*([\w.]+)\s*\}\}/g)].map(m => m[1]))];
+    return {reply: draft.trim() ? `The prompt in the editor has ${draft.split('\n').length} lines and uses ${keys.length ? keys.join(', ') : 'no features'}. I changed nothing; tell me what to change and I'll draft it.` : "There is no prompt yet. Ask me to draft one from your schema, or paste the one you use today."};
+  }
+  if (t && isVague(t)) return {reply: '', question: 'Which field should the change help, and what goes wrong with it today?'};
   if (r.intent === 'draft_prompt') {
     const d = draftTemplate(r.context.schema, r.context.task ?? '');
     return {reply: 'I drafted a starting prompt from your schema and ticked the features it uses. Edit anything, then press Create.', ...d};
   }
   // A follow-up on the page where it joined: a question is answered, anything else is a change.
-  if (r.intent === 'explain_version' || (r.intent === 'follow_up' && /\?\s*$|^(what|why|how|which|does|is|can)\b/i.test((r.userText ?? '').trim()))) {
+  if (r.intent === 'explain_version' || (t && isQuestion(t))) {
     const v = r.context.version;
     return {reply: v ? `${v.label} was made by ${v.madeBy}. ${v.change ? `It changed: ${v.change}.` : ''} ${v.delta ?? ''}`.trim() : 'Pick a version and I can tell you what it changed.'};
   }

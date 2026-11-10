@@ -222,7 +222,7 @@ function Done({state, split, rows, job}: {state: ProjectState; split: SetKey; ro
     ) : (
       <Metrics vertical>
         <Metric label="Labeled" value={num(labeled.length)} unit={`/${num(rows.length)}`} />
-        <Metric label={<Hov text="Gold labels" tip="Answers you gave in Gold Labels" />} value={num(fromGold)} />
+        <Metric label="Gold labels" value={num(fromGold)} />
         <Metric label="Labeled by the model" value={num(labeled.length - fromGold)} />
         <Metric label="Total tokens" value={num(tokens)} />
       </Metrics>

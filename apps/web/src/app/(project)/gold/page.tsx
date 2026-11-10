@@ -1,6 +1,6 @@
 'use client';
 
-import {useRouter} from 'next/navigation';
+import {useGo} from '@/components/nav';
 import {Fragment, useEffect, useMemo, useRef, useState} from 'react';
 import type {Answer, Example, ExampleMedia, LabelField} from '@tsp/contracts';
 import {FEATURES, versionLabel} from '@tsp/domain';
@@ -20,7 +20,7 @@ export default function GoldPage() {
 }
 
 function Gold({state}: {state: ProjectState}) {
-  const router = useRouter();
+  const go = useGo();
   const {href} = useProject();
   const sets = useMemo(() => ({eval: state.examples.filter(e => e.split === 'eval'), test: state.examples.filter(e => e.split === 'test')}), [state.examples]);
   const [tab, setTab] = useState<SetKey>('eval');
@@ -62,7 +62,7 @@ function Gold({state}: {state: ProjectState}) {
             title={evalDone ? undefined : 'Label every eval example first. Gold labels on the test set are optional.'}
             onClick={async () => {
               await approveNode(state.project.id, 'gold');
-              router.push(href('/prompt'));
+              await go(href('/prompt'));
             }}
           />
         </>

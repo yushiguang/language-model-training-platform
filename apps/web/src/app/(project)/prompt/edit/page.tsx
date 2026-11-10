@@ -1,6 +1,7 @@
 'use client';
 
-import {useRouter, useSearchParams} from 'next/navigation';
+import {useGo} from '@/components/nav';
+import {useSearchParams} from 'next/navigation';
 import {Suspense, useEffect, useMemo, useState} from 'react';
 import type {PageContext, PromptVersion} from '@tsp/contracts';
 import {ALL_KEYS, diffLines, diffSummary, diffWords, MADE_BY, nextVersion, versionLabel, withReasons} from '@tsp/domain';
@@ -42,7 +43,7 @@ function EditRouter() {
 
 /** View or edit a version. Saving makes the next number (Save: minor, Save as vN: major) and never overwrites one. */
 function Edit({state, version, readOnly, setPage}: {state: ProjectState; version: PromptVersion; readOnly: boolean; setPage: (p: PageContext) => void}) {
-  const router = useRouter();
+  const go = useGo();
   const {href} = useProject();
   const base: Draft = {template: version.template, features: version.features, images: version.images};
   const [draft, setDraft] = useState<Draft>(base);
@@ -84,9 +85,9 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
       agent: 'prompt_agent',
       intent: 'revise_prompt',
       hint: 'Ask me what this version changed, or tell me what to fix and I will draft the change here.',
-      context: {schema: state.setup?.schema, template: draft.template, version: {label: versionLabel(version), madeBy: MADE_BY[version.madeBy], change: version.change}},
+      context: {schema: state.setup?.schema, template: draft.template, features: draft.features, images: draft.images, unsaved: dirty, version: {label: versionLabel(version), madeBy: MADE_BY[version.madeBy], change: version.change}},
     });
-  }, [version.id, draft.template]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [version.id, draft.template, draft.features, draft.images, dirty]); // eslint-disable-line react-hooks/exhaustive-deps
   useAgentDrafts(state, d => {
     if (readOnly) return;
     setDraft(cur => ({...cur, template: d.template, features: d.features ?? cur.features}));
@@ -101,7 +102,7 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
     const v = await createVersion(state.project.id, {...draft, parent: version, madeBy, change: summary, kind, schema: state.setup!.schema!, schemaVersion: state.setup!.schemaVersion});
     // Saving is the user's start: the new version is scored right away.
     void scoreVersion(state.project.id, v);
-    router.push(href('/prompt'));
+    await go(href('/prompt'));
   };
   const discard = () => {
     setDraft(base);

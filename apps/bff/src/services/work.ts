@@ -100,9 +100,10 @@ export async function tick(state: ProjectState) {
 
 /**
  * Auto Optimise: starts a run of up to `maxRounds` changes on the project's model (one model per
- * project). `auto`: an agent's start tool, after the user asked in Ask AI.
+ * project), from `startVersionId` (the version selected in the list; left out: the best scored
+ * version). `auto`: an agent's start tool, after the user asked in Ask AI.
  */
-export async function startOptimiser(projectId: string, maxRounds = DEFAULT_MAX_ROUNDS, opts: {auto?: boolean} = {}): Promise<void> {
+export async function startOptimiser(projectId: string, maxRounds = DEFAULT_MAX_ROUNDS, startVersionId?: string, opts: {auto?: boolean} = {}): Promise<void> {
   const state = await loadProjectState(projectId);
   const endpoint = state?.setup?.models[0]?.endpoint;
   if (!state || !endpoint) throw new Error('Pick a model in Setup first.');
@@ -112,7 +113,7 @@ export async function startOptimiser(projectId: string, maxRounds = DEFAULT_MAX_
     await getApp().locks.run(optimiserLock(projectId, endpoint), async () => {
       const open = (await loadProjectState(projectId))?.optimisation.find(o => o.state === 'running' || o.state === 'paused');
       if (open) return runOptimiser(open, {resumed: true});
-      const run = await newRun(projectId, endpoint, rounds, opts);
+      const run = await newRun(projectId, endpoint, rounds, {...opts, startVersionId});
       if (!opts.auto) await postEvent(projectId, 'start', 'user', `started the Optimiser for up to ${rounds} rounds`, {path: '/prompt'});
       return runOptimiser(run);
     });

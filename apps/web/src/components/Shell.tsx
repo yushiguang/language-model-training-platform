@@ -47,6 +47,11 @@ const ShellCtx = createContext<Shell>({
   setOpen: () => undefined,
   side: null,
 });
+/** Opens Ask AI: every action that starts or continues a helper's work opens it, so the user lands where the helper works (R3-6). */
+export function useOpenAskAi(): () => void {
+  const {setOpen} = useContext(ShellCtx);
+  return () => setOpen(true);
+}
 const PageCtx = createContext<PageContext>({
   label: '',
   agent: 'front_desk',

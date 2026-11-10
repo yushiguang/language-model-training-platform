@@ -1,12 +1,12 @@
 'use client';
 
-import {useRouter} from 'next/navigation';
+import {useGo} from '@/components/nav';
 import {useEffect, useRef, useState} from 'react';
 import {gate} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {applySplit, approveNode, getSamplePoolSize, startSampleDataset, stopSampleDataset, uploadDatasetFile, type ProjectState} from '@/backend-api';
-import {Badge, Button, Card, CenterProgress, dateTime, Empty, Field, Hov, LinkChip, Metric, Metrics, num, PageHead} from '@/ui';
+import {Badge, Button, Card, CenterProgress, dateTime, Empty, Field, LinkChip, Metric, Metrics, num, PageHead} from '@/ui';
 
 export default function DatasetPage() {
   return (
@@ -89,7 +89,7 @@ function recommended(total: number, minEval: number | null) {
 }
 
 function NextButton({state, flush, splitOk}: {state: ProjectState; flush: {current: () => Promise<void>}; splitOk: boolean}) {
-  const router = useRouter();
+  const go = useGo();
   const {href} = useProject();
   const evalOn = !!state.setup?.thresholds;
   const g = gate('dataset', state.facts);
@@ -102,7 +102,7 @@ function NextButton({state, flush, splitOk}: {state: ProjectState; flush: {curre
       onClick={async () => {
         await flush.current();
         await approveNode(state.project.id, 'dataset');
-        router.push(href(evalOn ? '/gold' : '/prompt'));
+        await go(href(evalOn ? '/gold' : '/prompt'));
       }}
     />
   );
@@ -160,7 +160,7 @@ function Ready({state, flush, onValid}: {state: ProjectState; flush: {current: (
           <Field label="Test size" width={160}>
             <input className="input" value={test} disabled={locked} title={lockTip} onChange={x => setTest(x.target.value.replace(/\D/g, ''))} />
           </Field>
-          <Field label={<Hov text="Train size" tip="Everything that is not eval or test" />} width={160}>
+          <Field label="Train size" width={160}>
             <span className="input" style={{display: 'flex', alignItems: 'center', background: 'var(--bg-muted)', borderColor: 'transparent'}}>
               {num(train)}
             </span>

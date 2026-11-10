@@ -1,4 +1,5 @@
-import type {Answer, DryRunResult, OptimisationRun, OptimiserRound, Schema} from '@tsp/contracts';
+import type {Answer, DryRunResult, Example, ExampleBrief, OptimisationRun, OptimiserRound, PromptVersion, Schema} from '@tsp/contracts';
+import {placeholderKeys} from './template.ts';
 
 /**
  * Pure parts of the Optimiser (GEPA, ported to TypeScript; see the design doc "Prompt optimising
@@ -21,8 +22,43 @@ export function fieldsRight(schema: Schema, gold: Answer, predicted: Answer | nu
 /** One example's score: the share of fields right (1 = every field matches the gold label). */
 export const exampleScore = (schema: Schema, gold: Answer, predicted: Answer | null) => (schema.fields.length ? fieldsRight(schema, gold, predicted).length / schema.fields.length : 0);
 
-/** Dry-run size: 10 examples of the optimiser half, or half of it when it has fewer than 20. */
-export const dryRunSize = (optimiserHalf: number) => (optimiserHalf >= 20 ? 10 : Math.max(1, Math.floor(optimiserHalf / 2)));
+/** Dry-run size: half of the optimiser half, at most 20 (D4, 2026-11-10). */
+export const dryRunSize = (optimiserHalf: number) => Math.min(20, Math.max(1, Math.floor(optimiserHalf / 2)));
+
+/** The features a version's prompt shows the model: its ticked features and its placeholders. */
+export const promptKeys = (v: Pick<PromptVersion, 'template' | 'features'>) => new Set([...v.features.video, ...v.features.photo_text, ...v.features.metadata, ...placeholderKeys(v.template)]);
+
+/** How long one feature may be in an example a helper reads. */
+export const BRIEF_FEATURE_CHARS = 300;
+/** How many wrong examples a helper reads (D3), and how many each version wins in a merge. */
+export const BRIEF_WRONG = 8;
+export const BRIEF_WINS = 4;
+
+/** An example as a helper reads it: the text features in `keys`, cut short; images and URLs left out. */
+export function exampleBrief(e: Example, keys: Iterable<string>, gold: Answer, predicted: Answer | null, rightIn?: 'template' | 'other'): ExampleBrief {
+  const features: Record<string, string> = {};
+  for (const k of keys) {
+    const v = e.features[k];
+    if (typeof v !== 'string' || !v.trim() || /^https?:\/\//.test(v.trim())) continue;
+    features[k] = v.length > BRIEF_FEATURE_CHARS ? `${v.slice(0, BRIEF_FEATURE_CHARS - 1).trimEnd()}…` : v;
+  }
+  return {externalId: e.externalId, features, gold, predicted, ...(rightIn ? {rightIn} : {})};
+}
+
+/**
+ * The examples a version gets wrong, worst first (fewest fields right), at most `max`. Pass only
+ * optimiser-half examples: the held-out half must never reach a helper.
+ */
+export function wrongExamples(schema: Schema, examples: Example[], keys: Iterable<string>, gold: Map<string, Answer>, predicted: Map<string, Answer | null>, max = BRIEF_WRONG): ExampleBrief[] {
+  const ks = [...keys];
+  return examples
+    .filter(e => gold.has(e.id) && predicted.has(e.id))
+    .map(e => ({e, s: exampleScore(schema, gold.get(e.id)!, predicted.get(e.id)!)}))
+    .filter(x => x.s < 1)
+    .sort((a, b) => a.s - b.s)
+    .slice(0, max)
+    .map(({e}) => exampleBrief(e, ks, gold.get(e.id)!, predicted.get(e.id)!));
+}
 
 /** A version in the pool with its scores on the optimiser half, by example id. */
 export interface PoolEntry {

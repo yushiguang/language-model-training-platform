@@ -5,7 +5,8 @@
  * "Unified UI"). Every screen is built only from these parts and `kit.css`, so the app looks like
  * the canvas. A change to a part goes on the canvas first, then here.
  */
-import Link from 'next/link';
+import Link, {useLinkStatus} from 'next/link';
+import {createPortal} from 'react-dom';
 import {createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode} from 'react';
 
 /** Mounted once around the app. The kit needs no theme provider; this only sets the root class. */
@@ -177,10 +178,7 @@ export function ActionErrorBanner() {
 }
 
 /** Buttons in one group (a page header's actions) lock together while one of them is working. */
-const PendingGroup = createContext<{
-  pending: boolean;
-  set: (p: boolean) => void;
-} | null>(null);
+const PendingGroup = createContext<{pending: boolean; set: (p: boolean) => void} | null>(null);
 export function ActionGroup({children}: {children: ReactNode}) {
   const [pending, set] = useState(false);
   return <PendingGroup.Provider value={{pending, set}}>{children}</PendingGroup.Provider>;
@@ -188,6 +186,23 @@ export function ActionGroup({children}: {children: ReactNode}) {
 
 // ---------- buttons ----------
 export type ButtonKind = 'primary' | 'secondary' | 'ghost' | 'white';
+
+/** A link button shows the spinner while its page loads (R3-5). */
+function LinkInner({icon, label}: {icon?: string; label?: string}) {
+  const {pending} = useLinkStatus();
+  return (
+    <>
+      {pending ? (
+        <span className="lp">
+          <Icon name="ring" />
+        </span>
+      ) : (
+        icon && <Icon name={icon} />
+      )}
+      {label}
+    </>
+  );
+}
 
 export function Button({
   label,
@@ -224,7 +239,7 @@ export function Button({
   if (href && !disabled)
     return (
       <Link className={cls} href={href} title={title} aria-label={ariaLabel}>
-        {inner}
+        <LinkInner icon={icon} label={label} />
       </Link>
     );
   // Work that takes time shows a spinner and locks the button (and its group) until it ends; a
@@ -268,12 +283,7 @@ export function Button({
 
 // ---------- badges ----------
 export type Tone = 'ok' | 'err' | 'info' | 'run' | 'warn' | 'gray';
-const TONE_ICON: Partial<Record<Tone, string>> = {
-  ok: 'check',
-  err: 'x',
-  info: 'ring',
-  run: 'ring',
-};
+const TONE_ICON: Partial<Record<Tone, string>> = {ok: 'check', err: 'x', info: 'ring', run: 'ring'};
 
 export function Badge({text, tone = 'gray', icon = true}: {text: string; tone?: Tone; icon?: boolean}) {
   const i = icon ? TONE_ICON[tone] : undefined;
@@ -306,11 +316,38 @@ export const Score = ({v, ok}: {v: number; ok: boolean}) => <b className={`t-${o
 export const Code = ({children}: {children: ReactNode}) => <span className="code">{children}</span>;
 
 /** A word with a dashed underline whose detail shows on hover. */
-export const Hov = ({text, tip}: {text: string; tip: string}) => (
-  <span className="hov" title={tip}>
-    {text}
-  </span>
-);
+/**
+ * A term with a dashed underline whose meaning shows in a popover on hover or keyboard focus
+ * (R3-1; design: U-F-Hint). The popover is drawn in the page layer, so no card clips it, and it
+ * opens above or to the left when there is no room below or to the right. Only terms a user may
+ * not know get one (decided 2026-11-10).
+ */
+export function Hov({text, tip}: {text: string; tip: string}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [at, setAt] = useState<{left?: number; right?: number; top?: number; bottom?: number} | null>(null);
+  const id = useRef(`tip-${Math.random().toString(36).slice(2, 8)}`).current;
+  const show = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    const below = window.innerHeight - r.bottom > 120;
+    const fromLeft = window.innerWidth - r.left > 340;
+    setAt({...(below ? {top: r.bottom + 8} : {bottom: window.innerHeight - r.top + 8}), ...(fromLeft ? {left: Math.max(8, r.left - 12)} : {right: Math.max(8, window.innerWidth - r.right - 12)})});
+  };
+  const hide = () => setAt(null);
+  return (
+    <span ref={ref} className="hov" tabIndex={0} aria-describedby={at ? id : undefined} onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide} onKeyDown={e => e.key === 'Escape' && hide()}>
+      {text}
+      {at &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <span id={id} role="tooltip" className="tip-pop" style={at}>
+            {tip}
+          </span>,
+          document.body,
+        )}
+    </span>
+  );
+}
 
 /** One line of text, cut with … and shown in full on hover. */
 export const One = ({text, className, style}: {text: string; className?: string; style?: CSSProperties}) => (
@@ -375,12 +412,7 @@ export function Table({cols, rows, first = 28, actWidth = 160, widths}: {cols: C
     <table className="tbl">
       <colgroup>
         {cols.map((c, i) => (
-          <col
-            key={i}
-            style={{
-              width: widths ? (widths[i] === 'auto' || widths[i] == null ? 'auto' : `${widths[i]}px`) : i === 0 ? `${first}%` : c.kind === 'act' ? `${actWidth}px` : 'auto',
-            }}
-          />
+          <col key={i} style={{width: widths ? (widths[i] === 'auto' || widths[i] == null ? 'auto' : `${widths[i]}px`) : i === 0 ? `${first}%` : c.kind === 'act' ? `${actWidth}px` : 'auto'}} />
         ))}
       </colgroup>
       <thead>
@@ -500,10 +532,7 @@ export function Cb({state, onToggle, label}: {state: 'on' | 'off' | 'mixed'; onT
       aria-checked={mixed ? 'mixed' : state === 'on'}
       aria-label={label}
       tabIndex={onToggle ? 0 : -1}
-      style={{
-        cursor: onToggle ? 'pointer' : undefined,
-        ...(mixed ? {background: 'var(--text)', borderColor: 'var(--text)'} : {}),
-      }}
+      style={{cursor: onToggle ? 'pointer' : undefined, ...(mixed ? {background: 'var(--text)', borderColor: 'var(--text)'} : {})}}
       onClick={onToggle}
       onKeyDown={e => onToggle && (e.key === ' ' || e.key === 'Enter') && (e.preventDefault(), onToggle())}
     >
@@ -518,7 +547,7 @@ export function CheckRow({tone, text, tip, fix}: {tone: 'ok' | 'warn' | 'err'; t
   return (
     <div className="chk-row">
       <span className={`chk ${tone}`}>{tone === 'ok' ? <Icon name="check" /> : tone === 'err' ? <Icon name="x" /> : <Icon name="alert" />}</span>
-      <span className="grow one" title={tip ?? (typeof text === 'string' ? text : undefined)}>
+      <span className="grow one" title={tip ? undefined : typeof text === 'string' ? text : undefined}>
         {tip && typeof text === 'string' ? <Hov text={text} tip={tip} /> : text}
       </span>
       {fix}
@@ -587,7 +616,17 @@ export function Tabs<K extends string>({items, selected, onSelect, end, label}: 
       }}
     >
       {items.map(t => (
-        <button key={t.key} type="button" role="tab" data-tab={t.key} tabIndex={t.key === selected ? 0 : -1} className="tab" aria-selected={t.key === selected} onClick={() => onSelect(t.key)} style={{display: 'inline-flex', alignItems: 'center', gap: 8}}>
+        <button
+          key={t.key}
+          type="button"
+          role="tab"
+          data-tab={t.key}
+          tabIndex={t.key === selected ? 0 : -1}
+          className="tab"
+          aria-selected={t.key === selected}
+          onClick={() => onSelect(t.key)}
+          style={{display: 'inline-flex', alignItems: 'center', gap: 8}}
+        >
           {t.label}
           {t.count != null && <span className="cnt">{t.count}</span>}
           {t.extra}
@@ -683,3 +722,34 @@ export const dateTime = (iso: string) => {
   const d = new Date(iso);
   return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
+
+/**
+ * A dialog that asks one question (design: U-F-Optimise-Confirm): a title, one line, and its
+ * buttons; the last button is the main one and gets the focus. Escape or a click outside closes it.
+ */
+export function Dialog({title, text, actions, onClose}: {title: string; text: string; actions: ReactNode; onClose: () => void}) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    const btns = box.current?.querySelectorAll<HTMLButtonElement>('button');
+    btns?.[btns.length - 1]?.focus();
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', key);
+    return () => {
+      window.removeEventListener('keydown', key);
+      prev?.focus?.();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  return createPortal(
+    <div className="k dlg-scrim" onMouseDown={e => e.target === e.currentTarget && onClose()}>
+      <div ref={box} role="dialog" aria-modal="true" aria-labelledby="dlg-t" className="dlg">
+        <h2 id="dlg-t" className="card-t">
+          {title}
+        </h2>
+        <p>{text}</p>
+        <div className="row dlg-acts">{actions}</div>
+      </div>
+    </div>,
+    document.body,
+  );
+}

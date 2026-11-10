@@ -36,6 +36,8 @@ interface RawAgentReply {
   template?: string;
   features?: FeatureSelection;
   change?: string;
+  /** One short question when the request is unclear (R3-10): the turn then proposes nothing. */
+  question?: string;
 }
 
 function parseJsonObject<T>(raw: string, fallback: T): T {
@@ -272,20 +274,26 @@ export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?
     out = await invokePreset(llm, agent, intent, input, tools);
   }
 
-  if (out.reply) {
-    emit({role: 'agent', agent, text: out.reply});
+  const question = typeof out.question === 'string' ? out.question.trim() : '';
+  const text = [out.reply?.trim(), question].filter(Boolean).join('\n\n');
+  if (text) {
+    emit({role: 'agent', agent, text});
   }
 
-  const resolvedSchema = extractSchema(out);
+  // A question, or an answer that leaves the prompt as it is, is a plain answer: no draft (R3-10).
+  const same = (t: string | undefined) => typeof t === 'string' && t.trim() === String(input.page.context.template ?? '').trim();
+  const resolvedSchema = question ? null : extractSchema(out);
   let proposal: AgentProposalDraft | null = null;
-  if (resolvedSchema) {
+  if (question) {
+    proposal = null;
+  } else if (resolvedSchema) {
     proposal = {
       kind: 'schema',
       agent,
       brief: input.userText,
       payload: resolvedSchema,
     };
-  } else if (out.template) {
+  } else if (out.template && !same(out.template)) {
     proposal = {
       kind: 'prompt',
       agent,
@@ -349,6 +357,7 @@ export async function reflectPrompt(input: OptimiserReflectInput, llm: AgentMode
       mixUps: input.mixUps.slice(0, 6),
       lowestField: input.lowestField,
       lowestValue: input.lowestValue,
+      examples: (input.examples ?? []).slice(0, 8),
       ...(input.other ? {other: input.other} : {}),
     },
     tools,
@@ -360,7 +369,7 @@ export async function reflectPrompt(input: OptimiserReflectInput, llm: AgentMode
 
 /** Improve with AI: the Prompt helper's draft of a version, with every change and its reason. */
 export async function draftImprovement(input: DraftImprovementInput, llm: AgentModel, tools?: AgentToolHost): Promise<DraftImprovementOutput> {
-  const raw = await withFeatureInfo(llm, 'prompt_agent', 'improve', {...input}, tools);
+  const raw = await withFeatureInfo(llm, 'prompt_agent', 'improve', {...input, examples: (input.examples ?? []).slice(0, 8)}, tools);
   const out = parseJsonObject<Partial<DraftImprovementOutput>>(raw, {});
   const changes = Array.isArray(out.changes) ? out.changes.filter(c => c && typeof c.text === 'string').map(c => ({text: c.text, reason: typeof c.reason === 'string' ? c.reason : ''})) : [];
   return {

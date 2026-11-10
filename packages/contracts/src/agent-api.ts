@@ -1,6 +1,7 @@
 import type {AgentModel, RawExample} from './platform-api.ts';
 import type {
   AgentPreset,
+  Answer,
   ChatAttachment,
   ChatEvent,
   ChatMessage,
@@ -129,6 +130,18 @@ export interface AgentTurnOutput {
   parseFailures: {agent: AgentPreset; intent: string}[];
 }
 
+/** One example a helper may read and cite (R3-9). Always from the optimiser half, never the held-out half. */
+export interface ExampleBrief {
+  externalId: string;
+  /** Text features the prompt uses, each cut to about 300 characters. Images are left out. */
+  features: Record<string, string>;
+  gold: Answer;
+  /** The model's answer (in a merge: from the version that misses it); null when it gave no valid answer. */
+  predicted: Answer | null;
+  /** Merge only: the version that gets this example right ('template': the first, 'other': the second). */
+  rightIn?: 'template' | 'other';
+}
+
 export interface OptimiserReflectInput {
   /** 'change': one change from the parent's mistakes. 'merge': combine `template` with `other`. */
   mode?: 'change' | 'merge';
@@ -139,7 +152,12 @@ export interface OptimiserReflectInput {
   mixUps: MixUp[];
   lowestField: Pick<FieldMetrics, 'field' | 'macroF1'>;
   lowestValue: {field: string; value: string; f1: number} | null;
-  /** Merge only: the second version, and the examples each version gets right that the other misses. */
+  /**
+   * Change: up to 8 examples of the optimiser half the parent gets wrong, worst first. Merge: up to
+   * 4 examples each version gets right that the other misses (`rightIn`).
+   */
+  examples?: ExampleBrief[];
+  /** Merge only: the second version. */
   other?: {template: string; features: FeatureSelection; change: string};
   signal?: AbortSignal;
 }
@@ -162,6 +180,8 @@ export interface DraftImprovementInput {
   lowestValue: {field: string; value: string; f1: number} | null;
   /** Mistakes on the eval set, with the gold label and the model's answer. */
   mistakes: number;
+  /** Up to 8 examples of the optimiser half the version gets wrong, worst first (never the held-out half). */
+  examples?: ExampleBrief[];
 }
 
 export interface DraftImprovementOutput {

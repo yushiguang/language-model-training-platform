@@ -309,3 +309,25 @@ test('Auto Optimise: the round limit ends the run', async () => {
   assert.equal(run.stopReason, 'max_rounds');
   assert.equal(run.round, 1);
 });
+
+test('Auto Optimise starts from the chosen version, and the helper reads wrong examples of the optimiser half only', async () => {
+  const agents = ruleAgent();
+  const inputs: Parameters<AgentRuntimeContract['reflectPrompt']>[0][] = [];
+  const reflect = agents.reflectPrompt;
+  agents.reflectPrompt = async (input, ...rest) => (inputs.push(input), reflect(input, ...rest));
+  const w = await world('b24', {agents, answer: ruled, macroF1: 0.99, gold: goldOf});
+  const v1 = await w.newVersion();
+  await w.newVersion();
+  const {startOptimiser} = await import('./work.ts');
+  await startOptimiser(w.projectId, 1, v1.id);
+  const run = (await w.state()).optimisation[0];
+  assert.equal(run.startVersionId, v1.id);
+  assert.equal(run.history[0].parentId, v1.id);
+  const ex = inputs[0].examples ?? [];
+  assert.ok(ex.length > 0 && ex.length <= 8);
+  assert.ok(
+    ex.every(e => Number(e.externalId) % 2 === 0),
+    'held-out examples never reach the helper',
+  );
+  assert.ok(ex.every(e => e.predicted?.format?.[0] !== e.gold.format?.[0]));
+});

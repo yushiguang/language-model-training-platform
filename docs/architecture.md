@@ -123,15 +123,20 @@ improves the prompt on the project's one labeling model, for up to the user's Ma
   and gives each change a reason with `withReasons`: the helper's change that shares its words, or
   for an Optimiser version, the round's change line. The marks are drawn under the text box; the
   editor finds the mark under the pointer with `elementsFromPoint` to show the hover.
+- **Start version.** A run starts from the version selected in the list (the page asks first when
+  a better minor of the same major exists); an agent's start uses the best scored version.
 - **Pool and parent.** The pool is the start version plus the run's kept versions, each scored per
   example on the optimiser half of the eval set (share of fields right). The parent is drawn from
   the Pareto front (versions best on at least one example and not dominated), weighted by how
   many examples each is best on. After every 2 kept versions, two front versions that each win
   examples the other misses are merged instead.
-- **A round.** The agent runtime writes one change (it may tick or untick a feature after reading
-  feature descriptions with `read_feature_info`) → the editor's Checks run (a failing or repeated
-  change is dropped, unlabeled) → the change is saved and **dry-run** on 10 examples of the
-  optimiser half (half of it when it has fewer than 20), the ones the parent gets wrong first →
+- **A round.** The agent runtime writes one change from the parent's mix-ups and up to 8 of its
+  wrong examples (`ExampleBrief`: gold, the model's answer, text features cut to about 300
+  characters; optimiser half only, never the held-out half; a merge gets up to 4 examples each
+  version wins). It may tick or untick a feature after reading feature descriptions with
+  `read_feature_info` → the editor's Checks run (a failing or repeated change is dropped,
+  unlabeled) → the change is saved and **dry-run** on half of the optimiser half, at most 20
+  examples, the ones the parent gets wrong first →
   it goes on only when it passes more of them than the parent → it is labeled on the whole eval
   set (the dry run's answers are reused) and scored on the held-out half.
 - **Ends** when a version passes (the Prompt step is approved and the training and test sets
@@ -151,7 +156,10 @@ the page shows (`apps/bff/src/services/page-views.ts`). The view goes with every
 with the page's unsaved edits. To see more, an agent calls **read tools** (other pages, versions,
 reports, examples, gold labels, predictions, template checks), like a coding agent reading files in
 a repo: up to 4 calls per turn, each one logged, nothing changed. Changes stay proposals the user
-approves on the page. All presets use the reasoning model.
+approves on the page. All presets use the reasoning model. A question gets an answer and never a
+proposal: the answer shapes make "template" and "schema" optional, a reply with "question" (one
+short question when the request is unclear) proposes nothing, and neither does a template equal to
+the one on the page. Improve with AI reads the same wrong examples as the Optimiser.
 
 Three **start tools** spend money (`apps/bff/src/services/starts.ts`): `try_template` (prompt
 agent: up to 5 eval examples with an unsaved draft, nothing saved), `score_version` and

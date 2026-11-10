@@ -11,7 +11,7 @@ import type {
   Schema,
   StartRequest,
 } from '@tsp/contracts';
-import {fieldsRight, newId, settingsHash, versionLabel} from '@tsp/domain';
+import {fieldsRight, newId, promptKeys, settingsHash, versionLabel, wrongExamples} from '@tsp/domain';
 import {loadProjectState} from './projects.ts';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
@@ -99,7 +99,10 @@ async function loadWorkspaceSnapshot(
   }
 
   // The page's unsaved edits go to the agent as the page's `context`; the view holds saved data.
-  const pageView = await getPageView(projectId, page.where ?? {page: 'projects', params: {}});
+  // What the page holds that isn't saved (the editor's draft template, ticked features, images) goes
+  // into the view's `unsaved` block too, so every helper reads the same workspace (R3-3).
+  const {schema: _s, task: _t, ...unsaved} = (page.context ?? {}) as Record<string, unknown>;
+  const pageView = await getPageView(projectId, page.where ?? {page: 'projects', params: {}}, unsaved);
 
   return {
     projectId,
@@ -287,6 +290,10 @@ export async function improveWithAi(projectId: string, versionId: string): Promi
   const answers = settings ? await labeling.predictions(v.id, report.endpoint, settingsHash(settings)) : new Map();
   const schema = setup.schema;
   const mistakes = state.examples.filter(e => e.split === 'eval' && state.gold.has(e.id) && fieldsRight(schema, state.gold.get(e.id)!.answer, answers.get(e.id)?.answer ?? null).length < schema.fields.length).length;
+  // R3-9 (D3): up to 8 wrong examples from the optimiser half; the held-out half never reaches the helper.
+  const half = state.examples.filter(e => e.split === 'eval' && e.optimiserHalf);
+  const gold = new Map(half.filter(e => state.gold.has(e.id)).map(e => [e.id, state.gold.get(e.id)!.answer]));
+  const examples = wrongExamples(schema, half, promptKeys(v), gold, new Map(half.filter(e => answers.has(e.id)).map(e => [e.id, answers.get(e.id)!.answer])));
   busyProjects.add(projectId);
   setLive(projectId, {agent: 'prompt_agent', working: `Reading the ${versionLabel(v)} mistakes…`, reply: null});
   await postEvent(projectId, 'start', 'user', `asked the Prompt helper to improve ${versionLabel(v)}`, {path: '/prompt'});
@@ -294,7 +301,7 @@ export async function improveWithAi(projectId: string, versionId: string): Promi
   try {
     const m = report.metrics;
     const out = await agents.draftImprovement(
-      {version: versionLabel(v), template: v.template, features: v.features, schema, mixUps: m.mixUps.slice(0, 8), lowestField: m.lowestField, lowestValue: m.lowestValue, mistakes},
+      {version: versionLabel(v), template: v.template, features: v.features, schema, mixUps: m.mixUps.slice(0, 8), lowestField: m.lowestField, lowestValue: m.lowestValue, mistakes, examples},
       gateway.agentModel(),
       agentTools(projectId),
     );

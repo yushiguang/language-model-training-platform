@@ -187,3 +187,37 @@ test('Improve with AI returns a draft with each change and its reason', async ()
   assert.equal(out.changes[0].reason, '5 Clip examples were read as Vlog');
   assert.ok(out.template.includes(out.changes[0].text));
 });
+
+test('a question on a page gets an answer and never a draft (R3-10)', async () => {
+  const ws = {projectId: 'pr_1', task: '', schema: optSchema, history: [], pageView: null};
+  const ask = (userText: string, agent: 'prompt_agent' | 'schema_agent', intent: string, context: Record<string, unknown>) => runAgentTurn({userText, page: {label: 'Edit prompt', agent, intent, context}, workspace: ws}, scriptedAgent());
+  const q = await ask('What does this prompt do with Clips?', 'prompt_agent', 'revise_prompt', {template: optTemplate, schema: optSchema});
+  assert.equal(q.proposal, null);
+  assert.ok(q.messages.some(m => m.role === 'agent' && /changed nothing/.test(m.text)));
+  const vague = await ask('improve it', 'prompt_agent', 'revise_prompt', {template: optTemplate, schema: optSchema});
+  assert.equal(vague.proposal, null);
+  assert.ok(vague.messages.some(m => m.role === 'agent' && m.text.endsWith('?')));
+  const labels = await ask('How many fields are there?', 'schema_agent', 'revise_schema', {schema: optSchema});
+  assert.equal(labels.proposal, null);
+  // A request still drafts.
+  const change = await ask('Treat cooking clips as Tutorial', 'prompt_agent', 'revise_prompt', {template: optTemplate, schema: optSchema});
+  assert.equal(change.proposal?.kind, 'prompt');
+});
+
+test('an answer with a question, or with the same prompt, proposes nothing', async () => {
+  const llm = (o: object) => ({chat: async () => JSON.stringify(o)}) as unknown as Parameters<typeof runAgentTurn>[1];
+  const turn = (o: object) => runAgentTurn({userText: 'x', page: {label: 'Edit prompt', agent: 'prompt_agent', intent: 'revise_prompt', context: {template: optTemplate}}, workspace: {projectId: 'pr_1', task: '', schema: optSchema, history: [], pageView: null}}, llm(o));
+  const a = await turn({reply: 'Sure.', question: 'Which field?', template: optTemplate + '\nMore.'});
+  assert.equal(a.proposal, null);
+  assert.deepEqual(a.messages.map(m => m.text), ['Sure.\n\nWhich field?']);
+  assert.equal((await turn({reply: 'It reads the title first.', template: optTemplate})).proposal, null);
+});
+
+test('the Optimiser and Improve with AI get the wrong examples', async () => {
+  const seen: string[] = [];
+  const llm = {chat: async (msgs: {content: string}[]) => (seen.push(msgs.at(-1)!.content), JSON.stringify({template: optTemplate, change: 'x', changes: [], reply: ''}))} as unknown as Parameters<typeof runAgentTurn>[1];
+  const examples = [{externalId: 'ex-7', features: {Title: 'cooking'}, gold: {format: ['Tutorial']}, predicted: {format: ['Vlog']}}];
+  await reflectPrompt({template: optTemplate, features: noFeatures, schema: optSchema, triedChanges: [], mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, examples}, llm);
+  await draftImprovement({version: 'v2', template: optTemplate, features: noFeatures, schema: optSchema, mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, mistakes: 1, examples}, llm);
+  assert.equal(seen.filter(c => c.includes('"ex-7"')).length, 2);
+});

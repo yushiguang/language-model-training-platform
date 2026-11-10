@@ -1,6 +1,7 @@
 'use client';
 
-import {useRouter, useSearchParams} from 'next/navigation';
+import {useGo} from '@/components/nav';
+import {useSearchParams} from 'next/navigation';
 import {Suspense, useEffect, useState} from 'react';
 import {CUSTOM_START, DEFAULT_THRESHOLDS} from '@tsp/domain';
 import type {AgentProposal, LabelField, ModelSettings, Schema, Thresholds} from '@tsp/contracts';
@@ -55,7 +56,7 @@ function useProposals(state: ProjectState) {
 }
 
 function SchemaView({state, setPage}: {state: ProjectState; setPage: (p: PageContext) => void}) {
-  const router = useRouter();
+  const go = useGo();
   const {href} = useProject();
   const setup = state.setup;
   const all = useProposals(state);
@@ -135,7 +136,7 @@ function SchemaView({state, setPage}: {state: ProjectState; setPage: (p: PageCon
             <Button label="Save" kind="primary" disabled={!valid(draft)} onClick={save} />
           </>
         ) : (
-          <Button label="Next: Evaluation" kind="primary" disabled={!approved} onClick={() => router.push(href('/setup', {step: '2'}))} />
+          <Button label="Next: Evaluation" kind="primary" disabled={!approved} onClick={() => go(href('/setup', {step: '2'}))} />
         )
       }
     />
@@ -278,7 +279,7 @@ const CHECKS: {key: Check; name: string; tip: string; applies: string}[] = [
 ];
 
 function Evaluation({state}: {state: ProjectState}) {
-  const router = useRouter();
+  const go = useGo();
   const {href, refresh} = useProject();
   const s = state.setup;
   const saved = s?.thresholds ?? null;
@@ -298,7 +299,7 @@ function Evaluation({state}: {state: ProjectState}) {
       mode === 'none' ? null : mode === 'default' ? DEFAULT_THRESHOLDS : {...DEFAULT_THRESHOLDS, mode: 'custom', macroF1: n('macroF1') ?? DEFAULT_THRESHOLDS.macroF1, valueF1: n('valueF1'), precision: n('precision'), recall: n('recall')};
     await saveSetup(state.project.id, {thresholds, steps: {schema: !!s?.steps.schema, evaluation: true, models: !!s?.steps.models}});
     await refresh();
-    router.push(href('/setup', {step: '3'}));
+    await go(href('/setup', {step: '3'}));
   };
 
   const head = <PageHead title="Evaluation settings" back={{label: 'Schema settings', href: href('/setup', {step: '1'})}} actions={<Button label="Next: Models" kind="primary" disabled={!s?.steps.schema} onClick={next} />} />;
@@ -357,7 +358,7 @@ function ModelsPage() {
 }
 
 function Models({state}: {state: ProjectState}) {
-  const router = useRouter();
+  const go = useGo();
   const {href} = useProject();
   const s = state.setup;
   const eps = state.endpoints;
@@ -372,7 +373,7 @@ function Models({state}: {state: ProjectState}) {
     const models: ModelSettings[] = [{endpoint: info.id, maxOutputTokens: parseInt(tokens) || 1024, temperature: info.supportsTemperature ? parseFloat(temp) || 0 : null}];
     await saveSetup(state.project.id, {models, steps: {schema: !!s?.steps.schema, evaluation: !!s?.steps.evaluation, models: true}});
     if (!state.project.approvedNodes.includes('setup')) await approveNode(state.project.id, 'setup');
-    router.push(href('/dataset'));
+    await go(href('/dataset'));
   };
   const head = <PageHead title="Labeling model" back={{label: 'Evaluation settings', href: href('/setup', {step: '2'})}} actions={<Button label="Next: Dataset" kind="primary" disabled={!s?.steps.evaluation || !info} onClick={next} />} />;
   const body = (
@@ -429,7 +430,7 @@ function SummaryPage() {
 }
 
 function Summary({state}: {state: ProjectState}) {
-  const router = useRouter();
+  const go = useGo();
   const {href} = useProject();
   const s = state.setup!;
   const fields = s.schema?.fields ?? [];
@@ -449,7 +450,7 @@ function Summary({state}: {state: ProjectState}) {
   ];
   const next = async () => {
     if (!state.project.approvedNodes.includes('setup')) await approveNode(state.project.id, 'setup');
-    router.push(href('/dataset'));
+    await go(href('/dataset'));
   };
   return (
     <Frame head={<PageHead title="Setup" actions={<Button label="Next: Dataset" kind="primary" onClick={next} />} />}>

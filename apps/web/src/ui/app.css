@@ -55,3 +55,30 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible, input:focus-vis
 
 /* List rows that select something are buttons (the canvas draws them as links). */
 button.vrow { width: 100%; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+
+/* Long unbroken text (a pasted prompt or JSON) wraps inside the chat bubbles (R3-2). */
+.chat .chat-m > * { min-width: 0; }
+.chat .msg-u, .chat .msg-a p, .chat .msg-a li { overflow-wrap: anywhere; word-break: break-word; }
+
+/* The hint popover (R3-1), the same look as the editor's change popover. */
+.tip-pop { position: fixed; z-index: 100; display: block; width: max-content; max-width: 320px; padding: 10px 12px; background: #fff; border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-med); font-family: var(--sans); font-size: 13px; line-height: 20px; font-weight: 400; color: var(--text-2); white-space: normal; text-align: left; pointer-events: none; }
+.hov:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+
+/* Loading placeholders (R3-4) */
+.skel { display: inline-block; height: 12px; border-radius: 6px; background: var(--bg-muted); vertical-align: middle; }
+.load-note { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; font-weight: 400; }
+.load-note svg.i { width: 14px; height: 14px; animation: k-spin 1s linear infinite; }
+.k .btn .lp { display: contents; }
+.k .btn .lp svg.i { animation: k-spin 1s linear infinite; }
+/* Prompt versions: one layout (R3-8). The right column is as high as the list; its detail card scrolls inside. */
+.pv-right { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.pv-right > .card.fill-scroll { overflow-y: auto; scrollbar-width: none; }
+.pv-right > .card.fill-scroll::-webkit-scrollbar { display: none; }
+.pv-right > .card.fill-scroll > * { flex: none; }
+.pv-empty { height: 200px; display: flex; align-items: center; justify-content: center; border-radius: 8px; background: var(--bg-muted); font-size: 13px; }
+/* Dialog (design: U-F-Optimise-Confirm). */
+.dlg-scrim { position: fixed; inset: 0; z-index: 50; background: rgb(0 0 0 / 24%); display: flex; align-items: center; justify-content: center; }
+.dlg { width: 480px; max-width: calc(100vw - 32px); background: #fff; border-radius: 16px; box-shadow: var(--shadow-med); padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+.dlg .card-t { font-size: 17px; line-height: 24px; }
+.dlg p { margin: 0; color: var(--text-2); font-size: 14px; line-height: 22px; }
+.dlg .dlg-acts { gap: 8px; justify-content: flex-end; padding-top: 16px; }

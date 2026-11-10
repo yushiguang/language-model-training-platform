@@ -87,6 +87,24 @@ with AI. What the code does (the boards are U-B-Setup-Models and the U-E-* board
 | Gold Labels (R2-2) | The model answer starts hidden on every example; Show reveals it for that example only, and the label records that it was seen |
 | Ask AI (R2-5) | The newest start line of work that is still running spins (scoring and the Optimiser, test answers, the training set) |
 
+## Done on 2026-11-10: acceptance round 3
+
+Evelyn accepted the answers D1 to D5 in the investigation and approved canvas rows 9 ("Acceptance
+round 3") and 10 ("Prompt versions: one layout"). What the code does:
+
+| Item | What the code does |
+| --- | --- |
+| R3-1 Hints | A hover or keyboard focus on a dashed-underline word opens a small popover (it flips above or left near the edges; Escape closes it). Hints stay only on words that need one (Filtered, Failed, rounds, the "Fewer than N" warnings, the dry run's "vX passed", Invalid dropped, a disabled control's reason, the model options); Gold labels, Train size and check lines that say everything lost theirs |
+| R3-2 Chat | Long words and links wrap inside the bubbles |
+| R3-3 Unsaved draft | The editor's and the first prompt's unsaved template, features and images go with every Ask AI turn (`pageView.data.unsaved`) |
+| R3-4 Projects | While loading: "Loading projects" with a spinner and three grey rows. On error: a red banner with Retry. Each row's current step fills in as its project loads |
+| R3-5 Pending | A link button shows a spinner while its page loads; buttons that navigate stay busy until the new page shows |
+| R3-6 Improve with AI | Opens Ask AI, then the editor, where the draft appears |
+| R3-7 Start version | Auto Optimise starts from the version selected in the list. When a better minor of the same major exists, a dialog asks: "Start from vX" or, as the main button, "Start from vBest" (U-F-Optimise-Confirm) |
+| R3-8 One layout | The chart card is always there (an empty grey area with a note before any score). The Versions list and the right column are both 478px high. The right column is the detail card, which scrolls inside with a fade, plus the AI Suggestion when there is one; only the detail card's height changes (200 ms). With no gold labels, Label distribution is inside the detail card. The Optimiser panel scrolls inside |
+| R3-9 Optimiser | The panel shows "Best so far" (score and version). The helpers read up to 8 wrong examples of the optimiser half (never the held-out half), text features cut to about 300 characters; a merge reads up to 4 examples each version wins. The dry run is half of the optimiser half, at most 20 |
+| R3-10 Helpers | A question gets an answer and never a draft; an unclear request gets one short question first; a big rewrite starts with a one-line summary |
+
 ## Still different from the canvas
 
 | Where | Canvas | Code | Why |

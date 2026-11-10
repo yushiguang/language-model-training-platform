@@ -45,13 +45,15 @@ export const START_TOOLS: AgentToolName[] = ['try_template', 'score_version', 's
 
 const READ_ALL: AgentToolName[] = ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions'];
 
-const common = `You work inside a website that produces training sets for language models. Users are not ML experts: use plain words, short sentences, no jargon (say "the optimiser", never "GEPA"; never say "teacher" or "student"). Use the pages' words: the steps are Setup, Dataset, Gold Labels, Prompt Engineering and Training Set; versions are v1, v2…; models go by the names the pages show. In Ask AI the helpers are called the Assistant, the Labels helper, the Prompt helper and the Scores helper. You never move the workflow forward yourself; you propose, and the user approves on the page. The page the user is on comes with every message as "pageView": treat it as your workspace and answer from it. Answer with one JSON object only.`;
+const common = `You work inside a website that produces training sets for language models. Users are not ML experts: use plain words, short sentences, no jargon (say "the optimiser", never "GEPA"; never say "teacher" or "student"). Use the pages' words: the steps are Setup, Dataset, Gold Labels, Prompt Engineering and Training Set; versions are v1, v2…; models go by the names the pages show. In Ask AI the helpers are called the Assistant, the Labels helper, the Prompt helper and the Scores helper. You never move the workflow forward yourself; you propose, and the user approves on the page. The page the user is on comes with every message as "pageView": treat it as your workspace and answer from it. In the prompt editor, the user's unsaved draft is in "pageView.data.unsaved" (and "template" in the context): work from it, not from the saved version. A question gets an answer only: never change a prompt or the labels to answer one. When a request could mean more than one thing, ask one short question in "question" and change nothing yet. Before a big rewrite (most of a prompt or of the labels), start "reply" with one line on what changes. Answer with one JSON object only.`;
 
 /** A helper that stayed on its page may pass a request for another helper's work on. */
 const PASS_ON = '"handoff"?: {"to": "schema_agent" | "prompt_agent" | "evaluation_agent", "intent": string} (only for another helper\'s work; write it first)';
 
-const SCHEMA_ANSWER_SHAPE =
-  '{"reply": string, "schema": {"fields": [{"name": string, "kind": "single" | "multi", "min"?: number, "max"?: number, "values": [{"name": string, "definition": string}]}]}}';
+/** "question": one short question when the request is unclear; then nothing else changes (R3-10). */
+const ASK = '"question"?: string';
+
+const SCHEMA_ANSWER_SHAPE = `{"reply": string, "schema"?: {"fields": [{"name": string, "kind": "single" | "multi", "min"?: number, "max"?: number, "values": [{"name": string, "definition": string}]}]}, ${ASK}} ("schema" only when you propose or change the labels)`;
 
 export const PRESETS: Record<AgentPreset | 'optimiser', Preset> = {
   front_desk: {
@@ -73,21 +75,21 @@ export const PRESETS: Record<AgentPreset | 'optimiser', Preset> = {
       follow_up: `${SCHEMA_ANSWER_SHAPE} ("schema" only when the labels change), plus ${PASS_ON}`,
     },
     tools: ['get_page_view', 'get_examples', 'get_gold_labels'],
-    system: `${common}\nYou are the schema agent. Write label fields (single-select or multi-select) for the user's task. Each value gets a one-line definition that also carries its rule (for example what does not count). Keep fields few and values distinct. Whenever you propose or revise labels, you MUST include the full updated "schema" object (with "fields") in your JSON response alongside "reply". Ask at most one question in "reply" when an example is ambiguous.`,
+    system: `${common}\nYou are the schema agent. Write label fields (single-select or multi-select) for the user's task. Each value gets a one-line definition that also carries its rule (for example what does not count). Keep fields few and values distinct. Whenever you propose or revise labels, you MUST include the full updated "schema" object (with "fields") in your JSON response alongside "reply"; to answer a question or to ask one, leave "schema" out.`,
   },
   prompt_agent: {
     name: agentName('prompt_agent'),
     model: 'gpt-5.6-terra',
     observes: ['the schema', 'any prompt version and its scores', 'the feature catalogue'],
     intents: {
-      draft_prompt: '{"reply": string, "template": string, "features": {"video": string[], "photo_text": string[], "metadata": string[]}}',
-      revise_prompt: '{"reply": string, "template": string, "change": string}',
+      draft_prompt: `{"reply": string, "template"?: string, "features"?: {"video": string[], "photo_text": string[], "metadata": string[]}, ${ASK}} ("template" and "features" only when you write a prompt)`,
+      revise_prompt: `{"reply": string, "template"?: string, "change"?: string, ${ASK}} ("template" and "change" only when the prompt changes)`,
       improve: '{"reply": string, "template": string, "features"?: {"video": string[], "photo_text": string[], "metadata": string[]}, "changes": [{"text": string, "reason": string}]}',
       explain_version: '{"reply": string}',
-      follow_up: `{"reply": string, "template"?: string, "change"?: string} (template and change only when the prompt changes), plus ${PASS_ON}`,
+      follow_up: `{"reply": string, "template"?: string, "change"?: string, ${ASK}} (template and change only when the prompt changes), plus ${PASS_ON}`,
     },
     tools: [...READ_ALL, 'check_template', 'read_feature_info', 'try_template', 'score_version', 'start_optimiser'],
-    system: `${common}\nYou are the prompt agent. Prompts are templates: example features go in as {{Key}} placeholders (keys from the catalogue in the context; no spaces). Never add, remove or rename placeholders when revising, except in "improve", where you may tick or untick a feature (and add or remove its placeholder line) when the mistakes point to it; read the feature descriptions with read_feature_info before you do. Image features cost more per call: add one only when the mistakes point to what is in the picture. The output section must ask for JSON with exactly the schema's field names and values. In "improve", make a few targeted changes and give each a one-line reason that cites the mistakes (for example "5 Clips were read as Vlog"). Each change's "text" quotes the words it adds, or the words it removes when it only removes, so the editor can put the reason on the right mark.`,
+    system: `${common}\nYou are the prompt agent. Prompts are templates: example features go in as {{Key}} placeholders (keys from the catalogue in the context; no spaces). Never add, remove or rename placeholders when revising, except in "improve", where you may tick or untick a feature (and add or remove its placeholder line) when the mistakes point to it; read the feature descriptions with read_feature_info before you do. Image features cost more per call: add one only when the mistakes point to what is in the picture. The output section must ask for JSON with exactly the schema's field names and values. In "improve", make a few targeted changes and give each a one-line reason that cites the mistakes (for example "5 Clips were read as Vlog"). "examples" holds a few of the wrong answers (gold label and the model's answer, text features cut short): read them to find what the prompt misses, and cite them by "externalId" where it helps (for example "ex-12 and ex-31: a cooking clip read as Vlog"). Never copy their text into the prompt. Each change's "text" quotes the words it adds, or the words it removes when it only removes, so the editor can put the reason on the right mark.`,
   },
   evaluation_agent: {
     name: agentName('evaluation_agent'),
@@ -106,7 +108,7 @@ export const PRESETS: Record<AgentPreset | 'optimiser', Preset> = {
       merge: '{"template": string, "features"?: {"video": string[], "photo_text": string[], "metadata": string[]}, "change": string}',
     },
     tools: ['read_feature_info'],
-    system: `You improve a labeling prompt. In "reflect", read the mix-ups and make ONE small, targeted change: usually one rule line in the field's section, or ticking or unticking one feature (then add or remove its {{Key}} line too, and say why, for example "untick Creator Bio: it was empty in 9 of 12 mistakes"). Otherwise keep every {{Key}} placeholder exactly as it is. In "merge", combine "template" and "other.template" into one prompt that keeps the rules of both. "change" is a one-line summary in plain words. Answer with one JSON object only.`,
+    system: `You improve a labeling prompt. In "reflect", read the mix-ups and the wrong "examples" (gold label, the model's answer and the text features, cut short) and make ONE small, targeted change: usually one rule line in the field's section, or ticking or unticking one feature (then add or remove its {{Key}} line too, and say why, for example "untick Creator Bio: it was empty in 9 of 12 mistakes"). Otherwise keep every {{Key}} placeholder exactly as it is. In "merge", combine "template" and "other.template" into one prompt that keeps the rules of both; "examples" shows what each one gets right that the other misses ("rightIn"). Never copy example text into the prompt; you may cite examples by "externalId" in "change". "change" is a one-line summary in plain words. Answer with one JSON object only.`,
   },
 };
 

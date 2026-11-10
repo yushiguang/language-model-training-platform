@@ -96,8 +96,11 @@ export interface BffContract {
   scoreVersion(projectId: string, version: PromptVersion, only?: EndpointId): Promise<void>;
   tick(state: ProjectState): Promise<void>;
   stopRun(runId: string): void;
-  /** Auto Optimise: the user starts a run of up to `maxRounds` changes on the project's model. */
-  startOptimiser(projectId: string, maxRounds: number): Promise<void>;
+  /**
+   * Auto Optimise: the user starts a run of up to `maxRounds` changes on the project's model,
+   * from the version selected in the list (`startVersionId`; left out: the best scored version).
+   */
+  startOptimiser(projectId: string, maxRounds: number, startVersionId?: string): Promise<void>;
   stopOptimiser(runId: string): void;
   /** Retry on a Failed (or paused) run: resumes from the step that failed. */
   retryOptimiser(runId: string): Promise<void>;

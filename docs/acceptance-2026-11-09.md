@@ -182,6 +182,8 @@ project state), and animate the icon on in-progress event lines in the chat.
 
 ## R3-1. Dashed-underline hints never show, and are overused
 
+**Status 2026-11-10:** done in PR #4 (see `docs/ui-gaps.md`, "Done on 2026-11-10: acceptance round 3").
+
 `Hov` (`apps/web/src/ui/index.tsx`) renders a dashed underline with `cursor: help` but
 relies on the native `title` attribute, which in practice shows nothing for these spans
 (and is unreachable by keyboard/touch). Replace it with the custom tooltip the editor
@@ -191,11 +193,15 @@ warnings), not everyday words.
 
 ## R3-2. Long user messages overflow the chat bubble
 
+**Status 2026-11-10:** done in PR #4 (see `docs/ui-gaps.md`, "Done on 2026-11-10: acceptance round 3").
+
 A long unbroken string (a pasted prompt as JSON, see the acceptance screenshot) spills
 past the grey user bubble. User message text needs wrapping (`overflow-wrap: anywhere`
 and `min-width: 0` on the bubble column) in Ask AI message rendering.
 
 ## R3-3. The agent cannot see the editor's unsaved feature selection
+
+**Status 2026-11-10:** done in PR #4 (see `docs/ui-gaps.md`, "Done on 2026-11-10: acceptance round 3").
 
 Partly implemented and currently broken: the prompt editor page sends the draft template
 in its page context (`apps/web/src/app/(project)/prompt/edit/page.tsx`) but not
@@ -206,11 +212,15 @@ and confirm the page view's `unsaved` block carries them to the agent.
 
 ## R3-4. Project list needs a loading state
 
+**Status 2026-11-10:** done in PR #4 (see `docs/ui-gaps.md`, "Done on 2026-11-10: acceptance round 3").
+
 The home page sits blank/empty while the project list loads. Show a loading indicator
 (skeleton rows or a spinner with "Loading projects") until the first list arrives, and an
 error state if it fails.
 
 ## R3-5. Buttons that fetch or navigate still freeze without feedback
+
+**Status 2026-11-10:** done in PR #4 (see `docs/ui-gaps.md`, "Done on 2026-11-10: acceptance round 3").
 
 Round 1 item 7 covered buttons that run work; the gap remains on buttons that fetch data
 or jump pages: the click lands, nothing moves for a while, then the page changes. Users
@@ -220,12 +230,16 @@ of round 1 — audit navigation and fetch buttons across pages, not only submit 
 
 ## R3-6. "Improve with AI" must open the Ask AI panel
 
+**Status 2026-11-10:** done in PR #4 (see `docs/ui-gaps.md`, "Done on 2026-11-10: acceptance round 3").
+
 Clicking Improve with AI navigates to the prompt editor but leaves the panel closed and
 nothing animates; a new user does not know the helper is working there or what to do next.
 Any navigation that starts (or continues) agent work must open the Ask AI panel on arrival
 (and show the working line), so the user lands where the action is.
 
 ## R3-7. Auto Optimise from a non-best version needs a confirmation
+
+**Status 2026-11-10:** done in PR #4 (see `docs/ui-gaps.md`, "Done on 2026-11-10: acceptance round 3").
 
 If the user starts Auto Optimise from a version that is not the highest-scoring minor of
 its major line, ask first with a dialog: continue from the selected version, or switch the
@@ -234,12 +248,16 @@ best-scoring minor. "Best" is by the current report scores on the project's mode
 
 ## R3-8. Prompt Versions layout jumps when cards change
 
+**Status 2026-11-10:** done in PR #4 (see `docs/ui-gaps.md`, "Done on 2026-11-10: acceptance round 3").
+
 The version list and detail cards change size as their content changes, shifting the whole
 page (it reads as a screen jolt). Give the version list a stable height and animate detail
 card changes (height/content transition). The exact treatment is the External Agent's
 choice; the requirement is no layout shift of surrounding content while interacting.
 
 ## R3-9. Why optimisation gains look small and random (analysis, with asks)
+
+**Status 2026-11-10:** done in PR #4 (see `docs/ui-gaps.md`, "Done on 2026-11-10: acceptance round 3").
 
 Three compounding causes, in likely order:
 
@@ -262,6 +280,8 @@ Three compounding causes, in likely order:
    progress panel (rounds tried, best so far) instead of implying steady improvement.
 
 ## R3-10. Agents act too eagerly; converse and confirm first
+
+**Status 2026-11-10:** done in PR #4 (see `docs/ui-gaps.md`, "Done on 2026-11-10: acceptance round 3").
 
 Across pages the agents move straight to drafting, editing the form, or proposing starts
 when intent is ambiguous. Adjust the preset system prompts and runtime guidance: when a

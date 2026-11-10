@@ -171,6 +171,13 @@ let current = null;
     const auto = button(page, 'Auto Optimise');
     if (await auto.count()) {
       await auto.click();
+      // A better minor of the selected major: the dialog asks which version to start from (R3-7).
+      const dlg = page.getByRole('dialog');
+      if (await dlg.count()) {
+        log('start dialog:', (await dlg.innerText()).replace(/\n/g, ' | '));
+        await shot(page, '5e-start-dialog');
+        await dlg.getByRole('button').last().click();
+      }
       log('auto optimise started');
     }
   }
