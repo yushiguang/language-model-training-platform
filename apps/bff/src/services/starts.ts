@@ -58,7 +58,6 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
           return {
             model: modelName(state, endpoint),
             rows: rows.map(r => ({id: byId.get(r.exampleId)?.externalId, title: byId.get(r.exampleId)?.title, model: r.answer, invalid: r.invalidReason, error: r.error, gold: state.gold.get(r.exampleId)?.answer ?? null})),
-            costUsd,
             saved: false,
           };
         },

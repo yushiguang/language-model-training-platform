@@ -1,5 +1,6 @@
 import type {Answer, DryRunResult, Example, ExampleBrief, OptimisationRun, OptimiserRound, PromptVersion, Schema} from '@tsp/contracts';
 import {placeholderKeys} from './template.ts';
+import {isImageKey} from './catalogue.ts';
 
 /**
  * Pure parts of the Optimiser (GEPA, ported to TypeScript; see the design doc "Prompt optimising
@@ -34,7 +35,13 @@ export const BRIEF_FEATURE_CHARS = 300;
 export const BRIEF_WRONG = 8;
 export const BRIEF_WINS = 4;
 
-/** An example as a helper reads it: the text features in `keys`, cut short; images and URLs left out. */
+/** How many images of one example a helper sees. */
+export const BRIEF_IMAGES = 2;
+
+/**
+ * An example as a helper reads it: the text features in `keys`, cut short (URLs left out), and
+ * up to 2 of its images (any image feature, whether or not the prompt uses it).
+ */
 export function exampleBrief(e: Example, keys: Iterable<string>, gold: Answer, predicted: Answer | null, rightIn?: 'template' | 'other'): ExampleBrief {
   const features: Record<string, string> = {};
   for (const k of keys) {
@@ -42,7 +49,12 @@ export function exampleBrief(e: Example, keys: Iterable<string>, gold: Answer, p
     if (typeof v !== 'string' || !v.trim() || /^https?:\/\//.test(v.trim())) continue;
     features[k] = v.length > BRIEF_FEATURE_CHARS ? `${v.slice(0, BRIEF_FEATURE_CHARS - 1).trimEnd()}…` : v;
   }
-  return {externalId: e.externalId, features, gold, predicted, ...(rightIn ? {rightIn} : {})};
+  const images = Object.entries(e.features)
+    .filter(([k]) => isImageKey(k))
+    .flatMap(([, v]) => (Array.isArray(v) ? v : [v]))
+    .filter(u => typeof u === 'string' && u.trim())
+    .slice(0, BRIEF_IMAGES);
+  return {externalId: e.externalId, features, gold, predicted, ...(images.length ? {images} : {}), ...(rightIn ? {rightIn} : {})};
 }
 
 /**
@@ -123,22 +135,28 @@ export function mergePair(pool: PoolEntry[], front: {id: string; wins: number}[]
 }
 
 /**
- * The dry-run examples: `size` examples of the optimiser half, the ones the parent gets wrong
- * first (in random order), then others. The parent's answers on them are already known.
+ * The dry-run examples: `size` examples of the optimiser half picked at random, as GEPA does
+ * (review finding 5: re-testing only the parent's mistakes lets a change that does nothing pass by
+ * luck). Up to half come from `focus`, the examples whose gold label holds the weakest value of
+ * the lowest field (finding 7), so a change aimed at the gate is tested where it matters.
  */
-export function pickDryRun(exampleIds: string[], parentScores: Map<string, number>, size: number, rand: () => number = Math.random): string[] {
+export function pickDryRun(exampleIds: string[], size: number, focus: Set<string> = new Set(), rand: () => number = Math.random): string[] {
   const shuffle = (xs: string[]) =>
     xs
       .map(x => ({x, k: rand()}))
       .sort((a, b) => a.k - b.k)
       .map(o => o.x);
-  const wrong = shuffle(exampleIds.filter(id => (parentScores.get(id) ?? 0) < 1));
-  const right = shuffle(exampleIds.filter(id => (parentScores.get(id) ?? 0) >= 1));
-  return [...wrong, ...right].slice(0, size);
+  const inFocus = shuffle(exampleIds.filter(id => focus.has(id))).slice(0, Math.floor(size / 2));
+  const taken = new Set(inFocus);
+  return [...inFocus, ...shuffle(exampleIds.filter(id => !taken.has(id)))].slice(0, size);
 }
 
-/** Compares a change with its parent on the dry-run examples. It goes on only when it passes more. */
-export function compareDryRun(schema: Schema, parentId: string, items: {gold: Answer; candidate: Answer | null; parent: Answer | null}[]): DryRunResult & {better: boolean} {
+/**
+ * Compares a change with its parent on the dry-run examples. It goes on only when it gets more
+ * fields right in total (finding 5), the `lowest` field counting double (finding 7: the gate is
+ * that field's score). `passed` and `parentPassed` still count examples fully right.
+ */
+export function compareDryRun(schema: Schema, parentId: string, items: {gold: Answer; candidate: Answer | null; parent: Answer | null}[], lowest?: string): DryRunResult & {better: boolean} {
   const all = (a: Answer | null, gold: Answer) => fieldsRight(schema, gold, a).length === schema.fields.length;
   const passed = items.filter(i => all(i.candidate, i.gold)).length;
   const parentPassed = items.filter(i => all(i.parent, i.gold)).length;
@@ -147,7 +165,8 @@ export function compareDryRun(schema: Schema, parentId: string, items: {gold: An
     passed: items.filter(i => fieldsRight(schema, i.gold, i.candidate).includes(f.name)).length,
     parentPassed: items.filter(i => fieldsRight(schema, i.gold, i.parent).includes(f.name)).length,
   }));
-  return {examples: items.length, passed, parentPassed, parentId, fields, better: passed > parentPassed};
+  const weighted = (k: 'passed' | 'parentPassed') => fields.reduce((n, f) => n + f[k] * (f.field === lowest ? 2 : 1), 0);
+  return {examples: items.length, passed, parentPassed, parentId, fields, better: weighted('passed') > weighted('parentPassed')};
 }
 
 /** What the Optimiser did with a version, for the versions list and the version card. */
@@ -180,6 +199,8 @@ export function stepLine(step: OptimisationRun['step'], version: string | null, 
       return `Labeling ${version ?? 'the change'} on the eval set`;
     case 'report':
       return `Scoring ${version ?? 'the change'}`;
+    case 'confirm':
+      return `Confirming ${version ?? 'the pass'}: labeling the held-out half again`;
     default:
       return 'Starting';
   }

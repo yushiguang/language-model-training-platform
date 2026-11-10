@@ -166,23 +166,23 @@ export function recommend(s: ProjectState, optimiserRunning: EndpointId | null):
   const passing = current.filter(r => r.passed);
   const name = (id: string) => versionLabel(s.versions.find(v => v.id === id)!);
   if (passing.length) {
-    const cheapest = [...passing].sort((a, b) => a.metrics.costPer1000 - b.metrics.costPer1000 || b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1)[0];
-    const m = cheapest.metrics;
+    // The best score wins, as on Training Set (review finding 11); cost only breaks a tie.
+    const pick = [...passing].sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1 || a.metrics.costPer1000 - b.metrics.costPer1000)[0];
+    const m = pick.metrics;
     const reasons = [
-      `All ${m.fields.length} fields are at ${t.macroF1.toFixed(2)} or higher${s.setup!.models.length > 1 ? ` on Model ${cheapest.endpoint}` : ''}${t.valueF1 != null ? `, and every value is above ${t.valueF1.toFixed(2)}` : ''}.`,
+      `All ${m.fields.length} fields are at ${t.macroF1.toFixed(2)} or higher${s.setup!.models.length > 1 ? ` on Model ${pick.endpoint}` : ''}${t.valueF1 != null ? `, and every value is above ${t.valueF1.toFixed(2)}` : ''}.`,
     ];
-    const other = s.setup!.models.find(x => x.endpoint !== cheapest.endpoint);
+    const other = s.setup!.models.find(x => x.endpoint !== pick.endpoint);
     if (other) {
       const best = current.filter(r => r.endpoint === other.endpoint).sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1)[0];
       if (best && !best.passed) reasons.push(`Model ${other.endpoint} is not there yet: its best${whyBelow(best.metrics, t, evalSize)}`);
-      else if (best?.passed) reasons.push(`Model ${cheapest.endpoint} costs less per 1,000 examples.`);
     }
     return {
       kind: 'make_training_set',
-      title: `Make the training and test sets with ${name(cheapest.promptVersionId)}${s.setup!.models.length > 1 ? ` on Model ${cheapest.endpoint}` : ''}`,
+      title: `Make the training and test sets with ${name(pick.promptVersionId)}${s.setup!.models.length > 1 ? ` on Model ${pick.endpoint}` : ''}`,
       reasons,
-      versionId: cheapest.promptVersionId,
-      endpoint: cheapest.endpoint,
+      versionId: pick.promptVersionId,
+      endpoint: pick.endpoint,
     };
   }
   if (optimiserRunning)

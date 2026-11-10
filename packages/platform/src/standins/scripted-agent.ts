@@ -25,7 +25,8 @@ interface Req {
 
 /** The request is the first user message; later user messages carry tool results. */
 function readRequest(messages: ModelMessage[]): Req {
-  const users = messages.filter(x => x.role === 'user').map(m => (typeof m.content === 'string' ? m.content : ''));
+  // A request may carry images after its text: the first text part is the request.
+  const users = messages.filter(x => x.role === 'user').map(m => (typeof m.content === 'string' ? m.content : (m.content.find(p => p.type === 'text') as {text: string} | undefined)?.text ?? ''));
   const req = JSON.parse(users[0] ?? '{}') as Req;
   req.results = {};
   for (const u of users.slice(1)) {

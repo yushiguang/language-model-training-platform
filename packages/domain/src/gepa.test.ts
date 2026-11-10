@@ -56,14 +56,18 @@ test('a version another one matches or beats on every example is not on the fron
   assert.deepEqual(paretoFront(pool, ['e1', 'e2']), [{id: 'v2', wins: 2}]);
 });
 
-test('the dry run takes the examples the parent gets wrong first', () => {
-  const scores = new Map([['e1', 1], ['e2', 0.5], ['e3', 1], ['e4', 0]]);
-  const picked = pickDryRun(['e1', 'e2', 'e3', 'e4'], scores, 3, () => 0.5);
-  assert.deepEqual(new Set(picked.slice(0, 2)), new Set(['e2', 'e4']));
-  assert.equal(picked.length, 3);
+test('the dry run picks at random, up to half from the focus examples', () => {
+  let i = 0;
+  const rand = () => (i++ * 0.37) % 1;
+  const ids = Array.from({length: 20}, (_, k) => `e${k}`);
+  const picked = pickDryRun(ids, 6, new Set(['e3', 'e7', 'e9', 'e11', 'e15']), rand);
+  assert.equal(picked.length, 6);
+  assert.equal(new Set(picked).size, 6);
+  assert.equal(picked.slice(0, 3).filter(id => ['e3', 'e7', 'e9', 'e11', 'e15'].includes(id)).length, 3);
+  assert.equal(pickDryRun(['e1', 'e2'], 5).length, 2);
 });
 
-test('a change goes on only when it passes more dry-run examples than its parent', () => {
+test('a change goes on only when it gets more fields right, the lowest field counting double', () => {
   const gold = {a: ['x'], b: ['p']};
   const r = compareDryRun(schema, 'v1', [
     {gold, candidate: {a: ['x'], b: ['p']}, parent: {a: ['y'], b: ['p']}},
@@ -72,7 +76,14 @@ test('a change goes on only when it passes more dry-run examples than its parent
   ]);
   assert.equal(r.passed, 2);
   assert.equal(r.parentPassed, 1);
-  assert.equal(r.better, true);
   assert.deepEqual(r.fields, [{field: 'a', passed: 2, parentPassed: 2}, {field: 'b', passed: 2, parentPassed: 2}]);
+  // More examples fully right, but the same fields right: no better.
+  assert.equal(r.better, false);
+  // Fixing one field of two counts.
+  assert.equal(compareDryRun(schema, 'v1', [{gold, candidate: gold, parent: {a: ['x'], b: []}}]).better, true);
   assert.equal(compareDryRun(schema, 'v1', [{gold, candidate: gold, parent: gold}]).better, false);
+  // One field gained on b, one lost on a: a tie, unless a is the lowest field (then worse) or b is (then better).
+  const swap = [{gold, candidate: {a: ['y'], b: ['p']}, parent: {a: ['x'], b: []}}];
+  assert.equal(compareDryRun(schema, 'v1', swap).better, false);
+  assert.equal(compareDryRun(schema, 'v1', swap, 'b').better, true);
 });

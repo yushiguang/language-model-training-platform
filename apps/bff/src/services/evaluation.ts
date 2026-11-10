@@ -1,5 +1,5 @@
 import type {EndpointId, EvalReport, Example, GoldLabel, LabelingTask, ModelSettings, Prediction, PromptVersion, SetupVersion, TaskPurpose} from '@tsp/contracts';
-import {computeMetrics, newId, settingsHash, versionLabel, type Scored} from '@tsp/domain';
+import {computeMetrics, judge, newId, settingsHash, versionLabel, type Scored} from '@tsp/domain';
 import {emitChange, getApp, now} from './app.ts';
 import {postEvent} from './chat-events.ts';
 
@@ -69,10 +69,11 @@ export async function labelExamples(
   endpoint: EndpointId,
   exampleIds: string[],
   purpose: 'eval' | 'optimiser',
-  opts: {auto?: boolean; onTask?: (taskId: string) => void} = {},
+  opts: {auto?: boolean; onTask?: (taskId: string) => void; pass?: number} = {},
 ): Promise<LabelingTask | null> {
   const {labeling, user} = getApp();
-  const settings = settingsFor(setup, endpoint);
+  // pass 2: the Optimiser's confirmation, a fresh labeling of the same examples.
+  const settings = opts.pass && opts.pass > 1 ? {...settingsFor(setup, endpoint), pass: opts.pass} : settingsFor(setup, endpoint);
   let task = await findTask(projectId, version, endpoint, settingsHash(settings), exampleIds, ['eval', 'optimiser']);
   if (task?.state === 'done') return task;
   task ??= await labeling.createTask({
@@ -147,6 +148,19 @@ export async function buildReport(
   await catalog.insert('eval_reports', report);
   emitChange();
   return report;
+}
+
+/**
+ * The confirmation of a pass (decided 2026-11-10): the held-out half's score from a second,
+ * fresh labeling (`pass` 2), and whether it passes the same thresholds.
+ */
+export async function confirmScore(setup: SetupVersion, version: PromptVersion, endpoint: EndpointId, examples: Example[], gold: Map<string, GoldLabel>): Promise<{score: number; passed: boolean}> {
+  const byExample = await predictionsFor(version.id, endpoint, {...settingsFor(setup, endpoint), pass: 2});
+  const evalExamples = examples.filter(e => e.split === 'eval');
+  const held = evalExamples.filter(e => !e.optimiserHalf && gold.has(e.id));
+  if (held.some(e => !byExample.has(e.id))) throw new Error('the second labeling is missing answers');
+  const m = computeMetrics(setup.schema!, held.map(e => ({exampleId: e.id, gold: gold.get(e.id)!.answer, predicted: byExample.get(e.id)!.answer, costUsd: byExample.get(e.id)!.costUsd})));
+  return {score: m.lowestField.macroF1, passed: !!setup.thresholds && judge(m, setup.thresholds, evalExamples.length).passed};
 }
 
 /** Scores a candidate on the optimiser's own half (used inside the optimiser loop only). */

@@ -54,6 +54,8 @@ export type AgentToolName =
   | 'check_template'
   /** Feature descriptions by key (what a feature holds, when it helps, its caveats). */
   | 'read_feature_info'
+  /** A document the user linked in Ask AI, as text. */
+  | 'read_doc'
   // Start-work tools: paid. They run at once when automatic starts are allowed, else they ask
   // the user with a card in the chat and the turn ends.
   | 'try_template'
@@ -133,8 +135,13 @@ export interface AgentTurnOutput {
 /** One example a helper may read and cite (R3-9). Always from the optimiser half, never the held-out half. */
 export interface ExampleBrief {
   externalId: string;
-  /** Text features the prompt uses, each cut to about 300 characters. Images are left out. */
+  /** Text features the prompt uses, each cut to about 300 characters. */
   features: Record<string, string>;
+  /**
+   * Up to 2 image URLs of the example (cover or frames; review finding 8), sent to the model as
+   * images after the text, so a mistake whose cause is in the picture can be seen.
+   */
+  images?: string[];
   gold: Answer;
   /** The model's answer (in a merge: from the version that misses it); null when it gave no valid answer. */
   predicted: Answer | null;

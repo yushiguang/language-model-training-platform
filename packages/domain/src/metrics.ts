@@ -105,7 +105,9 @@ export function judge(m: Metrics, t: Thresholds, evalCount: number): {passed: bo
     const lo = singles.length ? Math.min(...singles.map(f => f.accuracy)) : 1;
     checks.push({label: 'Accuracy, single-select fields', actual: lo.toFixed(2), need: `≥ ${t.accuracy.toFixed(2)}`, met: lo >= t.accuracy});
   }
-  checks.push({label: 'Eval examples', actual: String(evalCount), need: `≥ ${t.minEval}`, met: evalCount >= t.minEval});
+  // The eval set's size is the setting; the score itself rests on the held-out half (m.n), said
+  // in the label so the check does not read as the score's base (review finding 1).
+  checks.push({label: `Eval examples (the score uses the ${m.n} held out)`, actual: String(evalCount), need: `≥ ${t.minEval}`, met: evalCount >= t.minEval});
   return {passed: checks.every(c => c.met), checks};
 }
 

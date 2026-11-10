@@ -2,6 +2,8 @@ import type {
   AgentToolHost,
   AgentToolName,
   ModelMessage,
+  ContentPart,
+  ExampleBrief,
   AgentEmittedMessage,
   AgentProposalDraft,
   AgentTurnInput,
@@ -118,6 +120,8 @@ function workingLine(name: AgentToolName, args: Record<string, unknown>): string
       return 'Checking the prompt…';
     case 'read_feature_info':
       return 'Reading the feature descriptions…';
+    case 'read_doc':
+      return 'Reading the linked document…';
     case 'try_template':
       return 'Trying the prompt on a few examples…';
     case 'score_version':
@@ -202,6 +206,7 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
     {role: 'system', content: `${systemPrompt(to)}\nAnswer shape for "${intent}": ${shape}${toolBlurb(to, tools.host)}`},
     {role: 'user', content: JSON.stringify(body)},
   ];
+  let retried = false;
   // A refused or extra call still counts as a step, so a model that keeps asking can't loop.
   for (let step = 0; ; step++) {
     const raw = await callModel(llm, to, messages, tools.progress);
@@ -210,7 +215,14 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
     const out = parseJsonObject<RawAgentReply>(raw, notJson as RawAgentReply);
     if (out === notJson) {
       tools.parseFailures.push({agent: to, intent});
-      return {reply: raw};
+      // Ask once more for the JSON answer (review finding 17); a second miss never shows broken
+      // output: plain prose is shown as it is, anything else gets a short apology.
+      if (!retried) {
+        retried = true;
+        messages.push({role: 'assistant', content: raw}, {role: 'user', content: 'That was not one JSON object. Answer again with one JSON object only, in the answer shape.'});
+        continue;
+      }
+      return {reply: raw.trim() && !/[{}[\]]/.test(raw) ? raw.trim() : "Sorry, my answer came out garbled. Please ask again."};
     }
     if (!out.tool) return out;
     if (step >= MAX_TOOL_CALLS + 1) return {reply: "I couldn't find what I needed. Could you say a bit more about what you're asking?"};
@@ -310,6 +322,24 @@ export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?
 }
 
 /**
+ * The request as text, then the examples' images (finding 8): each example's images follow a
+ * line naming it, and the JSON keeps only how many images it has.
+ */
+function withImages(body: {preset: string; intent: string; context: Record<string, unknown>}): string | ContentPart[] {
+  const {context} = body;
+  const examples = Array.isArray(context.examples) ? (context.examples as ExampleBrief[]) : [];
+  if (!examples.some(e => e.images?.length)) return JSON.stringify(body);
+  const text = JSON.stringify({...body, context: {...context, examples: examples.map(({images, ...e}) => ({...e, ...(images?.length ? {images: images.length} : {})}))}});
+  const parts: ContentPart[] = [{type: 'text', text}];
+  for (const e of examples) {
+    if (!e.images?.length) continue;
+    parts.push({type: 'text', text: `Images of ${e.externalId}:`});
+    for (const url of e.images) parts.push({type: 'image', url});
+  }
+  return parts;
+}
+
+/**
  * A one-shot call (no chat history) that may read feature descriptions first: the model answers
  * {"tool": {"name": "read_feature_info", "args": {"keys": [...]}}} to read them, up to twice.
  */
@@ -320,7 +350,7 @@ async function withFeatureInfo(llm: AgentModel, preset: AgentPreset | 'optimiser
     : '';
   const messages: ModelMessage[] = [
     {role: 'system', content: `${systemPrompt(preset)}\nAnswer shape for "${intent}": ${shape}${toolLine}`},
-    {role: 'user', content: JSON.stringify({preset, intent, context})},
+    {role: 'user', content: withImages({preset, intent, context})},
   ];
   for (let step = 0; ; step++) {
     const raw = await llm.chat(messages, {model: presetModel(preset), json: true, signal});

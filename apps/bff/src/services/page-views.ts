@@ -1,6 +1,6 @@
 import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@tsp/contracts';
 import {agentStart, isStartTool} from './starts.ts';
-import {checkTemplate, defaultOutputPick, finalRunPlan, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, recommend, settingsHash, stepLine, versionLabel} from '@tsp/domain';
+import {checkTemplate, defaultOutputPick, dryRunSize, finalRunPlan, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, recommend, settingsHash, stepLine, versionLabel} from '@tsp/domain';
 import {getApp} from './app.ts';
 import {loadProjectState} from './projects.ts';
 
@@ -76,14 +76,13 @@ function optimiserView(state: ProjectState) {
   const o = state.optimisation[0];
   if (!o) return null;
   const label = (id: string | null) => (id ? (state.versions.find(v => v.id === id) ? versionLabel(state.versions.find(v => v.id === id)!) : null) : null);
-  const half = state.examples.filter(e => e.split === 'eval' && e.optimiserHalf).length;
   return {
     model: modelName(state, o.endpoint),
     state: o.state,
     round: o.round,
     maxRounds: o.maxRounds,
     startedFrom: label(o.startVersionId),
-    now: o.state === 'running' ? stepLine(o.step, label(o.stepVersionId), Math.min(half, 10)) : null,
+    now: o.state === 'running' ? stepLine(o.step, label(o.stepVersionId), dryRunSize(state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && state.gold.has(e.id)).length)) : null,
     stopReason: o.stopReason,
     error: o.error,
     rounds: o.history.map(r => ({round: r.round, version: label(r.versionId), from: label(r.parentId), kind: r.kind, change: r.change, outcome: r.outcome, lowestFieldMacroF1: r.score == null ? null : r2(r.score), passed: r.passed})),
@@ -118,7 +117,6 @@ function reportView(state: ProjectState, v: PromptVersion | undefined, model: En
       lowestField: {field: r.metrics.lowestField.field, macroF1: r2(r.metrics.lowestField.macroF1)},
       lowestValue: r.metrics.lowestValue ? {...r.metrics.lowestValue, f1: r2(r.metrics.lowestValue.f1)} : null,
       invalidRate: r2(r.metrics.invalidRate),
-      costPer1000Usd: r2(r.metrics.costPer1000),
       checks: t ? judge(r.metrics, t, nEval).checks : null,
       topMixUps: r.metrics.mixUps.slice(0, 5).map(m => ({field: m.field, kind: m.kind, gold: m.gold, predicted: m.predicted, count: m.count, examples: m.exampleIds.slice(0, 3).map(id => byId.get(id)?.externalId)})),
     },
@@ -166,7 +164,7 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
       const step = params.step ?? '1';
       return base(
         step === '1' ? 'Setup step 1: the task and the labels (schema).' : step === '2' ? 'Setup step 2: how prompts are evaluated (thresholds).' : 'Setup step 3: which labeling models to use.',
-        {step, task: s?.task ?? '', schema: s?.schema ?? null, thresholds: s?.thresholds ?? null, models: s?.models ?? [], availableModels: state.endpoints.map(e => ({id: e.id, name: e.name, cost: e.cost, speed: e.speed}))},
+        {step, task: s?.task ?? '', schema: s?.schema ?? null, thresholds: s?.thresholds ?? null, models: s?.models ?? [], availableModels: state.endpoints.map(e => ({id: e.id, name: e.name, speed: e.speed}))},
       );
     }
     case 'dataset': {
@@ -214,7 +212,7 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
       if (ts) {
         const v = state.versions.find(x => x.id === ts.promptVersionId);
         return base(`Training and test sets with ${v ? versionLabel(v) : 'a version'} on ${modelName(state, ts.endpoint)}: ${ts.state}, ${ts.done} of ${ts.total} labeled.`, {
-          run: {state: ts.state, version: v ? versionLabel(v) : null, model: modelName(state, ts.endpoint), done: ts.done, total: ts.total, train: ts.trainTotal ?? ts.total, test: ts.testTotal ?? 0, labeled: ts.labeled, invalid: ts.invalid, failed: ts.failed, costUsd: r2(ts.costUsd), approvedUsd: r2(ts.estimateUsd), evaluated: ts.evaluated},
+          run: {state: ts.state, version: v ? versionLabel(v) : null, model: modelName(state, ts.endpoint), done: ts.done, total: ts.total, train: ts.trainTotal ?? ts.total, test: ts.testTotal ?? 0, labeled: ts.labeled, invalid: ts.invalid, failed: ts.failed, evaluated: ts.evaluated},
         });
       }
       // The same plan as the page's confirm: train is labeled; a test example uses its gold label,
@@ -222,17 +220,14 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
       const p = pick ? finalRunPlan(state, pick.version, pick.endpoint, answered) : null;
       if (!pick || !p) return base('Not generated yet: there is no prompt version.', {plan: null});
       const t = p.test;
-      const run = p.total(false);
       return base(
-        `Not generated yet. It would use ${versionLabel(pick.version)} on ${modelName(state, pick.endpoint)}: ${p.train.count} train examples, about $${run.costUsd.toFixed(2)}. Test set: ${t.withGold.length} with a gold label, ${t.withAnswer.length} with an answer from it, ${t.toLabel.length} with no label${t.toLabel.length ? ` (labeling them adds about $${t.costUsd.toFixed(2)})` : ''}.`,
+        `Not generated yet. It would use ${versionLabel(pick.version)} on ${modelName(state, pick.endpoint)}: ${p.train.count} train examples. Test set: ${t.withGold.length} with a gold label, ${t.withAnswer.length} with an answer from it, ${t.toLabel.length} with no label.`,
         {
           plan: {
             version: versionLabel(pick.version),
             model: modelName(state, pick.endpoint),
             train: p.train.count,
-            test: {total: t.total, withGold: t.withGold.length, withAnswer: t.withAnswer.length, noLabel: t.toLabel.length, labelThemUsd: r2(t.costUsd)},
-            estimateUsd: r2(run.costUsd),
-            minutes: run.minutes,
+            test: {total: t.total, withGold: t.withGold.length, withAnswer: t.withAnswer.length, noLabel: t.toLabel.length},
             evaluated: !!p.report && !!state.reports.find(r => r.id === p.report!.id)?.passed,
           },
         },
@@ -321,6 +316,14 @@ export function agentTools(projectId: string): AgentToolHost {
           const keys = Array.isArray(args.keys) ? args.keys.map(String).slice(0, 30) : [];
           const info = (await getApp().featureInfo?.describe(keys)) ?? {};
           return Object.fromEntries(keys.map(k => [k, info[k] ?? {description: 'No description yet.'}]));
+        }
+        case 'read_doc': {
+          const url = typeof args.url === 'string' ? args.url.trim() : '';
+          if (!/^https?:\/\//.test(url)) throw new Error('Give the link to read.');
+          const doc = await getApp().documents?.read(url);
+          if (!doc) return {error: 'This link cannot be opened here. Ask the user to paste the text.'};
+          const MAX = 20000;
+          return {title: doc.title, text: doc.text.length > MAX ? `${doc.text.slice(0, MAX)}… (cut)` : doc.text};
         }
         default:
           throw new Error(`Unknown tool ${String(name)}.`);

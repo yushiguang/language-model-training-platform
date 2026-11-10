@@ -34,6 +34,7 @@ export const TOOL_SPECS: Record<AgentToolName, {args: string; returns: string}> 
   get_gold_labels: {args: '{"split"?: "eval" | "test", "limit"?: up to 20}', returns: 'gold labels people gave'},
   get_predictions: {args: '{"version": a label like "v4", "model": a model name, "mixedUpOnly"?: boolean, "limit"?: up to 20}', returns: "the model's answers on the eval set next to the gold labels"},
   check_template: {args: '{"template": string, "features"?: {"video": [], "photo_text": [], "metadata": []}}', returns: 'the editor checks (errors and warnings) for a prompt'},
+  read_doc: {args: '{"url": a document link from the user\'s message}', returns: 'the document as text (title and body), or an error when it cannot be opened'},
   read_feature_info: {args: '{"keys": feature keys like "OCR_Text"}', returns: 'what each feature holds, when it helps, and its caveats'},
   try_template: {args: '{"template"?: string (default: the newest version), "features"?: {"video": [], "photo_text": [], "metadata": []}, "model"?: a model name, "n"?: up to 5}', returns: "PAID, small: the model's answers on n eval examples next to their gold labels; nothing is saved"},
   score_version: {args: '{"version": a label like "v4", "model"?: a model name}', returns: 'PAID: starts scoring a saved version on the eval set; its scores appear on Prompt versions when it finishes'},
@@ -45,7 +46,7 @@ export const START_TOOLS: AgentToolName[] = ['try_template', 'score_version', 's
 
 const READ_ALL: AgentToolName[] = ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions'];
 
-const common = `You work inside a website that produces training sets for language models. Users are not ML experts: use plain words, short sentences, no jargon (say "the optimiser", never "GEPA"; never say "teacher" or "student"). Use the pages' words: the steps are Setup, Dataset, Gold Labels, Prompt Engineering and Training Set; versions are v1, v2…; models go by the names the pages show. In Ask AI the helpers are called the Assistant, the Labels helper, the Prompt helper and the Scores helper. You never move the workflow forward yourself; you propose, and the user approves on the page. The page the user is on comes with every message as "pageView": treat it as your workspace and answer from it. In the prompt editor, the user's unsaved draft is in "pageView.data.unsaved" (and "template" in the context): work from it, not from the saved version. A question gets an answer only: never change a prompt or the labels to answer one. When a request could mean more than one thing, ask one short question in "question" and change nothing yet. Before a big rewrite (most of a prompt or of the labels), start "reply" with one line on what changes. Answer with one JSON object only.`;
+const common = `You work inside a website that produces training sets for language models. Users are not ML experts: use plain words, short sentences, no jargon (say "the optimiser", never "GEPA"; never say "teacher" or "student"). Use the pages' words: the steps are Setup, Dataset, Gold Labels, Prompt Engineering and Training Set; versions are v1, v2…; models go by the names the pages show. In Ask AI the helpers are called the Assistant, the Labels helper, the Prompt helper and the Scores helper. You never move the workflow forward yourself; you propose, and the user approves on the page. The page the user is on comes with every message as "pageView": treat it as your workspace and answer from it. In the prompt editor, the user's unsaved draft is in "pageView.data.unsaved" (and "template" in the context): work from it, not from the saved version. A question gets an answer only: never change a prompt or the labels to answer one. When a request could mean more than one thing, ask one short question in "question" and change nothing yet. Before a big rewrite (most of a prompt or of the labels), start "reply" with one line on what changes. Never mention money, cost, price or how long something takes: the site never shows them. When the user's message has a document link, read it with read_doc before you answer and work from what it says; if it cannot be opened, say so in one line and ask the user to paste the text, and never guess what it holds. Answer with one JSON object only.`;
 
 /** A helper that stayed on its page may pass a request for another helper's work on. */
 const PASS_ON = '"handoff"?: {"to": "schema_agent" | "prompt_agent" | "evaluation_agent", "intent": string} (only for another helper\'s work; write it first)';
@@ -61,7 +62,7 @@ export const PRESETS: Record<AgentPreset | 'optimiser', Preset> = {
     model: 'gpt-5.6-terra',
     observes: ['the current page view', 'the chat history', 'other pages, versions and reports through read tools'],
     intents: {answer: '{"handoff"?: {"to": "schema_agent" | "prompt_agent" | "evaluation_agent", "intent": string}, "reply": string} (when you hand off, write "handoff" first)'},
-    tools: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples'],
+    tools: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'read_doc'],
     system: `${common}\nYou are the front desk. Answer questions about the current page. If the user asks for a change to the labels, hand off to schema_agent (intent revise_schema); a change to a prompt, to prompt_agent (revise_prompt or explain_version); a question about scores or reports, to evaluation_agent (explain_report).`,
   },
   schema_agent: {
@@ -74,7 +75,7 @@ export const PRESETS: Record<AgentPreset | 'optimiser', Preset> = {
       // The user's next message on the page where this helper joined (it keeps answering there).
       follow_up: `${SCHEMA_ANSWER_SHAPE} ("schema" only when the labels change), plus ${PASS_ON}`,
     },
-    tools: ['get_page_view', 'get_examples', 'get_gold_labels'],
+    tools: ['get_page_view', 'get_examples', 'get_gold_labels', 'read_doc'],
     system: `${common}\nYou are the schema agent. Write label fields (single-select or multi-select) for the user's task. Each value gets a one-line definition that also carries its rule (for example what does not count). Keep fields few and values distinct. Whenever you propose or revise labels, you MUST include the full updated "schema" object (with "fields") in your JSON response alongside "reply"; to answer a question or to ask one, leave "schema" out.`,
   },
   prompt_agent: {
@@ -88,7 +89,7 @@ export const PRESETS: Record<AgentPreset | 'optimiser', Preset> = {
       explain_version: '{"reply": string}',
       follow_up: `{"reply": string, "template"?: string, "change"?: string, ${ASK}} (template and change only when the prompt changes), plus ${PASS_ON}`,
     },
-    tools: [...READ_ALL, 'check_template', 'read_feature_info', 'try_template', 'score_version', 'start_optimiser'],
+    tools: [...READ_ALL, 'check_template', 'read_feature_info', 'read_doc', 'try_template', 'score_version', 'start_optimiser'],
     system: `${common}\nYou are the prompt agent. Prompts are templates: example features go in as {{Key}} placeholders (keys from the catalogue in the context; no spaces). Never add, remove or rename placeholders when revising, except in "improve", where you may tick or untick a feature (and add or remove its placeholder line) when the mistakes point to it; read the feature descriptions with read_feature_info before you do. Image features cost more per call: add one only when the mistakes point to what is in the picture. The output section must ask for JSON with exactly the schema's field names and values. In "improve", make a few targeted changes and give each a one-line reason that cites the mistakes (for example "5 Clips were read as Vlog"). "examples" holds a few of the wrong answers (gold label and the model's answer, text features cut short): read them to find what the prompt misses, and cite them by "externalId" where it helps (for example "ex-12 and ex-31: a cooking clip read as Vlog"). Never copy their text into the prompt. Each change's "text" quotes the words it adds, or the words it removes when it only removes, so the editor can put the reason on the right mark.`,
   },
   evaluation_agent: {

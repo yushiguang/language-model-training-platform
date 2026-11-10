@@ -431,6 +431,22 @@ export interface FeatureInfoSource {
   describe(keys: string[]): Promise<Record<string, FeatureInfo>>;
 }
 
+/** A document a user linked in Ask AI, as plain text (headings kept as lines). */
+export interface LinkedDocument {
+  title: string;
+  text: string;
+}
+
+/**
+ * Reads the documents users link in Ask AI (the internal document service), for the helpers'
+ * `read_doc` tool. The internal agent implements it; the repo's stand-in reads nothing. See
+ * docs/handover/integration.md, "Document links".
+ */
+export interface DocumentSource {
+  /** The document at `url` as the signed-in user may see it; null when it cannot be read. */
+  read(url: string): Promise<LinkedDocument | null>;
+}
+
 export interface Platform {
   db: DocRuntime;
   models: LabelingModels;
@@ -445,6 +461,8 @@ export interface Platform {
   media?: MediaSource;
   /** Feature descriptions. Optional: without it the agents see feature names only. */
   featureInfo?: FeatureInfoSource;
+  /** Document links in Ask AI. Optional: without it the helpers say they cannot open links. */
+  documents?: DocumentSource;
   /**
    * Registered endpoints with their QPM/TPM. Optional: the gateway fills anything missing from its
    * assumed defaults (`apps/llm-gateway/src/registry.ts`).

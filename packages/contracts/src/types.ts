@@ -55,6 +55,11 @@ export interface ModelSettings {
   maxOutputTokens: number;
   /** null when the model does not support temperature. */
   temperature: number | null;
+  /**
+   * A second labeling of the same examples (2): the Optimiser's confirmation of a pass. It is part
+   * of the answers' key, so the answers are fresh; never sent to the model.
+   */
+  pass?: number;
 }
 
 export interface SetupVersion {
@@ -266,7 +271,7 @@ export interface DryRunResult {
 }
 
 /** What an Optimiser run is doing now (the panel's "Now" line). */
-export type OptimiserStep = 'parent' | 'reflect' | 'merge' | 'check' | 'dry_run' | 'full' | 'report';
+export type OptimiserStep = 'parent' | 'reflect' | 'merge' | 'check' | 'dry_run' | 'full' | 'report' | 'confirm';
 
 /** One change the Optimiser tried: a row of the panel's history, newest first in the UI. */
 export interface OptimiserRound {
@@ -282,6 +287,11 @@ export interface OptimiserRound {
   score: number | null;
   passed: boolean;
   dryRun: DryRunResult | null;
+  /**
+   * A pass is confirmed by labeling the held-out half a second time (decided 2026-11-10): the
+   * second labeling's score, and whether it passes too. Only a confirmed pass ends the run.
+   */
+  confirm?: {score: number; passed: boolean} | null;
   /** Where a failed or stopped round was, so Retry resumes there. */
   step?: OptimiserStep;
 }

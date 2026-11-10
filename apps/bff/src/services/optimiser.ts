@@ -1,4 +1,4 @@
-import type {EndpointId, ExampleBrief, FeatureSelection, Prediction, OptimisationRun, OptimiserRound, OptimiserStep, ProjectState, PromptVersion, Schema, SetupVersion} from '@tsp/contracts';
+import type {Answer, EndpointId, ExampleBrief, FeatureSelection, Prediction, OptimisationRun, OptimiserRound, OptimiserStep, ProjectState, PromptVersion, Schema, SetupVersion} from '@tsp/contracts';
 import {
   BRIEF_WINS,
   checkTemplate,
@@ -20,7 +20,7 @@ import {
 } from '@tsp/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
-import {buildReport, labelEvalSet, labelExamples, scoreOnOptimiserHalf} from './evaluation.ts';
+import {buildReport, confirmScore, labelEvalSet, labelExamples, scoreOnOptimiserHalf} from './evaluation.ts';
 import {agentTools} from './page-views.ts';
 import {approveNode, loadProjectState} from './projects.ts';
 import {createVersion} from './prompts.ts';
@@ -67,6 +67,7 @@ const STEP_NAME: Record<OptimiserStep, string> = {
   dry_run: 'Dry run of',
   full: 'Labeling',
   report: 'Scoring',
+  confirm: 'Confirming the pass of',
 };
 
 class StepFailed extends Error {
@@ -75,6 +76,12 @@ class StepFailed extends Error {
     super(message);
     this.step = step;
   }
+}
+
+/** The Optimiser's random picks (parent, dry-run examples). Tests set a fixed one. */
+let random: () => number = Math.random;
+export function setOptimiserRandom(r: () => number = Math.random): void {
+  random = r;
 }
 
 const aborted = () => new DOMException('Stopped', 'AbortError');
@@ -184,9 +191,9 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
     throw new StepFailed(name, `${what} failed after ${TRIES} tries: ${(last as Error)?.message ?? 'unknown error'}`);
   }
   /** Labels examples as one try of a step; a stopped or failed task is an error. */
-  const label = async (setup: SetupVersion, v: PromptVersion, ids: string[] | 'eval') => {
+  const label = async (setup: SetupVersion, v: PromptVersion, ids: string[] | 'eval', pass?: number) => {
     const fresh = (await loadProjectState(projectId))!;
-    const o = {onTask: (id: string) => void (entry.task = id)};
+    const o = {onTask: (id: string) => void (entry.task = id), pass};
     const t = ids === 'eval' ? await labelEvalSet(projectId, setup, v, endpoint, fresh.examples, 'optimiser', o) : await labelExamples(projectId, setup, v, endpoint, ids, 'optimiser', o);
     entry.task = null;
     if (!t) throw new Error('another tab is labeling this version');
@@ -210,8 +217,19 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
     await save();
   };
 
+  // Rebuilt from the history, so a resumed run keeps counting (review finding 17).
+  const settled = run.history.filter(h => h.outcome !== 'running' && h.outcome !== 'failed' && h.outcome !== 'stopped');
   let wasted = 0;
+  for (const h of [...settled].reverse()) {
+    if (h.outcome === 'kept') break;
+    wasted++;
+  }
   let keptSinceMerge = 0;
+  for (const h of [...settled].reverse()) {
+    if (h.outcome !== 'kept') continue;
+    if (h.kind === 'merge') break;
+    keptSinceMerge++;
+  }
   let passedVersion: PromptVersion | null = null;
   try {
     // A round left by a failure or a closed page: one with a saved change goes on from its step;
@@ -219,7 +237,7 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
     const pending = run.history.at(-1);
     let resumeRound: OptimiserRound | null = null;
     if (pending && (pending.outcome === 'running' || pending.outcome === 'failed')) {
-      if (pending.versionId && pending.step && ['dry_run', 'full', 'report'].includes(pending.step)) resumeRound = {...pending, outcome: 'running'};
+      if (pending.versionId && pending.step && ['dry_run', 'full', 'report', 'confirm'].includes(pending.step)) resumeRound = {...pending, outcome: 'running'};
       else {
         run.history.pop();
         run.round = Math.max(0, run.round - 1);
@@ -285,7 +303,7 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
           break;
         }
         const pair = keptSinceMerge >= MERGE_EVERY ? mergePair(entries, front) : null;
-        const parentId = pair ? pair[0] : (pickParent(front) ?? start.id);
+        const parentId = pair ? pair[0] : (pickParent(front, random) ?? start.id);
         parent = pool.find(v => v.id === parentId) ?? start;
         const other = pair ? pool.find(v => v.id === pair[1])! : null;
         run.round++;
@@ -350,11 +368,22 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
         await putRound(round);
       }
 
-      // Dry run: a few examples of the optimiser half, the ones the parent gets wrong first.
+      // Dry run: examples of the optimiser half at random, up to half of them holding the weakest
+      // value of the parent's lowest field.
       if (round.step === 'dry_run') {
         const parentAnswers = answers.get(parent.id) ?? (await getApp().labeling.predictions(parent.id, endpoint, settingsHash(settings)));
-        const parentScores = new Map(half.filter(id => parentAnswers.has(id)).map(id => [id, exampleScore(schema, state.gold.get(id)!.answer, parentAnswers.get(id)!.answer)]));
-        const ids = pickDryRun(half, parentScores, dryRunSize(half.length));
+        const pm = await scoreOnOptimiserHalf(setup, parent, endpoint, state.examples, state.gold);
+        const weak = pm.lowestValue;
+        // The weakest value's score suffers from both sides: examples that have it, and examples
+        // the parent wrongly gave it.
+        const has = (a: Answer | null | undefined) => !!weak && !!a?.[weak.field]?.includes(weak.value);
+        const focus = new Set(half.filter(id => has(state.gold.get(id)!.answer) || has(parentAnswers.get(id)?.answer)));
+        const ids = pickDryRun(
+          half.filter(id => parentAnswers.has(id)),
+          dryRunSize(half.length),
+          focus,
+          random,
+        );
         const result = await step('dry_run', cand, async () => {
           await label(setup, cand, ids);
           const mine = await getApp().labeling.predictions(cand.id, endpoint, settingsHash(settings));
@@ -362,6 +391,7 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
             schema,
             parent.id,
             ids.map(id => ({gold: state.gold.get(id)!.answer, candidate: mine.get(id)?.answer ?? null, parent: parentAnswers.get(id)?.answer ?? null})),
+            pm.lowestField.field,
           );
         });
         const {better, ...dryRun} = result;
@@ -380,11 +410,23 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
         await putRound(round);
       }
       const s = await step('report', cand, () => score(setup, cand));
+      // A pass is confirmed before it ends the run: the held-out half is labeled a second time and
+      // must pass again (decided 2026-11-10; review finding 6: with many tries, one passes by luck).
+      let confirm: OptimiserRound['confirm'] = null;
+      if (s.passed) {
+        round = {...round, score: s.report.metrics.lowestField.macroF1, passed: true, step: 'confirm'};
+        await putRound(round);
+        confirm = await step('confirm', cand, async () => {
+          const fresh = (await loadProjectState(projectId))!;
+          await label(setup, cand, fresh.examples.filter(e => e.split === 'eval' && !e.optimiserHalf).map(e => e.id), 2);
+          return confirmScore(setup, cand, endpoint, fresh.examples, fresh.gold);
+        });
+      }
       wasted = 0;
       keptSinceMerge = round.kind === 'merge' ? 0 : keptSinceMerge + 1;
       tm().counter('tsp_optimiser_candidates_total', {slot: endpoint, result: 'kept'});
-      await putRound({...round, outcome: 'kept', score: s.report.metrics.lowestField.macroF1, passed: s.passed, step: undefined});
-      if (s.passed) {
+      await putRound({...round, outcome: 'kept', score: s.report.metrics.lowestField.macroF1, passed: s.passed, confirm, step: undefined});
+      if (s.passed && confirm?.passed) {
         passedVersion = cand;
         run.stopReason = 'passes';
         break;

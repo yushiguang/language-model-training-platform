@@ -227,6 +227,10 @@ const ruled = (id: string, _n: number, prompt: string) => {
   const k = (prompt.match(/RULE/g) ?? []).length;
   return JSON.stringify({format: Number(id) < 5 * k ? goldOf(id) : 'Vlog'});
 };
+// The Optimiser's picks (parent, dry-run examples) are fixed in these tests: in order, focus first.
+const {setOptimiserRandom} = await import('./optimiser.ts');
+setOptimiserRandom(() => 0);
+
 const ruleAgent = (fail: {left: number} = {left: 0}): AgentRuntimeContract => ({
   runAgentTurn: async () => ({invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []}),
   async reflectPrompt(input) {
@@ -330,4 +334,45 @@ test('Auto Optimise starts from the chosen version, and the helper reads wrong e
     'held-out examples never reach the helper',
   );
   assert.ok(ex.every(e => e.predicted?.format?.[0] !== e.gold.format?.[0]));
+});
+
+test('Auto Optimise: a pass is confirmed by labeling the held-out half again before the final labeling', async () => {
+  const w = await world('b25', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf, train: 3, test: 1});
+  await w.newVersion();
+  const {startOptimiser} = await import('./work.ts');
+  await startOptimiser(w.projectId, 10);
+  const run = (await w.state()).optimisation[0];
+  assert.equal(run.stopReason, 'passes');
+  assert.deepEqual(run.history.at(-1)?.confirm, {score: 1, passed: true});
+  // Each held-out example was labeled twice for the passing version.
+  const heldOut = ['1', '3', '5', '7', '9'];
+  assert.ok(heldOut.every(id => (w.seen.get(id) ?? 0) >= 2));
+});
+
+test('Auto Optimise: a pass that the second labeling does not confirm does not end the run', async () => {
+  // The held-out half is right the first time it is asked, wrong after (a lucky pass).
+  const asked = new Map<string, number>();
+  const lucky = (id: string, n: number, prompt: string) => {
+    const k = `${id}|${prompt}`;
+    asked.set(k, (asked.get(k) ?? 0) + 1);
+    return Number(id) % 2 === 1 && asked.get(k)! > 1 ? JSON.stringify({format: goldOf(id) === 'Vlog' ? 'Tutorial' : 'Vlog'}) : ruled(id, n, prompt);
+  };
+  const w = await world('b26', {agents: ruleAgent(), answer: lucky, macroF1: 0.99, gold: goldOf, train: 3, test: 1});
+  await w.newVersion();
+  const {startOptimiser} = await import('./work.ts');
+  await startOptimiser(w.projectId, 3);
+  const s = await w.state();
+  const run = s.optimisation[0];
+  assert.notEqual(run.stopReason, 'passes');
+  const passed = run.history.filter(h => h.passed);
+  assert.ok(passed.length > 0 && passed.every(h => h.confirm?.passed === false));
+  assert.equal(run.trainingSetId, null);
+  assert.equal(s.trainingSets.length, 0);
+});
+
+test('read_doc: a link that cannot be opened says so, so the helper asks for the text', async () => {
+  const w = await world('b28');
+  const {agentTools} = await import('./page-views.ts');
+  const out = (await agentTools(w.projectId).call({agent: 'schema_agent', name: 'read_doc', args: {url: 'https://docs.example.com/docx/abc'}})) as {error?: string};
+  assert.match(out.error ?? '', /cannot be opened/);
 });

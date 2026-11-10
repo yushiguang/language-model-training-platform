@@ -221,3 +221,14 @@ test('the Optimiser and Improve with AI get the wrong examples', async () => {
   await draftImprovement({version: 'v2', template: optTemplate, features: noFeatures, schema: optSchema, mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, mistakes: 1, examples}, llm);
   assert.equal(seen.filter(c => c.includes('"ex-7"')).length, 2);
 });
+
+test('a reply that is not JSON is asked again once, then never shown as broken output', async () => {
+  const replies = (xs: string[]) => {
+    let i = 0;
+    return {chat: async () => xs[Math.min(i++, xs.length - 1)]} as unknown as Parameters<typeof runAgentTurn>[1];
+  };
+  const turn = (llm: Parameters<typeof runAgentTurn>[1]) => runAgentTurn({userText: 'hi', page: {label: 'Setup', agent: 'front_desk', intent: 'answer', context: {}}, workspace: {projectId: 'pr_1', task: '', schema: null, history: [], pageView: null}}, llm);
+  assert.deepEqual((await turn(replies(['{"reply": "Hel', '{"reply": "Hello."}']))).messages.map(m => m.text), ['Hello.']);
+  assert.deepEqual((await turn(replies(['{"reply": "Hel', '{"reply": "Hel']))).messages.map(m => m.text), ['Sorry, my answer came out garbled. Please ask again.']);
+  assert.deepEqual((await turn(replies(['Hello there.']))).messages.map(m => m.text), ['Hello there.']);
+});

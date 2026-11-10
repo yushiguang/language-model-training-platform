@@ -52,7 +52,7 @@ const telemetry = createTelemetry({
 const gateway = createGateway(platform, {telemetry});
 const catalog = createCatalog(platform.db, {telemetry});
 const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: emitChange, telemetry});
-configureBff({catalog, labeling, gateway, agents: agentRuntime, identity: platform.identity, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, standIns: platform.standIns, telemetry, locks: browserLocks()});
+configureBff({catalog, labeling, gateway, agents: agentRuntime, identity: platform.identity, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, standIns: platform.standIns, telemetry, locks: browserLocks()});
 const web = webTelemetry(telemetry);
 void platform.identity.currentUser().then(u => telemetry.setContext({userId: u.id}));
 
