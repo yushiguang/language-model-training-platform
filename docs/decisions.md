@@ -10,6 +10,16 @@ where it matters, why. The code follows these; change a line here when a decisio
   it. They may read scores and counts built on it. Users still see every example on the pages.
   Why: the held-out half scores every version, and a helper that read it could write prompts that
   fit those examples, so the score would no longer say how the prompt does on new data.
+- **Gold labels are judged by people only.** No helper says a gold label is right or wrong. A
+  helper that meets a label that looks odd against its definition writes no rule for it and moves
+  on; people review such labels on the Mismatches tab.
+- **The helpers' instructions were rewritten** (`apps/agents/src/presets.ts`): each helper is told
+  why its job matters, what good output looks like, and what it must not do. The user's job is
+  business knowledge and gold labels; tuning prompts is the site's job.
+- **A score from fewer than about 50 examples is called a rough reading** by the Scores helper.
+- **The report helpers read says whether a pass was confirmed** (`confirmed`: true, false, or
+  null when there was no second labeling). The Scores helper never recommends a version whose
+  pass was not confirmed.
 
 ## 2026-11-10: MVP review
 

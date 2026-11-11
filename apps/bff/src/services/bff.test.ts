@@ -8,6 +8,7 @@ import {configureBff} from './app.ts';
 import {loadProjectState} from './projects.ts';
 import {agentStart} from './starts.ts';
 import {tick} from './work.ts';
+import {versionLabel} from '@tsp/domain';
 
 const schema: Schema = {fields: [{name: 'format', kind: 'single', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}]};
 /** Output price only, so every estimate is 150 tokens x $200/M = $0.03 per example. */
@@ -344,6 +345,13 @@ test('Auto Optimise: a pass is confirmed by labeling the held-out half again bef
   const run = (await w.state()).optimisation[0];
   assert.equal(run.stopReason, 'passes');
   assert.deepEqual(run.history.at(-1)?.confirm, {score: 1, passed: true});
+  // The helpers read it on the report (the Scores helper recommends a version only when its pass holds).
+  const {agentTools} = await import('./page-views.ts');
+  const s = await w.state();
+  const label = (id: string | null) => versionLabel(s.versions.find(v => v.id === id)!);
+  const rep = (v: string) => agentTools(w.projectId).call({agent: 'evaluation_agent', name: 'get_report', args: {version: v}}) as Promise<{report: {confirmed: boolean | null}}>;
+  assert.equal((await rep(label(run.history.at(-1)!.versionId))).report.confirmed, true);
+  assert.equal((await rep(label(run.startVersionId))).report.confirmed, null, 'no second labeling for the start version');
   // Each held-out example was labeled twice for the passing version.
   const heldOut = ['1', '3', '5', '7', '9'];
   assert.ok(heldOut.every(id => (w.seen.get(id) ?? 0) >= 2));
@@ -366,6 +374,10 @@ test('Auto Optimise: a pass that the second labeling does not confirm does not e
   assert.notEqual(run.stopReason, 'passes');
   const passed = run.history.filter(h => h.passed);
   assert.ok(passed.length > 0 && passed.every(h => h.confirm?.passed === false));
+  const {agentTools} = await import('./page-views.ts');
+  const ref = versionLabel(s.versions.find(v => v.id === passed[0].versionId)!);
+  const rep = (await agentTools(w.projectId).call({agent: 'evaluation_agent', name: 'get_report', args: {version: ref}})) as {report: {passed: boolean; confirmed: boolean | null}};
+  assert.deepEqual([rep.report.passed, rep.report.confirmed], [true, false], 'the report says the pass was not confirmed');
   assert.equal(run.trainingSetId, null);
   assert.equal(s.trainingSets.length, 0);
 });

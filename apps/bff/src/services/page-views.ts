@@ -86,12 +86,25 @@ function optimiserView(state: ProjectState) {
     now: o.state === 'running' ? stepLine(o.step, label(o.stepVersionId), dryRunSize(state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && state.gold.has(e.id)).length)) : null,
     stopReason: o.stopReason,
     error: o.error,
-    rounds: o.history.map(r => ({round: r.round, version: label(r.versionId), from: label(r.parentId), kind: r.kind, change: r.change, outcome: r.outcome, lowestFieldMacroF1: r.score == null ? null : r2(r.score), passed: r.passed})),
+    rounds: o.history.map(r => ({round: r.round, version: label(r.versionId), from: label(r.parentId), kind: r.kind, change: r.change, outcome: r.outcome, lowestFieldMacroF1: r.score == null ? null : r2(r.score), passed: r.passed, confirmed: r.confirm ? r.confirm.passed : null})),
   };
 }
 
 function versionDetail(state: ProjectState, v: PromptVersion) {
   return {...versionRow(state, v), template: v.template, features: v.features, promptImages: v.images.length};
+}
+
+/**
+ * Whether the Optimiser's second labeling of the held-out half agreed with a version's pass:
+ * true or false, or null when there was no second labeling (a version scored outside a run, or
+ * one that did not pass).
+ */
+function confirmedOf(state: ProjectState, versionId: string): boolean | null {
+  for (const o of state.optimisation) {
+    const c = o.history.find(h => h.versionId === versionId)?.confirm;
+    if (c) return c.passed;
+  }
+  return null;
 }
 
 /** A report as the Eval report page shows it: scores, the threshold checks, mix-ups, trend. */
@@ -113,6 +126,7 @@ function reportView(state: ProjectState, v: PromptVersion | undefined, model: En
       model: modelName(state, r.endpoint),
       scoredOn: r.metrics.n,
       passed: r.passed,
+      confirmed: confirmedOf(state, ver.id),
       fields: r.metrics.fields.map(f => ({field: f.field, kind: f.kind, macroF1: r2(f.macroF1), accuracy: r2(f.accuracy), weakestValues: [...f.values].sort((a, b) => a.f1 - b.f1).slice(0, 3).map(x => ({value: x.value, f1: r2(x.f1)}))})),
       lowestField: {field: r.metrics.lowestField.field, macroF1: r2(r.metrics.lowestField.macroF1)},
       lowestValue: r.metrics.lowestValue ? {...r.metrics.lowestValue, f1: r2(r.metrics.lowestValue.f1)} : null,

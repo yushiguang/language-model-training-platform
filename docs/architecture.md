@@ -197,6 +197,14 @@ helper:
 Page views carry scores and counts only. Every preset's instructions (`common` and the
 Optimiser's) say the held-out half is hidden and why, so a helper doesn't ask for it.
 
+**The helpers' instructions** (rewritten 2026-11-11) are the shared rules in `common` plus one
+text per helper in `apps/agents/src/presets.ts`. They say who does what (code runs the workflow,
+helpers explain and propose, the user approves), what good labels and a good labeling prompt look
+like, the Scores helper's six next steps, and what the Optimiser must avoid (rules that fit one
+example, repeating a tried change). No helper judges a gold label. The report view carries
+`scoredOn` and `confirmed` (the Optimiser's second labeling of the held-out half: true, false, or
+null when there was none) for the Scores helper. The texts have not been tried on real models yet.
+
 **The label check** (review finding 10). Dataset's AI Suggestion "Check the labels against your
 data" sends the Labels helper 20 random examples (never the held-out half) with their gold labels
 when they have one (`checkLabels`, intent `check_schema`). It answers in Ask AI, may put a schema
