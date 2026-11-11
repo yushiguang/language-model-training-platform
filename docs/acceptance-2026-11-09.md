@@ -180,6 +180,67 @@ started the optimiser on ...") whose icon does not animate. Add a running-optimi
 on the page (model, candidates so far, calls, cost, Stop — the run data is already in
 project state), and animate the icon on in-progress event lines in the chat.
 
+## R4-1. The report's headline metric must say what it is
+
+The version detail card renamed the headline metric to a generic "Score"
+(`apps/web/src/app/(project)/prompt/page.tsx`, `SCORE_TIP` hover). Restore the concrete
+name (the metric it actually is, e.g. "Lowest field macro-F1"), likewise the per-field
+table's "Score" column. A hover tooltip is not a substitute for the name; users compare
+these numbers across pages (Gold Labels, reports) that use the real names.
+
+## R4-2. Remove the blur/fade at the detail card's bottom edge
+
+`.card.fill > .vlist` and `.card.fill-scroll` fade the last ~30px with a mask gradient
+(`apps/web/src/ui/kit.css`), which reads as a blur defect on the version detail card.
+Remove the mask fade. Keep the layout-shift work from R3-8: the card may animate its height
+when content changes, it just must not fade or blur content.
+
+## R4-3. Move the rounds choice into the Auto Optimise confirmation
+
+The AI Suggestion card carries both the rounds input and the Auto Optimise button. Take
+the rounds input off the card (the card keeps one clear action); clicking Auto Optimise
+opens the confirmation dialog, which now holds: the base-version choice from R3-7
+(selected version vs best-scoring minor of its major) and the rounds choice (same range
+and default as today), then Start. One dialog, no settings stranded on cards.
+
+## R4-4. Mismatches: show why, let the labeler say why, feed both to the optimiser
+
+On the Mismatches tab, for each item show beside the two answers (a) the model's raw
+output and, when invalid, its invalid reason — both already saved on the prediction — and
+(b) a free-text "my call and why" box for the labeler, saved with the review decision
+(extend the `gold.review` audit data, or a note on the gold record). Then use them: the
+reflect input (R3-9) should include, for the parent's wrong examples, the labeler's notes
+where they exist, marked as the human's stated reasoning. Note the model gives no natural
+language reason today (the prompt asks for JSON only, and only the raw output is saved);
+if a model-side reason is wanted later, the prompt pattern can ask for a `reason` key
+outside the schema fields — the answer parser already ignores extra keys — but that is a
+prompt change, not a prerequisite for (a) and (b).
+
+## R4-5. Mismatch judgement is recomputed, but a reviewed item cannot be reopened (gap)
+
+For the user's question: the judgement is not one-time. The list is derived on every read
+from saved predictions against the current gold labels, and a decision is recorded in the
+audit log against that gold label's id. Change the gold label again (on Gold Labels) and
+the item is judged again against the new label and can re-enter the list; score a new
+version and wrongness counts update. The gap: an item reviewed and left (kept, or changed
+and reviewed under its new gold id) has no "reopen" path in the Mismatches UI if the user
+changes their mind without editing the label elsewhere. Add one (a reviewed section with
+an undo/reopen action that drops the review record for that gold id).
+
+## R4-6. Invalid and filtered outputs must not count as wrong answers in scores
+
+Today an invalid output counts as wrong on every field (`packages/domain/src/metrics.ts`),
+and a filtered prediction (no answer at all) counts the same way. Both poison F1,
+precision and recall with what is a format/platform event, not a labelling judgement, and
+the optimiser then chases ghosts. Change the score calculation: exclude examples whose
+prediction is invalid or filtered from the per-field F1 / precision / recall and accuracy
+denominators, for reports, version comparisons and the optimiser's scoring alike. Keep
+them visible and counted separately — invalid and filtered counts and rates stay on the
+card (R4-1 naming applies) — and keep a guard so a version cannot pass on a technicality:
+the pass judgement should also require the invalid+filtered rate on the scored half to be
+at most a stated cap (suggest 10%, shown next to the result), reusing the existing
+invalid-rate threshold machinery where possible.
+
 ## R3-1. Dashed-underline hints never show, and are overused
 
 **Status 2026-11-10:** done in PR #4 (see `docs/ui-gaps.md`, "Done on 2026-11-10: acceptance round 3").
