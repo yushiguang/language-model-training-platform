@@ -65,7 +65,7 @@ export const METRICS = {
   tsp_agent_parse_failures_total: {type: 'counter', help: "Answers that weren't the asked JSON", labels: ['agent', 'intent']},
   tsp_agent_proposals_total: {type: 'counter', help: 'Proposals by outcome', labels: ['agent', 'kind', 'outcome']},
   tsp_optimiser_runs_total: {type: 'counter', help: 'Optimiser runs by outcome', labels: ['slot', 'outcome']},
-  tsp_optimiser_candidates_total: {type: 'counter', help: 'Optimiser rounds by result (kept, dropped after the dry run, failed the Checks, repeated)', labels: ['slot', 'result']},
+  tsp_optimiser_candidates_total: {type: 'counter', help: 'Optimiser rounds by result (kept, tied, dropped after the dry run, failed the Checks, repeated)', labels: ['slot', 'result']},
   tsp_optimiser_step_failures_total: {type: 'counter', help: 'Optimiser steps that errored (each try)', labels: ['step']},
   // catalog and storage
   tsp_catalog_operations_total: {type: 'counter', help: 'Catalog operations', labels: ['collection', 'op', 'outcome']},

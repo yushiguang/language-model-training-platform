@@ -1,8 +1,8 @@
 import {DocFieldValue, type GateApproval, type NodeId, type Project, type ProjectState, type WorkflowFacts} from '@tsp/contracts';
-import {compareVersions, contextIdFor, gate, judge, newId} from '@tsp/domain';
+import {compareVersions, contextIdFor, gate, judge, newId, scoresUpdating} from '@tsp/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {getSamplingTask} from './dataset.ts';
-import {latestGold} from './evaluation.ts';
+import {cannotBuild, latestGold} from './evaluation.ts';
 import {runView, trainingView} from './views.ts';
 
 export type {ProjectState};
@@ -69,7 +69,7 @@ export async function loadProjectState(projectId: string): Promise<ProjectState 
     trainingSet: trainingSets[0] ?? null,
     approved: project.approvedNodes,
   };
-  return {
+  const out = {
     project,
     setup,
     snapshot,
@@ -88,6 +88,7 @@ export async function loadProjectState(projectId: string): Promise<ProjectState 
     samplingTask: getSamplingTask(projectId),
     otherAutoSpendUsd: autoSpend.reduce((n, a) => n + Number((a.data as {costUsd?: number}).costUsd ?? 0), 0),
   };
+  return {...out, scoresUpdating: scoresUpdating(out, cannotBuild)};
 }
 
 /** Next step: checks the gate, then records who approved it. */
@@ -115,13 +116,3 @@ export async function approveNode(projectId: string, node: NodeId): Promise<void
   emitChange();
 }
 
-/** Gold labels are optional: skipping is recorded like any other approval. */
-export async function skipGold(projectId: string): Promise<void> {
-  const {catalog, user} = getApp();
-  const u = await user();
-  await catalog.insert('gate_approvals', {id: newId('ga'), projectId, node: 'gold', status: 'skipped', createdAt: now(), createdBy: u.name});
-  await catalog.patch('projects', projectId, {approvedNodes: DocFieldValue.arrayUnion('gold')});
-  await catalog.audit(projectId, u.name, 'gate.skip', {node: 'gold'});
-  tm().counter('tsp_gate_actions_total', {node: 'gold', action: 'skip'});
-  emitChange();
-}

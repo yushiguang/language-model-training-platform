@@ -333,6 +333,16 @@ export interface OptimiserRound {
   passed: boolean;
   dryRun: DryRunResult | null;
   /**
+   * The dry run tied with the parent (acceptance R5-6): as many fields right, but on different
+   * examples. The change is labeled in full and kept in the pool, but does not count as progress.
+   */
+  tied?: boolean;
+  /**
+   * Why this parent (R5-7): on how many optimiser-half examples it is the best version. null: round
+   * 1, which always starts from the version the user picked. Missing on rounds made before.
+   */
+  parentWins?: number | null;
+  /**
    * A pass is confirmed by labeling the held-out half a second time (decided 2026-11-10): the
    * second labeling's score, and whether it passes too. Only a confirmed pass ends the run.
    */
@@ -626,6 +636,8 @@ export interface ProjectState {
   trainingSets: TrainingSet[];
   facts: WorkflowFacts;
   contextId: string;
+  /** A gold edit archived some reports and they are being rebuilt from saved answers (acceptance R5-4, R5-5). */
+  scoresUpdating: boolean;
   /** Available preset endpoints from the model runtime. */
   endpoints: EndpointInfo[];
   /** Active or recently finished sampling task, if any. */

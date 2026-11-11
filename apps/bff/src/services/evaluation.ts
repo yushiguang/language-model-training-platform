@@ -110,6 +110,9 @@ export async function predictionsFor(versionId: string, endpoint: EndpointId, se
   return getApp().labeling.predictions(versionId, endpoint, settingsHash(settings));
 }
 
+/** Reports that cannot be built from saved answers, as "versionId|endpoint|contextId" (R5-4): the answers miss part of the eval set. */
+export const cannotBuild = new Set<string>();
+
 /**
  * Builds the report for a version on a model, once the eval set is fully labeled and has gold
  * labels. Scores use only the held-out half of the eval set.
@@ -131,7 +134,10 @@ export async function buildReport(
   const settings = settingsFor(setup, endpoint);
   const byExample = await predictionsFor(version.id, endpoint, settings);
   const scoredOn = evalExamples.filter(e => !e.optimiserHalf);
-  if (scoredOn.some(e => !byExample.has(e.id))) return null;
+  if (scoredOn.some(e => !byExample.has(e.id))) {
+    cannotBuild.add(`${version.id}|${endpoint}|${contextId}`);
+    return null;
+  }
   const items: Scored[] = scoredOn.map(e => ({exampleId: e.id, gold: gold.get(e.id)!.answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd}));
   const report: EvalReport = {
     id: newId('er'),

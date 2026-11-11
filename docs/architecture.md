@@ -1,7 +1,7 @@
 # Architecture
 
 The MVP produces a labeled training set and a labeled test set for one task: Setup → Dataset →
-Gold Labels (optional) → Prompt Engineering → Training Set (the final run labels train and test). It is a fixed-workflow website with agents built into each step.
+Gold Labels → Prompt Engineering → Training Set (the final run labels train and test). It is a fixed-workflow website with agents built into each step.
 Code decides the next step; agents explain and propose, people approve.
 
 ## Eight apps, three packages
@@ -124,11 +124,13 @@ improves the prompt on the project's one labeling model, for up to the user's Ma
   editor finds the mark under the pointer with `elementsFromPoint` to show the hover.
 - **Start version.** A run starts from the version selected in the list (the page asks first when
   a better minor of the same major exists); an agent's start uses the best scored version.
-- **Pool and parent.** The pool is the start version plus the run's kept versions, each scored per
-  example on the optimiser half of the eval set (share of fields right). The parent is drawn from
-  the Pareto front (versions best on at least one example and not dominated), weighted by how
-  many examples each is best on. After every 2 kept versions, two front versions that each win
-  examples the other misses are merged instead.
+- **Pool and parent.** The pool is the start version, the run's kept versions, and every other
+  version with a current score on the model (2026-11-11), each scored per example on the optimiser
+  half of the eval set (share of fields right). Round 1 always changes the start version (R5-7).
+  Later parents are drawn from the Pareto front (versions best on at least one example and not
+  dominated), weighted by how many examples each is best on; the round keeps that count
+  (`parentWins`) so the panel can say why. After every 2 kept versions, two front versions that
+  each win examples the other misses are merged instead.
 - **A round.** The agent runtime writes one change from the parent's mix-ups and up to 8 of its
   wrong examples (`ExampleBrief`: gold, the model's answer, text features cut to about 300
   characters; optimiser half only, never the held-out half; a merge gets up to 4 examples each
@@ -138,7 +140,8 @@ improves the prompt on the project's one labeling model, for up to the user's Ma
   examples, picked at random (review finding 7), up to half of them from the examples that hold
   the parent's weakest value (in the gold label or the parent's answer) → it goes on only when it
   gets more fields right than the parent on them, the parent's weakest field counting double
-  (`compareDryRun`, review finding 5) → it is labeled on the whole eval set (the dry run's
+  (`compareDryRun`, review finding 5), or ties it while being right on different examples (R5-6:
+  `tied`, labeled in full and kept in the pool, but a wasted round; 2 ties in a row end the run) → it is labeled on the whole eval set (the dry run's
   answers are reused) and scored on the held-out half. `setOptimiserRandom` fixes the random picks
   in tests.
 - **Confirming a pass** (decided 2026-11-10, review finding 6). A version that passes is not used
@@ -221,6 +224,12 @@ data" sends the Labels helper 20 random examples (never the held-out half) with 
 when they have one (`checkLabels`, intent `check_schema`). It answers in Ask AI, may put a schema
 draft on Schema settings, and keeps answering on Dataset.
 
+**Scores after gold edits** (acceptance R5-4, R5-5). A gold edit changes the evaluation context,
+so reports are archived; `ProjectState.scoresUpdating` says some must be rebuilt, and
+`rebuildReports` rebuilds them from saved answers (nothing is labeled). Gold Labels calls it once,
+1.5 s after the last edit; the Prompt page's tick calls it too. Saved answers on the whole eval set
+are kept in memory per version, since they never change once complete.
+
 **Mismatches** (review finding 2, decided 2026-11-10). Gold Labels has a Mismatches tab: the eval
 examples where a version's saved answer differs from the gold label, for the version picked in
 "Compare with" at the end of the tab row (default: the best scored one; only versions with answers
@@ -272,7 +281,7 @@ application `id` to the store's document id.
 | Reading a model answer against the schema; settings hash; evaluation context id; token estimate | `packages/domain/src/labels.ts` |
 | Metrics (macro-F1 per field, shown as "Score" with the metric name in grey; per-value F1, accuracy, invalid rate, mix-ups; invalid and filtered answers left out of the scores and counted apart) and pass/fail (always at most 1% invalid, `INVALID_CAP`) | `packages/domain/src/metrics.ts` |
 | Versions are major.minor and never overwritten; the catalog assigns the numbers | `packages/domain/src/versions.ts`, `apps/catalog/src/catalog.ts` |
-| Gates between steps; Gold Labels is recommended, not required | `packages/domain/src/gates.ts` |
+| Gates between steps; Gold Labels is an ordinary step (R5-8) | `packages/domain/src/gates.ts` |
 | The recommended next step (the best score wins; cost only breaks a tie) | `packages/domain/src/workflow.ts` |
 | Agent prompts, handoffs (to known specialists only), read tools per preset | `apps/agents/src/presets.ts`, `apps/agents/src/runtime.ts` |
 | What an agent sees of each page (page views) and the read tools' implementation | `apps/bff/src/services/page-views.ts` |

@@ -5,6 +5,15 @@ where it matters, why. The code follows these; change a line here when a decisio
 
 ## 2026-11-11
 
+- **Gold Labels is an ordinary step** (acceptance R5-8): not optional or "recommended", and no
+  way to skip it (the "None" pass rule is gone). Scores, mismatch review and the Optimiser all
+  rest on gold labels.
+- **Gold edits are grouped** (R5-5): the lists and the reports are worked out once after the
+  edits stop, from saved answers only. The user never waits between edits.
+- **A tied dry run goes on** (R5-6): it may hold what the parent lacks, so it is labeled in full
+  and joins the pool, but it is not progress (a wasted round; 2 ties in a row end the run).
+- **Round 1 changes the version the user started from** (R5-7); later rounds pick from the
+  Pareto front, weighted by the examples each version wins, and the panel says which and why.
 - **Invalid and filtered answers are left out of scores** (acceptance R4-6). They are counted on
   their own next to the score. A version passes only when at most 1% of its answers are invalid
   (or the project's own limit). Why: an unreadable answer is a format problem, not a wrong label,

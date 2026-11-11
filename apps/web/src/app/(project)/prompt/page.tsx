@@ -203,7 +203,8 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
     </Card>
   );
 
-  const advice = !running && !showPanel && !selDropped ? <Advice state={state} onMake={onMake} selId={sel.id} /> : null;
+  // R5-4: no advice from scores that are being rebuilt after a gold edit.
+  const advice = !running && !showPanel && !selDropped && !state.scoresUpdating ? <Advice state={state} onMake={onMake} selId={sel.id} onStarted={() => setSel(null)} /> : null;
   return (
     <Frame head={<PageHead title="Prompt versions" />}>
       {chart}
@@ -313,6 +314,14 @@ const ROUND_RESULT: Record<OptimiserRound['outcome'], {text: string; tone?: 'run
   stopped: {text: 'Stopped'},
 };
 
+/** Why the Optimiser picked a round's parent (R5-7). */
+const parentWhy = (r: OptimiserRound, parent: string) =>
+  r.parentWins === null
+    ? `Round 1 changes ${parent}, the version you started from`
+    : r.parentWins === undefined
+      ? `The change was made to ${parent}`
+      : `${parent} is the best version on ${r.parentWins} ${r.parentWins === 1 ? 'example' : 'examples'} of the optimiser half. Versions that are best on more examples are picked more often`;
+
 /** The Optimiser's progress panel: round, where it started, what it does now, every round so far. */
 function OptimiserPanel({state, run, box}: {state: ProjectState; run: OptimisationRun; box: Box}) {
   const label = (id: string | null) => {
@@ -329,7 +338,7 @@ function OptimiserPanel({state, run, box}: {state: ProjectState; run: Optimisati
         <div className="row" style={{gap: 8}}>
           <div className="live grow">
             <Icon name="ring" />
-            <span>{stepLine(run.step, label(run.stepVersionId), dryRunSize(half))}</span>
+            <span>{stepLine(run.step, label(run.stepVersionId), dryRunSize(half), label(run.history.at(-1)?.parentId ?? null))}</span>
           </div>
           {run.stepStartedAt && (
             <span className="t-3" style={{fontSize: 13}}>
@@ -359,7 +368,14 @@ function OptimiserPanel({state, run, box}: {state: ProjectState; run: Optimisati
             None
           </span>
         ),
-        <One key="c" text={r.change || 'Writing a change'} />,
+        <span key="c" className="row" style={{gap: 8, minWidth: 0}}>
+          {label(r.parentId) && (
+            <span className="t-3" style={{flex: 'none'}}>
+              <Hov text={`from ${label(r.parentId)}`} tip={parentWhy(r, label(r.parentId)!)} />
+            </span>
+          )}
+          <One text={r.change || 'Writing a change'} />
+        </span>,
         res ? (
           <Badge key="r" text={res.text} tone={res.tone ?? 'gray'} icon={res.tone === 'run' || res.tone === 'err'} />
         ) : r.score != null && r.passed && r.confirm && !r.confirm.passed ? (
@@ -368,6 +384,14 @@ function OptimiserPanel({state, run, box}: {state: ProjectState; run: Optimisati
             <Score v={r.score} ok />
             <span className="badge b-gray">
               <Hov text="Not confirmed" tip={`The second labeling of the held-out half scored ${r.confirm.score.toFixed(2)}, below the bar`} />
+            </span>
+          </span>
+        ) : r.score != null && r.tied ? (
+          // R5-6: a tie is labeled in full but is not progress.
+          <span key="r" className="row" style={{gap: 8, justifyContent: 'center'}}>
+            <Score v={r.score} ok={r.passed} />
+            <span className="badge b-gray">
+              <Hov text="Tied" tip={`In the dry run it got as many fields right as ${label(r.parentId) ?? 'its parent'}, on different examples. It was labeled in full but does not count as progress`} />
             </span>
           </span>
         ) : r.score != null ? (
@@ -558,7 +582,8 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
           {actions}
         </div>
         <div className="row" style={{gap: 12}}>
-          <span className="t-3">{why}</span>
+          {/* R5-4: a gold edit archived the score; it is rebuilt from saved answers. */}
+          {state.scoresUpdating && runs.some(r => r.state === 'done') ? <Badge text="Scores updating" tone="run" /> : <span className="t-3">{why}</span>}
           {canScore && <Button label={runs.length ? 'Resume' : 'Score'} size="sm" icon="play" onClick={() => void scoreVersion(state.project.id, v)} />}
         </div>
       </Card>
@@ -591,7 +616,7 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
  * while scoring or the Optimiser runs (design: no card while it waits). Below the bar it offers
  * Improve with AI (a draft in the editor) or Auto Optimise, whose dialog asks for the rounds.
  */
-function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId: string, endpoint: EndpointId) => Promise<void>; selId: string}) {
+function Advice({state, onMake, selId, onStarted}: {state: ProjectState; onMake: (versionId: string, endpoint: EndpointId) => Promise<void>; selId: string; onStarted: () => void}) {
   const {href} = useProject();
   const go = useGo();
   const [rounds, setRounds] = useState(String(DEFAULT_MAX_ROUNDS));
@@ -619,6 +644,8 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
   const [ask, setAsk] = useState<{sel: PromptVersion; selScore: number | null; best: PromptVersion | null; bestScore: number; from: string} | null>(null);
   const start = (versionId: string, n: number) => {
     setAsk(null);
+    // R5-4: starting a run takes the user to it (the progress panel), not the version they left.
+    onStarted();
     startOptimiser(state.project.id, n, versionId).catch(e => reportActionError(`The Optimiser could not start: ${(e as Error).message}`, () => start(versionId, n)));
   };
   const auto = () => {
@@ -684,11 +711,9 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
   } else if (a.kind === 'keep_improving' && a.versionId) {
     title = a.title;
     text = a.reasons[0] ?? '';
-    const or = <span style={{fontSize: 13, color: 'var(--text-2)'}}>or</span>;
     acts = (
       <div className="row" style={{gap: 8}}>
         <Button label="Improve with AI" onClick={() => improve(a.versionId!)} />
-        {or}
         <Button label="Auto Optimise" kind="primary" onClick={auto} />
       </div>
     );
@@ -722,6 +747,10 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
             </span>
             <input className="input sm" style={{width: 72, textAlign: 'center'}} value={rounds} inputMode="numeric" aria-label="Max rounds" onChange={e => setRounds(e.target.value.replace(/\D/g, '').slice(0, 2))} />
           </div>
+          {/* R5-7: how the parent of each round is picked. */}
+          <span className="t-3" style={{fontSize: 13, lineHeight: '20px'}}>
+            Round 1 changes the version you start from. Later rounds can start from any scored version, most often one that is best on many examples
+          </span>
         </Dialog>
       )}
     </section>

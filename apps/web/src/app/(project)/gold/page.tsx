@@ -7,7 +7,7 @@ import type {Answer, Example, ExampleMedia, LabelField, MismatchList, MismatchRe
 import {FEATURES, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
-import {approveNode, exampleMedia, mismatches, predictionsFor, reopenGold, reviewGold, saveGold, type ProjectState} from '@/backend-api';
+import {approveNode, exampleMedia, mismatches, predictionsFor, rebuildReports, reopenGold, reviewGold, saveGold, type ProjectState} from '@/backend-api';
 import {Badge, Banner, Button, Card, Code, dateTime, Empty, Hov, Icon, num, PageHead, reportActionError, Seg, Tabs} from '@/ui';
 
 type SetKey = 'eval' | 'test' | 'mismatch';
@@ -29,21 +29,75 @@ function GoldRouter() {
   );
 }
 
+/** How long after the last gold edit the lists and scores are worked out again (R5-5). */
+const SETTLE_MS = 1500;
+
 /**
- * The Mismatches list for the picked version (review finding 2). It reads saved answers only, so it
- * reloads when scores or gold labels change, and after each keep or change.
+ * The Mismatches list for the picked version (review finding 2). It reads saved answers only.
+ * Acceptance R5-5: a burst of gold edits is worked out once, SETTLE_MS after the last one, and the
+ * reports those edits archived are rebuilt then too; `edit` applies a review to the list at once,
+ * so the user keeps going without waiting. A new version, a new score or another picked version
+ * reloads at once.
  */
-function useMismatches(state: ProjectState, versionId: string | null): [MismatchList | null, () => void] {
+function useMismatches(state: ProjectState, versionId: string | null): {list: MismatchList | null; settling: boolean; edited: (exampleId: string, review: MismatchReview | null) => void} {
   const [list, setList] = useState<MismatchList | null>(null);
   const [n, setN] = useState(0);
+  const [settling, setSettling] = useState(false);
+  const first = useRef(true);
+  const lastEdit = useRef(0);
   useEffect(() => {
     let live = true;
-    void mismatches(state.project.id, versionId).then(m => live && setList(m));
+    const load = () =>
+      void mismatches(state.project.id, versionId).then(m => {
+        if (!live) return;
+        setList(m);
+        setSettling(false);
+        if (lastEdit.current) void rebuildReports(state.project.id);
+        lastEdit.current = 0;
+      });
+    const wait = first.current ? 0 : Math.max(0, lastEdit.current + SETTLE_MS - Date.now());
+    first.current = false;
+    if (!wait) load();
+    const id = wait ? setTimeout(load, wait) : undefined;
     return () => {
       live = false;
+      clearTimeout(id);
     };
   }, [state.project.id, versionId, state.contextId, state.reports.length, state.versions.length, n]);
-  return [list, () => setN(x => x + 1)];
+  const edited = (exampleId: string, review: MismatchReview | null) => {
+    lastEdit.current = Date.now();
+    setSettling(true);
+    setList(l => {
+      if (!l) return l;
+      const item = l.items.find(x => x.exampleId === exampleId);
+      if (review) {
+        const reviewedItems = [review, ...l.reviewedItems.filter(r => r.exampleId !== exampleId)];
+        return {...l, items: l.items.filter(x => x.exampleId !== exampleId), reviewedItems, reviewed: reviewedItems.length, reviewedAll: l.reviewedAll + 1};
+      }
+      // Reopened: back in To review until the list is worked out again.
+      const reviewedItems = l.reviewedItems.filter(r => r.exampleId !== exampleId);
+      return {...l, items: item ? l.items : [...l.items, {exampleId, wrongIn: 0, of: l.versions.length}], reviewedItems, reviewed: reviewedItems.length};
+    });
+    setN(x => x + 1);
+  };
+  return {list, settling, edited};
+}
+
+/** R5-2: the version picked in "Compare with" stays for the session (per project). */
+const pickKey = (projectId: string) => `gold-compare:${projectId}`;
+function readPick(projectId: string): string | null {
+  try {
+    return sessionStorage.getItem(pickKey(projectId));
+  } catch {
+    return null;
+  }
+}
+function savePick(projectId: string, id: string) {
+  try {
+    sessionStorage.setItem(pickKey(projectId), id);
+  } catch {
+    // Storage off: the pick stays for this page only.
+  }
 }
 
 const sameValues = (a: string[] = [], b: string[] = []) => a.length === b.length && [...a].sort().join('|') === [...b].sort().join('|');
@@ -51,8 +105,17 @@ const sameValues = (a: string[] = [], b: string[] = []) => a.length === b.length
 function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null}) {
   const go = useGo();
   const {href} = useProject();
-  const [cmp, setCmp] = useState<string | null>(null);
-  const [mm, reloadMm] = useMismatches(state, cmp);
+  const [cmp, setCmpState] = useState<string | null>(() => readPick(state.project.id));
+  const setCmp = (id: string) => {
+    setCmpState(id);
+    savePick(state.project.id, id);
+  };
+  const {list: mm, settling, edited} = useMismatches(state, cmp);
+  // R5-2: the first list picks the best version; from then on the pick holds, and only the
+  // "(best)" mark moves when scores change.
+  useEffect(() => {
+    if (mm?.versionId && cmp !== mm.versionId && (!cmp || !mm.versions.some(v => v.id === cmp))) setCmp(mm.versionId);
+  }, [mm?.versionId]); // eslint-disable-line react-hooks/exhaustive-deps
   // R4-5: Mismatches splits into To review and Reviewed, both for the version picked for the page.
   const [sub, setSub] = useState<'open' | 'done'>('open');
   const byId = useMemo(() => new Map(state.examples.map(e => [e.id, e])), [state.examples]);
@@ -96,8 +159,10 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   const diff = onMismatch && gold && modelAnswer ? new Set(state.setup!.schema!.fields.filter(f => !sameValues(gold[f.name], modelAnswer[f.name])).map(f => f.name)) : new Set<string>();
   const review = async (outcome: 'kept' | 'changed', note: string, answer?: Answer) => {
     if (!ex || !versionId) return;
+    const at = new Date().toISOString();
+    const used = outcome === 'kept' ? 'kept' : answer && modelAnswer && same(answer, modelAnswer) ? 'model' : 'other';
     await reviewGold(state.project.id, ex.id, versionId, outcome, answer, note);
-    reloadMm();
+    edited(ex.id, {exampleId: ex.id, outcome: used, note: note.trim() || null, at});
   };
   const reopen = async () => {
     if (!ex || !versionId) return;
@@ -105,8 +170,9 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
       await reopenGold(state.project.id, ex.id, versionId);
     } catch (e) {
       reportActionError(`The review could not be reopened: ${(e as Error).message}`);
+      return;
     }
-    reloadMm();
+    edited(ex.id, null);
   };
   const pickSub = (v: 'open' | 'done') => {
     setSub(v);
@@ -164,6 +230,8 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
     );
 
   const picked = mm?.versions.find(v => v.id === versionId);
+  // A version has scores, so the Mismatches tab and Compare with will be there (R5-1).
+  const expectMm = state.reports.some(r => r.schemaVersion === state.setup!.schemaVersion);
   return (
     <Frame head={head}>
       {state.staleGold.size > 0 && <Banner text={`The schema changed. ${num(state.staleGold.size)} labels were made under the old schema and need a quick re-check.`} />}
@@ -175,19 +243,26 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
           {key: 'eval', label: 'Eval set', count: `${num(state.facts.goldEvalDone)} / ${num(sets.eval.length)}`},
           {key: 'test', label: 'Test set', count: `${num(state.facts.goldTestDone)} / ${num(sets.test.length)}`},
           // Once a version has answers on the whole eval set.
-          ...(mm?.versions.length ? [{key: 'mismatch' as const, label: 'Mismatches', count: num(mm.items.length)}] : []),
+          // R5-1: the tab is there from the first paint when versions have scores; its count
+          // follows once the list is worked out.
+          ...(mm?.versions.length || (!mm && expectMm) ? [{key: 'mismatch' as const, label: 'Mismatches', count: mm ? num(mm.items.length) : '–'}] : []),
         ]}
         end={
           // Evelyn 2026-11-11: one "Compare with" for the page. Every tab shows this version's
           // answers, and Mismatches and reviews are for it.
-          mm?.versions.length && versionId ? (
+          (mm?.versions.length && versionId) || (!mm && expectMm) ? (
             <div className="row" style={{alignItems: 'center', paddingBottom: 6}}>
+              {(settling || state.scoresUpdating) && (
+                <span style={{marginRight: 12}}>
+                  <Badge text="Scores updating" tone="run" />
+                </span>
+              )}
               <span className="t-3" style={{fontSize: 13, marginRight: 8}}>
                 <Hov text="Compare with" tip="The version whose answers show on every tab. Mismatches and reviews are for this version" />
               </span>
               <span className="select" style={{width: 132}}>
-                <select aria-label="Compare with" style={{height: 32}} value={versionId} onChange={e => setCmp(e.target.value)}>
-                  {mm.versions.map(v => (
+                <select aria-label="Compare with" style={{height: 32}} value={versionId ?? ''} disabled={!mm} onChange={e => setCmp(e.target.value)}>
+                  {(mm?.versions ?? []).map(v => (
                     <option key={v.id} value={v.id}>
                       {v.label}
                       {v.best ? ' (best)' : ''}

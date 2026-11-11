@@ -88,7 +88,8 @@ let current = null;
   log('dataset:', (await page.locator('main .legend').innerText()).replace(/\s+/g, ' '));
   await shot(page, '2-dataset');
   // The label check (review finding 10): the Labels helper reads a sample in Ask AI
-  if ((await page.locator('header .step-opt').innerText()) !== 'recommended') throw new Error('Gold Labels should say recommended');
+  // R5-8: Gold Labels is an ordinary step, with no "recommended" or "optional" tag.
+  if (await page.locator('header .step-opt').count()) throw new Error('Gold Labels should have no step tag');
   await button(page, 'Check labels').click();
   await page.locator('aside.chat').getByText('Labels helper joined to answer').waitFor({timeout: 10000});
   await page.locator('aside.chat .msg-a').last().getByText(/^I read \d+ examples/).waitFor({timeout: 20000});

@@ -1,8 +1,8 @@
 import type {Answer, Example, ExampleBrief, MismatchList, MismatchReview, Prediction, ProjectState} from '@tsp/contracts';
 import {fieldsRight, versionLabel, visibleToAgents} from '@tsp/domain';
-import {emitChange, getApp, now, tm} from './app.ts';
+import {emitChange, getApp, now, once, tm} from './app.ts';
 import {saveGold} from './dataset.ts';
-import {predictionsFor} from './evaluation.ts';
+import {buildReport, predictionsFor} from './evaluation.ts';
 import {loadProjectState} from './projects.ts';
 
 /** The audit action that records a decision made on the Mismatches tab. */
@@ -74,6 +74,49 @@ export function withLabelerNotes(briefs: ExampleBrief[], examples: Example[], no
 }
 
 /**
+ * Saved answers on the whole eval set, by version (acceptance R5-5). Once a version has an answer
+ * for every eval example those answers never change (labeling again uses another pass), so they
+ * are read once per page and reused for every gold edit. Partial sets are not kept.
+ */
+const fullAnswers = new Map<string, Map<string, Prediction>>();
+async function answersOnEval(versionId: string, model: NonNullable<ProjectState['setup']>['models'][number], evalIds: string[]): Promise<Map<string, Prediction> | null> {
+  const key = `${versionId}|${model.endpoint}|${JSON.stringify(model)}`;
+  const had = fullAnswers.get(key);
+  if (had && evalIds.every(id => had.has(id))) return had;
+  const p = await predictionsFor(versionId, model.endpoint, model);
+  if (!evalIds.every(id => p.has(id))) return null;
+  fullAnswers.set(key, p);
+  return p;
+}
+
+/**
+ * Rebuilds the reports a gold edit archived (R5-4, R5-5), from saved answers only: nothing is
+ * labeled. Called once after a burst of edits on Gold Labels (the page waits until the edits
+ * stop), and by the Prompt page's tick. Edits made while it runs are picked up by a second pass.
+ * Returns how many reports it built.
+ */
+export async function rebuildReports(projectId: string): Promise<number> {
+  return (
+    (await once(`rebuild:${projectId}`, async () => {
+      let built = 0;
+      for (let pass = 0; pass < 3; pass++) {
+        const state = await loadProjectState(projectId);
+        if (!state?.setup?.schema) break;
+        let n = 0;
+        for (const r of state.runs.filter(x => x.state === 'done')) {
+          if (state.reports.some(x => x.promptVersionId === r.promptVersionId && x.endpoint === r.endpoint && !x.archivedNow)) continue;
+          const v = state.versions.find(x => x.id === r.promptVersionId);
+          if (v && (await buildReport(projectId, state.setup, v, r.endpoint, state.examples, state.gold, state.contextId))) n++;
+        }
+        built += n;
+        if (!n) break;
+      }
+      return built;
+    })) ?? 0
+  );
+}
+
+/**
  * Gold Labels' Mismatches tab (review finding 2, approved 2026-11-10): the eval examples where a
  * version's saved answer differs from the gold label, wrong in the most versions first. Only
  * versions with saved answers on the whole eval set count (not ones dropped after a dry run).
@@ -93,9 +136,10 @@ export async function mismatches(projectId: string, versionId?: string | null): 
   const standing = await standingReviews(projectId, state);
   // Versions of the current schema with an answer for every eval example, newest first.
   const answers = new Map<string, Map<string, Prediction>>();
+  const evalIds = evalEx.map(e => e.id);
   for (const v of state.versions.filter(x => x.schemaVersion === setup.schemaVersion)) {
-    const p = await predictionsFor(v.id, model.endpoint, model);
-    if (evalEx.every(e => p.has(e.id))) answers.set(v.id, new Map(evalEx.map(e => [e.id, p.get(e.id)!])));
+    const p = await answersOnEval(v.id, model, evalIds);
+    if (p) answers.set(v.id, new Map(evalEx.map(e => [e.id, p.get(e.id)!])));
   }
   if (!answers.size) return {...empty, reviewedAll: standing.size};
   const score = (id: string) => state.reports.find(r => r.promptVersionId === id && r.endpoint === model.endpoint && !r.archivedNow)?.metrics.lowestField.macroF1 ?? null;

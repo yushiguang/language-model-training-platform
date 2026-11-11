@@ -182,6 +182,8 @@ project state), and animate the icon on in-progress event lines in the chat.
 
 ## R5-8. Gold Labels is a normal step, not an "optional" one
 
+**Status 2026-11-11:** done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-11: acceptance round 5").
+
 The stepper (and every other place that names the step) shows "Gold Labels · optional".
 Drop the "optional" suffix everywhere and present it as an ordinary workflow step: gold
 labels are now the system's most important user input — scoring, mismatch review and the
@@ -193,12 +195,16 @@ fine (it takes the model's answer or gets labeled in the final run).
 
 ## R5-1. Gold Labels: the Mismatches tab and version picker pop in late
 
+**Status 2026-11-11:** done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-11: acceptance round 5").
+
 On entering Gold Labels only the Eval/Test tabs are there; the Mismatches tab and its
 version picker appear after a delay, shifting the layout. Load the mismatches data with
 the page (or reserve the tab and picker with a loading state from the first render) so
 nothing pops in or moves.
 
 ## R5-2. The Mismatches version picker must not follow "best" on its own
+
+**Status 2026-11-11:** done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-11: acceptance round 5").
 
 Scores legitimately change as gold labels are edited (they are rebuilt from saved
 answers), but the picker silently re-defaults to the current best version: a user who
@@ -208,10 +214,14 @@ when the best version changes, mark it (the badge may move; the selection may no
 
 ## R5-3. Remove the "or" between Improve with AI and Auto Optimise
 
+**Status 2026-11-11:** done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-11: acceptance round 5").
+
 With the confirmation dialog of R4-3 the two actions no longer need the explanatory "or"
 between the buttons; remove it for a consistent button row.
 
 ## R5-4. Passing after gold edits must show up, and starting a run must go to it
+
+**Status 2026-11-11:** done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-11: acceptance round 5").
 
 After gold edits push a version over the threshold, the version card still shows it as
 below and the AI advice still recommends optimising; and after starting Auto Optimise
@@ -224,6 +234,8 @@ show the progress panel for that run, per R2-5), not leave them on the base vers
 
 ## R5-5. Do not recompute everything on every single gold edit
 
+**Status 2026-11-11:** done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-11: acceptance round 5").
+
 Each review on the Mismatches tab currently triggers a full reload: predictions for
 every version, mismatch lists, and report rebuilds on the next tick. Design a cheaper
 scheme and implement it. Constraints: recompute never calls a model (saved answers only,
@@ -235,6 +247,8 @@ without waiting for scores between edits. State in the PR which design was chose
 
 ## R5-6. A dry run that ties its parent should not be dropped for tying
 
+**Status 2026-11-11:** done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-11: acceptance round 5").
+
 `compareDryRun` requires strictly greater weighted passes, so an equal candidate is
 dropped even when it differs on individual examples (better here, worse there) — exactly
 the diversity the Pareto pool wants. Let a tie go through to the full labeling, but count
@@ -243,6 +257,8 @@ for example 2, so a plateau still ends), and mark the round "tied" in the UI so 
 not read as progress.
 
 ## R5-7. Say which version a dry run compares against, and why that one
+
+**Status 2026-11-11:** done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-11: acceptance round 5").
 
 Parent selection is GEPA-style: each round picks a parent from the Pareto front of every
 scored version, at random weighted by per-example wins (`pickParent` in

@@ -478,6 +478,19 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
   await reviewGold(w.projectId, id(5), best.id, 'kept', undefined, '  Its own words  ');
   m = await mismatches(w.projectId);
   assert.deepEqual(m.reviewedItems.map(r => [r.exampleId, r.note]), [[id(5), 'Its own words']]);
+
+  // R5-4, R5-5: a gold change archives the reports; they are rebuilt from saved answers in one go.
+  await reviewGold(w.projectId, id(7), best.id, 'changed', {format: ['Vlog']});
+  let st = await w.state();
+  assert.equal(st.scoresUpdating, true);
+  assert.equal(st.reports.filter(r => !r.archivedNow).length, 0);
+  const {rebuildReports} = await import('./mismatches.ts');
+  const tasksBefore = (await w.state()).runs.length;
+  assert.equal(await rebuildReports(w.projectId), 2);
+  st = await w.state();
+  assert.equal(st.scoresUpdating, false);
+  assert.equal(st.reports.filter(r => !r.archivedNow).length, 2);
+  assert.equal(st.runs.length, tasksBefore, 'nothing is labeled again');
 });
 
 test('Finding 3: no helper tool or helper input carries an example of the held-out half', async () => {
@@ -567,13 +580,17 @@ test("Auto Optimise: the pool holds the user's other scored versions too, and th
   const {startOptimiser} = await import('./work.ts');
   setOptimiserRandom(() => 0.99); // the last version of the front
   try {
-    await startOptimiser(w.projectId, 1, v1.id);
+    await startOptimiser(w.projectId, 2, v1.id);
   } finally {
     setOptimiserRandom(() => 0);
   }
   const run = (await w.state()).optimisation[0];
   assert.equal(run.startVersionId, v1.id);
-  assert.equal(run.history[0].parentId, mine.id, "the user's version is picked as the parent");
+  // R5-7: round 1 starts from the version the user picked; later rounds roam the front.
+  assert.equal(run.history[0].parentId, v1.id, 'round 1 starts from the version the user picked');
+  assert.equal(run.history[0].parentWins, null);
+  assert.equal(run.history[1]?.parentId, mine.id, "the user's version is picked as a later parent");
+  assert.ok((run.history[1].parentWins ?? 0) > 0, 'a later parent says on how many examples it is best');
   const ex = inputs[0].examples ?? [];
   assert.ok(ex.length > 0 && ex.every(e => e.reason === `why ${e.externalId}`), "each wrong example carries the model's reason");
 });

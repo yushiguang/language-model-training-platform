@@ -37,10 +37,13 @@ import {startTrainingSet} from './training.ts';
  *  2. ask the agent runtime for one change (it may read feature descriptions);
  *  3. run the editor's Checks; a failing or repeated change is dropped with no labeling;
  *  4. save it as the next minor of the run's major (v4.1, v4.2…) and dry-run it on 10 examples
- *     of the optimiser half (the parent's answers are known); drop it unless it passes more;
+ *     of the optimiser half (the parent's answers are known); drop it unless it passes more.
+ *     A tie (as many fields right, on different examples) goes on but is not progress (R5-6);
  *  5. label it on the whole eval set (the dry run's answers are reused) and build its report.
  * Stops when a version passes (then the training and test sets start), at the round limit,
- * after 3 wasted rounds in a row, on Stop, or when a step fails 3 times (Failed, with Retry).
+ * after 3 wasted rounds in a row (ties count), after 2 ties in a row, on Stop, or when a step
+ * fails 3 times (Failed, with Retry). Round 1 always starts from the version the user picked
+ * (R5-7); later rounds pick a parent from the Pareto front, weighted by the examples it wins.
  */
 
 const active = new Map<string, {ctrl: AbortController; task: string | null}>();
@@ -59,6 +62,7 @@ export function stopOptimiser(id: string): void {
 
 const TRIES = 3;
 const WASTED_LIMIT = 3;
+const TIE_LIMIT = 2;
 const MERGE_EVERY = 2;
 
 const STEP_NAME: Record<OptimiserStep, string> = {
@@ -229,8 +233,13 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
   const settled = run.history.filter(h => h.outcome !== 'running' && h.outcome !== 'failed' && h.outcome !== 'stopped');
   let wasted = 0;
   for (const h of [...settled].reverse()) {
-    if (h.outcome === 'kept') break;
+    if (h.outcome === 'kept' && !h.tied) break;
     wasted++;
+  }
+  let ties = 0;
+  for (const h of [...settled].reverse()) {
+    if (!h.tied) break;
+    ties++;
   }
   let keptSinceMerge = 0;
   for (const h of [...settled].reverse()) {
@@ -313,16 +322,20 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
           run.stopReason = 'max_rounds';
           break;
         }
-        if (wasted >= WASTED_LIMIT) {
+        if (wasted >= WASTED_LIMIT || ties >= TIE_LIMIT) {
           run.stopReason = 'no_new_ideas';
           break;
         }
-        const pair = keptSinceMerge >= MERGE_EVERY ? mergePair(entries, front) : null;
-        const parentId = pair ? pair[0] : (pickParent(front, random) ?? start.id);
+        // R5-7: round 1 starts from the version the user picked, as the dialog promised; later
+        // rounds roam the front.
+        const first = run.round === 0;
+        const pair = !first && keptSinceMerge >= MERGE_EVERY ? mergePair(entries, front) : null;
+        const parentId = first ? start.id : pair ? pair[0] : (pickParent(front, random) ?? start.id);
         parent = pool.find(v => v.id === parentId) ?? start;
         const other = pair ? pool.find(v => v.id === pair[1])! : null;
+        const parentWins = first ? null : (front.find(f => f.id === parent.id)?.wins ?? 0);
         run.round++;
-        round = {round: run.round, versionId: null, parentId: parent.id, kind: other ? 'merge' : 'change', change: '', outcome: 'running', score: null, passed: false, dryRun: null, step: other ? 'merge' : 'reflect'};
+        round = {round: run.round, versionId: null, parentId: parent.id, parentWins, kind: other ? 'merge' : 'change', change: '', outcome: 'running', score: null, passed: false, dryRun: null, step: other ? 'merge' : 'reflect'};
         await putRound(round);
 
         const m = await scoreOnOptimiserHalf(setup, parent, endpoint, state.examples, state.gold);
@@ -411,14 +424,14 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
             pm.lowestField.field,
           );
         });
-        const {better, ...dryRun} = result;
-        if (!better) {
+        const {better, tied, ...dryRun} = result;
+        if (!better && !tied) {
           wasted++;
           tm().counter('tsp_optimiser_candidates_total', {slot: endpoint, result: 'dropped'});
           await putRound({...round, outcome: 'dropped', dryRun, step: undefined});
           continue;
         }
-        round = {...round, dryRun, step: 'full'};
+        round = {...round, dryRun, ...(tied ? {tied: true} : {}), step: 'full'};
         await putRound(round);
       }
       if (round.step === 'full') {
@@ -439,9 +452,16 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
           return confirmScore(setup, cand, endpoint, fresh.examples, fresh.gold);
         });
       }
-      wasted = 0;
+      // A tie is kept in the pool but is not progress (R5-6).
+      if (round.tied) {
+        wasted++;
+        ties++;
+      } else {
+        wasted = 0;
+        ties = 0;
+      }
       keptSinceMerge = round.kind === 'merge' ? 0 : keptSinceMerge + 1;
-      tm().counter('tsp_optimiser_candidates_total', {slot: endpoint, result: 'kept'});
+      tm().counter('tsp_optimiser_candidates_total', {slot: endpoint, result: round.tied ? 'tied' : 'kept'});
       await putRound({...round, outcome: 'kept', score: s.report.metrics.lowestField.macroF1, passed: s.passed, confirm, step: undefined});
       if (s.passed && confirm?.passed) {
         passedVersion = cand;

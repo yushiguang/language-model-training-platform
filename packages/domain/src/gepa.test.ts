@@ -77,8 +77,12 @@ test('a change goes on only when it gets more fields right, the lowest field cou
   assert.equal(r.passed, 2);
   assert.equal(r.parentPassed, 1);
   assert.deepEqual(r.fields, [{field: 'a', passed: 2, parentPassed: 2}, {field: 'b', passed: 2, parentPassed: 2}]);
-  // More examples fully right, but the same fields right: no better.
+  // More examples fully right, but the same fields right: no better, but a tie (R5-6) since the
+  // two are right on different examples.
   assert.equal(r.better, false);
+  assert.equal(r.tied, true);
+  // The same answers everywhere is no tie: there is nothing new in it.
+  assert.equal(compareDryRun(schema, 'v1', [{gold, candidate: gold, parent: gold}]).tied, false);
   // Fixing one field of two counts.
   assert.equal(compareDryRun(schema, 'v1', [{gold, candidate: gold, parent: {a: ['x'], b: []}}]).better, true);
   assert.equal(compareDryRun(schema, 'v1', [{gold, candidate: gold, parent: gold}]).better, false);

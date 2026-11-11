@@ -3,6 +3,7 @@ import {autoSpendUsd, DEFAULT_MAX_ROUNDS, dueStarts, versionLabel, type DueStart
 import {busy, getApp, once, optimiserLock, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {buildReport, labelEvalSet} from './evaluation.ts';
+import {rebuildReports} from './mismatches.ts';
 import {modelName} from './page-views.ts';
 import {newRun, optimiserActive, runOptimiser} from './optimiser.ts';
 import {approveNode, loadProjectState} from './projects.ts';
@@ -87,6 +88,8 @@ export async function tick(state: ProjectState) {
       const v = state.versions.find(v => v.id === r.promptVersionId);
       if (v) void once(`report:${v.id}:${r.endpoint}`, () => buildReport(projectId, state.setup!, v, r.endpoint, state.examples, state.gold, state.contextId));
     }
+    // Reports a gold edit archived are rebuilt from saved answers (R5-4).
+    if (state.scoresUpdating) void rebuildReports(projectId);
   }
 
   // Paid work the workflow would start now: all of it starts here, with no cost limit (the user
