@@ -8,8 +8,12 @@ where it matters, why. The code follows these; change a line here when a decisio
 - **Gold Labels is an ordinary step** (acceptance R5-8): not optional or "recommended", and no
   way to skip it (the "None" pass rule is gone). Scores, mismatch review and the Optimiser all
   rest on gold labels.
-- **Gold edits are grouped** (R5-5): the lists and the reports are worked out once after the
-  edits stop, from saved answers only. The user never waits between edits.
+- **Scores rebuild lazily after gold edits** (R5-5; Evelyn: a timer is too eager, above all in a
+  future microservice system). Gold Labels only writes; the next reader of scores rebuilds them
+  once from saved answers. The user never waits between edits.
+- **One workflow owner starts auto tasks**, woken by events and a sweep, with keyed (idempotent)
+  starts and a manual button for each auto task as the fallback. Why: one place can always say
+  why a task waits.
 - **A tied dry run goes on** (R5-6): it may hold what the parent lacks, so it is labeled in full
   and joins the pool, but it is not progress (a wasted round; 2 ties in a row end the run).
 - **Round 1 changes the version the user started from** (R5-7); later rounds pick from the

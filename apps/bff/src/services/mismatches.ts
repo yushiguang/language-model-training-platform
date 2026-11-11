@@ -91,9 +91,10 @@ async function answersOnEval(versionId: string, model: NonNullable<ProjectState[
 
 /**
  * Rebuilds the reports a gold edit archived (R5-4, R5-5), from saved answers only: nothing is
- * labeled. Called once after a burst of edits on Gold Labels (the page waits until the edits
- * stop), and by the Prompt page's tick. Edits made while it runs are picked up by a second pass.
- * Returns how many reports it built.
+ * labeled. Lazy (Evelyn, 2026-11-11): a gold edit only makes the reports out of date; they are
+ * rebuilt once, by whoever reads scores next (Prompt versions, Training Set, a helper, the
+ * Optimiser), however many edits came before. Edits made while it runs are picked up by a second
+ * pass. Returns how many reports it built.
  */
 export async function rebuildReports(projectId: string): Promise<number> {
   return (
@@ -114,6 +115,14 @@ export async function rebuildReports(projectId: string): Promise<number> {
       return built;
     })) ?? 0
   );
+}
+
+/** The project state with scores that match today's gold labels: rebuilt first when a gold edit made them out of date. */
+export async function loadScoredState(projectId: string): Promise<ProjectState | null> {
+  const state = await loadProjectState(projectId);
+  if (!state?.scoresUpdating) return state;
+  await rebuildReports(projectId);
+  return loadProjectState(projectId);
 }
 
 /**

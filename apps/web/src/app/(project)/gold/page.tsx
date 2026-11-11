@@ -7,7 +7,7 @@ import type {Answer, Example, ExampleMedia, LabelField, MismatchList, MismatchRe
 import {FEATURES, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
-import {approveNode, exampleMedia, mismatches, predictionsFor, rebuildReports, reopenGold, reviewGold, saveGold, type ProjectState} from '@/backend-api';
+import {approveNode, exampleMedia, mismatches, predictionsFor, reopenGold, reviewGold, saveGold, type ProjectState} from '@/backend-api';
 import {Badge, Banner, Button, Card, Code, dateTime, Empty, Hov, Icon, num, PageHead, reportActionError, Seg, Tabs} from '@/ui';
 
 type SetKey = 'eval' | 'test' | 'mismatch';
@@ -29,58 +29,36 @@ function GoldRouter() {
   );
 }
 
-/** How long after the last gold edit the lists and scores are worked out again (R5-5). */
-const SETTLE_MS = 1500;
-
 /**
  * The Mismatches list for the picked version (review finding 2). It reads saved answers only.
- * Acceptance R5-5: a burst of gold edits is worked out once, SETTLE_MS after the last one, and the
- * reports those edits archived are rebuilt then too; `edit` applies a review to the list at once,
- * so the user keeps going without waiting. A new version, a new score or another picked version
- * reloads at once.
+ * Lazy (Evelyn, 2026-11-11): a review applies to the list here at once and nothing else is worked
+ * out. The list is worked out again only when the page opens, another version is picked, or a
+ * version or score is added; the scores the edits made out of date are rebuilt by whoever reads
+ * them next (Prompt versions, Training Set, a helper, the Optimiser).
  */
-function useMismatches(state: ProjectState, versionId: string | null): {list: MismatchList | null; settling: boolean; edited: (exampleId: string, review: MismatchReview | null) => void} {
+function useMismatches(state: ProjectState, versionId: string | null): {list: MismatchList | null; edited: (exampleId: string, review: MismatchReview | null) => void} {
   const [list, setList] = useState<MismatchList | null>(null);
-  const [n, setN] = useState(0);
-  const [settling, setSettling] = useState(false);
-  const first = useRef(true);
-  const lastEdit = useRef(0);
   useEffect(() => {
     let live = true;
-    const load = () =>
-      void mismatches(state.project.id, versionId).then(m => {
-        if (!live) return;
-        setList(m);
-        setSettling(false);
-        if (lastEdit.current) void rebuildReports(state.project.id);
-        lastEdit.current = 0;
-      });
-    const wait = first.current ? 0 : Math.max(0, lastEdit.current + SETTLE_MS - Date.now());
-    first.current = false;
-    if (!wait) load();
-    const id = wait ? setTimeout(load, wait) : undefined;
+    void mismatches(state.project.id, versionId).then(m => live && setList(m));
     return () => {
       live = false;
-      clearTimeout(id);
     };
-  }, [state.project.id, versionId, state.contextId, state.reports.length, state.versions.length, n]);
-  const edited = (exampleId: string, review: MismatchReview | null) => {
-    lastEdit.current = Date.now();
-    setSettling(true);
+    // Not on gold edits (contextId): those are applied by `edited`.
+  }, [state.project.id, versionId, state.versions.length, state.reports.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const edited = (exampleId: string, review: MismatchReview | null) =>
     setList(l => {
       if (!l) return l;
-      const item = l.items.find(x => x.exampleId === exampleId);
       if (review) {
         const reviewedItems = [review, ...l.reviewedItems.filter(r => r.exampleId !== exampleId)];
         return {...l, items: l.items.filter(x => x.exampleId !== exampleId), reviewedItems, reviewed: reviewedItems.length, reviewedAll: l.reviewedAll + 1};
       }
-      // Reopened: back in To review until the list is worked out again.
+      // Reopened: back in To review.
       const reviewedItems = l.reviewedItems.filter(r => r.exampleId !== exampleId);
-      return {...l, items: item ? l.items : [...l.items, {exampleId, wrongIn: 0, of: l.versions.length}], reviewedItems, reviewed: reviewedItems.length};
+      const back = l.items.some(x => x.exampleId === exampleId) ? l.items : [...l.items, {exampleId, wrongIn: 0, of: l.versions.length}];
+      return {...l, items: back, reviewedItems, reviewed: reviewedItems.length};
     });
-    setN(x => x + 1);
-  };
-  return {list, settling, edited};
+  return {list, edited};
 }
 
 /** R5-2: the version picked in "Compare with" stays for the session (per project). */
@@ -110,7 +88,7 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
     setCmpState(id);
     savePick(state.project.id, id);
   };
-  const {list: mm, settling, edited} = useMismatches(state, cmp);
+  const {list: mm, edited} = useMismatches(state, cmp);
   // R5-2: the first list picks the best version; from then on the pick holds, and only the
   // "(best)" mark moves when scores change.
   useEffect(() => {
@@ -252,9 +230,9 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
           // answers, and Mismatches and reviews are for it.
           (mm?.versions.length && versionId) || (!mm && expectMm) ? (
             <div className="row" style={{alignItems: 'center', paddingBottom: 6}}>
-              {(settling || state.scoresUpdating) && (
-                <span style={{marginRight: 12}}>
-                  <Badge text="Scores updating" tone="run" />
+              {state.scoresUpdating && (
+                <span className="badge b-gray" style={{marginRight: 12}}>
+                  <Hov text="Scores out of date" tip="Your label changes are saved. Scores are worked out again when you open Prompt versions" />
                 </span>
               )}
               <span className="t-3" style={{fontSize: 13, marginRight: 8}}>

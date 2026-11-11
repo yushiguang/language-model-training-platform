@@ -9,7 +9,7 @@ import {useProject} from '@/components/ProjectContext';
 import {ScoreChart} from '@/components/prompt/ScoreChart';
 import {useChecks, Workbench, type Draft} from '@/components/prompt/Workbench';
 import {useAgentDrafts} from '@/components/prompt/useAgentDrafts';
-import {approveNode, createVersion, improveWithAi, mismatches, predictionsFor, retryOptimiser, scoreVersion, startOptimiser, stopOptimiser, stopRun, tick, type ProjectState} from '@/backend-api';
+import {approveNode, createVersion, improveWithAi, mismatches, predictionsFor, retryOptimiser, scoreVersion, startOptimiser, stopOptimiser, rebuildReports, stopRun, type ProjectState} from '@/backend-api';
 import {Badge, Banner, Below, Button, Card, Code, dateTime, Dialog, Empty, Hov, Icon, Metric, num, One, Opt, PageHead, Passed, Progress, reportActionError, Score, Seg, Suggestion, Table, timeOfDay} from '@/ui';
 import {LabelDistribution, labelCounts} from '@/components/LabelDistribution';
 import {fieldRows, modelName, reportFor, runsFor, versionScore} from '@/components/prompt/scores';
@@ -108,9 +108,10 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
   const sel = list.find(v => v.id === selId) ?? (run?.stepVersionId ? list.find(v => v.id === run.stepVersionId) : undefined) ?? list[0];
   const running = state.runs.some(r => r.state === 'running') || state.optimisation.some(o => o.state === 'running');
 
+  // Scores are read here, so out-of-date ones are rebuilt now (lazy rebuild, 2026-11-11).
   useEffect(() => {
-    void tick(state);
-  }, [state]);
+    if (state.scoresUpdating) void rebuildReports(state.project.id);
+  }, [state.scoresUpdating, state.contextId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setPage({...VERSIONS_PAGE, label: `Prompt versions · ${versionLabel(sel)}`, context: {version: versionLabel(sel)}});
   }, [sel.id]); // eslint-disable-line react-hooks/exhaustive-deps

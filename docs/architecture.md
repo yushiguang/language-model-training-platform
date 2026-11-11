@@ -224,11 +224,20 @@ data" sends the Labels helper 20 random examples (never the held-out half) with 
 when they have one (`checkLabels`, intent `check_schema`). It answers in Ask AI, may put a schema
 draft on Schema settings, and keeps answering on Dataset.
 
-**Scores after gold edits** (acceptance R5-4, R5-5). A gold edit changes the evaluation context,
-so reports are archived; `ProjectState.scoresUpdating` says some must be rebuilt, and
-`rebuildReports` rebuilds them from saved answers (nothing is labeled). Gold Labels calls it once,
-1.5 s after the last edit; the Prompt page's tick calls it too. Saved answers on the whole eval set
-are kept in memory per version, since they never change once complete.
+**Scores after gold edits** (acceptance R5-4, R5-5; lazy, Evelyn 2026-11-11). A gold edit changes
+the evaluation context, so reports are archived; `ProjectState.scoresUpdating` says some must be
+rebuilt. Gold Labels only writes (the Mismatches list updates in the page; "Scores out of date"
+shows). The next reader of scores rebuilds them once from saved answers, nothing labeled:
+`loadScoredState` (page views, helper read tools, the Optimiser) and the Prompt and Training Set
+pages call `rebuildReports`. `tick` builds only a version's first report. Saved answers on the
+whole eval set are kept in memory per version, since they never change once complete.
+
+**Auto-start manager** (2026-11-11). `dueStarts(state)` says what should be running; `tick` starts
+it. The project provider (`apps/web/src/components/ProjectContext.tsx`) runs `tick` on every
+change event and on a 60 s sweep, on every project page. Starts are keyed (`once()` plus the
+labeling app's lock per task), so extra runs are safe. Every auto task also has a button that
+sends the same start (Score/Resume, Optimiser Resume/Retry, training set Resume). In a microservice
+system the same split holds: one workflow service owns `dueStarts`, woken by events and a sweep.
 
 **Mismatches** (review finding 2, decided 2026-11-10). Gold Labels has a Mismatches tab: the eval
 examples where a version's saved answer differs from the gold label, for the version picked in

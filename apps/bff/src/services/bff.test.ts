@@ -484,9 +484,12 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
   let st = await w.state();
   assert.equal(st.scoresUpdating, true);
   assert.equal(st.reports.filter(r => !r.archivedNow).length, 0);
-  const {rebuildReports} = await import('./mismatches.ts');
+  // Lazy (2026-11-11): the workflow check does not rebuild; the next reader of scores does, once.
   const tasksBefore = (await w.state()).runs.length;
-  assert.equal(await rebuildReports(w.projectId), 2);
+  await tick(st);
+  assert.equal((await w.state()).scoresUpdating, true, 'tick leaves scores to their next reader');
+  const {getPageView} = await import('./page-views.ts');
+  await getPageView(w.projectId, {page: 'prompt', params: {}});
   st = await w.state();
   assert.equal(st.scoresUpdating, false);
   assert.equal(st.reports.filter(r => !r.archivedNow).length, 2);
