@@ -332,7 +332,7 @@ export function agentTools(projectId: string): AgentToolHost {
             .filter(e => e.split === 'eval' && visibleToAgents(e) && preds.has(e.id))
             .map(e => ({e, p: preds.get(e.id)!, g: state.gold.get(e.id)?.answer ?? null}))
             .filter(({p, g}) => !args.mixedUpOnly || !p.answer || (g && state.setup!.schema!.fields.some(f => !same(g[f.name], p.answer![f.name]))));
-          return {version: versionLabel(v), model: modelName(state, settings.endpoint), note: HIDDEN_NOTE, rows: rows.slice(0, limitOf(args.limit, 20, 10)).map(({e, p, g}) => ({id: e.externalId, title: e.title, model: p.answer, invalid: p.invalidReason, gold: g})), matching: rows.length};
+          return {version: versionLabel(v), model: modelName(state, settings.endpoint), note: HIDDEN_NOTE, rows: rows.slice(0, limitOf(args.limit, 20, 10)).map(({e, p, g}) => ({id: e.externalId, title: e.title, model: p.answer, ...(p.reason ? {reason: p.reason} : {}), invalid: p.invalidReason, gold: g})), matching: rows.length};
         }
         case 'check_template': {
           const template = typeof args.template === 'string' ? args.template : '';

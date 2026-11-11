@@ -1,4 +1,4 @@
-import type {Answer, DryRunResult, Example, ExampleBrief, OptimisationRun, OptimiserRound, PromptVersion, Schema} from '@tsp/contracts';
+import type {Answer, DryRunResult, Example, ExampleBrief, OptimisationRun, OptimiserRound, Prediction, PromptVersion, Schema} from '@tsp/contracts';
 import {placeholderKeys} from './template.ts';
 import {isImageKey} from './catalogue.ts';
 
@@ -42,7 +42,7 @@ export const BRIEF_IMAGES = 2;
  * An example as a helper reads it: the text features in `keys`, cut short (URLs left out), and
  * up to 2 of its images (any image feature, whether or not the prompt uses it).
  */
-export function exampleBrief(e: Example, keys: Iterable<string>, gold: Answer, predicted: Answer | null, rightIn?: 'template' | 'other'): ExampleBrief {
+export function exampleBrief(e: Example, keys: Iterable<string>, gold: Answer, predicted: Answer | null, rightIn?: 'template' | 'other', said?: HelperNote): ExampleBrief {
   const features: Record<string, string> = {};
   for (const k of keys) {
     const v = e.features[k];
@@ -54,7 +54,7 @@ export function exampleBrief(e: Example, keys: Iterable<string>, gold: Answer, p
     .flatMap(([, v]) => (Array.isArray(v) ? v : [v]))
     .filter(u => typeof u === 'string' && u.trim())
     .slice(0, BRIEF_IMAGES);
-  return {externalId: e.externalId, features, gold, predicted, ...(images.length ? {images} : {}), ...(rightIn ? {rightIn} : {})};
+  return {externalId: e.externalId, features, gold, predicted, ...(said?.reason ? {reason: said.reason} : {}), ...(said?.invalid ? {invalid: said.invalid} : {}), ...(images.length ? {images} : {}), ...(rightIn ? {rightIn} : {})};
 }
 
 /**
@@ -71,7 +71,7 @@ export const HIDDEN_NOTE = 'The held-out half of the eval set is hidden from hel
  * The examples a version gets wrong, worst first (fewest fields right), at most `max`. Pass only
  * optimiser-half examples: the held-out half must never reach a helper.
  */
-export function wrongExamples(schema: Schema, examples: Example[], keys: Iterable<string>, gold: Map<string, Answer>, predicted: Map<string, Answer | null>, max = BRIEF_WRONG): ExampleBrief[] {
+export function wrongExamples(schema: Schema, examples: Example[], keys: Iterable<string>, gold: Map<string, Answer>, predicted: Map<string, Answer | null>, max = BRIEF_WRONG, notes?: Map<string, HelperNote>): ExampleBrief[] {
   const ks = [...keys];
   return examples
     .filter(e => gold.has(e.id) && predicted.has(e.id))
@@ -79,7 +79,29 @@ export function wrongExamples(schema: Schema, examples: Example[], keys: Iterabl
     .filter(x => x.s < 1)
     .sort((a, b) => a.s - b.s)
     .slice(0, max)
-    .map(({e}) => exampleBrief(e, ks, gold.get(e.id)!, predicted.get(e.id)!));
+    .map(({e}) => exampleBrief(e, ks, gold.get(e.id)!, predicted.get(e.id)!, undefined, notes?.get(e.id)));
+}
+
+/** What a helper reads next to a model answer: the model's own reason, and why a reply was invalid. */
+export interface HelperNote {
+  reason?: string;
+  invalid?: string;
+}
+
+/**
+ * Saved answers as the helpers read them (decided 2026-11-11): each answer with the model's reason
+ * and the invalid reason. Answers the safety filter stopped are left out: there is nothing in
+ * them for a prompt to fix.
+ */
+export function answersForHelpers(preds: Iterable<Pick<Prediction, 'exampleId' | 'answer' | 'invalidReason' | 'reason' | 'filtered'>>): {predicted: Map<string, Answer | null>; notes: Map<string, HelperNote>} {
+  const predicted = new Map<string, Answer | null>();
+  const notes = new Map<string, HelperNote>();
+  for (const p of preds) {
+    if (p.filtered) continue;
+    predicted.set(p.exampleId, p.answer);
+    if (p.reason || (!p.answer && p.invalidReason)) notes.set(p.exampleId, {...(p.reason ? {reason: p.reason} : {}), ...(!p.answer && p.invalidReason ? {invalid: p.invalidReason} : {})});
+  }
+  return {predicted, notes};
 }
 
 /** A version in the pool with its scores on the optimiser half, by example id. */

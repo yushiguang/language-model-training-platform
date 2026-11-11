@@ -10,6 +10,16 @@ where it matters, why. The code follows these; change a line here when a decisio
   it. They may read scores and counts built on it. Users still see every example on the pages.
   Why: the held-out half scores every version, and a helper that read it could write prompts that
   fit those examples, so the score would no longer say how the prompt does on new data.
+- **The Optimiser reads why the model answered as it did.** The site adds one line after every
+  labeling prompt asking the model for a short "reason" (one sentence) before its values. The
+  reason is kept with each answer and given to the Optimiser and Improve with AI with the wrong
+  examples. It is never a label and never in the exported files. Why: GEPA works best when the
+  optimiser sees the trace, not only the result and the score.
+- **Invalid reasons go to the helpers too** ("Not valid JSON", a value that is not in the labels);
+  answers the safety filter stopped are left out, since no prompt can fix them.
+- **The Optimiser's pool is every scored version**, not only its own run: the start version, the
+  run's kept versions, and any other version with a current score on the model. The user's own
+  versions and earlier runs may hold rules the best version lacks.
 - **Gold labels are judged by people only.** No helper says a gold label is right or wrong. A
   helper that meets a label that looks odd against its definition writes no rule for it and moves
   on; people review such labels on the Mismatches tab.

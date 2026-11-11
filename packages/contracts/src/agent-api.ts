@@ -145,6 +145,10 @@ export interface ExampleBrief {
   gold: Answer;
   /** The model's answer (in a merge: from the version that misses it); null when it gave no valid answer. */
   predicted: Answer | null;
+  /** The labeling model's own short reason for `predicted`, when it gave one (decided 2026-11-11). */
+  reason?: string;
+  /** Why the site could not read the model's reply as an answer ("Not valid JSON", a value that is not in the labels…). */
+  invalid?: string;
   /** Merge only: the version that gets this example right ('template': the first, 'other': the second). */
   rightIn?: 'template' | 'other';
 }

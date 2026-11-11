@@ -18,7 +18,7 @@ import {
   type TelemetryPort,
   type TryTemplateRow,
 } from '@tsp/contracts';
-import {hashString, parseOutput, renderPrompt, settingsHash, type Part} from '@tsp/domain';
+import {hashString, parseOutput, REASON_LINE, renderPrompt, settingsHash, type Part} from '@tsp/domain';
 import {DocRepo, newId} from '@tsp/platform';
 import {browserLocks, type TaskLocks} from './locks.ts';
 
@@ -53,6 +53,9 @@ const FINISHED: TaskState[] = ['done'];
 
 /** A run's options, plus Retry failed (clears the failed examples once the lock is held). */
 type ExecOptions = RunOptions & {retry?: boolean};
+
+/** The site's own last line of every labeling prompt: asks the model for its short reason. */
+const withReason = (parts: Part[]): Part[] => [...parts, {type: 'text', text: `\n\n${REASON_LINE}`}];
 
 export function toMessages(parts: Part[], resolveUrl: (u: string) => string = u => u): ModelMessage[] {
   const content: ContentPart[] = parts.map(p => (p.type === 'text' ? {type: 'text', text: p.text} : {type: 'image', url: resolveUrl(p.url)}));
@@ -211,7 +214,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         const saved = await repo.get<Prediction>(PREDICTIONS, id);
         if (saved) return {pred: saved, paid: false};
         if (!ex) throw new Error('The example no longer exists.');
-        const parts = renderPrompt(version.template, ex, version.features, version.images);
+        const parts = withReason(renderPrompt(version.template, ex, version.features, version.images));
         const res = await deps.gateway
           .label({
             slot: task.endpoint,
@@ -241,6 +244,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           output: res.text,
           answer: parsed.answer,
           invalidReason: parsed.reason,
+          ...(parsed.note ? {reason: parsed.note} : {}),
           costUsd: res.costUsd,
           tokens: res.inputTokens + res.outputTokens,
           createdAt: now(),
@@ -412,7 +416,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       await Promise.all(
         input.examples.map(async ex => {
           try {
-            const parts = renderPrompt(input.template, ex, input.features, input.images);
+            const parts = withReason(renderPrompt(input.template, ex, input.features, input.images));
             const res = await deps.gateway.label({
               slot: input.settings.endpoint,
               messages: toMessages(parts, deps.resolveUrl),

@@ -37,7 +37,7 @@ const imageCount = (messages: ModelMessage[]) => messages.reduce((n, m) => n + (
 function fieldsAsked(text: string): string[] {
   const names = new Set<string>();
   for (const m of text.matchAll(/###\s*\d+\.\s*([A-Za-z_][A-Za-z0-9_]*)/g)) names.add(m[1]);
-  for (const m of text.matchAll(/"([a-z_][a-z0-9_]*)"\s*:/g)) if (!['summary', 'reasoning'].includes(m[1])) names.add(m[1]);
+  for (const m of text.matchAll(/"([a-z_][a-z0-9_]*)"\s*:/g)) if (!['summary', 'reasoning', 'reason'].includes(m[1])) names.add(m[1]);
   return [...names];
 }
 
@@ -54,7 +54,7 @@ async function answer(req: ChatRequest): Promise<ChatResult> {
   const base = req.endpoint === 'A' ? 0.72 : 0.66;
   const q = Math.min(0.985, base + 0.035 * Math.max(0, rules - 2) + (text.includes('Return JSON only') ? 0.02 : 0));
   const r = rng(`${req.endpoint}|${req.traceId}|${text.length}|${rules}|${req.temperature ?? 0}`);
-  const out: Record<string, unknown> = {summary: 'A short post.', reasoning: 'Based on the description and what is shown.'};
+  const out: Record<string, unknown> = text.includes('"reason" key') ? {reason: 'Based on the description and what is shown.'} : {summary: 'A short post.', reasoning: 'Based on the description and what is shown.'};
   for (const field of fieldsAsked(text)) {
     const values = valuesFor(text, field);
     const gold = truth[field] ?? [values[Math.floor(r() * values.length)]];

@@ -11,7 +11,7 @@ import type {
   Schema,
   StartRequest,
 } from '@tsp/contracts';
-import {agentName, exampleBrief, fieldsRight, newId, promptKeys, settingsHash, versionLabel, visibleToAgents, wrongExamples} from '@tsp/domain';
+import {agentName, answersForHelpers, exampleBrief, fieldsRight, newId, promptKeys, settingsHash, versionLabel, visibleToAgents, wrongExamples} from '@tsp/domain';
 import {loadProjectState} from './projects.ts';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
@@ -321,7 +321,8 @@ export async function improveWithAi(projectId: string, versionId: string): Promi
   const half = state.examples.filter(e => e.split === 'eval' && visibleToAgents(e));
   const mistakes = half.filter(e => state.gold.has(e.id) && fieldsRight(schema, state.gold.get(e.id)!.answer, answers.get(e.id)?.answer ?? null).length < schema.fields.length).length;
   const gold = new Map(half.filter(e => state.gold.has(e.id)).map(e => [e.id, state.gold.get(e.id)!.answer]));
-  const examples = wrongExamples(schema, half, promptKeys(v), gold, new Map(half.filter(e => answers.has(e.id)).map(e => [e.id, answers.get(e.id)!.answer])));
+  const said = answersForHelpers(half.filter(e => answers.has(e.id)).map(e => answers.get(e.id)!));
+  const examples = wrongExamples(schema, half, promptKeys(v), gold, said.predicted, undefined, said.notes);
   busyProjects.add(projectId);
   setLive(projectId, {agent: 'prompt_agent', working: `Reading the ${versionLabel(v)} mistakes…`, reply: null});
   await postEvent(projectId, 'start', 'user', `asked the Prompt helper to improve ${versionLabel(v)}`, {path: '/prompt'});

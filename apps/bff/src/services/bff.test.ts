@@ -494,3 +494,32 @@ test('Finding 3: no helper tool or helper input carries an example of the held-o
   assert.deepEqual(leaks(input), [], 'examples and mix-ups come from the optimiser half');
   assert.ok(input.mixUps.every(m => m.exampleIds.every(id => !heldOut.has(id))));
 });
+
+test("Auto Optimise: the pool holds the user's other scored versions too, and the helper reads the model's reasons", async () => {
+  const agents = ruleAgent();
+  const inputs: Parameters<AgentRuntimeContract['reflectPrompt']>[0][] = [];
+  const reflect = agents.reflectPrompt;
+  agents.reflectPrompt = async (input, ...rest) => (inputs.push(input), reflect(input, ...rest));
+  // The model gives its reason with every answer.
+  const reasoned = (id: string, n: number, prompt: string) => JSON.stringify({reason: `why ${id}`, ...JSON.parse(ruled(id, n, prompt))});
+  const w = await world('b32', {agents, answer: reasoned, macroF1: 0.99, gold: goldOf});
+  const v1 = await w.newVersion();
+  await tick(await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
+  // The user's own v1.1 has one rule: right on 0-4, where v1 is not. It is not part of any run.
+  const mine = await w.catalog.createPromptVersion({projectId: w.projectId, template: 'Label this\nRULE 1', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
+  await tick(await w.state());
+  await until(async () => (await w.state()).reports.length === 2, 'the user version scored');
+  const {startOptimiser} = await import('./work.ts');
+  setOptimiserRandom(() => 0.99); // the last version of the front
+  try {
+    await startOptimiser(w.projectId, 1, v1.id);
+  } finally {
+    setOptimiserRandom(() => 0);
+  }
+  const run = (await w.state()).optimisation[0];
+  assert.equal(run.startVersionId, v1.id);
+  assert.equal(run.history[0].parentId, mine.id, "the user's version is picked as the parent");
+  const ex = inputs[0].examples ?? [];
+  assert.ok(ex.length > 0 && ex.every(e => e.reason === `why ${e.externalId}`), "each wrong example carries the model's reason");
+});

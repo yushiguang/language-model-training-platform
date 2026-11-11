@@ -3,6 +3,7 @@ import {
   BRIEF_WINS,
   checkTemplate,
   compareDryRun,
+  answersForHelpers,
   exampleBrief,
   dryRunSize,
   exampleScore,
@@ -97,7 +98,10 @@ function briefs(state: ProjectState, schema: Schema, half: string[], parent: Pro
   const exs = state.examples.filter(e => halfSet.has(e.id));
   const gold = new Map(exs.filter(e => state.gold.has(e.id)).map(e => [e.id, state.gold.get(e.id)!.answer]));
   const mine = answers.get(parent.id) ?? new Map<string, Prediction>();
-  if (!other) return wrongExamples(schema, exs, promptKeys(parent), gold, new Map([...mine].map(([id, p]) => [id, p.answer])));
+  if (!other) {
+    const {predicted, notes} = answersForHelpers(mine.values());
+    return wrongExamples(schema, exs, promptKeys(parent), gold, predicted, undefined, notes);
+  }
   const a = entries.find(x => x.id === parent.id)?.scores;
   const b = entries.find(x => x.id === other.id)?.scores;
   if (!a || !b) return [];
@@ -105,9 +109,12 @@ function briefs(state: ProjectState, schema: Schema, half: string[], parent: Pro
   const keys = new Set([...promptKeys(parent), ...promptKeys(other)]);
   const wins = (x: Map<string, number>, y: Map<string, number>, by: 'template' | 'other', preds: Map<string, Prediction>) =>
     exs
-      .filter(e => (x.get(e.id) ?? 0) > (y.get(e.id) ?? 0) && gold.has(e.id))
+      .filter(e => (x.get(e.id) ?? 0) > (y.get(e.id) ?? 0) && gold.has(e.id) && !preds.get(e.id)?.filtered)
       .slice(0, BRIEF_WINS)
-      .map(e => exampleBrief(e, keys, gold.get(e.id)!, preds.get(e.id)?.answer ?? null, by));
+      .map(e => {
+        const p = preds.get(e.id);
+        return exampleBrief(e, keys, gold.get(e.id)!, p?.answer ?? null, by, p ? answersForHelpers([p]).notes.get(e.id) : undefined);
+      });
   // `predicted` is the answer of the version that misses the example.
   return [...wins(a, b, 'template', theirs), ...wins(b, a, 'other', mine)];
 }
@@ -266,8 +273,13 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
         break;
       }
 
+      // The pool (decided 2026-11-11): the start version, this run's kept versions, and every other
+      // version with a current score on this model: the user's own versions and earlier runs may
+      // hold rules the best version lacks. Reports are archived when the labels or gold labels
+      // change, so a current report means answers on today's eval set.
       const kept = run.history.filter(h => h.outcome === 'kept' && h.versionId).map(h => h.versionId!);
-      const pool = [start, ...state.versions.filter(v => kept.includes(v.id))];
+      const scored = new Set(state.reports.filter(r => r.endpoint === endpoint && !r.archivedNow).map(r => r.promptVersionId));
+      const pool = [start, ...state.versions.filter(v => kept.includes(v.id)), ...state.versions.filter(v => v.id !== start.id && !kept.includes(v.id) && scored.has(v.id))];
       const settings = setup.models.find(m => m.endpoint === endpoint);
       if (!settings) throw new StepFailed('parent', `The model is not chosen in Setup any more.`);
       const half = state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && state.gold.has(e.id)).map(e => e.id);

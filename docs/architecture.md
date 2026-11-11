@@ -197,6 +197,17 @@ helper:
 Page views carry scores and counts only. Every preset's instructions (`common` and the
 Optimiser's) say the held-out half is hidden and why, so a helper doesn't ask for it.
 
+**The model's reason** (decided 2026-11-11). `apps/labeling` adds `REASON_LINE`
+(`packages/domain/src/labels.ts`) as the last text part of every labeling prompt and of a try. It
+is not part of the template. `parseOutput` reads the "reason" key into `Prediction.reason` (at most
+300 characters), also when the answer is invalid. `answersForHelpers` gives the Optimiser and
+Improve with AI each wrong example with `reason` and `invalid`, and leaves filtered answers out.
+Exports read `answer` only. Answers saved before this have no reason.
+
+**The Optimiser's pool** (decided 2026-11-11) is the start version, the run's kept versions and
+every other version with a current report on the model, so a parent or a merge side can be a
+version the user wrote or an earlier run made.
+
 **The helpers' instructions** (rewritten 2026-11-11) are the shared rules in `common` plus one
 text per helper in `apps/agents/src/presets.ts`. They say who does what (code runs the workflow,
 helpers explain and propose, the user approves), what good labels and a good labeling prompt look

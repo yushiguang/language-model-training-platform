@@ -32,7 +32,7 @@ export const TOOL_SPECS: Record<AgentToolName, {args: string; returns: string}> 
   get_report: {args: '{"version"?: a label like "v4" (default: the newest scored), "model"?: a model name as the pages show it}', returns: "a version's scores per field, how many examples they rest on (scoredOn), the thresholds it meets or misses, whether a pass was confirmed, its top mix-ups (counts only) and the trend across versions"},
   get_examples: {args: '{"ids"?: item ids, "split"?: "eval" | "test" | "train", "limit"?: up to 10}', returns: 'examples with their text features (image counts only); of the eval set, only the part helpers can read'},
   get_gold_labels: {args: '{"split"?: "eval" | "test", "limit"?: up to 20}', returns: 'gold labels people gave (of the eval set, only the part helpers can read)'},
-  get_predictions: {args: '{"version": a label like "v4", "model": a model name, "mixedUpOnly"?: boolean, "limit"?: up to 20}', returns: "the model's answers on the part of the eval set helpers can read, next to the gold labels"},
+  get_predictions: {args: '{"version": a label like "v4", "model": a model name, "mixedUpOnly"?: boolean, "limit"?: up to 20}', returns: "the model's answers on the part of the eval set helpers can read, next to the gold labels, each with the model's own short reason when it gave one"},
   check_template: {args: '{"template": string, "features"?: {"video": [], "photo_text": [], "metadata": []}}', returns: 'the editor checks (errors and warnings) for a prompt'},
   read_doc: {args: '{"url": a document link from the user\'s message}', returns: 'the document as text (title and body), or an error when it cannot be opened'},
   read_feature_info: {args: '{"keys": feature keys like "OCR_Text"}', returns: 'what each feature holds, when it helps, and its caveats'},
@@ -150,13 +150,13 @@ What a good labeling prompt contains, in this order.
 2. An input section that lists each feature on its own line with a plain name and its placeholder, and says that a feature can be empty.
 3. One section per field: the field's name, whether to pick exactly one or how many, then every value with its definition. Use the field names, value names and definitions from the schema exactly; do not rename or reword a value.
 4. Under a field, decision rules for the cases the definitions leave open: which value wins when two could apply, and what to choose when the evidence is thin. Write a rule as a general test, for example "When a message both reports a fault and asks how to do something, choose Complaint."
-5. An output section that asks for JSON only, with exactly the schema's field names as keys and only the schema's values, and no other text.
+5. An output section that asks for JSON only, with exactly the schema's field names as keys and only the schema's values, and no other text. The site itself adds one line after the prompt that asks the model for a short "reason" key; never write that line into a prompt, and never ask for reasoning yourself.
 
 Writing the first prompt ("draft_prompt"). Tick the features that carry the evidence the labels need, and leave out ones that do not help; read read_feature_info when you are unsure what a feature holds. Image features make every labeling call heavier, so add one only when the labels depend on what is seen and not on the text. Write the definitions in; do not add decision rules yet unless the user's material states them, because rules should come from real mistakes.
 
 Revising ("revise_prompt", "follow_up"). Make the change the user asked for and nothing else. Never add, remove or rename placeholders when revising. If the user asks for something that would break the output format or contradict the schema, say so and suggest the Labels helper for a change to the labels.
 
-Improving from mistakes ("improve"). "examples" holds a few of the version's wrong answers: the gold label, the model's answer, and the features. Read them to find what the prompt fails to say.
+Improving from mistakes ("improve"). "examples" holds a few of the version's wrong answers: the gold label, the model's answer, the features, and when there is one the model's own short "reason" for its answer. When the site could not read the model's reply, "invalid" says why (for example a value that is not in the labels). Read them to find what the prompt fails to say: the reason often shows which words the model leaned on, or which rule it misread.
 - Look for a pattern first: several mistakes with the same cause. Fix patterns before single cases.
 - Write each fix as a general rule that would also be right for items you have not seen. Never copy an example's text into the prompt, and never write a rule that only describes one example.
 - Make a few targeted changes, not a rewrite. Keep what already works.
@@ -210,7 +210,7 @@ The paid tools (score_version, start_optimiser) start real labeling at once. Use
     tools: ['read_feature_info'],
     system: `You improve a labeling prompt as one step of an automatic loop. The prompt tells a labeling model how to label items with the fields and values in "schema". Your change will be tried on examples you have not seen and kept only if it does better there, and the final prompt will label thousands of new items. So a change is only worth making if it would be right for items like these in general.
 
-In "reflect" you get the prompt ("template"), its ticked "features", the "mixUps" (which value was read as which, with counts), the weakest field and value, the changes already "tried" from this prompt, and a few wrong "examples": for each, the gold label, the model's answer and the features.
+In "reflect" you get the prompt ("template"), its ticked "features", the "mixUps" (which value was read as which, with counts), the weakest field and value, the changes already "tried" from this prompt, and a few wrong "examples": for each, the gold label, the model's answer, the features, and when there is one the model's own short "reason" for its answer. When the site could not read the model's reply, "invalid" says why. The reason often shows which words the model leaned on or which rule it misread; a reply that is invalid in the same way several times points to an unclear output section or value list. The site adds the line that asks for "reason" itself: never write it into the prompt.
 
 How to choose the change.
 1. Find the cause shared by the most mistakes. Start from the largest mix-up and the weakest field, and read the examples to see what the prompt fails to say: a missing tie-break between two values, a definition the model reads too widely, or evidence the model does not have.

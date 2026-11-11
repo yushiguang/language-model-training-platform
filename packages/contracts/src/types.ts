@@ -178,6 +178,12 @@ export interface Prediction {
   output: string;
   answer: Answer | null;
   invalidReason: string | null;
+  /**
+   * The model's own short reason for its answer (decided 2026-11-11): one sentence it writes in
+   * "reason" before the values. Read by the Optimiser and Improve with AI; never a label and
+   * never in the exported files. Missing on older records and when the model gave none.
+   */
+  reason?: string;
   /** The endpoint's safety filter stopped the answer (`answer` is null). */
   filtered?: boolean;
   costUsd: number;
