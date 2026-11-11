@@ -180,6 +180,80 @@ started the optimiser on ...") whose icon does not animate. Add a running-optimi
 on the page (model, candidates so far, calls, cost, Stop — the run data is already in
 project state), and animate the icon on in-progress event lines in the chat.
 
+## R5-8. Gold Labels is a normal step, not an "optional" one
+
+The stepper (and every other place that names the step) shows "Gold Labels · optional".
+Drop the "optional" suffix everywhere and present it as an ordinary workflow step: gold
+labels are now the system's most important user input — scoring, mismatch review and the
+optimiser all depend on them. If a skip affordance for the node still exists anywhere in
+the flow, remove or hide it so the presentation and the behaviour agree. This changes the
+step's status, not the per-example rules inside it: eval examples still all need gold
+labels before scoring means anything, while a test example without a gold label is still
+fine (it takes the model's answer or gets labeled in the final run).
+
+## R5-1. Gold Labels: the Mismatches tab and version picker pop in late
+
+On entering Gold Labels only the Eval/Test tabs are there; the Mismatches tab and its
+version picker appear after a delay, shifting the layout. Load the mismatches data with
+the page (or reserve the tab and picker with a loading state from the first render) so
+nothing pops in or moves.
+
+## R5-2. The Mismatches version picker must not follow "best" on its own
+
+Scores legitimately change as gold labels are edited (they are rebuilt from saved
+answers), but the picker silently re-defaults to the current best version: a user who
+picked v1 finds themselves looking at v2.8, badged "best", after a few edits. Keep the
+user's picked version sticky for the session; default to best only on first arrival, and
+when the best version changes, mark it (the badge may move; the selection may not).
+
+## R5-3. Remove the "or" between Improve with AI and Auto Optimise
+
+With the confirmation dialog of R4-3 the two actions no longer need the explanatory "or"
+between the buttons; remove it for a consistent button row.
+
+## R5-4. Passing after gold edits must show up, and starting a run must go to it
+
+After gold edits push a version over the threshold, the version card still shows it as
+below and the AI advice still recommends optimising; and after starting Auto Optimise
+from a version's card, the page stays on that version instead of moving to the run.
+Reports are rebuilt on the page tick against the new evaluation context, but nothing
+makes that visible or timely, and advice reads the same possibly stale reports. Make the
+rejudge prompt and visible (scores update, then the passed state and the advice follow),
+and when an optimiser run starts, take the user to it (select the run's first version or
+show the progress panel for that run, per R2-5), not leave them on the base version.
+
+## R5-5. Do not recompute everything on every single gold edit
+
+Each review on the Mismatches tab currently triggers a full reload: predictions for
+every version, mismatch lists, and report rebuilds on the next tick. Design a cheaper
+scheme and implement it. Constraints: recompute never calls a model (saved answers only,
+already true); several edits in a row must coalesce into one recompute (debounce or an
+explicit "recalculate" moment, with a visible "scores updating" state while pending);
+per-version scores are cached against the evaluation context (the report cache exists —
+reuse the idea for the mismatch scores); and the user must be able to keep editing
+without waiting for scores between edits. State in the PR which design was chosen.
+
+## R5-6. A dry run that ties its parent should not be dropped for tying
+
+`compareDryRun` requires strictly greater weighted passes, so an equal candidate is
+dropped even when it differs on individual examples (better here, worse there) — exactly
+the diversity the Pareto pool wants. Let a tie go through to the full labeling, but count
+it as a non-improving round for the wasted/stop bookkeeping (and cap consecutive ties,
+for example 2, so a plateau still ends), and mark the round "tied" in the UI so it does
+not read as progress.
+
+## R5-7. Say which version a dry run compares against, and why that one
+
+Parent selection is GEPA-style: each round picks a parent from the Pareto front of every
+scored version, at random weighted by per-example wins (`pickParent` in
+`packages/domain/src/gepa.ts`) — not the version the user started the run from, not the
+newest, not the highest scoring. That is a legitimate strategy, but the UI presents the
+dry run as if it compared against the user's base (a run started from v1 compared
+against v2.5). Label every dry run and round with its actual parent ("Dry run vs v2.5 —
+best on 6 examples") and state the parent-picking rule in the Auto Optimise dialog
+(R4-3). Also make round 1 use the version the user started from as its parent: later
+rounds may roam the front, but the base the user picked is the promise the dialog made.
+
 ## R4-1. The report's headline metric must say what it is
 
 **Status 2026-11-11:** done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-11: acceptance round 4").
