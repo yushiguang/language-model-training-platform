@@ -5,6 +5,18 @@ where it matters, why. The code follows these; change a line here when a decisio
 
 ## 2026-11-11
 
+- **Invalid and filtered answers are left out of scores** (acceptance R4-6). They are counted on
+  their own next to the score. A version passes only when at most 1% of its answers are invalid
+  (or the project's own limit). Why: an unreadable answer is a format problem, not a wrong label,
+  and it must not pass a version on a technicality either.
+- **"Score" stays as the label**, with the real metric in small grey text next to it (R4-1).
+- **A mismatch review belongs to a gold label and a version** (Evelyn). "Compare with" is one
+  picker for the whole Gold Labels page; To review and Reviewed are for the picked version. A
+  review can be reopened; a changed label then goes back to what it was (R4-5).
+- **The labeler can say why** on Mismatches (R4-4). The note goes to the Optimiser and Improve with
+  AI as the person's own reading of the label, for optimiser-half examples only. The helpers build
+  it into the prompt and never argue with it.
+- **Max rounds is asked in the Auto Optimise dialog**, with the start version (R4-3).
 - **No helper sees the held-out half of the eval set** (review finding 3). Not the Assistant, the
   Labels, Prompt or Scores helper, nor the Optimiser: no example, gold label or model answer from
   it. They may read scores and counts built on it. Users still see every example on the pages.

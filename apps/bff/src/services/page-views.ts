@@ -124,7 +124,11 @@ function reportView(state: ProjectState, v: PromptVersion | undefined, model: En
       version: versionLabel(ver),
       versionId: ver.id,
       model: modelName(state, r.endpoint),
+      // R4-6: invalid and filtered answers are left out of the score; scoredOn counts what is left.
       scoredOn: r.metrics.n,
+      examples: r.metrics.total ?? r.metrics.n,
+      invalid: r.metrics.invalid,
+      filtered: r.metrics.filtered ?? 0,
       passed: r.passed,
       confirmed: confirmedOf(state, ver.id),
       fields: r.metrics.fields.map(f => ({field: f.field, kind: f.kind, macroF1: r2(f.macroF1), accuracy: r2(f.accuracy), weakestValues: [...f.values].sort((a, b) => a.f1 - b.f1).slice(0, 3).map(x => ({value: x.value, f1: r2(x.f1)}))})),

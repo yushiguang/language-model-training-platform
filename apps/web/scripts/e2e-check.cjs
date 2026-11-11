@@ -141,6 +141,8 @@ let current = null;
   for (let i = 0; i < 30 && !(await button(page, 'Review labels').count()) && !(await button(page, 'Improve with AI').count()); i++) await page.waitForTimeout(1000);
   if (await button(page, 'Review labels').count()) {
     log('suggestion:', (await suggestion()).replace(/\n/g, ' | '));
+    // R4-6: the version card says what the score rests on.
+    log('left out:', await page.getByText(/^Scored on \d+ of \d+ examples/).first().innerText());
     await shot(page, '4b-disagree');
     await button(page, 'Review labels').click();
     await page.waitForURL(/gold/);
@@ -149,9 +151,25 @@ let current = null;
     const before = +((await tab.innerText()).match(/(\d+)\s*$/) || [0, 0])[1];
     await page.getByLabel('Compare with').waitFor();
     log('mismatches:', before, '· compare with', await page.getByLabel('Compare with').locator('option:checked').innerText());
+    const why = await page.locator('section.card', {hasText: 'Model answer'}).innerText();
+    log('model answer card:', why.replace(/\n/g, ' | ').slice(0, 200));
+    if (!/Model's reason|Not readable/.test(why)) throw new Error("the Model answer card shows no reason");
+    await page.getByLabel('Why', {exact: true}).fill('The clip is cut from a show');
     await shot(page, '4c-mismatches');
+    const tabCount = n => page.waitForFunction(k => +((document.querySelector('[role=tab][aria-selected=true]')?.textContent ?? '').match(/(\d+)\s*$/) || [0, 0])[1] === k, n, {timeout: 10000});
     await button(page, 'Keep my label').click();
-    await page.waitForFunction(n => +((document.querySelector('[role=tab][aria-selected=true]')?.textContent ?? '').match(/(\d+)\s*$/) || [0, 0])[1] === n - 1, before, {timeout: 10000});
+    await tabCount(before - 1);
+    // R4-5: the review shows under Reviewed with its note, and Reopen puts it back.
+    await page.getByRole('button', {name: /^Reviewed \d+$/}).click();
+    await page.getByText('Kept my label', {exact: true}).waitFor({timeout: 5000});
+    if ((await page.getByLabel('Why', {exact: true}).inputValue()) !== 'The clip is cut from a show') throw new Error('the reviewed note is missing');
+    await shot(page, '4d-reviewed');
+    await button(page, 'Reopen').click();
+    await tabCount(before);
+    await page.getByRole('button', {name: /^To review \d+$/}).click();
+    log('reopened, to review again:', await tab.innerText());
+    await button(page, 'Keep my label').click();
+    await tabCount(before - 1);
     if (before > 1) {
       await button(page, "Use the model's answer").click();
       await page.waitForFunction(n => +((document.querySelector('[role=tab][aria-selected=true]')?.textContent ?? '').match(/(\d+)\s*$/) || [0, 0])[1] === n - 2, before, {timeout: 10000});
@@ -188,7 +206,7 @@ let current = null;
 
   // Auto Optimise until a version passes; a pass starts the training and test sets by itself
   let optimised = false;
-  for (let i = 0; i < 180; i++) {
+  for (let i = 0; i < 360; i++) {
     await page.waitForTimeout(1500);
     const text = await suggestion();
     if (/training and test sets started/.test(text) || (await button(page, 'Make training and test sets').count())) break;
@@ -203,13 +221,14 @@ let current = null;
     const auto = button(page, 'Auto Optimise');
     if (await auto.count()) {
       await auto.click();
-      // A better minor of the selected major: the dialog asks which version to start from (R3-7).
+      // R4-3: Auto Optimise always opens one dialog: Start from (only when a better minor of the
+      // selected major exists) and Max rounds.
       const dlg = page.getByRole('dialog');
-      if (await dlg.count()) {
-        log('start dialog:', (await dlg.innerText()).replace(/\n/g, ' | '));
-        await shot(page, '5e-start-dialog');
-        await dlg.getByRole('button').last().click();
-      }
+      await dlg.waitFor({timeout: 5000});
+      if ((await dlg.getByLabel('Max rounds').inputValue()) !== '10') throw new Error('Max rounds is not prefilled with 10');
+      log('start dialog:', (await dlg.innerText()).replace(/\n/g, ' | '));
+      await shot(page, '5e-start-dialog');
+      await dlg.getByRole('button', {name: 'Start', exact: true}).click();
       log('auto optimise started');
     }
   }

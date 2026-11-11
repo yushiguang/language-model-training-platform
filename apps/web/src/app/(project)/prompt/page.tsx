@@ -3,14 +3,14 @@
 import {useGo} from '@/components/nav';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode} from 'react';
 import type {Answer, EndpointId, LabelingRun, MismatchList, OptimisationRun, OptimiserRound, PageContext, PromptVersion} from '@tsp/contracts';
-import {DEFAULT_MAX_ROUNDS, dryRunSize, optimiserVersions, recommend, stepLine, versionLabel} from '@tsp/domain';
+import {DEFAULT_MAX_ROUNDS, dryRunSize, INVALID_CAP, optimiserVersions, recommend, stepLine, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage, useOpenAskAi} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {ScoreChart} from '@/components/prompt/ScoreChart';
 import {useChecks, Workbench, type Draft} from '@/components/prompt/Workbench';
 import {useAgentDrafts} from '@/components/prompt/useAgentDrafts';
 import {approveNode, createVersion, improveWithAi, mismatches, predictionsFor, retryOptimiser, scoreVersion, startOptimiser, stopOptimiser, stopRun, tick, type ProjectState} from '@/backend-api';
-import {Badge, Banner, Below, Button, Card, Code, dateTime, Dialog, Empty, Hov, Icon, Metric, num, One, PageHead, Passed, Progress, reportActionError, Score, Seg, Suggestion, Table, timeOfDay} from '@/ui';
+import {Badge, Banner, Below, Button, Card, Code, dateTime, Dialog, Empty, Hov, Icon, Metric, num, One, Opt, PageHead, Passed, Progress, reportActionError, Score, Seg, Suggestion, Table, timeOfDay} from '@/ui';
 import {LabelDistribution, labelCounts} from '@/components/LabelDistribution';
 import {fieldRows, modelName, reportFor, runsFor, versionScore} from '@/components/prompt/scores';
 
@@ -277,8 +277,31 @@ function majors(scored: {v: PromptVersion; s: {score: number; passed: boolean} |
     });
 }
 
-const SCORE_TIP = "The lowest field's Macro-F1: how well the model finds each value, every value counting the same";
-const FIELD_TIP = "The field's Macro-F1: how well the model finds each of its values, every value counting the same";
+/** R4-1 (2026-11-11): the label stays "Score", with the real metric name in small grey text next to it. */
+const named = (name: string) => (
+  <span>
+    Score
+    <span className="t-3" style={{fontSize: 13, fontWeight: 400, marginLeft: 6}}>
+      {name}
+    </span>
+  </span>
+);
+const LEFT_OUT_TIP = "Answers that can't be read as labels (invalid) or that the safety filter stopped are left out of the score. A version passes only when at most 1% of its answers are invalid";
+/** R4-6: how many answers the score rests on, and how many were left out. Red when invalid answers are over the cap. */
+function LeftOut({m, cap}: {m: ProjectState['reports'][number]['metrics']; cap: number}) {
+  const total = m.total ?? m.n;
+  if (!total) return null;
+  const filtered = m.filtered ?? 0;
+  const over = m.invalidRate > cap;
+  const txt = `Scored on ${m.n} of ${total} examples · ${m.invalid} invalid (${Math.round(100 * m.invalidRate)}%${over ? `, above ${+(100 * cap).toFixed(1)}%` : ''}) · ${filtered} filtered left out`;
+  return (
+    <div className="row" style={{paddingTop: 12, fontSize: 13}}>
+      <span className={over ? 't-err' : 't-3'}>
+        <Hov text={txt} tip={LEFT_OUT_TIP} />
+      </span>
+    </div>
+  );
+}
 
 const ROUND_RESULT: Record<OptimiserRound['outcome'], {text: string; tone?: 'run' | 'err'} | null> = {
   running: {text: 'Running', tone: 'run'},
@@ -545,7 +568,7 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
   return (
     <Card className={box.className} style={box.style}>
       <div style={{display: 'flex', alignItems: 'flex-end', gap: 16, paddingBottom: 16}}>
-        <Metric label={<Hov text="Score" tip={SCORE_TIP} />} value={rep.metrics.lowestField.macroF1.toFixed(2)} unit={`/ ${+t.macroF1.toFixed(2)}`} tone={rep.passed ? 'ok' : 'err'} size="lg" />
+        <Metric label={named('Lowest field macro-F1')} value={rep.metrics.lowestField.macroF1.toFixed(2)} unit={`/ ${+t.macroF1.toFixed(2)}`} tone={rep.passed ? 'ok' : 'err'} size="lg" />
         <div style={{display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 9}}>
           {rep.passed ? <Passed /> : <Below />}
           <span className="t-3" style={{fontSize: 13}}>
@@ -555,9 +578,10 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
         {actions}
       </div>
       <Table
-        cols={[{label: 'Field'}, {label: <Hov text="Score" tip={FIELD_TIP} />, kind: 'c'}, {label: 'Precision', kind: 'c'}, {label: 'Recall', kind: 'c'}, {label: 'Result', kind: 'c'}]}
+        cols={[{label: 'Field'}, {label: named('Macro-F1'), kind: 'c'}, {label: 'Precision', kind: 'c'}, {label: 'Recall', kind: 'c'}, {label: 'Result', kind: 'c'}]}
         rows={rows.map(r => ({key: r.field, cells: [<Code key="f">{r.field}</Code>, <Score key="s" v={r.f1} ok={r.passed} />, r.precision.toFixed(2), r.recall.toFixed(2), r.passed ? <Passed key="p" /> : <Below key="b" />]}))}
       />
+      <LeftOut m={rep.metrics} cap={t.invalidRate ?? INVALID_CAP} />
     </Card>
   );
 }
@@ -565,7 +589,7 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
 /**
  * The AI Suggestion card. The next step is chosen by code from the reports; the card is hidden
  * while scoring or the Optimiser runs (design: no card while it waits). Below the bar it offers
- * Improve with AI (a draft in the editor) or Auto Optimise for up to N rounds.
+ * Improve with AI (a draft in the editor) or Auto Optimise, whose dialog asks for the rounds.
  */
 function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId: string, endpoint: EndpointId) => Promise<void>; selId: string}) {
   const {href} = useProject();
@@ -589,15 +613,15 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
     improveWithAi(state.project.id, versionId).catch(e => reportActionError(`Improve with AI failed: ${(e as Error).message}`, () => improve(versionId)));
     return go(href('/prompt/edit', {v: versionId}));
   };
-  // Auto Optimise starts from the version selected in the list (R3-7). When a better minor of the
-  // same major exists, a dialog asks which one (design: U-F-Optimise-Confirm).
-  const [ask, setAsk] = useState<{sel: PromptVersion; selScore: number | null; best: PromptVersion; bestScore: number; n: number} | null>(null);
+  // Auto Optimise starts from the version selected in the list (R3-7). It always opens one dialog
+  // (R4-3, design: U-J-Optimise-Dialog): where to start, shown only when a better minor of the same
+  // major exists, and the most rounds to try.
+  const [ask, setAsk] = useState<{sel: PromptVersion; selScore: number | null; best: PromptVersion | null; bestScore: number; from: string} | null>(null);
   const start = (versionId: string, n: number) => {
     setAsk(null);
     startOptimiser(state.project.id, n, versionId).catch(e => reportActionError(`The Optimiser could not start: ${(e as Error).message}`, () => start(versionId, n)));
   };
   const auto = () => {
-    const n = Math.max(1, Math.min(50, Math.round(Number(rounds)) || DEFAULT_MAX_ROUNDS));
     const sel = state.versions.find(v => v.id === selId) ?? latest;
     const selScore = versionScore(state, sel.id)?.score ?? null;
     const best = state.versions
@@ -605,8 +629,9 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
       .map(v => ({v, s: versionScore(state, v.id)?.score}))
       .filter(x => x.s != null)
       .sort((a, b) => b.s! - a.s!)[0];
-    if (best && best.v.id !== sel.id && (selScore == null || best.s! > selScore)) setAsk({sel, selScore, best: best.v, bestScore: best.s!, n});
-    else start(sel.id, n);
+    const better = best && best.v.id !== sel.id && (selScore == null || best.s! > selScore);
+    setRounds(String(DEFAULT_MAX_ROUNDS));
+    setAsk({sel, selScore, best: better ? best.v : null, bestScore: better ? best.s! : 0, from: better ? best.v.id : sel.id});
   };
   // The newest run that passed and started the training and test sets.
   const done = state.optimisation[0];
@@ -615,7 +640,7 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
   let text: string;
   let acts: React.ReactNode;
   const lastRun = state.optimisation[0];
-  const disagree = !!mm && !lastRun && mm.reviewed === 0 && mm.items.length > 0;
+  const disagree = !!mm && !lastRun && mm.reviewedAll === 0 && mm.items.length > 0;
   const wrongEverywhere = !!mm && lastRun?.state === 'done' && lastRun.stopReason !== 'passes' && mm.wrongEverywhere > 0;
   if (a.kind === 'make_training_set' && passedBy && a.versionId === passedBy) {
     title = `${name(passedBy)} passes, training and test sets started`;
@@ -653,10 +678,6 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
     acts = (
       <div className="row" style={{gap: 8}}>
         <Button label="Auto Optimise" onClick={auto} />
-        <input className="input sm" style={{width: 56, textAlign: 'center'}} value={rounds} inputMode="numeric" aria-label="Max rounds" onChange={e => setRounds(e.target.value.replace(/\D/g, '').slice(0, 2))} />
-        <span style={{fontSize: 13, color: 'var(--text-2)'}}>
-          <Hov text="rounds" tip="Most rounds to try. Each round tries one change to the prompt" />
-        </span>
         <Button label="Review labels" kind="primary" onClick={() => go(href('/gold', {tab: 'mismatches'}))} />
       </div>
     );
@@ -669,10 +690,6 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
         <Button label="Improve with AI" onClick={() => improve(a.versionId!)} />
         {or}
         <Button label="Auto Optimise" kind="primary" onClick={auto} />
-        <input className="input sm" style={{width: 56, textAlign: 'center'}} value={rounds} inputMode="numeric" aria-label="Max rounds" onChange={e => setRounds(e.target.value.replace(/\D/g, '').slice(0, 2))} />
-        <span style={{fontSize: 13, color: 'var(--text-2)'}}>
-          <Hov text="rounds" tip="Most rounds to try. Each round tries one change to the prompt" />
-        </span>
       </div>
     );
   } else return null;
@@ -681,16 +698,31 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
       <Suggestion title={title} text={text} actions={acts} />
       {ask && (
         <Dialog
-          title={`Start from ${versionLabel(ask.sel)}`}
-          text={`${versionLabel(ask.best)} is the best version in v${ask.sel.major}, at ${ask.bestScore.toFixed(2)} ${ask.selScore == null ? `while ${versionLabel(ask.sel)} has no score yet` : `against ${ask.selScore.toFixed(2)} for ${versionLabel(ask.sel)}`}`}
+          title="Auto Optimise"
           onClose={() => setAsk(null)}
           actions={
             <>
-              <Button label={`Start from ${versionLabel(ask.sel)}`} onClick={() => start(ask.sel.id, ask.n)} />
-              <Button label={`Start from ${versionLabel(ask.best)}`} kind="primary" onClick={() => start(ask.best.id, ask.n)} />
+              <Button label="Cancel" onClick={() => setAsk(null)} />
+              <Button label="Start" kind="primary" onClick={() => start(ask.from, Math.max(1, Math.min(50, Math.round(Number(rounds)) || DEFAULT_MAX_ROUNDS)))} />
             </>
           }
-        />
+        >
+          {ask.best && (
+            <div className="col" style={{gap: 8}}>
+              <span className="field-l">Start from</span>
+              <div className="opts" role="radiogroup" aria-label="Start from">
+                <Opt title={versionLabel(ask.best)} tip={`The best version in v${ask.sel.major}`} checked={ask.from === ask.best.id} onSelect={() => setAsk({...ask, from: ask.best!.id})} extra={<span className="t-3" style={{fontSize: 13, marginLeft: 'auto'}}>{`Best in v${ask.sel.major} · ${ask.bestScore.toFixed(2)}`}</span>} />
+                <Opt title={versionLabel(ask.sel)} tip="The version you selected" checked={ask.from === ask.sel.id} onSelect={() => setAsk({...ask, from: ask.sel.id})} extra={<span className="t-3" style={{fontSize: 13, marginLeft: 'auto'}}>{`Selected · ${ask.selScore == null ? 'no score yet' : ask.selScore.toFixed(2)}`}</span>} />
+              </div>
+            </div>
+          )}
+          <div className="col" style={{gap: 8}}>
+            <span className="field-l">
+              <Hov text="Max rounds" tip="Most rounds to try. Each round tries one change to the prompt" />
+            </span>
+            <input className="input sm" style={{width: 72, textAlign: 'center'}} value={rounds} inputMode="numeric" aria-label="Max rounds" onChange={e => setRounds(e.target.value.replace(/\D/g, '').slice(0, 2))} />
+          </div>
+        </Dialog>
       )}
     </section>
   );

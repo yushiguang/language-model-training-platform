@@ -229,6 +229,7 @@ export const improveWithAi = timed('improveWithAi', bff.improveWithAi);
 export const checkLabels = timed('checkLabels', bff.checkLabels);
 export const mismatches = timed('mismatches', bff.mismatches);
 export const reviewGold = timed('reviewGold', bff.reviewGold);
+export const reopenGold = timed('reopenGold', bff.reopenGold);
 export const featureInfo = timed('featureInfo', bff.featureInfo);
 export const predictionsFor = timed('predictionsFor', bff.predictionsFor);
 export const labelTestSet = timed('labelTestSet', bff.labelTestSet);

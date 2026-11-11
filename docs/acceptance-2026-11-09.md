@@ -182,6 +182,8 @@ project state), and animate the icon on in-progress event lines in the chat.
 
 ## R4-1. The report's headline metric must say what it is
 
+**Status 2026-11-11:** done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-11: acceptance round 4").
+
 The version detail card renamed the headline metric to a generic "Score"
 (`apps/web/src/app/(project)/prompt/page.tsx`, `SCORE_TIP` hover). Restore the concrete
 name (the metric it actually is, e.g. "Lowest field macro-F1"), likewise the per-field
@@ -190,12 +192,16 @@ these numbers across pages (Gold Labels, reports) that use the real names.
 
 ## R4-2. Remove the blur/fade at the detail card's bottom edge
 
+**Status 2026-11-11:** done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-11: acceptance round 4").
+
 `.card.fill > .vlist` and `.card.fill-scroll` fade the last ~30px with a mask gradient
 (`apps/web/src/ui/kit.css`), which reads as a blur defect on the version detail card.
 Remove the mask fade. Keep the layout-shift work from R3-8: the card may animate its height
 when content changes, it just must not fade or blur content.
 
 ## R4-3. Move the rounds choice into the Auto Optimise confirmation
+
+**Status 2026-11-11:** done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-11: acceptance round 4").
 
 The AI Suggestion card carries both the rounds input and the Auto Optimise button. Take
 the rounds input off the card (the card keeps one clear action); clicking Auto Optimise
@@ -204,6 +210,8 @@ opens the confirmation dialog, which now holds: the base-version choice from R3-
 and default as today), then Start. One dialog, no settings stranded on cards.
 
 ## R4-4. Mismatches: show why, let the labeler say why, feed both to the optimiser
+
+**Status 2026-11-11:** done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-11: acceptance round 4").
 
 On the Mismatches tab, for each item show beside the two answers (a) the model's raw
 output and, when invalid, its invalid reason — both already saved on the prediction — and
@@ -218,6 +226,8 @@ prompt change, not a prerequisite for (a) and (b).
 
 ## R4-5. Mismatch judgement is recomputed, but a reviewed item cannot be reopened (gap)
 
+**Status 2026-11-11:** done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-11: acceptance round 4").
+
 For the user's question: the judgement is not one-time. The list is derived on every read
 from saved predictions against the current gold labels, and a decision is recorded in the
 audit log against that gold label's id. Change the gold label again (on Gold Labels) and
@@ -228,6 +238,8 @@ changes their mind without editing the label elsewhere. Add one (a reviewed sect
 an undo/reopen action that drops the review record for that gold id).
 
 ## R4-6. Invalid and filtered outputs must not count as wrong answers in scores
+
+**Status 2026-11-11:** done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-11: acceptance round 4").
 
 Today an invalid output counts as wrong on every field (`packages/domain/src/metrics.ts`),
 and a filtered prediction (no answer at all) counts the same way. Both poison F1,

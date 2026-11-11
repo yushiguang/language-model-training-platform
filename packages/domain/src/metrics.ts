@@ -3,10 +3,18 @@ import type {Answer, FieldMetrics, Metrics, MixUp, Schema, Thresholds, ValueMetr
 export interface Scored {
   exampleId: string;
   gold: Answer;
-  /** null = invalid output. */
+  /** null = no answer: an invalid output, or one the safety filter stopped. */
   predicted: Answer | null;
+  /** The safety filter stopped the answer. */
+  filtered?: boolean;
   costUsd: number;
 }
+
+/**
+ * At most this share of answers may be invalid for a version to pass (acceptance R4-6, decided
+ * 2026-11-11). Applies when the project sets no invalid-rate threshold of its own.
+ */
+export const INVALID_CAP = 0.01;
 
 const f1 = (p: number, r: number) => (p + r === 0 ? 0 : (2 * p * r) / (p + r));
 const round = (x: number) => Math.round(x * 1000) / 1000;
@@ -14,9 +22,12 @@ const round = (x: number) => Math.round(x * 1000) / 1000;
 /**
  * Scores predictions against gold labels. Every value is scored one-vs-rest; a field's macro-F1
  * is the mean over values that appear in the gold labels or the predictions, so rare values
- * count as much as common ones. An invalid output counts as wrong on every field.
+ * count as much as common ones. Invalid outputs and answers the safety filter stopped are left out
+ * of every score (they are a format or platform event, not a labeling judgement) and counted
+ * apart; `judge` keeps a version with too many invalid answers from passing.
  */
-export function computeMetrics(schema: Schema, items: Scored[]): Metrics {
+export function computeMetrics(schema: Schema, all: Scored[]): Metrics {
+  const items = all.filter(it => it.predicted && !it.filtered);
   const fields: FieldMetrics[] = [];
   const mixUps: MixUp[] = [];
   for (const field of schema.fields) {
@@ -69,17 +80,20 @@ export function computeMetrics(schema: Schema, items: Scored[]): Metrics {
   const lowestField = fields.reduce((lo, f) => (f.macroF1 < lo.macroF1 ? {field: f.field, macroF1: f.macroF1} : lo), {field: fields[0]?.field ?? '', macroF1: fields[0]?.macroF1 ?? 0});
   let lowestValue: Metrics['lowestValue'] = null;
   for (const f of fields) for (const v of f.values) if (v.support > 0 && (!lowestValue || v.f1 < lowestValue.f1)) lowestValue = {field: f.field, value: v.value, f1: v.f1};
-  const invalid = items.filter(it => !it.predicted).length;
-  const cost = items.reduce((s, it) => s + it.costUsd, 0);
+  const filtered = all.filter(it => it.filtered).length;
+  const invalid = all.filter(it => !it.predicted && !it.filtered).length;
+  const cost = all.reduce((s, it) => s + it.costUsd, 0);
   return {
     n: items.length,
+    total: all.length,
+    filtered,
     fields,
     lowestField,
     lowestValue,
     invalid,
-    invalidRate: items.length ? invalid / items.length : 0,
+    invalidRate: all.length ? invalid / all.length : 0,
     mixUps: mixUps.slice(0, 12),
-    costPer1000: items.length ? (cost / items.length) * 1000 : 0,
+    costPer1000: all.length ? (cost / all.length) * 1000 : 0,
   };
 }
 
@@ -99,7 +113,10 @@ export function judge(m: Metrics, t: Thresholds, evalCount: number): {passed: bo
   const lowest = (k: 'precision' | 'recall') => (values.length ? Math.min(...values.map(v => v[k])) : 1);
   if (t.precision != null) checks.push({label: 'Lowest value precision', actual: lowest('precision').toFixed(2), need: `≥ ${t.precision.toFixed(2)}`, met: lowest('precision') >= t.precision});
   if (t.recall != null) checks.push({label: 'Lowest value recall', actual: lowest('recall').toFixed(2), need: `≥ ${t.recall.toFixed(2)}`, met: lowest('recall') >= t.recall});
-  if (t.invalidRate != null) checks.push({label: 'Invalid outputs', actual: pct(m.invalidRate), need: `≤ ${pct(t.invalidRate)}`, met: m.invalidRate <= t.invalidRate});
+  // Always checked (R4-6): invalid answers are left out of the scores, so a version must not pass
+  // by giving unreadable answers on the hard examples.
+  const cap = t.invalidRate ?? INVALID_CAP;
+  checks.push({label: 'Invalid outputs', actual: pct(m.invalidRate), need: `≤ ${pct(cap)}`, met: m.invalidRate <= cap});
   if (t.accuracy != null) {
     const singles = m.fields.filter(f => f.kind === 'single');
     const lo = singles.length ? Math.min(...singles.map(f => f.accuracy)) : 1;
@@ -107,7 +124,7 @@ export function judge(m: Metrics, t: Thresholds, evalCount: number): {passed: bo
   }
   // The eval set's size is the setting; the score itself rests on the held-out half (m.n), said
   // in the label so the check does not read as the score's base (review finding 1).
-  checks.push({label: `Eval examples (the score uses the ${m.n} held out)`, actual: String(evalCount), need: `≥ ${t.minEval}`, met: evalCount >= t.minEval});
+  checks.push({label: `Eval examples (the score uses ${m.n} of the ${m.total ?? m.n} held out)`, actual: String(evalCount), need: `≥ ${t.minEval}`, met: evalCount >= t.minEval});
   return {passed: checks.every(c => c.met), checks};
 }
 

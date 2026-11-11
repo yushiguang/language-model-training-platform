@@ -727,7 +727,7 @@ export const dateTime = (iso: string) => {
  * A dialog that asks one question (design: U-F-Optimise-Confirm): a title, one line, and its
  * buttons; the last button is the main one and gets the focus. Escape or a click outside closes it.
  */
-export function Dialog({title, text, actions, onClose}: {title: string; text: string; actions: ReactNode; onClose: () => void}) {
+export function Dialog({title, text, actions, onClose, children}: {title: string; text?: string; actions: ReactNode; onClose: () => void; children?: ReactNode}) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
@@ -742,11 +742,12 @@ export function Dialog({title, text, actions, onClose}: {title: string; text: st
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return createPortal(
     <div className="k dlg-scrim" onMouseDown={e => e.target === e.currentTarget && onClose()}>
-      <div ref={box} role="dialog" aria-modal="true" aria-labelledby="dlg-t" className="dlg">
+      <div ref={box} role="dialog" aria-modal="true" aria-labelledby="dlg-t" className={children ? 'dlg form' : 'dlg'}>
         <h2 id="dlg-t" className="card-t">
           {title}
         </h2>
-        <p>{text}</p>
+        {text && <p>{text}</p>}
+        {children}
         <div className="row dlg-acts">{actions}</div>
       </div>
     </div>,

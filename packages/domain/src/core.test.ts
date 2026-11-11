@@ -65,12 +65,17 @@ test('macro-F1 and pass judgement', () => {
     {exampleId: '3', gold: {f: ['b']}, predicted: {f: ['b']}, costUsd: 0.001},
     {exampleId: '4', gold: {f: ['b']}, predicted: null, costUsd: 0.001},
   ];
-  const m = computeMetrics(schema, items);
-  // a: p=0.5 r=1 f1=0.667; b: p=1 r=1/3 f1=0.5
-  assert.equal(m.fields[0].macroF1, 0.584);
-  assert.equal(m.invalid, 1);
+  const m = computeMetrics(schema, [...items, {exampleId: '5', gold: {f: ['a']}, predicted: null, filtered: true, costUsd: 0}]);
+  // R4-6: the invalid (4) and filtered (5) answers are left out. a: p=0.5 r=1 f1=0.667; b: p=1 r=1/2 f1=0.667
+  assert.equal(m.fields[0].macroF1, 0.667);
+  assert.deepEqual([m.n, m.total, m.invalid, m.filtered, m.invalidRate], [3, 5, 1, 1, 0.2]);
   assert.equal(m.mixUps[0].count, 1);
-  assert.equal(judge(m, DEFAULT_THRESHOLDS, 30).passed, false);
+  // The invalid cap is always checked: 20% invalid fails even with a passing score.
+  const lenient = {...DEFAULT_THRESHOLDS, macroF1: 0.5};
+  const j = judge(m, lenient, 30);
+  assert.equal(j.passed, false);
+  assert.deepEqual(j.checks.find(c => c.label === 'Invalid outputs'), {label: 'Invalid outputs', actual: '20%', need: '≤ 1.0%', met: false});
+  assert.equal(judge(computeMetrics(schema, items.slice(0, 3)), lenient, 30).passed, true);
 });
 
 test('versions: Save makes the next minor, Save as new version the next major, an Optimiser run its reserved major', () => {

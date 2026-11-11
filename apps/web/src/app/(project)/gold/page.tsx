@@ -3,12 +3,12 @@
 import {useGo} from '@/components/nav';
 import {useSearchParams} from 'next/navigation';
 import {Fragment, Suspense, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import type {Answer, Example, ExampleMedia, LabelField, MismatchList} from '@tsp/contracts';
+import type {Answer, Example, ExampleMedia, LabelField, MismatchList, MismatchReview} from '@tsp/contracts';
 import {FEATURES, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
-import {approveNode, exampleMedia, mismatches, predictionsFor, reviewGold, saveGold, type ProjectState} from '@/backend-api';
-import {Badge, Banner, Button, Card, Code, dateTime, Empty, Hov, Icon, num, PageHead, Tabs} from '@/ui';
+import {approveNode, exampleMedia, mismatches, predictionsFor, reopenGold, reviewGold, saveGold, type ProjectState} from '@/backend-api';
+import {Badge, Banner, Button, Card, Code, dateTime, Empty, Hov, Icon, num, PageHead, reportActionError, Seg, Tabs} from '@/ui';
 
 type SetKey = 'eval' | 'test' | 'mismatch';
 
@@ -53,14 +53,16 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   const {href} = useProject();
   const [cmp, setCmp] = useState<string | null>(null);
   const [mm, reloadMm] = useMismatches(state, cmp);
+  // R4-5: Mismatches splits into To review and Reviewed, both for the version picked for the page.
+  const [sub, setSub] = useState<'open' | 'done'>('open');
   const byId = useMemo(() => new Map(state.examples.map(e => [e.id, e])), [state.examples]);
   const sets = useMemo(
     () => ({
       eval: state.examples.filter(e => e.split === 'eval'),
       test: state.examples.filter(e => e.split === 'test'),
-      mismatch: (mm?.items ?? []).map(x => byId.get(x.exampleId)!).filter(Boolean),
+      mismatch: (sub === 'done' ? (mm?.reviewedItems ?? []) : (mm?.items ?? [])).map(x => byId.get(x.exampleId)!).filter(Boolean),
     }),
-    [state.examples, mm, byId],
+    [state.examples, mm, byId, sub],
   );
   // "Review labels" on Prompt versions opens the Mismatches tab.
   const [tab, setTab] = useState<SetKey>(tabParam === 'mismatches' ? 'mismatch' : 'eval');
@@ -88,13 +90,27 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   const evalDone = state.facts.goldEvalDone >= sets.eval.length && sets.eval.length > 0;
   const move = (n: number) => setPos(p => ({...p, [tab]: n}));
   const versionId = mm?.versionId ?? null;
-  const item = onMismatch && ex ? mm?.items.find(x => x.exampleId === ex.id) : undefined;
+  const item = onMismatch && ex && sub === 'open' ? mm?.items.find(x => x.exampleId === ex.id) : undefined;
+  const done = onMismatch && ex && sub === 'done' ? mm?.reviewedItems.find(x => x.exampleId === ex.id) : undefined;
   const gold = ex ? state.gold.get(ex.id)?.answer : undefined;
   const diff = onMismatch && gold && modelAnswer ? new Set(state.setup!.schema!.fields.filter(f => !sameValues(gold[f.name], modelAnswer[f.name])).map(f => f.name)) : new Set<string>();
-  const review = async (outcome: 'kept' | 'changed', answer?: Answer) => {
+  const review = async (outcome: 'kept' | 'changed', note: string, answer?: Answer) => {
     if (!ex || !versionId) return;
-    await reviewGold(state.project.id, ex.id, versionId, outcome, answer);
+    await reviewGold(state.project.id, ex.id, versionId, outcome, answer, note);
     reloadMm();
+  };
+  const reopen = async () => {
+    if (!ex || !versionId) return;
+    try {
+      await reopenGold(state.project.id, ex.id, versionId);
+    } catch (e) {
+      reportActionError(`The review could not be reopened: ${(e as Error).message}`);
+    }
+    reloadMm();
+  };
+  const pickSub = (v: 'open' | 'done') => {
+    setSub(v);
+    setPos(p => ({...p, mismatch: 0}));
   };
 
   const head = (
@@ -102,6 +118,20 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
       title="Gold Labels"
       actions={
         <>
+          {onMismatch && mm && (
+            <>
+              <Seg
+                label="Mismatches"
+                value={sub}
+                onChange={pickSub}
+                options={[
+                  {value: 'open', label: `To review ${num(mm.items.length)}`},
+                  {value: 'done', label: `Reviewed ${num(mm.reviewed)}`},
+                ]}
+              />
+              <span style={{width: 8}} />
+            </>
+          )}
           {list.length > 0 && (
             <>
               <Button label="" ariaLabel="Previous" kind="ghost" icon="left" disabled={i === 0} onClick={() => move(i - 1)} />
@@ -147,6 +177,28 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
           // Once a version has answers on the whole eval set.
           ...(mm?.versions.length ? [{key: 'mismatch' as const, label: 'Mismatches', count: num(mm.items.length)}] : []),
         ]}
+        end={
+          // Evelyn 2026-11-11: one "Compare with" for the page. Every tab shows this version's
+          // answers, and Mismatches and reviews are for it.
+          mm?.versions.length && versionId ? (
+            <div className="row" style={{alignItems: 'center', paddingBottom: 6}}>
+              <span className="t-3" style={{fontSize: 13, marginRight: 8}}>
+                <Hov text="Compare with" tip="The version whose answers show on every tab. Mismatches and reviews are for this version" />
+              </span>
+              <span className="select" style={{width: 132}}>
+                <select aria-label="Compare with" style={{height: 32}} value={versionId} onChange={e => setCmp(e.target.value)}>
+                  {mm.versions.map(v => (
+                    <option key={v.id} value={v.id}>
+                      {v.label}
+                      {v.best ? ' (best)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <Icon name="chev" />
+              </span>
+            </div>
+          ) : undefined
+        }
       />
       {ex ? (
         <div style={{display: 'grid', gridTemplateColumns: '520px 1fr', gap: 16, alignItems: 'start'}}>
@@ -157,7 +209,8 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
               state={state}
               ex={ex}
               versionId={versionId}
-              picker={mm?.versions.length ? {versions: mm.versions, onPick: setCmp} : undefined}
+              paged={!!mm?.versions.length}
+              why={onMismatch}
               shown={showModel}
               toggle={!onMismatch}
               diff={diff}
@@ -175,14 +228,16 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
               onFound={answer => setModel({exampleId: ex.id, answer})}
             />
             <YourAnswer
-              key={`y-${ex.id}-${tab}`}
+              key={`y-${ex.id}-${tab}-${sub}-${versionId ?? ''}`}
               state={state}
               ex={ex}
               modelShown={(showModel || seen.has(ex.id)) && !!modelAnswer}
-              review={onMismatch && picked ? {modelAnswer, onKeep: () => review('kept'), onChange: a => review('changed', a)} : undefined}
+              review={onMismatch && picked ? {modelAnswer, done, onKeep: note => review('kept', note), onChange: (a, note) => review('changed', note, a), onReopen: reopen} : undefined}
             />
           </div>
         </div>
+      ) : onMismatch && sub === 'done' ? (
+        mm && <Empty title="Nothing reviewed yet" text={`Labels you keep or change for ${picked?.label ?? 'this version'} show here.`} />
       ) : onMismatch ? (
         mm && <Empty title="No mismatches left" text={`Every label ${picked?.label ?? 'the model'} disagrees with has been checked.`} />
       ) : (
@@ -297,15 +352,18 @@ const CHIP = {cursor: 'default', background: 'var(--bg-muted)', borderColor: 'tr
 const CHIP_DIFF = {cursor: 'default', background: '#fdecec', borderColor: 'transparent', color: '#b42318'} as const;
 
 /**
- * The model's answer, from the version picked in the card (review finding 2; default: the best
- * scored version with answers on the whole eval set). Before any version has those, it is the
- * newest version with an answer for this example, with no picker.
+ * The model's answer, from the version picked for the page (review finding 2, moved to the page by
+ * Evelyn 2026-11-11; default: the best scored version with answers on the whole eval set). Before
+ * any version has those, it is the newest version with an answer for this example, named in the
+ * card. On Mismatches (`why`) it adds the model's own short reason, or why its reply could not be
+ * read (R4-4).
  */
 function ModelAnswer({
   state,
   ex,
   versionId,
-  picker,
+  paged,
+  why,
   shown,
   toggle,
   diff,
@@ -315,14 +373,15 @@ function ModelAnswer({
   state: ProjectState;
   ex: Example;
   versionId: string | null;
-  picker?: {versions: MismatchList['versions']; onPick: (id: string) => void};
+  paged: boolean;
+  why: boolean;
   shown: boolean;
   toggle: boolean;
   diff: Set<string>;
   onToggle: () => void;
   onFound: (answer: Answer | null) => void;
 }) {
-  const [found, setFound] = useState<{answer: Answer | null; invalid: string | null; label: string; endpoint: string} | null | undefined>(undefined);
+  const [found, setFound] = useState<{answer: Answer | null; invalid: string | null; reason: string | null; label: string; endpoint: string} | null | undefined>(undefined);
   useEffect(() => {
     let live = true;
     void (async () => {
@@ -332,7 +391,7 @@ function ModelAnswer({
           const p = (await predictionsFor(v.id, m.endpoint, m)).get(ex.id);
           if (p) {
             if (live) onFound(p.answer);
-            if (live) setFound({answer: p.answer, invalid: p.invalidReason, label: versionLabel(v), endpoint: state.endpoints.find(e => e.id === m.endpoint)?.name ?? m.endpoint});
+            if (live) setFound({answer: p.answer, invalid: p.invalidReason, reason: p.reason ?? null, label: versionLabel(v), endpoint: state.endpoints.find(e => e.id === m.endpoint)?.name ?? m.endpoint});
             return;
           }
         }
@@ -347,35 +406,27 @@ function ModelAnswer({
   }, [ex.id, versionId, state.versions.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const schema = state.setup!.schema!;
   // No model answer for this example (or still looking) and nothing to pick: no card at all (design, 2026-11-09).
-  if (found === undefined || (!found && !picker)) return null;
-  const pick = picker && versionId && (
-    <span className="select" style={{width: 132}}>
-      <select aria-label="Compare with" style={{height: 32}} value={versionId} onChange={e => picker.onPick(e.target.value)}>
-        {picker.versions.map(v => (
-          <option key={v.id} value={v.id}>
-            {v.label}
-            {v.best ? ' (best)' : ''}
-          </option>
-        ))}
-      </select>
-      <Icon name="chev" />
-    </span>
+  if (found === undefined || (!found && !paged)) return null;
+  const said = (lab: string, text: string, err: boolean) => (
+    <div className="row" style={{gap: 12, paddingTop: 4, fontSize: 13, lineHeight: '20px', alignItems: 'flex-start'}}>
+      <span className="t-3" style={{width: 128, flex: 'none'}}>
+        {lab}
+      </span>
+      <span className={err ? 't-err' : 't-2'}>{text}</span>
+    </div>
   );
   return (
     <Card
       title="Model answer"
       titleExtra={
-        shown && found && !picker ? (
+        shown && found && !paged ? (
           <span className="t-3 one" style={{fontSize: 13}}>
             {found.endpoint} · prompt {found.label}
           </span>
         ) : undefined
       }
       actions={
-        <div className="row" style={{gap: 8}}>
-          {pick}
-          {toggle && <Button label={shown ? 'Hide' : 'Show'} kind="ghost" size="sm" icon="eye" onClick={onToggle} />}
-        </div>
+        toggle ? <Button label={shown ? 'Hide' : 'Show'} kind="ghost" size="sm" icon="eye" onClick={onToggle} /> : undefined
       }
     >
       {!shown ? null : !found ? (
@@ -383,9 +434,15 @@ function ModelAnswer({
           No answer from this version for this example
         </span>
       ) : !found.answer ? (
-        <span className="t-3 one" style={{fontSize: 13}} title={found.invalid ?? undefined}>
-          The model&apos;s answer was invalid
-        </span>
+        why ? (
+          <div className="col" style={{gap: 12}}>
+            {said('Not readable', found.invalid ?? "The model's reply could not be read", true)}
+          </div>
+        ) : (
+          <span className="t-3 one" style={{fontSize: 13}} title={found.invalid ?? undefined}>
+            The model&apos;s answer was invalid
+          </span>
+        )
       ) : (
         <div className="col" style={{gap: 12}}>
           {schema.fields.map(fl => (
@@ -400,19 +457,22 @@ function ModelAnswer({
               ))}
             </div>
           ))}
+          {why && found.reason && said("Model's reason", found.reason, false)}
         </div>
       )}
     </Card>
   );
 }
 
+const DONE_TEXT: Record<MismatchReview['outcome'], string> = {kept: 'Kept my label', model: "Used the model's answer", other: 'Changed my label'};
 const kindText = (f: LabelField) => (f.kind === 'single' ? 'Single-select' : `Multi-select, ${f.min ?? 1} to ${f.max ?? f.values.length}`);
 const same = (a: Answer, b: Answer) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
 
 /**
  * Picking values saves the answer as soon as every field has one (no Save button in the design).
  * On Mismatches (`review`), the card keeps the label or takes the model's answer, and a third
- * answer picked on the chips is recorded as a change too.
+ * answer picked on the chips is recorded as a change too. "Why" goes with the decision (R4-4). A
+ * reviewed example (`review.done`) shows the decision, its time, the note, and Reopen (R4-5).
  */
 function YourAnswer({
   state,
@@ -423,7 +483,7 @@ function YourAnswer({
   state: ProjectState;
   ex: Example;
   modelShown: boolean;
-  review?: {modelAnswer: Answer | null; onKeep: () => Promise<void>; onChange: (a: Answer) => Promise<void>};
+  review?: {modelAnswer: Answer | null; done?: MismatchReview; onKeep: (note: string) => Promise<void>; onChange: (a: Answer, note: string) => Promise<void>; onReopen: () => Promise<void>};
 }) {
   const schema = state.setup!.schema!;
   const saved = state.gold.get(ex.id);
@@ -434,6 +494,10 @@ function YourAnswer({
   const isSaved = !!saved && same(saved.answer, answer);
   const reviewRef = useRef(review);
   reviewRef.current = review;
+  const done = review?.done;
+  const [note, setNote] = useState(done?.note ?? '');
+  const noteRef = useRef(note);
+  noteRef.current = note;
 
   // A complete answer saves a moment after the last click. Moving to another example (which
   // unmounts this card) saves at once instead of dropping the answer.
@@ -442,8 +506,9 @@ function YourAnswer({
     if (!complete || (savedRef.current && same(savedRef.current.answer, answer))) return;
     const save = () => {
       pending.current = null;
-      if (reviewRef.current) void reviewRef.current.onChange(answer);
-      else void saveGold(state.project.id, ex.id, state.setup!.schemaVersion, answer, modelShown);
+      if (reviewRef.current) {
+        if (!reviewRef.current.done) void reviewRef.current.onChange(answer, noteRef.current);
+      } else void saveGold(state.project.id, ex.id, state.setup!.schemaVersion, answer, modelShown);
     };
     pending.current = save;
     const id = setTimeout(save, 300);
@@ -468,10 +533,18 @@ function YourAnswer({
         ) : undefined
       }
       actions={
-        review ? (
+        review && done ? (
+          <div className="row" style={{gap: 8, alignItems: 'center'}}>
+            <Badge text={DONE_TEXT[done.outcome]} tone="ok" />
+            <span className="t-3" style={{fontSize: 13}}>
+              {dateTime(done.at)}
+            </span>
+            <Button label="Reopen" size="sm" onClick={review.onReopen} />
+          </div>
+        ) : review ? (
           <div className="row" style={{gap: 8}}>
-            <Button label="Keep my label" size="sm" disabled={!isSaved} onClick={review.onKeep} />
-            <Button label="Use the model's answer" size="sm" disabled={!review.modelAnswer} onClick={() => review.onChange(review.modelAnswer!)} />
+            <Button label="Keep my label" size="sm" disabled={!isSaved} onClick={() => review.onKeep(note)} />
+            <Button label="Use the model's answer" size="sm" disabled={!review.modelAnswer} onClick={() => review.onChange(review.modelAnswer!, note)} />
           </div>
         ) : undefined
       }
@@ -489,7 +562,7 @@ function YourAnswer({
               {f.values.map(v => {
                 const on = (answer[f.name] ?? []).includes(v.name);
                 return (
-                  <button key={v.name} type="button" className="ch" aria-pressed={on} title={v.definition} onClick={() => pick(f, v.name)}>
+                  <button key={v.name} type="button" className="ch" aria-pressed={on} title={v.definition} disabled={!!done} onClick={() => pick(f, v.name)}>
                     {on && <Icon name="check" />}
                     {v.name}
                   </button>
@@ -498,6 +571,26 @@ function YourAnswer({
             </div>
           </div>
         ))}
+        {review && (!done || done.note) && (
+          <div style={{paddingTop: 8}}>
+            <div className="col" style={{gap: 8}}>
+              <span className="field-l">
+                <Hov text="Why" tip="Goes to the Optimiser with this example, so it learns what your label means. It never reaches the held-out half" />
+              </span>
+              <textarea
+                className="input"
+                rows={3}
+                aria-label="Why"
+                readOnly={!!done}
+                placeholder={done ? undefined : 'Optional: for example, the clip is cut from a show, so it is a Clip'}
+                maxLength={500}
+                value={note}
+                onChange={e => setNote(e.target.value)}
+                style={{height: 76, padding: '8px 12px', resize: 'none', lineHeight: '20px', ...(done ? {background: 'var(--bg-muted)', borderColor: 'transparent'} : {})}}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </Card>
   );

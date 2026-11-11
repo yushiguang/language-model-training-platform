@@ -451,6 +451,33 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
   assert.equal(after.gold.get(id(5))!.id, s.gold.get(id(5))!.id, 'keeping a label saves no new label');
   const log = await w.catalog.find('audit_log', {projectId: w.projectId, action: 'gold.review'});
   assert.deepEqual(log.map(l => (l.data as {outcome: string}).outcome).sort(), ['changed', 'kept']);
+
+  // R4-5 (2026-11-11): a review belongs to a gold label and a version. v1 still lists 5 (reviewed
+  // for v2 only); 6 now has v1's answer as its label, so it is no mismatch for v1.
+  m = await mismatches(w.projectId, v1);
+  assert.deepEqual(m.items.map(x => x.exampleId).sort(), [5, 7, 0, 1, 2, 3, 4].map(id).sort());
+  assert.equal(m.reviewed, 0);
+  assert.equal(m.reviewedAll, 2);
+  m = await mismatches(w.projectId);
+  assert.deepEqual(
+    m.reviewedItems.map(r => [r.exampleId, r.outcome]).sort(),
+    [
+      [id(5), 'kept'],
+      [id(6), 'model'],
+    ],
+  );
+  // Reopen: a kept label goes back to To review; a changed label goes back to what it was.
+  const {reopenGold} = await import('./mismatches.ts');
+  await reopenGold(w.projectId, id(5), best.id);
+  await reopenGold(w.projectId, id(6), best.id);
+  m = await mismatches(w.projectId);
+  assert.deepEqual(m.items.map(x => x.exampleId), [5, 6, 7].map(id));
+  assert.equal(m.reviewed, 0);
+  assert.deepEqual((await w.state()).gold.get(id(6))!.answer, s.gold.get(id(6))!.answer);
+  // Reviewed again after a reopen, the new decision stands.
+  await reviewGold(w.projectId, id(5), best.id, 'kept', undefined, '  Its own words  ');
+  m = await mismatches(w.projectId);
+  assert.deepEqual(m.reviewedItems.map(r => [r.exampleId, r.note]), [[id(5), 'Its own words']]);
 });
 
 test('Finding 3: no helper tool or helper input carries an example of the held-out half', async () => {
@@ -493,6 +520,33 @@ test('Finding 3: no helper tool or helper input carries an example of the held-o
   assert.ok(input.examples && input.examples.length > 0);
   assert.deepEqual(leaks(input), [], 'examples and mix-ups come from the optimiser half');
   assert.ok(input.mixUps.every(m => m.exampleIds.every(id => !heldOut.has(id))));
+});
+
+test('R4-4: the labeler\'s Why reaches the helpers for optimiser-half examples only', async () => {
+  const agents = ruleAgent();
+  const improve: Parameters<AgentRuntimeContract['draftImprovement']>[0][] = [];
+  agents.draftImprovement = async input => (improve.push(input), {template: input.template, changes: [], reply: ''});
+  const w = await world('b33', {agents, answer: ruled, macroF1: 0.99, gold: goldOf});
+  await w.newVersion();
+  await tick(await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
+  const s = await w.state();
+  const v = s.versions[0].id;
+  const {mismatches, reviewGold, labelerNotes} = await import('./mismatches.ts');
+  const wrong = new Set((await mismatches(w.projectId, v)).items.map(x => x.exampleId));
+  const evalEx = s.examples.filter(e => e.split === 'eval' && wrong.has(e.id));
+  const mine = evalEx.find(e => e.optimiserHalf)!;
+  const held = evalEx.find(e => !e.optimiserHalf)!;
+  assert.ok(mine && held);
+  await reviewGold(w.projectId, mine.id, v, 'kept', undefined, 'Shown at work, so it is a Tutorial');
+  await reviewGold(w.projectId, held.id, v, 'kept', undefined, 'A held-out note');
+  const notes = await labelerNotes(w.projectId, (await w.state())!);
+  assert.deepEqual([...notes], [[mine.id, 'Shown at work, so it is a Tutorial']]);
+  const {improveWithAi} = await import('./agents.ts');
+  await improveWithAi(w.projectId, v);
+  const briefs = improve[0].examples ?? [];
+  assert.equal(briefs.find(b => b.externalId === mine.externalId)?.labelerNote, 'Shown at work, so it is a Tutorial');
+  assert.ok(!JSON.stringify(improve[0]).includes('A held-out note'));
 });
 
 test("Auto Optimise: the pool holds the user's other scored versions too, and the helper reads the model's reasons", async () => {

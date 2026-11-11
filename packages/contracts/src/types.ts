@@ -124,9 +124,25 @@ export interface DatasetSnapshot {
 export interface MismatchList {
   versions: {id: string; label: string; score: number | null; best?: boolean}[];
   versionId: string | null;
+  /** To review: the picked version's mismatches not yet reviewed for that version. */
   items: {exampleId: string; wrongIn: number; of: number}[];
   wrongEverywhere: number;
+  /** Reviewed for the picked version (acceptance R4-5, 2026-11-11: a review belongs to a gold label and a version). */
   reviewed: number;
+  /** The picked version's reviews, newest first; each can be reopened. */
+  reviewedItems: MismatchReview[];
+  /** Reviews still standing on any version: the AI Suggestion asks for a first review only while this is 0. */
+  reviewedAll: number;
+}
+
+/** A decision made on the Mismatches tab, for one gold label and one version. */
+export interface MismatchReview {
+  exampleId: string;
+  /** Kept the gold label, took the model's answer, or picked another answer. */
+  outcome: 'kept' | 'model' | 'other';
+  /** The labeler's "Why" (R4-4): sent to the Optimiser for optimiser-half examples only. */
+  note: string | null;
+  at: string;
 }
 
 export interface GoldLabel {
@@ -253,11 +269,20 @@ export interface MixUp {
 }
 
 export interface Metrics {
+  /**
+   * Examples the score rests on: answers the site could read as labels. Invalid answers and answers
+   * the safety filter stopped are left out (acceptance R4-6, 2026-11-11) and counted below.
+   */
   n: number;
+  /** Every example scored for, including those left out. Missing on reports made before 2026-11-11. */
+  total?: number;
+  /** Answers the safety filter stopped. Missing on reports made before 2026-11-11. */
+  filtered?: number;
   fields: FieldMetrics[];
   lowestField: {field: string; macroF1: number};
   lowestValue: {field: string; value: string; f1: number} | null;
   invalid: number;
+  /** Invalid answers over every example scored for (`total`). */
   invalidRate: number;
   mixUps: MixUp[];
   costPer1000: number;

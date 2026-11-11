@@ -132,7 +132,7 @@ export async function buildReport(
   const byExample = await predictionsFor(version.id, endpoint, settings);
   const scoredOn = evalExamples.filter(e => !e.optimiserHalf);
   if (scoredOn.some(e => !byExample.has(e.id))) return null;
-  const items: Scored[] = scoredOn.map(e => ({exampleId: e.id, gold: gold.get(e.id)!.answer, predicted: byExample.get(e.id)!.answer, costUsd: byExample.get(e.id)!.costUsd}));
+  const items: Scored[] = scoredOn.map(e => ({exampleId: e.id, gold: gold.get(e.id)!.answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd}));
   const report: EvalReport = {
     id: newId('er'),
     projectId,
@@ -159,7 +159,7 @@ export async function confirmScore(setup: SetupVersion, version: PromptVersion, 
   const evalExamples = examples.filter(e => e.split === 'eval');
   const held = evalExamples.filter(e => !e.optimiserHalf && gold.has(e.id));
   if (held.some(e => !byExample.has(e.id))) throw new Error('the second labeling is missing answers');
-  const m = computeMetrics(setup.schema!, held.map(e => ({exampleId: e.id, gold: gold.get(e.id)!.answer, predicted: byExample.get(e.id)!.answer, costUsd: byExample.get(e.id)!.costUsd})));
+  const m = computeMetrics(setup.schema!, held.map(e => ({exampleId: e.id, gold: gold.get(e.id)!.answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd})));
   return {score: m.lowestField.macroF1, passed: !!setup.thresholds && judge(m, setup.thresholds, evalExamples.length).passed};
 }
 
@@ -169,6 +169,6 @@ export async function scoreOnOptimiserHalf(setup: SetupVersion, version: PromptV
   const half = examples.filter(e => e.split === 'eval' && e.optimiserHalf && byExample.has(e.id) && gold.has(e.id));
   return computeMetrics(
     setup.schema!,
-    half.map(e => ({exampleId: e.id, gold: gold.get(e.id)!.answer, predicted: byExample.get(e.id)!.answer, costUsd: byExample.get(e.id)!.costUsd})),
+    half.map(e => ({exampleId: e.id, gold: gold.get(e.id)!.answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd})),
   );
 }

@@ -223,10 +223,14 @@ draft on Schema settings, and keeps answering on Dataset.
 
 **Mismatches** (review finding 2, decided 2026-11-10). Gold Labels has a Mismatches tab: the eval
 examples where a version's saved answer differs from the gold label, for the version picked in
-the Model answer card (default: the best scored one; only versions with answers on the whole eval
-set). The examples wrong in the most versions come first. The user keeps the label or changes it
-(to the model's answer or a third answer); each decision is an audit record (`gold.review`) and
-the example leaves the list. A change saves a new gold label, so the evaluation context changes
+"Compare with" at the end of the tab row (default: the best scored one; only versions with answers
+on the whole eval set; answers the safety filter stopped are no mismatch). The examples wrong in
+the most versions come first. The user keeps the label or changes it (to the model's answer or a
+third answer), with an optional "Why"; each decision is an audit record (`gold.review`, with the
+version) and the example moves from To review to Reviewed for that version only (acceptance R4-5).
+A review stands until it is reopened (`gold.reopen`, which names the review; a changed label goes
+back to what it was) or the gold label changes. `labelerNotes` gives the standing notes on
+optimiser-half examples to the Optimiser and Improve with AI as `ExampleBrief.labelerNote`. A change saves a new gold label, so the evaluation context changes
 and reports are rebuilt from saved answers: nothing is labeled again
 (`apps/bff/src/services/mismatches.ts`). Prompt versions' AI Suggestion points to the tab right
 after the first score (before any review or Optimiser run) and when Auto Optimise ends without a
@@ -266,7 +270,7 @@ application `id` to the store's document id.
 |---|---|
 | `{{Key}}` placeholders, checks and quick fixes; rendering to text and image parts | `packages/domain/src/template.ts` |
 | Reading a model answer against the schema; settings hash; evaluation context id; token estimate | `packages/domain/src/labels.ts` |
-| Metrics (macro-F1 per field, shown as "Score"; per-value F1, accuracy, invalid rate, mix-ups) and pass/fail | `packages/domain/src/metrics.ts` |
+| Metrics (macro-F1 per field, shown as "Score" with the metric name in grey; per-value F1, accuracy, invalid rate, mix-ups; invalid and filtered answers left out of the scores and counted apart) and pass/fail (always at most 1% invalid, `INVALID_CAP`) | `packages/domain/src/metrics.ts` |
 | Versions are major.minor and never overwritten; the catalog assigns the numbers | `packages/domain/src/versions.ts`, `apps/catalog/src/catalog.ts` |
 | Gates between steps; Gold Labels is recommended, not required | `packages/domain/src/gates.ts` |
 | The recommended next step (the best score wins; cost only breaks a tie) | `packages/domain/src/workflow.ts` |

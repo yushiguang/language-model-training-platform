@@ -120,6 +120,23 @@ Canvas rows 11 ("Fixes from the MVP review") and 12 ("Mismatches on Gold Labels"
 | Gold Labels (finding 2) | The Model answer card picks the version to compare with (default: the best scored version with answers on the whole eval set). A Mismatches tab lists the eval examples where that version disagrees with the gold label, wrong in the most versions first, with the model's answer shown and the different field in red. "Keep my label" and "Use the model's answer" (or a third answer on the chips) take the example off the list and are recorded |
 | Prompt versions (finding 2) | The AI Suggestion "The model disagrees with N of your labels" right after the first score, and "N examples were wrong in every version" when Auto Optimise ends without a pass; Review labels opens the Mismatches tab |
 
+## Done on 2026-11-11: acceptance round 4
+
+Evelyn approved canvas row 13 ("Acceptance round 4") and asked for the code (2026-11-11). What the
+code does:
+
+| Item | What the code does |
+| --- | --- |
+| R4-1 Score | "Score" stays, with the real metric in small grey text next to it: "Lowest field macro-F1" on the big number, "Macro-F1" on the field column. No hover |
+| R4-2 Fade | No fade at the bottom of the version card or the Versions list |
+| R4-3 Rounds | The AI Suggestion has no rounds box. Auto Optimise always opens one dialog: "Start from" (only when a better minor of the same major exists; the best is picked), "Max rounds" (prefilled 10), Cancel and Start. The "model disagrees" suggestion also lost its rounds box |
+| R4-4 Why | On Mismatches the Model answer card adds "Model's reason" (the model's own sentence), or "Not readable" with the invalid reason in red. Your answer adds "Why", saved with Keep or Change. Notes on optimiser-half examples go to the Optimiser and Improve with AI as the person's own reading of the label; notes on the held-out half never reach a helper |
+| R4-5 Reviewed | One "Compare with" for the page, at the end of the tab row: every tab shows that version's answers. A review belongs to a gold label and a version. Mismatches has "To review N / Reviewed M" for the picked version; a reviewed example shows the decision ("Kept my label", "Used the model's answer" or "Changed my label"), its time, the note read-only, and Reopen. Reopen puts it back in To review, and a changed label goes back to what it was |
+| R4-6 Invalid | Invalid answers and answers the safety filter stopped are left out of every score (reports, the Optimiser's comparisons) and counted on their own: "Scored on 16 of 17 examples · 1 invalid (6%, above 1%) · 0 filtered left out" under the field table, red when over the cap. Every pass also needs at most 1% invalid answers (the project's own limit when Setup sets one). The Optimiser's per-example score still counts an invalid answer as 0 and skips filtered ones |
+
+Not drawn, decided in code: a reviewed example with no note shows no Why box; "Reviewed" with
+nothing in it shows "Nothing reviewed yet".
+
 ## Still different from the canvas
 
 | Where | Canvas | Code | Why |
@@ -151,7 +168,7 @@ Canvas rows 11 ("Fixes from the MVP review") and 12 ("Mismatches on Gold Labels"
 | Choosing which models to use | One labeling model per project, chosen on Setup (decided 2026-11-09). Comparing models comes later |
 | Reading document links | The helpers read a linked document with the `read_doc` tool. The public build's stand-in opens nothing, so the helper asks for the pasted text; the internal agent connects the real document service (docs/handover/integration.md) |
 | Agent replies | The helpers read model names and version labels the way the pages show them. The page views hold no cost or time, and the helpers' rules say never to mention either (MVP review finding 16) |
-| Gold Labels, a version with no answer for an example | The Model answer card keeps its version picker and says "No answer from this version for this example" (not drawn) |
+| Gold Labels, a version with no answer for an example | The Model answer card says "No answer from this version for this example" (not drawn) |
 | Gold Labels, no mismatches left | The Mismatches tab shows "No mismatches left" with the usual empty-state look (not drawn) |
 
 ## Tech changes

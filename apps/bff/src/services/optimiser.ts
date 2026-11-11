@@ -25,6 +25,7 @@ import {buildReport, confirmScore, labelEvalSet, labelExamples, scoreOnOptimiser
 import {agentTools} from './page-views.ts';
 import {approveNode, loadProjectState} from './projects.ts';
 import {createVersion} from './prompts.ts';
+import {labelerNotes, withLabelerNotes} from './mismatches.ts';
 import {startTrainingSet} from './training.ts';
 
 /**
@@ -288,7 +289,9 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
       for (const v of pool) answers.set(v.id, await getApp().labeling.predictions(v.id, endpoint, settingsHash(settings)));
       const entries: PoolEntry[] = pool.map(v => ({
         id: v.id,
-        scores: new Map(half.filter(id => answers.get(v.id)!.has(id)).map(id => [id, exampleScore(schema, state.gold.get(id)!.answer, answers.get(v.id)!.get(id)!.answer)])),
+        // R4-6: an answer the safety filter stopped is left out. An invalid answer still scores 0
+        // here, so the Optimiser keeps fixing prompts that give unreadable answers.
+        scores: new Map(half.filter(id => answers.get(v.id)!.has(id) && !answers.get(v.id)!.get(id)!.filtered).map(id => [id, exampleScore(schema, state.gold.get(id)!.answer, answers.get(v.id)!.get(id)!.answer)])),
       }));
       const front = paretoFront(entries, half);
 
@@ -323,7 +326,8 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
         await putRound(round);
 
         const m = await scoreOnOptimiserHalf(setup, parent, endpoint, state.examples, state.gold);
-        const examples = briefs(state, schema, half, parent, other, answers, entries);
+        // R4-4: the labelers' Why notes go with optimiser-half examples (never the held-out half).
+        const examples = withLabelerNotes(briefs(state, schema, half, parent, other, answers, entries), state.examples, await labelerNotes(state.project.id, state));
         const out = await step(other ? 'merge' : 'reflect', parent, () =>
           agents.reflectPrompt(
             {
@@ -402,7 +406,8 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
           return compareDryRun(
             schema,
             parent.id,
-            ids.map(id => ({gold: state.gold.get(id)!.answer, candidate: mine.get(id)?.answer ?? null, parent: parentAnswers.get(id)?.answer ?? null})),
+            // R4-6: examples where either answer was stopped by the safety filter are left out.
+            ids.filter(id => !mine.get(id)?.filtered && !parentAnswers.get(id)?.filtered).map(id => ({gold: state.gold.get(id)!.answer, candidate: mine.get(id)?.answer ?? null, parent: parentAnswers.get(id)?.answer ?? null})),
             pm.lowestField.field,
           );
         });

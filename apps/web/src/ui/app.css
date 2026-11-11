@@ -82,3 +82,6 @@ button.vrow { width: 100%; border: 0; background: none; font: inherit; color: in
 .dlg .card-t { font-size: 17px; line-height: 24px; }
 .dlg p { margin: 0; color: var(--text-2); font-size: 14px; line-height: 22px; }
 .dlg .dlg-acts { gap: 8px; justify-content: flex-end; padding-top: 16px; }
+/* R4-3: a dialog with fields (Auto Optimise) spaces them like the canvas board U-J-Optimise-Dialog. */
+.dlg.form { gap: 20px; }
+.dlg.form .dlg-acts { padding-top: 4px; }
