@@ -245,6 +245,8 @@ let current = null;
   await page.getByText('Unsaved changes', {exact: true}).waitFor();
   const del = page.locator('.ed .editor .ed-del').first();
   await del.waitFor({state: 'attached'});
+  // The page may be scrolled (Ask AI open, a longer prompt): bring the mark into view first
+  await del.evaluate(el => el.scrollIntoView({block: 'center'}));
   const at = await del.evaluate(el => {
     const r = el.getClientRects()[0];
     return {x: r.left + r.width / 2, y: r.top + r.height / 2};

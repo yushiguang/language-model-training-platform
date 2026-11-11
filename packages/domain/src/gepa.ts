@@ -58,6 +58,16 @@ export function exampleBrief(e: Example, keys: Iterable<string>, gold: Answer, p
 }
 
 /**
+ * Decided 2026-11-11 (review finding 3): no helper, agent or the Optimiser ever reads an example of
+ * the held-out half of the eval set: not its features, gold label or the model's answers. Scores
+ * and counts built on it may still be shown.
+ */
+export const visibleToAgents = (e: Pick<Example, 'split' | 'optimiserHalf'>): boolean => !(e.split === 'eval' && !e.optimiserHalf);
+
+/** What a tool says when it leaves held-out examples out, so a helper doesn't ask for them. */
+export const HIDDEN_NOTE = 'The held-out half of the eval set is hidden from helpers so its scores stay fair; it is not in this list.';
+
+/**
  * The examples a version gets wrong, worst first (fewest fields right), at most `max`. Pass only
  * optimiser-half examples: the held-out half must never reach a helper.
  */

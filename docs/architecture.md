@@ -185,6 +185,18 @@ document service (docs/handover/integration.md, "Document links").
 once more; on a second miss it shows plain prose as it is, or a short "please ask again" line when
 the reply looks like broken JSON.
 
+**The held-out half stays hidden from every helper** (review finding 3, decided 2026-11-11).
+`visibleToAgents` in `packages/domain/src/gepa.ts` is the one rule, used wherever examples go to a
+helper:
+- the read tools (`get_examples`, `get_gold_labels`, `get_predictions`) leave held-out examples
+  out and say so in a `note`; asking for one by id gives nothing;
+- `get_report` and the report page view give mix-ups as counts only, since reports are scored on
+  the held-out half;
+- `try_template`, the label check, Improve with AI (its mistakes, mix-ups and wrong examples come
+  from `scoreOnOptimiserHalf`) and the Optimiser read the optimiser half only.
+Page views carry scores and counts only. Every preset's instructions (`common` and the
+Optimiser's) say the held-out half is hidden and why, so a helper doesn't ask for it.
+
 **The label check** (review finding 10). Dataset's AI Suggestion "Check the labels against your
 data" sends the Labels helper 20 random examples (never the held-out half) with their gold labels
 when they have one (`checkLabels`, intent `check_schema`). It answers in Ask AI, may put a schema
@@ -241,6 +253,7 @@ application `id` to the store's document id.
 | The recommended next step (the best score wins; cost only breaks a tie) | `packages/domain/src/workflow.ts` |
 | Agent prompts, handoffs (to known specialists only), read tools per preset | `apps/agents/src/presets.ts`, `apps/agents/src/runtime.ts` |
 | What an agent sees of each page (page views) and the read tools' implementation | `apps/bff/src/services/page-views.ts` |
+| No helper reads the held-out half (`visibleToAgents`) | `packages/domain/src/gepa.ts`, used in `page-views.ts`, `starts.ts`, `agents.ts` |
 | When labeling starts, reports scored on the held-out half of the eval set | `apps/bff/src/services/evaluation.ts`, `work.ts` |
 | Optimiser: Pareto front, parent, merge pair, dry-run pick and comparison | `packages/domain/src/gepa.ts` |
 | Confirming a pass (second labeling of the held-out half) | `confirmScore` in `apps/bff/src/services/evaluation.ts` |

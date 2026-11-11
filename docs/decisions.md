@@ -3,6 +3,14 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-11
+
+- **No helper sees the held-out half of the eval set** (review finding 3). Not the Assistant, the
+  Labels, Prompt or Scores helper, nor the Optimiser: no example, gold label or model answer from
+  it. They may read scores and counts built on it. Users still see every example on the pages.
+  Why: the held-out half scores every version, and a helper that read it could write prompts that
+  fit those examples, so the score would no longer say how the prompt does on new data.
+
 ## 2026-11-10: MVP review
 
 - **Real eval sets have 1,000 to 3,000 examples.** Small sets are for tests only, so the minimum

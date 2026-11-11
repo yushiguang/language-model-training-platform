@@ -1,5 +1,5 @@
 import type {AgentPreset, ChatLink, EndpointId, ProjectState} from '@tsp/contracts';
-import {autoSpendUsd, DEFAULT_MAX_ROUNDS, evalEstimate, optimiserEstimate, TRY_TEMPLATE_MAX, versionLabel} from '@tsp/domain';
+import {autoSpendUsd, DEFAULT_MAX_ROUNDS, evalEstimate, optimiserEstimate, TRY_TEMPLATE_MAX, versionLabel, visibleToAgents} from '@tsp/domain';
 import {getApp, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {asModel, findVersion, modelName} from './page-views.ts';
@@ -43,7 +43,7 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
       if (!template.trim()) throw new Error('Give the template to try.');
       const draft = {template, features: (args.features as typeof base.features | undefined) ?? base?.features ?? {video: [], photo_text: [], metadata: []}, images: base?.images ?? []};
       const n = Math.max(1, Math.min(TRY_TEMPLATE_MAX, typeof args.n === 'number' ? Math.floor(args.n) : 3));
-      const examples = state.examples.filter(e => e.split === 'eval').slice(0, n);
+      const examples = state.examples.filter(e => e.split === 'eval' && visibleToAgents(e)).slice(0, n);
       if (!examples.length) throw new Error('There are no eval examples to try it on.');
       return {
         line: `tried the prompt on ${examples.length} eval example${examples.length === 1 ? '' : 's'} with ${modelName(state, endpoint)}`,

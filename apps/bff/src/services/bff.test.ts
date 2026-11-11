@@ -440,3 +440,45 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
   const log = await w.catalog.find('audit_log', {projectId: w.projectId, action: 'gold.review'});
   assert.deepEqual(log.map(l => (l.data as {outcome: string}).outcome).sort(), ['changed', 'kept']);
 });
+
+test('Finding 3: no helper tool or helper input carries an example of the held-out half', async () => {
+  const agents = ruleAgent();
+  const improve: Parameters<AgentRuntimeContract['draftImprovement']>[0][] = [];
+  agents.draftImprovement = async input => (improve.push(input), {template: input.template, changes: [], reply: ''});
+  const w = await world('b31', {agents, answer: ruled, macroF1: 0.99, gold: goldOf, test: 2, train: 2});
+  await w.newVersion();
+  await tick(await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
+  const s = await w.state();
+  const heldOut = new Set(s.examples.filter(e => e.split === 'eval' && !e.optimiserHalf).flatMap(e => [e.externalId, e.id]));
+  assert.equal(heldOut.size, 10);
+  const {agentTools} = await import('./page-views.ts');
+  const tools = agentTools(w.projectId);
+  const call = (name: string, args: Record<string, unknown> = {}) => tools.call({agent: 'prompt_agent', name: name as 'get_examples', args});
+  const leaks = (x: unknown) => [...heldOut].filter(id => new RegExp(`"(id|externalId|exampleId)":"${id}"`).test(JSON.stringify(x)));
+
+  const ex = (await call('get_examples', {split: 'eval', limit: 10})) as {total: number; note?: string};
+  assert.equal(ex.total, 5);
+  assert.match(ex.note ?? '', /held-out/);
+  assert.deepEqual(leaks(ex), []);
+  const byId = (await call('get_examples', {ids: ['1', '2']})) as {total: number};
+  assert.equal(byId.total, 1, 'asking for a held-out example by id gives nothing');
+  const gold = (await call('get_gold_labels', {split: 'eval', limit: 20})) as {labeled: number};
+  assert.equal(gold.labeled, 5);
+  assert.deepEqual(leaks(gold), []);
+  const preds = (await call('get_predictions', {version: 'v1', model: 'A', limit: 20})) as {matching: number};
+  assert.equal(preds.matching, 5);
+  assert.deepEqual(leaks(preds), []);
+  const report = (await call('get_report', {version: 'v1'})) as {report: {topMixUps: object[]}};
+  assert.ok(report.report.topMixUps.length > 0 && report.report.topMixUps.every(m => !('examples' in m)), 'mix-ups as counts only');
+  const tried = (await call('try_template', {n: 5})) as {rows: {id: string}[]};
+  assert.equal(tried.rows.length, 5);
+  assert.deepEqual(leaks(tried), []);
+
+  const {improveWithAi} = await import('./agents.ts');
+  await improveWithAi(w.projectId, s.versions[0].id);
+  const input = improve[0];
+  assert.ok(input.examples && input.examples.length > 0);
+  assert.deepEqual(leaks(input), [], 'examples and mix-ups come from the optimiser half');
+  assert.ok(input.mixUps.every(m => m.exampleIds.every(id => !heldOut.has(id))));
+});

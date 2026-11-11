@@ -1,6 +1,6 @@
 import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@tsp/contracts';
 import {agentStart, isStartTool} from './starts.ts';
-import {checkTemplate, defaultOutputPick, dryRunSize, finalRunPlan, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, recommend, settingsHash, stepLine, versionLabel} from '@tsp/domain';
+import {checkTemplate, defaultOutputPick, dryRunSize, finalRunPlan, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, recommend, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE} from '@tsp/domain';
 import {getApp} from './app.ts';
 import {loadProjectState} from './projects.ts';
 import {mismatches} from './mismatches.ts';
@@ -102,7 +102,6 @@ function reportView(state: ProjectState, v: PromptVersion | undefined, model: En
   const ver = state.versions.find(x => x.id === r.promptVersionId)!;
   const t = state.setup?.thresholds;
   const nEval = state.examples.filter(e => e.split === 'eval').length;
-  const byId = new Map(state.examples.map(e => [e.id, e]));
   const trend = state.reports
     .filter(x => x.endpoint === r.endpoint && !x.archivedNow)
     .map(x => ({version: versionLabel(state.versions.find(v2 => v2.id === x.promptVersionId)!), lowestFieldMacroF1: r2(x.metrics.lowestField.macroF1), passed: x.passed}))
@@ -119,7 +118,8 @@ function reportView(state: ProjectState, v: PromptVersion | undefined, model: En
       lowestValue: r.metrics.lowestValue ? {...r.metrics.lowestValue, f1: r2(r.metrics.lowestValue.f1)} : null,
       invalidRate: r2(r.metrics.invalidRate),
       checks: t ? judge(r.metrics, t, nEval).checks : null,
-      topMixUps: r.metrics.mixUps.slice(0, 5).map(m => ({field: m.field, kind: m.kind, gold: m.gold, predicted: m.predicted, count: m.count, examples: m.exampleIds.slice(0, 3).map(id => byId.get(id)?.externalId)})),
+      // Scored on the held-out half, so mix-ups go as counts only: no example ids (finding 3).
+      topMixUps: r.metrics.mixUps.slice(0, 5).map(m => ({field: m.field, kind: m.kind, gold: m.gold, predicted: m.predicted, count: m.count})),
     },
     thresholds: t,
     trend,
@@ -298,13 +298,14 @@ export function agentTools(projectId: string): AgentToolHost {
         case 'get_examples': {
           const ids = Array.isArray(args.ids) ? new Set(args.ids.map(String)) : null;
           const split = typeof args.split === 'string' ? args.split : null;
-          const list = state.examples.filter(e => (!ids || ids.has(e.externalId) || ids.has(e.id)) && (!split || e.split === split));
-          return {total: list.length, examples: list.slice(0, limitOf(args.limit, 10, 5)).map(exampleView)};
+          const all = state.examples.filter(e => (!ids || ids.has(e.externalId) || ids.has(e.id)) && (!split || e.split === split));
+          const list = all.filter(visibleToAgents);
+          return {total: list.length, examples: list.slice(0, limitOf(args.limit, 10, 5)).map(exampleView), ...(list.length < all.length ? {note: HIDDEN_NOTE} : {})};
         }
         case 'get_gold_labels': {
           const split = args.split === 'test' ? 'test' : 'eval';
-          const list = state.examples.filter(e => e.split === split && state.gold.has(e.id));
-          return {split, labeled: list.length, labels: list.slice(0, limitOf(args.limit, 20, 10)).map(e => ({id: e.externalId, title: e.title, answer: state.gold.get(e.id)!.answer}))};
+          const list = state.examples.filter(e => e.split === split && state.gold.has(e.id) && visibleToAgents(e));
+          return {split, labeled: list.length, ...(split === 'eval' ? {note: HIDDEN_NOTE} : {}), labels: list.slice(0, limitOf(args.limit, 20, 10)).map(e => ({id: e.externalId, title: e.title, answer: state.gold.get(e.id)!.answer}))};
         }
         case 'get_predictions': {
           const v = findVersion(state, args.version);
@@ -314,10 +315,10 @@ export function agentTools(projectId: string): AgentToolHost {
           const preds = await labeling.predictions(v.id, settings.endpoint, settingsHash(settings));
           const same = (a?: string[], b?: string[]) => JSON.stringify([...(a ?? [])].sort()) === JSON.stringify([...(b ?? [])].sort());
           const rows = state.examples
-            .filter(e => e.split === 'eval' && preds.has(e.id))
+            .filter(e => e.split === 'eval' && visibleToAgents(e) && preds.has(e.id))
             .map(e => ({e, p: preds.get(e.id)!, g: state.gold.get(e.id)?.answer ?? null}))
             .filter(({p, g}) => !args.mixedUpOnly || !p.answer || (g && state.setup!.schema!.fields.some(f => !same(g[f.name], p.answer![f.name]))));
-          return {version: versionLabel(v), model: modelName(state, settings.endpoint), rows: rows.slice(0, limitOf(args.limit, 20, 10)).map(({e, p, g}) => ({id: e.externalId, title: e.title, model: p.answer, invalid: p.invalidReason, gold: g})), matching: rows.length};
+          return {version: versionLabel(v), model: modelName(state, settings.endpoint), note: HIDDEN_NOTE, rows: rows.slice(0, limitOf(args.limit, 20, 10)).map(({e, p, g}) => ({id: e.externalId, title: e.title, model: p.answer, invalid: p.invalidReason, gold: g})), matching: rows.length};
         }
         case 'check_template': {
           const template = typeof args.template === 'string' ? args.template : '';
