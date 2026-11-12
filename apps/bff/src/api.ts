@@ -3,7 +3,6 @@ import {getApp, onChange} from './services/app.ts';
 import * as agents from './services/agents.ts';
 import * as dataset from './services/dataset.ts';
 import * as evaluation from './services/evaluation.ts';
-import * as optimiser from './services/optimiser.ts';
 import * as mismatch from './services/mismatches.ts';
 import * as projects from './services/projects.ts';
 import * as prompts from './services/prompts.ts';
@@ -99,7 +98,7 @@ export function createBffApi(): BffContract {
     scoreVersion: r => idempotent('scoreVersion', r.idempotencyKey, async () => work.scoreVersion(r.projectId, await versionOf(r.projectId, r.promptVersionId), r.endpoint)),
     stopRun: async runId => evaluation.stopRun(runId),
     startOptimiser: r => idempotent('startOptimiser', r.idempotencyKey, () => work.startOptimiser(r.projectId, r.maxRounds, r.startVersionId)),
-    stopOptimiser: async runId => optimiser.stopOptimiser(runId),
+    stopOptimiser: async runId => work.stopOptimiser(runId),
     retryOptimiser: work.retryOptimiser,
     improveWithAi: agents.improveWithAi,
     featureInfo: prompts.featureInfo,

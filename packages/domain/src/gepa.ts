@@ -237,3 +237,10 @@ export function stepLine(step: OptimisationRun['step'], version: string | null, 
       return 'Starting';
   }
 }
+
+/** Adds the labelers' notes (from `labelerNotes`) to the examples a helper reads. */
+export function withLabelerNotes(briefs: ExampleBrief[], examples: Example[], notes: Map<string, string>): ExampleBrief[] {
+  if (!notes.size) return briefs;
+  const byExt = new Map(examples.filter(e => notes.has(e.id)).map(e => [e.externalId, notes.get(e.id)!]));
+  return briefs.map(b => (byExt.has(b.externalId) ? {...b, labelerNote: byExt.get(b.externalId)!} : b));
+}

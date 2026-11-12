@@ -3,8 +3,10 @@ import test from 'node:test';
 import type {AgentRuntimeContract, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema} from '@tsp/contracts';
 import {createCatalog} from '@tsp/catalog';
 import {createLabeling, memoryLocks} from '@tsp/labeling';
+import {createOptimiser} from '@tsp/optimiser';
 import {DocRepo, localDocRuntime} from '@tsp/platform';
-import {configureBff} from './app.ts';
+import {configureBff, emitChange} from './app.ts';
+import {optimiserHost} from './optimiser-host.ts';
 import {loadProjectState} from './projects.ts';
 import {agentStart} from './starts.ts';
 import {tick} from './work.ts';
@@ -49,11 +51,14 @@ async function world(prefix: string, opts: WorldOpts = {}) {
     },
   } as unknown as LlmGatewayContract;
   const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks()});
+  const agents = opts.agents ?? ({} as AgentRuntimeContract);
+  const optimiser = createOptimiser({catalog, labeling, agents, agentModel: () => gateway.agentModel(), host: optimiserHost(), onChange: emitChange, random: () => optimiserRandom()});
   configureBff({
     catalog,
     labeling,
     gateway,
-    agents: opts.agents ?? ({} as AgentRuntimeContract),
+    agents,
+    optimiser,
     identity: {currentUser: async () => ({id: 'u_1', name: 'Tester'})},
     files: {} as FileStore,
     examples: {} as ExampleSource,
@@ -229,8 +234,7 @@ const ruled = (id: string, _n: number, prompt: string) => {
   return JSON.stringify({format: Number(id) < 5 * k ? goldOf(id) : 'Vlog'});
 };
 // The Optimiser's picks (parent, dry-run examples) are fixed in these tests: in order, focus first.
-const {setOptimiserRandom} = await import('./optimiser.ts');
-setOptimiserRandom(() => 0);
+let optimiserRandom = () => 0;
 
 const ruleAgent = (fail: {left: number} = {left: 0}): AgentRuntimeContract => ({
   runAgentTurn: async () => ({invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []}),
@@ -598,11 +602,11 @@ test("Auto Optimise: the pool holds the user's other scored versions too, and th
   await tick(await w.state());
   await until(async () => (await w.state()).reports.length === 2, 'the user version scored');
   const {startOptimiser} = await import('./work.ts');
-  setOptimiserRandom(() => 0.99); // the last version of the front
+  optimiserRandom = () => 0.99; // the last version of the front
   try {
     await startOptimiser(w.projectId, 2, v1.id);
   } finally {
-    setOptimiserRandom(() => 0);
+    optimiserRandom = () => 0;
   }
   const run = (await w.state()).optimisation[0];
   assert.equal(run.startVersionId, v1.id);

@@ -1,25 +1,20 @@
-import {NO_TELEMETRY, type AgentRuntimeContract, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type MediaSource, type Identity, type LabelingContract, type LlmGatewayContract, type TelemetryPort} from '@tsp/contracts';
+import {NO_TELEMETRY, type AgentRuntimeContract, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type MediaSource, type Identity, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type TelemetryPort} from '@tsp/contracts';
 
 /**
  * What the bff talks to. The bff holds no records of its own: product records live in the
  * catalog, labeling tasks and predictions in labeling, model calls go through the llm-gateway.
  * The composition root (`apps/web/src/backend-api`) builds these and calls `configureBff` once.
  */
-/**
- * One runner per piece of work across the tabs of this browser (the Web Locks API in the browser,
- * an in-memory lock in tests). Same shape as the labeling app's task locks.
- */
-export interface WorkLocks {
-  /** Runs fn while holding the lock, or returns null at once when someone else holds it. */
-  run<T>(name: string, fn: () => Promise<T>): Promise<T | null>;
-  isHeld(name: string): Promise<boolean>;
-}
+/** One runner per piece of work across the tabs of this browser; see `LockPort`. */
+export type WorkLocks = LockPort;
 
 export interface BffDeps {
   catalog: CatalogContract;
   labeling: LabelingContract;
   gateway: LlmGatewayContract;
   agents: AgentRuntimeContract;
+  /** The Optimiser service (`@tsp/optimiser`). Without it Auto Optimise is not available. */
+  optimiser?: OptimiserContract;
   identity: Identity;
   files: FileStore;
   examples: ExampleSource;
@@ -63,9 +58,6 @@ function memoryWorkLocks(): WorkLocks {
     isHeld: async name => held.has(name),
   };
 }
-
-/** The lock an optimiser run on one model holds for as long as it runs, in any tab. */
-export const optimiserLock = (projectId: string, endpoint: string) => `optimiser:${projectId}:${endpoint}`;
 
 export function getApp(): App {
   if (!app) throw new Error('The bff is not configured: call configureBff() first.');

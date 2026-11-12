@@ -1,5 +1,5 @@
 import type {Answer, Example, ExampleBrief, MismatchList, MismatchReview, Prediction, ProjectState} from '@tsp/contracts';
-import {fieldsRight, versionLabel, visibleToAgents, systemConfig} from '@tsp/domain';
+import {withLabelerNotes, fieldsRight, versionLabel, visibleToAgents, systemConfig} from '@tsp/domain';
 import {emitChange, getApp, now, once, tm} from './app.ts';
 import {saveGold} from './dataset.ts';
 import {buildReport, predictionsFor} from './evaluation.ts';
@@ -75,13 +75,6 @@ export async function labelerNotes(projectId: string, state: ProjectState): Prom
     if (!had || had.at <= d.at) notes.set(d.exampleId, {note: d.note, at: d.at});
   }
   return new Map([...notes].map(([id, n]) => [id, n.note]));
-}
-
-/** Adds the labelers' notes (from `labelerNotes`) to the examples a helper reads. */
-export function withLabelerNotes(briefs: ExampleBrief[], examples: Example[], notes: Map<string, string>): ExampleBrief[] {
-  if (!notes.size) return briefs;
-  const byExt = new Map(examples.filter(e => notes.has(e.id)).map(e => [e.externalId, notes.get(e.id)!]));
-  return briefs.map(b => (byExt.has(b.externalId) ? {...b, labelerNote: byExt.get(b.externalId)!} : b));
 }
 
 /**
@@ -222,3 +215,5 @@ export async function reopenGold(projectId: string, exampleId: string, versionId
   tm().event('gold_mismatch_reopened', {});
   emitChange();
 }
+
+export {withLabelerNotes};

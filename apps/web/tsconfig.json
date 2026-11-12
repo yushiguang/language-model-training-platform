@@ -32,6 +32,9 @@
       "@tsp/agents": [
         "../../apps/agents/src/index.ts"
       ],
+      "@tsp/optimiser": [
+        "../../apps/optimiser/src/index.ts"
+      ],
       "@tsp/bff": [
         "../../apps/bff/src/index.ts"
       ],
