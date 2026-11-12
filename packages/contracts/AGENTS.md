@@ -14,7 +14,5 @@ Types and every contract between apps and with the hosting platform. No logic (p
 | `platform-api.ts` | everything → hosting platform runtimes (`Platform`, `DocRuntime`, models, files, ...) |
 | `errors.ts` | `LlmCallError`, `errorKindOf` |
 
-`infra-api.ts` re-exports `platform-api.ts` for older imports.
-
 Rules: imports nothing. Any change here is a contract change: mark it in the PR and follow
 "Asking for a contract change" in `docs/handover/integration.md`.
