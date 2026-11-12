@@ -180,6 +180,88 @@ started the optimiser on ...") whose icon does not animate. Add a running-optimi
 on the page (model, candidates so far, calls, cost, Stop — the run data is already in
 project state), and animate the icon on in-progress event lines in the chat.
 
+## Analysis: why many optimiser runs never beat the first prompt (internal agent, 2026-11-12)
+
+Measured on a real project (single field, three values, 50-example eval split 25/25,
+16 scored versions across three optimiser runs, roughly 400 model calls). No raw data
+here; aggregates only.
+
+- The hand-written first version is still the best (held-out macro-F1 0.54). The best
+  optimiser product reaches 0.48; the other kept candidates cluster at 0.29-0.30, many
+  with near-identical predictions to their parents.
+- 7 of the 25 held-out examples are answered wrong by **every** version, and 2 more are
+  always stopped by the safety filter. Whatever changes, about a third of the scored half
+  cannot move: there is a hard ceiling well under 1.0, and the first prompt is already
+  close to it. These items are boundary cases (the middle value against both neighbours),
+  not cases a wording change has ever flipped.
+- The search starts low and stays low: no run was based on the best version (the first
+  run started from an AI-drafted 0.30 version, later runs drew parents at random from a
+  pool sitting on the same plateau), and most candidate changes are paraphrases whose
+  predictions barely differ from the parent's — hence the identical scores. A change the
+  labelers' notes inspired (a nudity-evidence rule, a dialogue-innuendo rule) is visible
+  verbatim-in-substance in later templates, so the input pipeline works; those candidates
+  then died at the dry-run gate or scored at the plateau like the rest.
+- The yardstick moved during measurement: gold labels were edited repeatedly through
+  mismatch review (60 gold records for 50 eval examples), so early rounds optimised
+  against older boundaries, and scores quoted at different times are not comparable.
+- At 25 scored examples one item is about 4 points of accuracy; gaps like 0.54 vs 0.48
+  are inside noise, but 14 candidates all landing under the baseline is not luck — it is
+  a ceiling plus a search that neither starts from the best nor produces materially
+  different candidates.
+
+Implications already partly specified (R3-9, R5-6, R5-7); the new asks are R6-1 to R6-3
+below, plus: when a run ends, the progress panel should say plainly if no candidate beat
+the base version, instead of leaving the user to discover it version by version.
+
+## R6-4. A "Below" with a passing headline score must say which check failed
+
+Found live (internal diagnosis, aggregates only): a version whose headline lowest-field
+macro-F1 is 0.54 against a 0.50 threshold still shows "Below", because passing is the
+conjunction of all checks and three value-level checks fail — the lowest value's F1,
+precision and recall are all 0, on a value with **support 1** in the scored half (its one
+example was missed). The card shows only the headline number, so the user cannot see why.
+Two fixes: (1) the version card (and anywhere a pass/fail badge shows) lists the failing
+checks by name with actual vs needed, not just in a detail view; (2) reconsider
+value-level thresholds at tiny support: a value with 1-2 scored examples should be
+flagged "too few to judge" (advisory, shown, but not by itself failing the version) or
+the value-F1/precision/recall checks should require a minimum support the user can see.
+Pick one in the PR and say which; silently failing a version on a single example is the
+bug-feeling to remove. (Relatedly, gold edits had shifted the scored half to 20/23 one
+value — the checks display should make that visible too, via the label distribution.)
+
+## R6-1. AI suggestion must exist at page level, and for dropped versions
+
+The AI Suggestion card only appears under a kept version's detail card. Add a page-level
+suggestion for Prompt Versions (best current version and whether its pass is confirmed,
+the recommended next action, anything blocked), shown regardless of selection. When a
+**dropped** version is selected, show a suggestion for it too: why it was dropped (its
+round's dry-run or checks outcome against its parent), and what to do with that
+information (for example "nothing — its change is covered by vN" or "worth retrying from
+the current best"), falling back to the page-level suggestion when nothing specific can
+be said.
+
+## R6-2. A "hide dropped" switch for the versions list
+
+Optimiser runs leave long tails of dropped versions in the list. Add a toggle to hide
+dropped versions (dropped = dropped in checks or dry run; kept/running/scored versions
+always show), defaulting to showing everything, remembered for the session.
+
+## R6-3. Rework mismatch reopening: edit in Reviewed, save appends a record
+
+Current behaviour: Reopen moves the item from Reviewed back to To review, the page does
+not follow it, the reopened editor looks different from the normal review editor, and it
+**autosaves** — a label change is committed (and the item jumps back to Reviewed, page
+refreshing) before the labeler can type their reason. Redesign per the user's proposal:
+
+- No migration: a reviewed item is edited **in place in the Reviewed section**, with the
+  same editor as a fresh review (answer control + "Why" box + an explicit Save button;
+  no autosave anywhere in this flow).
+- Saving appends a **new** review record (the audit trail keeps the old one; the newest
+  standing decision wins, as the labeler-notes reader already assumes), updates the
+  item in place, and does not refresh the page or move the user's scroll/selection.
+- Changing the label this way saves the new gold label exactly like a fresh review does;
+  keeping the label with a new reason only appends the record.
+
 ## R5-8. Gold Labels is a normal step, not an "optional" one
 
 **Status 2026-11-11:** done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-11: acceptance round 5").
