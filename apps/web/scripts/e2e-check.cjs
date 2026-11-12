@@ -230,6 +230,16 @@ let current = null;
       if (!optimised) await shot(page, '5b-optimiser-running');
       optimised = true;
       if (await button(page, 'Retry').count()) throw new Error(`the Optimiser failed: ${await panel.innerText()}`);
+      // Round 6: a run that ended without a pass keeps its panel and says how it ended, until a
+      // version is picked.
+      if (await panel.getByText('Finished', {exact: true}).count()) {
+        const end = panel.getByRole('button', {name: /^Show v/});
+        await end.waitFor({timeout: 5000});
+        log('run ended:', (await panel.locator('.hov').first().innerText()).trim());
+        await shot(page, '5g-run-end');
+        await end.click();
+        await panel.waitFor({state: 'detached', timeout: 5000});
+      }
       continue;
     }
     const auto = button(page, 'Auto Optimise');
