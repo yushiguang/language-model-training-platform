@@ -88,9 +88,9 @@ its Rules board.
 | Page title | Every page; names the page or the object on it | A line under the title explaining the page |
 | Card title | Every card; names its one job | A description line under the card title |
 | Field label | Every input, above it; names the data | Helper text under the input |
-| Hover detail | Definitions, rules, limits, why something is disabled; dashed underline | The same detail in a visible paragraph |
+| Hover detail | Definitions, rules, limits, why something is disabled; dashed underline | The same detail in a visible paragraph. From 1.0.0 the Project Settings default panel is the exception: each setting shows its explanation as a one-line subtitle, no hover |
 | AI Suggestion text | One bold headline (what the agent found) and one grey line (what to do) | Agent explanations outside its card; a third line |
-| Long text | One line, cut with …, full text on hover | Wrapping onto a second line (chat messages are the one exception) |
+| Long text | Interface text (titles, labels, buttons, table cells): one line, cut with …, full text on hover. From 1.0.0, text the user wrote and reads to work (label definitions, rules, comments, chat messages) wraps in full | Wrapping interface text onto a second line; cutting a definition the user has to read |
 | Empty state | One line saying what to do, plus the button that does it | Instructions, tips or lists of steps |
 | Error | One line under the field, in the user's words | Pop-ups for field errors; codes or stack traces |
 | Numbers | Counts and scores the user decides on; unit or total small at the bottom right | Estimated time or cost, anywhere |
@@ -120,7 +120,7 @@ its Rules board.
 - **Size to content.** A card is as wide as its content needs; short content means a narrower card, with related cards side by side.
 - **Title with its text.** A title sits 8 px from its own text and far from the next group.
 - **Space by weight.** Heavy parts (inputs, big numbers, charts) get more space; a card ending in inputs gets 32 below instead of 24.
-- **One line of text.** Text never wraps in a product screen.
+- **One line of text.** Interface text never wraps in a product screen. From 1.0.0, user-written content (definitions, rules, comments) wraps instead of being cut.
 
 ## Ask AI and the AI Suggestion card
 

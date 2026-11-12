@@ -3,6 +3,16 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-12 (review of the 1.0.0 spec)
+
+- **No pass verdict under 20 scored examples.** The score shows as a rough reading and Finish stays closed.
+- **Appending examples never freezes scoring.** Versions are scored on gold-labeled examples; new ones are pending; changed scores are stale until Rebuild scores.
+- **Every example removal is recorded and restorable**, and the removed count shows next to the score.
+- **The held-out half is not a test set.** Confirm a pass stays; an untouched test set comes with the batch labeling project.
+- **Prompt import lists what it could not carry over.**
+- **1.0.0 ships in four phases**, the first a contract and service refactor with no behaviour change.
+- **Three 0.x UI rules change in 1.0.0:** Enter sends in Ask AI (Shift+Enter adds a line, input-method safe); user-written content wraps; the Project Settings default panel shows explanations as subtitles.
+
 ## 2026-11-11
 
 - **Gold Labels is an ordinary step** (acceptance R5-8): not optional or "recommended", and no
