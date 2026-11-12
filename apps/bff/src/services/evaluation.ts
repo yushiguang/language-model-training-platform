@@ -125,12 +125,13 @@ export async function buildReport(
   examples: Example[],
   gold: Map<string, GoldLabel>,
   contextId: string,
+  opts: {replace?: boolean} = {},
 ): Promise<EvalReport | null> {
   const {catalog} = getApp();
   const evalExamples = examples.filter(e => e.split === 'eval');
   if (!setup.schema || !evalExamples.length || evalExamples.some(e => !gold.has(e.id))) return null;
-  const existing = await catalog.find('eval_reports', {projectId, promptVersionId: version.id, endpoint, contextId});
-  if (existing.length) return existing[0];
+  const existing = (await catalog.find('eval_reports', {projectId, promptVersionId: version.id, endpoint, contextId})).filter(r => !r.archived);
+  if (existing.length && !opts.replace) return existing[0];
   const settings = settingsFor(setup, endpoint);
   const byExample = await predictionsFor(version.id, endpoint, settings);
   const scoredOn = evalExamples.filter(e => !e.optimiserHalf);
@@ -152,6 +153,8 @@ export async function buildReport(
     createdAt: now(),
   };
   await catalog.insert('eval_reports', report);
+  // Rebuild scores (2026-11-12): the new report replaces the one for the same context.
+  for (const old of existing) await catalog.patch('eval_reports', old.id, {archived: true});
   emitChange();
   return report;
 }

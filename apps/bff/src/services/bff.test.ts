@@ -484,16 +484,24 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
   let st = await w.state();
   assert.equal(st.scoresUpdating, true);
   assert.equal(st.reports.filter(r => !r.archivedNow).length, 0);
-  // Lazy (2026-11-11): the workflow check does not rebuild; the next reader of scores does, once.
+  // 2026-11-12: nothing rebuilds by itself; Rebuild scores on Prompt versions does, by hand.
   const tasksBefore = (await w.state()).runs.length;
   await tick(st);
-  assert.equal((await w.state()).scoresUpdating, true, 'tick leaves scores to their next reader');
   const {getPageView} = await import('./page-views.ts');
   await getPageView(w.projectId, {page: 'prompt', params: {}});
+  assert.equal((await w.state()).scoresUpdating, true, 'neither the workflow check nor a reader rebuilds');
+  const {rebuildReports} = await import('./mismatches.ts');
+  assert.equal(await rebuildReports(w.projectId), 2);
   st = await w.state();
   assert.equal(st.scoresUpdating, false);
   assert.equal(st.reports.filter(r => !r.archivedNow).length, 2);
   assert.equal(st.runs.length, tasksBefore, 'nothing is labeled again');
+  // Pressed again with nothing changed (say after a Setup change): each report is replaced, not doubled.
+  const ids = st.reports.map(r => r.id).sort();
+  assert.equal(await rebuildReports(w.projectId), 2);
+  st = await w.state();
+  assert.equal(st.reports.filter(r => !r.archivedNow).length, 2);
+  assert.notDeepEqual(st.reports.map(r => r.id).sort(), ids);
 });
 
 test('Finding 3: no helper tool or helper input carries an example of the held-out half', async () => {

@@ -232,7 +232,7 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
             <div className="row" style={{alignItems: 'center', paddingBottom: 6}}>
               {state.scoresUpdating && (
                 <span className="badge b-gray" style={{marginRight: 12}}>
-                  <Hov text="Scores out of date" tip="Your label changes are saved. Scores are worked out again when you open Prompt versions" />
+                  <Hov text="Scores out of date" tip="Your label changes are saved. Rebuild scores on Prompt versions to see them in the scores" />
                 </span>
               )}
               <span className="t-3" style={{fontSize: 13, marginRight: 8}}>

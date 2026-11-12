@@ -178,6 +178,14 @@ let current = null;
     log('mismatches after review:', await tab.innerText());
     await page.goto(url('/prompt/'));
     await page.locator('nav.vlist').waitFor();
+    // 2026-11-12: a gold change leaves scores out of date until Rebuild scores is pressed.
+    if (before > 1) {
+      await page.getByText('Scores out of date', {exact: true}).first().waitFor({timeout: 5000});
+      await shot(page, '4e-scores-out-of-date');
+      await button(page, 'Rebuild scores').click();
+      await page.getByText('Scores out of date', {exact: true}).first().waitFor({state: 'detached', timeout: 10000});
+      log('scores rebuilt by hand');
+    }
   }
 
   // Below the bar: Improve with AI puts the Prompt helper's draft in the editor, saved as v1.1

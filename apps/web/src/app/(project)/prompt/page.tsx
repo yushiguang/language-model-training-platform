@@ -108,10 +108,6 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
   const sel = list.find(v => v.id === selId) ?? (run?.stepVersionId ? list.find(v => v.id === run.stepVersionId) : undefined) ?? list[0];
   const running = state.runs.some(r => r.state === 'running') || state.optimisation.some(o => o.state === 'running');
 
-  // Scores are read here, so out-of-date ones are rebuilt now (lazy rebuild, 2026-11-11).
-  useEffect(() => {
-    if (state.scoresUpdating) void rebuildReports(state.project.id);
-  }, [state.scoresUpdating, state.contextId]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setPage({...VERSIONS_PAGE, label: `Prompt versions · ${versionLabel(sel)}`, context: {version: versionLabel(sel)}});
   }, [sel.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -204,10 +200,28 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
     </Card>
   );
 
-  // R5-4: no advice from scores that are being rebuilt after a gold edit.
+  // No advice from scores that are out of date (Rebuild scores first).
   const advice = !running && !showPanel && !selDropped && !state.scoresUpdating ? <Advice state={state} onMake={onMake} selId={sel.id} onStarted={() => setSel(null)} /> : null;
   return (
-    <Frame head={<PageHead title="Prompt versions" />}>
+    <Frame
+      head={
+        <PageHead
+          title="Prompt versions"
+          actions={
+            // Evelyn 2026-11-12: scores are rebuilt only here, by hand. Gold edits, Setup changes
+            // and new code all move scores; nothing tries to sense them one by one.
+            <>
+              {state.scoresUpdating && (
+                <span className="badge b-gray">
+                  <Hov text="Scores out of date" tip={OOD_TIP} />
+                </span>
+              )}
+              <Button label="Rebuild scores" disabled={running} title={running ? 'Wait until the running work ends' : undefined} onClick={() => rebuildReports(state.project.id)} />
+            </>
+          }
+        />
+      }
+    >
       {chart}
       <div style={{display: 'grid', gridTemplateColumns: '360px 1fr', gap: 16, alignItems: 'start'}}>
         {versions}
@@ -314,6 +328,8 @@ const ROUND_RESULT: Record<OptimiserRound['outcome'], {text: string; tone?: 'run
   failed: {text: 'Failed', tone: 'err'},
   stopped: {text: 'Stopped'},
 };
+
+const OOD_TIP = "Gold labels changed since these scores were made. Press Rebuild scores to work them out again from saved answers";
 
 /** Why the Optimiser picked a round's parent (R5-7). */
 const parentWhy = (r: OptimiserRound, parent: string) =>
@@ -583,8 +599,14 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
           {actions}
         </div>
         <div className="row" style={{gap: 12}}>
-          {/* R5-4: a gold edit archived the score; it is rebuilt from saved answers. */}
-          {state.scoresUpdating && runs.some(r => r.state === 'done') ? <Badge text="Scores updating" tone="run" /> : <span className="t-3">{why}</span>}
+          {/* A gold edit archived the score; Rebuild scores works it out again from saved answers. */}
+          {state.scoresUpdating && runs.some(r => r.state === 'done') ? (
+            <span className="badge b-gray">
+              <Hov text="Scores out of date" tip={OOD_TIP} />
+            </span>
+          ) : (
+            <span className="t-3">{why}</span>
+          )}
           {canScore && <Button label={runs.length ? 'Resume' : 'Score'} size="sm" icon="play" onClick={() => void scoreVersion(state.project.id, v)} />}
         </div>
       </Card>

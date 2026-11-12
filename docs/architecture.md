@@ -224,13 +224,14 @@ data" sends the Labels helper 20 random examples (never the held-out half) with 
 when they have one (`checkLabels`, intent `check_schema`). It answers in Ask AI, may put a schema
 draft on Schema settings, and keeps answering on Dataset.
 
-**Scores after gold edits** (acceptance R5-4, R5-5; lazy, Evelyn 2026-11-11). A gold edit changes
-the evaluation context, so reports are archived; `ProjectState.scoresUpdating` says some must be
-rebuilt. Gold Labels only writes (the Mismatches list updates in the page; "Scores out of date"
-shows). The next reader of scores rebuilds them once from saved answers, nothing labeled:
-`loadScoredState` (page views, helper read tools, the Optimiser) and the Prompt and Training Set
-pages call `rebuildReports`. `tick` builds only a version's first report. Saved answers on the
-whole eval set are kept in memory per version, since they never change once complete.
+**Rebuild scores** (Evelyn, 2026-11-12: by hand only). A gold edit changes the evaluation context,
+so reports are archived and `ProjectState.scoresUpdating` is set ("Scores out of date" on Gold
+Labels and Prompt versions). Nothing rebuilds by itself: gold edits, Setup changes and new code all
+move scores, and sensing each one is fragile. The Rebuild scores button on Prompt versions calls
+`rebuildReports`, which gives every version of the current schema with a finished scoring a fresh
+report from saved answers (nothing labeled); a report it replaces is marked `archived` and hidden.
+`tick` builds only a version's first report. Saved answers on the whole eval set are kept in memory
+per version for the Mismatches list.
 
 **Auto-start manager** (2026-11-11). `dueStarts(state)` says what should be running; `tick` starts
 it. The project provider (`apps/web/src/components/ProjectContext.tsx`) runs `tick` on every

@@ -7,7 +7,7 @@ import {estimate, MIN_PER_VALUE, recommend, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {LabelDistribution, labelCounts} from '@/components/LabelDistribution';
 import {modelName, versionScore} from '@/components/prompt/scores';
-import {labelTestSet, predictionsFor, startTrainingSet, stopRun, rebuildReports, stopTrainingSet, track, trainingRows, type ProjectState} from '@/backend-api';
+import {labelTestSet, predictionsFor, startTrainingSet, stopRun, stopTrainingSet, track, trainingRows, type ProjectState} from '@/backend-api';
 import {Badge, Button, Card, Code, dateTime, Empty, Hov, Metric, Metrics, num, PageHead, Progress, Select, Tabs} from '@/ui';
 
 type SetKey = 'train' | 'test';
@@ -41,10 +41,6 @@ const trainState = (ts: TrainingSet | undefined): SetState => (!ts ? 'todo' : ts
 const testState = (r: LabelingRun | undefined): SetState => (!r ? 'todo' : r.state === 'done' ? 'done' : r.state === 'running' ? 'running' : 'stopped');
 
 function Training({state, vParam, mParam}: {state: ProjectState; vParam: string | null; mParam: EndpointId | null}) {
-  // Scores are read here, so out-of-date ones are rebuilt now (lazy rebuild, 2026-11-11).
-  useEffect(() => {
-    if (state.scoresUpdating) void rebuildReports(state.project.id);
-  }, [state.scoresUpdating, state.contextId]); // eslint-disable-line react-hooks/exhaustive-deps
   const ts = state.trainingSets[0];
   const testRun = state.testRuns[0];
   const st: Record<SetKey, SetState> = {train: trainState(ts), test: testState(testRun)};

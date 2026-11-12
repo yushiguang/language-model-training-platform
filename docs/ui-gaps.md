@@ -149,7 +149,7 @@ boards; the canvas still shows the old states for them.
 | R5-2 Compare with | The first visit picks the best version; from then on the pick holds for the session (per project). Only the "(best)" mark moves |
 | R5-3 AI Suggestion | No "or" between Improve with AI and Auto Optimise |
 | R5-4 After gold edits | Reports the edits archived are rebuilt from saved answers (nothing is labeled). Meanwhile the version card shows a "Scores updating" badge instead of "Not scored", and there is no AI Suggestion. Start in the Auto Optimise dialog takes you to the Optimiser panel |
-| R5-5 Many edits | A review applies to the list at once, so you keep going. Nothing else is worked out: a grey "Scores out of date" note (why on hover) shows next to Compare with. Scores are rebuilt once when Prompt versions, Training Set, a helper or the Optimiser next reads them |
+| R5-5 Many edits | A review applies to the list at once, so you keep going. Nothing else is worked out: a grey "Scores out of date" note (why on hover) shows next to Compare with and on Prompt versions. Prompt versions has a "Rebuild scores" button in the page head (2026-11-12, not drawn), which works every score out again from saved answers |
 | R5-6 Ties | A dry run that ties its parent (as many fields right, on different examples) goes on to the full labeling, with a grey "Tied" badge next to its score. It counts as a wasted round, and 2 ties in a row end the run |
 | R5-7 Parent | Round 1 always changes the version you started from. Each round says "from vX" before its change, with why on hover (best on N examples of the optimiser half). The dry run's Now line says "against vX". The dialog says how later rounds pick |
 

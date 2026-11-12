@@ -8,9 +8,11 @@ where it matters, why. The code follows these; change a line here when a decisio
 - **Gold Labels is an ordinary step** (acceptance R5-8): not optional or "recommended", and no
   way to skip it (the "None" pass rule is gone). Scores, mismatch review and the Optimiser all
   rest on gold labels.
-- **Scores rebuild lazily after gold edits** (R5-5; Evelyn: a timer is too eager, above all in a
-  future microservice system). Gold Labels only writes; the next reader of scores rebuilds them
-  once from saved answers. The user never waits between edits.
+- **Scores are rebuilt by hand** (Evelyn, 2026-11-12, replacing the 1.5 s timer and the lazy
+  rebuild of 2026-11-11). A Rebuild scores button on Prompt versions works every score out again
+  from saved answers. Why: gold edits, Setup changes (thresholds) and code changes all move scores,
+  and it is hard to sense every case and trigger a rebuild for it. Gold Labels only writes, so the
+  user never waits between edits.
 - **One workflow owner starts auto tasks**, woken by events and a sweep, with keyed (idempotent)
   starts and a manual button for each auto task as the fallback. Why: one place can always say
   why a task waits.

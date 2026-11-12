@@ -50,7 +50,8 @@ export async function loadProjectState(projectId: string): Promise<ProjectState 
   const evalExamples = examples.filter(e => e.split === 'eval');
   const contextId = contextIdFor(schemaVersion, evalExamples, gold);
   const t = setup?.thresholds;
-  const reports = rawReports.map(r => ({
+  // A report replaced by Rebuild scores is kept for the record but never shown.
+  const reports = rawReports.filter(r => !r.archived).map(r => ({
     ...r,
     archivedNow: r.contextId !== contextId,
     passed: !!t && r.contextId === contextId && judge(r.metrics, t, evalExamples.length).passed,

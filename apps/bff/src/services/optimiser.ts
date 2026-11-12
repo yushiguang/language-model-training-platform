@@ -25,7 +25,7 @@ import {buildReport, confirmScore, labelEvalSet, labelExamples, scoreOnOptimiser
 import {agentTools} from './page-views.ts';
 import {approveNode, loadProjectState} from './projects.ts';
 import {createVersion} from './prompts.ts';
-import {labelerNotes, loadScoredState, withLabelerNotes} from './mismatches.ts';
+import {labelerNotes, withLabelerNotes} from './mismatches.ts';
 import {startTrainingSet} from './training.ts';
 
 /**
@@ -264,8 +264,7 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
 
     for (;;) {
       if (signal.aborted) throw aborted();
-      // The pool and the pass rest on scores: rebuild any a gold edit made out of date.
-      let state = (await loadScoredState(projectId))!;
+      let state = (await loadProjectState(projectId))!;
       const setup = state.setup!;
       const schema = setup.schema!;
       const start = state.versions.find(v => v.id === run.startVersionId) ?? state.versions[state.versions.length - 1];

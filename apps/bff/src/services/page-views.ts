@@ -2,7 +2,8 @@ import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLoca
 import {agentStart, isStartTool} from './starts.ts';
 import {checkTemplate, defaultOutputPick, dryRunSize, finalRunPlan, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, recommend, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE} from '@tsp/domain';
 import {getApp} from './app.ts';
-import {loadScoredState, mismatches} from './mismatches.ts';
+import {mismatches} from './mismatches.ts';
+import {loadProjectState} from './projects.ts';
 
 /**
  * Page views: each page as the agent sees it, built from the same saved data the page shows.
@@ -259,8 +260,7 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
 export {pageFromPath};
 
 export async function getPageView(projectId: string, loc: PageLocation, unsaved: Record<string, unknown> = {}): Promise<PageView> {
-  // Helpers read scores, so out-of-date ones are rebuilt first (lazy rebuild, 2026-11-11).
-  const state = await loadScoredState(projectId);
+  const state = await loadProjectState(projectId);
   if (!state) return {page: loc.page, title: TITLES[loc.page], summary: 'The project was not found.', data: {}};
   const view = build(state, loc, unsaved, await answeredTest(state, loc.page));
   if (!state.setup) view.data.note = 'Setup is not finished yet.';
@@ -293,7 +293,7 @@ export function agentTools(projectId: string): AgentToolHost {
       await catalog.audit(projectId, `agent:${agent}`, 'agent.tool', {name, args});
       // Start-work tools spend money and start at once; they live in starts.ts.
       if (isStartTool(name)) return agentStart(projectId, agent, name, args);
-      const state = await loadScoredState(projectId);
+      const state = await loadProjectState(projectId);
       if (!state) throw new Error('The project was not found.');
       switch (name) {
         case 'get_page_view': {

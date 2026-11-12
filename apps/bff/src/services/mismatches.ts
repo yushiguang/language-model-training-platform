@@ -90,39 +90,30 @@ async function answersOnEval(versionId: string, model: NonNullable<ProjectState[
 }
 
 /**
- * Rebuilds the reports a gold edit archived (R5-4, R5-5), from saved answers only: nothing is
- * labeled. Lazy (Evelyn, 2026-11-11): a gold edit only makes the reports out of date; they are
- * rebuilt once, by whoever reads scores next (Prompt versions, Training Set, a helper, the
- * Optimiser), however many edits came before. Edits made while it runs are picked up by a second
- * pass. Returns how many reports it built.
+ * Rebuild scores (Evelyn, 2026-11-12): only when the user presses the button on Prompt versions.
+ * Nothing starts it by itself, since gold edits, Setup changes (thresholds) and code changes all
+ * move scores and are hard to sense one by one. Every version of the current schema with saved
+ * answers on the whole eval set gets a fresh report for today's gold labels and settings, from
+ * saved answers only: nothing is labeled. Returns how many reports it built.
  */
 export async function rebuildReports(projectId: string): Promise<number> {
   return (
     (await once(`rebuild:${projectId}`, async () => {
+      const state = await loadProjectState(projectId);
+      if (!state?.setup?.schema) return 0;
       let built = 0;
-      for (let pass = 0; pass < 3; pass++) {
-        const state = await loadProjectState(projectId);
-        if (!state?.setup?.schema) break;
-        let n = 0;
-        for (const r of state.runs.filter(x => x.state === 'done')) {
-          if (state.reports.some(x => x.promptVersionId === r.promptVersionId && x.endpoint === r.endpoint && !x.archivedNow)) continue;
-          const v = state.versions.find(x => x.id === r.promptVersionId);
-          if (v && (await buildReport(projectId, state.setup, v, r.endpoint, state.examples, state.gold, state.contextId))) n++;
-        }
-        built += n;
-        if (!n) break;
+      const seen = new Set<string>();
+      for (const r of state.runs.filter(x => x.state === 'done')) {
+        const key = `${r.promptVersionId}|${r.endpoint}`;
+        const v = state.versions.find(x => x.id === r.promptVersionId && x.schemaVersion === state.setup!.schemaVersion);
+        if (!v || seen.has(key)) continue;
+        seen.add(key);
+        if (await buildReport(projectId, state.setup, v, r.endpoint, state.examples, state.gold, state.contextId, {replace: true})) built++;
       }
+      emitChange();
       return built;
     })) ?? 0
   );
-}
-
-/** The project state with scores that match today's gold labels: rebuilt first when a gold edit made them out of date. */
-export async function loadScoredState(projectId: string): Promise<ProjectState | null> {
-  const state = await loadProjectState(projectId);
-  if (!state?.scoresUpdating) return state;
-  await rebuildReports(projectId);
-  return loadProjectState(projectId);
 }
 
 /**
