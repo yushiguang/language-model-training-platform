@@ -7,3 +7,4 @@ export * from './standins/scripted-agent.ts';
 export * from './standins/simulated-models.ts';
 export * from './standins/feature-info.ts';
 export * from './standins/documents.ts';
+export * from './standins/enterprise.ts';

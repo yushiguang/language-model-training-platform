@@ -15,7 +15,7 @@ import {
   NO_TELEMETRY,
   type TelemetryPort,
 } from '@tsp/contracts';
-import {estimateTokens} from '@tsp/domain';
+import {estimateTokens, systemConfig} from '@tsp/domain';
 import {EndpointLimiter} from './limiter.ts';
 import {buildRegistry} from './registry.ts';
 
@@ -30,7 +30,6 @@ export interface GatewayOptions {
   telemetry?: TelemetryPort;
 }
 
-export const DEFAULT_RETRY_DELAYS_MS = [2000, 4000, 8000, 16000];
 
 const abortableSleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
@@ -56,13 +55,13 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
   tm.allowLabelValues('model', registry.map(e => e.model));
   for (const ep of registry)
     for (const [kind, v] of [['qpm', ep.qpm], ['tpm', ep.tpm], ['concurrency', ep.maxConcurrency]] as const) tm.gauge('tsp_llm_endpoint_limit', v, {endpoint: ep.id, kind, assumed: ep.assumed});
-  const delays = opts.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
+  const delays = opts.retryDelaysMs ?? systemConfig().gateway.retryDelaysMs;
   const sleep = opts.sleep ?? abortableSleep;
   const limiters = new Map<string, EndpointLimiter>();
   const limiterFor = (ep: EndpointConfig) => {
     let l = limiters.get(ep.id);
     if (!l) {
-      l = new EndpointLimiter({qpm: ep.qpm, tpm: ep.tpm, maxConcurrency: ep.maxConcurrency, windowMs: opts.windowMs});
+      l = new EndpointLimiter({qpm: ep.qpm, tpm: ep.tpm, maxConcurrency: ep.maxConcurrency, windowMs: opts.windowMs ?? systemConfig().gateway.windowMs});
       limiters.set(ep.id, l);
     }
     return l;
@@ -198,14 +197,14 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
             if (chunk.type === 'thinking') chars += chunk.thinking.length;
             yield chunk;
           }
-          permit.release(input + Math.ceil(chars / 4));
+          permit.release(input + Math.ceil(chars / systemConfig().gateway.charsPerTokenEstimate));
           tm.counter('tsp_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose: ep.purpose, outcome: 'ok'});
           return;
         } catch (e) {
           const kind = errorKindOf(e);
           const retryAfter = e instanceof LlmCallError ? e.retryAfterMs : undefined;
           if (kind === 'rate_limited') limiter.onRateLimited(retryAfter ?? delays[Math.min(attempt, delays.length - 1)] ?? 1000);
-          permit.release(started ? input + Math.ceil(chars / 4) : undefined);
+          permit.release(started ? input + Math.ceil(chars / systemConfig().gateway.charsPerTokenEstimate) : undefined);
           tm.counter('tsp_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose: ep.purpose, outcome: kind});
           if (started || kind === 'aborted' || kind === 'rejected' || kind === 'filtered' || attempt >= delays.length) throw e;
           tm.counter('tsp_llm_retries_total', {endpoint: ep.id, purpose: ep.purpose, reason: kind});

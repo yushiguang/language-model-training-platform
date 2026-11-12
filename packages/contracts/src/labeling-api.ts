@@ -126,7 +126,7 @@ export interface LabelingContract {
    * Saved predictions for one version, model and settings, one per example: the first valid one,
    * else the first (an invalid answer labeled again under `relabelInvalid` leaves two).
    */
-  predictions(promptVersionId: string, endpoint: EndpointId, settingsHash: string): Promise<Map<string, Prediction>>;
+  predictions(promptVersionId: string, endpoint: EndpointId, settingsHash: string): Promise<Record<string, Prediction>>;
   /**
    * Labels a few examples with an unsaved template (the prompt agent's try_template). Nothing is
    * saved: no task, no predictions. Each example is one call through the gateway.

@@ -3,7 +3,7 @@
 import {useGo} from '@/components/nav';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode} from 'react';
 import type {Answer, EndpointId, LabelingRun, MismatchList, OptimisationRun, OptimiserRound, PageContext, PromptVersion} from '@tsp/contracts';
-import {DEFAULT_MAX_ROUNDS, dryRunSize, INVALID_CAP, optimiserVersions, recommend, stepLine, versionLabel} from '@tsp/domain';
+import {dryRunSize, optimiserVersions, recommend, stepLine, versionLabel, systemConfig} from '@tsp/domain';
 import {Frame, ProjectPage, useOpenAskAi} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {ScoreChart} from '@/components/prompt/ScoreChart';
@@ -54,8 +54,8 @@ function FirstPrompt({state, setPage}: {state: ProjectState; setPage: (p: PageCo
   useAgentDrafts(state, d => setDraft(cur => ({...cur, template: d.template, features: d.features ?? cur.features})));
   // A failed create shows the page's red banner with Retry (the Button reports it).
   const create = async () => {
-    const v = await createVersion(state.project.id, {...draft, parent: null, madeBy: 'user', change: 'First prompt', kind: 'major', schema: state.setup!.schema!, schemaVersion: state.setup!.schemaVersion});
-    void scoreVersion(state.project.id, v);
+    const v = await createVersion({projectId: state.project.id, template: draft.template, features: draft.features, images: draft.images, parentId: null, madeBy: 'user', change: 'First prompt', kind: 'major'});
+    void scoreVersion({projectId: state.project.id, promptVersionId: v.id});
   };
   const dirty = draft.template !== '' || Object.values(draft.features).some(l => l.length);
   const blocked = check.errors.length > 0 || !draft.template.trim();
@@ -249,7 +249,7 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
     </Card>
   );
   // The chart card keeps its place in every state; before any score it says when scores come.
-  const hasGold = state.examples.some(e => e.split === 'eval' && state.gold.has(e.id));
+  const hasGold = state.examples.some(e => e.split === 'eval' && !!state.gold[e.id]);
   const chart = (
     <Card title="Score by version">
       {t && points.length > 0 ? (
@@ -419,7 +419,7 @@ function OptimiserPanel({state, run, box, onShow}: {state: ProjectState; run: Op
       <Badge text={run.state === 'stopped' ? 'Stopped' : 'Paused'} icon={false} />
     );
   const act = over ? undefined : run.state === 'running' ? <Button label="Stop" icon="stop" onClick={() => stopOptimiser(run.id)} /> : <Button label={run.state === 'failed' ? 'Retry' : 'Resume'} kind="primary" onClick={() => void retryOptimiser(run.id)} />;
-  const half = state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && state.gold.has(e.id)).length;
+  const half = state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && !!state.gold[e.id]).length;
   const task = run.stepVersionId ? state.runs.find(r => r.promptVersionId === run.stepVersionId && r.endpoint === run.endpoint && r.state === 'running') : undefined;
   // Best so far: the highest score among the start version and the changes this run kept.
   const tried = [{id: run.startVersionId, s: versionScore(state, run.startVersionId)?.score}, ...run.history.filter(h => h.outcome === 'kept' && h.score != null).map(h => ({id: h.versionId, s: h.score!}))];
@@ -625,7 +625,7 @@ function NoGoldCard({state, v, box}: {state: ProjectState; v: PromptVersion; box
     if (!settings) return;
     const evalIds = new Set(state.examples.filter(e => e.split === 'eval').map(e => e.id));
     let live = true;
-    void predictionsFor(v.id, run.endpoint, settings).then(m => live && setAnswers([...m.values()].filter(p => evalIds.has(p.exampleId)).map(p => p.answer)));
+    void predictionsFor(v.id, run.endpoint, settings).then(m => live && setAnswers(Object.values(m).filter(p => evalIds.has(p.exampleId)).map(p => p.answer)));
     return () => void (live = false);
   }, [v.id, run.endpoint]); // eslint-disable-line react-hooks/exhaustive-deps
   const filtered = run.filtered ?? 0;
@@ -710,7 +710,7 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
           ) : (
             <span className="t-3">{why}</span>
           )}
-          {canScore && <Button label={runs.length ? 'Resume' : 'Score'} size="sm" icon="play" onClick={() => void scoreVersion(state.project.id, v)} />}
+          {canScore && <Button label={runs.length ? 'Resume' : 'Score'} size="sm" icon="play" onClick={() => void scoreVersion({projectId: state.project.id, promptVersionId: v.id})} />}
         </div>
       </Card>
     );
@@ -732,7 +732,7 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
         cols={[{label: 'Field'}, {label: named('Macro-F1'), kind: 'c'}, {label: 'Precision', kind: 'c'}, {label: 'Recall', kind: 'c'}, {label: 'Result', kind: 'c'}]}
         rows={rows.map(r => ({key: r.field, cells: [<Code key="f">{r.field}</Code>, <Score key="s" v={r.f1} ok={r.passed} />, r.precision.toFixed(2), r.recall.toFixed(2), r.passed ? <Passed key="p" /> : <Below key="b" />]}))}
       />
-      <LeftOut m={rep.metrics} cap={t.invalidRate ?? INVALID_CAP} />
+      <LeftOut m={rep.metrics} cap={t.invalidRate ?? systemConfig().evaluation.invalidRateCap} />
     </Card>
   );
 }
@@ -745,7 +745,7 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
 function Advice({state, onMake, selId, onStarted}: {state: ProjectState; onMake: (versionId: string, endpoint: EndpointId) => Promise<void>; selId: string; onStarted: () => void}) {
   const {href} = useProject();
   const go = useGo();
-  const [rounds, setRounds] = useState(String(DEFAULT_MAX_ROUNDS));
+  const [rounds, setRounds] = useState(String(systemConfig().optimiser.defaultMaxRounds));
   const a = recommend(state, null);
   // Review finding 2: where the model disagrees with gold labels (saved answers only, nothing labeled).
   const [mm, setMm] = useState<MismatchList | null>(null);
@@ -772,7 +772,7 @@ function Advice({state, onMake, selId, onStarted}: {state: ProjectState; onMake:
     setAsk(null);
     // R5-4: starting a run takes the user to it (the progress panel), not the version they left.
     onStarted();
-    startOptimiser(state.project.id, n, versionId).catch(e => reportActionError(`The Optimiser could not start: ${(e as Error).message}`, () => start(versionId, n)));
+    startOptimiser({projectId: state.project.id, maxRounds: n, startVersionId: versionId}).catch(e => reportActionError(`The Optimiser could not start: ${(e as Error).message}`, () => start(versionId, n)));
   };
   const auto = () => {
     const sel = state.versions.find(v => v.id === selId) ?? latest;
@@ -783,7 +783,7 @@ function Advice({state, onMake, selId, onStarted}: {state: ProjectState; onMake:
       .filter(x => x.s != null)
       .sort((a, b) => b.s! - a.s!)[0];
     const better = best && best.v.id !== sel.id && (selScore == null || best.s! > selScore);
-    setRounds(String(DEFAULT_MAX_ROUNDS));
+    setRounds(String(systemConfig().optimiser.defaultMaxRounds));
     setAsk({sel, selScore, best: better ? best.v : null, bestScore: better ? best.s! : 0, from: better ? best.v.id : sel.id});
   };
   // The newest run that passed and started the training and test sets.
@@ -854,7 +854,7 @@ function Advice({state, onMake, selId, onStarted}: {state: ProjectState; onMake:
           actions={
             <>
               <Button label="Cancel" onClick={() => setAsk(null)} />
-              <Button label="Start" kind="primary" onClick={() => start(ask.from, Math.max(1, Math.min(50, Math.round(Number(rounds)) || DEFAULT_MAX_ROUNDS)))} />
+              <Button label="Start" kind="primary" onClick={() => start(ask.from, Math.max(1, Math.min(systemConfig().optimiser.maxRoundsCap, Math.round(Number(rounds)) || systemConfig().optimiser.defaultMaxRounds)))} />
             </>
           }
         >

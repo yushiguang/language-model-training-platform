@@ -69,7 +69,7 @@ export function AskAi({
       await onSend?.(text);
       // The agent sees the page through the backend's page view; the page only says where it is.
       const params = Object.fromEntries([...new URLSearchParams(location.search)].filter(([k]) => k !== 'p'));
-      await sendUserMessage(projectId, text, {...page, where: {page: pageFromPath(location.pathname), params}});
+      await sendUserMessage({projectId, text, page: {...page, where: {page: pageFromPath(location.pathname), params}}});
     } finally {
       setBusy(isAgentBusy(projectId));
     }

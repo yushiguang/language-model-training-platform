@@ -1,3 +1,4 @@
+import {systemConfig} from './config.ts';
 import type {Answer, DryRunResult, Example, ExampleBrief, OptimisationRun, OptimiserRound, Prediction, PromptVersion, Schema} from '@tsp/contracts';
 import {placeholderKeys} from './template.ts';
 import {isImageKey} from './catalogue.ts';
@@ -24,19 +25,12 @@ export function fieldsRight(schema: Schema, gold: Answer, predicted: Answer | nu
 export const exampleScore = (schema: Schema, gold: Answer, predicted: Answer | null) => (schema.fields.length ? fieldsRight(schema, gold, predicted).length / schema.fields.length : 0);
 
 /** Dry-run size: half of the optimiser half, at most 20 (D4, 2026-11-10). */
-export const dryRunSize = (optimiserHalf: number) => Math.min(20, Math.max(1, Math.floor(optimiserHalf / 2)));
+export const dryRunSize = (optimiserHalf: number) => Math.min(systemConfig().optimiser.dryRunMaxExamples, Math.max(1, Math.floor(optimiserHalf / 2)));
 
 /** The features a version's prompt shows the model: its ticked features and its placeholders. */
 export const promptKeys = (v: Pick<PromptVersion, 'template' | 'features'>) => new Set([...v.features.video, ...v.features.photo_text, ...v.features.metadata, ...placeholderKeys(v.template)]);
 
-/** How long one feature may be in an example a helper reads. */
-export const BRIEF_FEATURE_CHARS = 300;
-/** How many wrong examples a helper reads (D3), and how many each version wins in a merge. */
-export const BRIEF_WRONG = 8;
-export const BRIEF_WINS = 4;
 
-/** How many images of one example a helper sees. */
-export const BRIEF_IMAGES = 2;
 
 /**
  * An example as a helper reads it: the text features in `keys`, cut short (URLs left out), and
@@ -47,13 +41,13 @@ export function exampleBrief(e: Example, keys: Iterable<string>, gold: Answer, p
   for (const k of keys) {
     const v = e.features[k];
     if (typeof v !== 'string' || !v.trim() || /^https?:\/\//.test(v.trim())) continue;
-    features[k] = v.length > BRIEF_FEATURE_CHARS ? `${v.slice(0, BRIEF_FEATURE_CHARS - 1).trimEnd()}…` : v;
+    features[k] = v.length > systemConfig().optimiser.briefFeatureMaxChars ? `${v.slice(0, systemConfig().optimiser.briefFeatureMaxChars - 1).trimEnd()}…` : v;
   }
   const images = Object.entries(e.features)
     .filter(([k]) => isImageKey(k))
     .flatMap(([, v]) => (Array.isArray(v) ? v : [v]))
     .filter(u => typeof u === 'string' && u.trim())
-    .slice(0, BRIEF_IMAGES);
+    .slice(0, systemConfig().optimiser.briefMaxImages);
   return {externalId: e.externalId, features, gold, predicted, ...(said?.reason ? {reason: said.reason} : {}), ...(said?.invalid ? {invalid: said.invalid} : {}), ...(images.length ? {images} : {}), ...(rightIn ? {rightIn} : {})};
 }
 
@@ -71,7 +65,7 @@ export const HIDDEN_NOTE = 'The held-out half of the eval set is hidden from hel
  * The examples a version gets wrong, worst first (fewest fields right), at most `max`. Pass only
  * optimiser-half examples: the held-out half must never reach a helper.
  */
-export function wrongExamples(schema: Schema, examples: Example[], keys: Iterable<string>, gold: Map<string, Answer>, predicted: Map<string, Answer | null>, max = BRIEF_WRONG, notes?: Map<string, HelperNote>): ExampleBrief[] {
+export function wrongExamples(schema: Schema, examples: Example[], keys: Iterable<string>, gold: Map<string, Answer>, predicted: Map<string, Answer | null>, max = systemConfig().optimiser.briefWrongExamples, notes?: Map<string, HelperNote>): ExampleBrief[] {
   const ks = [...keys];
   return examples
     .filter(e => gold.has(e.id) && predicted.has(e.id))
@@ -202,7 +196,7 @@ export function compareDryRun(schema: Schema, parentId: string, items: {gold: An
     passed: items.filter(i => fieldsRight(schema, i.gold, i.candidate).includes(f.name)).length,
     parentPassed: items.filter(i => fieldsRight(schema, i.gold, i.parent).includes(f.name)).length,
   }));
-  const weighted = (k: 'passed' | 'parentPassed') => fields.reduce((n, f) => n + f[k] * (f.field === lowest ? 2 : 1), 0);
+  const weighted = (k: 'passed' | 'parentPassed') => fields.reduce((n, f) => n + f[k] * (f.field === lowest ? systemConfig().optimiser.lowestFieldWeight : 1), 0);
   const differs = items.some(i => fieldsRight(schema, i.gold, i.candidate).join() !== fieldsRight(schema, i.gold, i.parent).join());
   return {examples: items.length, passed, parentPassed, parentId, fields, better: weighted('passed') > weighted('parentPassed'), tied: weighted('passed') === weighted('parentPassed') && differs};
 }

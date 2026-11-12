@@ -1,6 +1,6 @@
 import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@tsp/contracts';
 import {agentStart, isStartTool} from './starts.ts';
-import {checkTemplate, defaultOutputPick, dryRunSize, finalRunPlan, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, recommend, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE} from '@tsp/domain';
+import {checkTemplate, defaultOutputPick, dryRunSize, finalRunPlan, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, recommend, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap} from '@tsp/domain';
 import {getApp} from './app.ts';
 import {mismatches} from './mismatches.ts';
 import {loadProjectState} from './projects.ts';
@@ -83,7 +83,7 @@ function optimiserView(state: ProjectState) {
     round: o.round,
     maxRounds: o.maxRounds,
     startedFrom: label(o.startVersionId),
-    now: o.state === 'running' ? stepLine(o.step, label(o.stepVersionId), dryRunSize(state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && state.gold.has(e.id)).length)) : null,
+    now: o.state === 'running' ? stepLine(o.step, label(o.stepVersionId), dryRunSize(state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && !!state.gold[e.id]).length)) : null,
     stopReason: o.stopReason,
     error: o.error,
     rounds: o.history.map(r => ({round: r.round, version: label(r.versionId), from: label(r.parentId), kind: r.kind, change: r.change, outcome: r.outcome, lowestFieldMacroF1: r.score == null ? null : r2(r.score), passed: r.passed, confirmed: r.confirm ? r.confirm.passed : null})),
@@ -167,7 +167,7 @@ async function answeredTest(state: ProjectState, page: PageId): Promise<Readonly
   const pick = page === 'training' ? defaultOutputPick(state) : null;
   const settings = pick && state.setup?.models.find(m => m.endpoint === pick.endpoint);
   if (!pick || !settings) return new Set();
-  const preds = await getApp().labeling.predictions(pick.version.id, pick.endpoint, settingsHash(settings));
+  const preds = toMap(await getApp().labeling.predictions(pick.version.id, pick.endpoint, settingsHash(settings)));
   return new Set(state.examples.filter(e => e.split === 'test' && preds.get(e.id)?.answer).map(e => e.id));
 }
 
@@ -198,7 +198,7 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
       return base(`Gold labels: eval ${state.facts.goldEvalDone} of ${counts.eval}, test ${state.facts.goldTestDone} of ${counts.test}. Eval labels are needed for scores; test labels are optional.`, {
         eval: {done: state.facts.goldEvalDone, total: counts.eval},
         test: {done: state.facts.goldTestDone, total: counts.test, modelAnswers: testRun ? {state: testRun.state, done: testRun.done, total: testRun.total, model: modelName(state, testRun.endpoint)} : null},
-        needRecheckAfterSchemaChange: state.staleGold.size,
+        needRecheckAfterSchemaChange: Object.keys(state.staleGold).length,
         note: 'Model answers stay hidden while people label, so as not to sway them. Do not reveal them unless asked.',
       });
     }
@@ -322,19 +322,19 @@ export function agentTools(projectId: string): AgentToolHost {
         }
         case 'get_gold_labels': {
           const split = args.split === 'test' ? 'test' : 'eval';
-          const list = state.examples.filter(e => e.split === split && state.gold.has(e.id) && visibleToAgents(e));
-          return {split, labeled: list.length, ...(split === 'eval' ? {note: HIDDEN_NOTE} : {}), labels: list.slice(0, limitOf(args.limit, 20, 10)).map(e => ({id: e.externalId, title: e.title, answer: state.gold.get(e.id)!.answer}))};
+          const list = state.examples.filter(e => e.split === split && !!state.gold[e.id] && visibleToAgents(e));
+          return {split, labeled: list.length, ...(split === 'eval' ? {note: HIDDEN_NOTE} : {}), labels: list.slice(0, limitOf(args.limit, 20, 10)).map(e => ({id: e.externalId, title: e.title, answer: state.gold[e.id]!.answer}))};
         }
         case 'get_predictions': {
           const v = findVersion(state, args.version);
           const m = asModel(args.model, state) ?? state.setup?.models[0]?.endpoint;
           const settings = state.setup?.models.find(x => x.endpoint === m);
           if (!v || !settings) throw new Error('Name a version and one of the chosen models.');
-          const preds = await labeling.predictions(v.id, settings.endpoint, settingsHash(settings));
+          const preds = toMap(await labeling.predictions(v.id, settings.endpoint, settingsHash(settings)));
           const same = (a?: string[], b?: string[]) => JSON.stringify([...(a ?? [])].sort()) === JSON.stringify([...(b ?? [])].sort());
           const rows = state.examples
             .filter(e => e.split === 'eval' && visibleToAgents(e) && preds.has(e.id))
-            .map(e => ({e, p: preds.get(e.id)!, g: state.gold.get(e.id)?.answer ?? null}))
+            .map(e => ({e, p: preds.get(e.id)!, g: state.gold[e.id]?.answer ?? null}))
             .filter(({p, g}) => !args.mixedUpOnly || !p.answer || (g && state.setup!.schema!.fields.some(f => !same(g[f.name], p.answer![f.name]))));
           return {version: versionLabel(v), model: modelName(state, settings.endpoint), note: HIDDEN_NOTE, rows: rows.slice(0, limitOf(args.limit, 20, 10)).map(({e, p, g}) => ({id: e.externalId, title: e.title, model: p.answer, ...(p.reason ? {reason: p.reason} : {}), invalid: p.invalidReason, gold: g})), matching: rows.length};
         }
@@ -355,7 +355,7 @@ export function agentTools(projectId: string): AgentToolHost {
           if (!/^https?:\/\//.test(url)) throw new Error('Give the link to read.');
           const doc = await getApp().documents?.read(url);
           if (!doc) return {error: 'This link cannot be opened here. Ask the user to paste the text.'};
-          const MAX = 20000;
+          const MAX = systemConfig().agent.maxDocChars;
           return {title: doc.title, text: doc.text.length > MAX ? `${doc.text.slice(0, MAX)}… (cut)` : doc.text};
         }
         default:

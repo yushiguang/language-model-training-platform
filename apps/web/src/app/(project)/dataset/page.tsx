@@ -136,7 +136,7 @@ function Ready({state, flush, onValid}: {state: ProjectState; flush: {current: (
   const rec = recommended(total, t?.minEval ?? null);
   const [evalSize, setEval] = useState(String(snap.split?.eval ?? rec.evalSize));
   const [test, setTest] = useState(String(snap.split?.test ?? rec.test));
-  const locked = state.gold.size > 0;
+  const locked = Object.keys(state.gold).length > 0;
   const e = evalOn ? parseInt(evalSize) || 0 : 0;
   const te = parseInt(test) || 0;
   const train = Math.max(0, total - e - te);

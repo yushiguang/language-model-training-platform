@@ -1,3 +1,4 @@
+import {systemConfig} from './config.ts';
 import {renderPrompt} from './template.ts';
 import type {Actor, AgentPreset, EndpointId, EndpointInfo, FeatureSelection, ProjectState, PromptImage, PromptVersion} from '@tsp/contracts';
 import {versionLabel} from './versions.ts';
@@ -58,7 +59,7 @@ export function estimateLabeling(state: ProjectState, draft: {template: string; 
       estimateTokens(renderPrompt(draft.template, ex, draft.features, draft.images)),
     );
     const avg = tokens.length ? tokens.reduce((a, b) => a + b, 0) / tokens.length : 0;
-    costUsd += costForTokens(state.endpoints, m.endpoint, avg, 150) * evalEx.length;
+    costUsd += costForTokens(state.endpoints, m.endpoint, avg, systemConfig().gateway.evalOutputTokensEstimate) * evalEx.length;
   }
   return {count: evalEx.length, costUsd, minutes: minutesFor(evalEx.length)};
 }
@@ -81,7 +82,7 @@ export function estimate(state: ProjectState, version: PromptVersion, endpoint: 
       const parts = renderPrompt(version.template, ex, version.features, version.images);
       return estimateTokens(parts);
     });
-    per1000 = sample.length ? costForTokens(state.endpoints, endpoint, tokens.reduce((a, b) => a + b, 0) / sample.length, 150) * 1000 : 0;
+    per1000 = sample.length ? costForTokens(state.endpoints, endpoint, tokens.reduce((a, b) => a + b, 0) / sample.length, systemConfig().gateway.evalOutputTokensEstimate) * 1000 : 0;
   }
   return {count: all.length, train, test, reused: all.length - todo.length, costUsd: (per1000 * todo.length) / 1000, minutes: todo.length ? minutesFor(todo.length) : 0, per1000, report: report ?? null};
 }
@@ -94,9 +95,9 @@ export function estimate(state: ProjectState, version: PromptVersion, endpoint: 
 export function finalRunPlan(state: ProjectState, version: PromptVersion, endpoint: EndpointId, answered: ReadonlySet<string> = new Set()) {
   const train = estimate(state, version, endpoint, ['train'], answered);
   const test = state.examples.filter(e => e.split === 'test');
-  const withGold = test.filter(e => state.gold.has(e.id)).map(e => e.id);
-  const withAnswer = test.filter(e => !state.gold.has(e.id) && answered.has(e.id)).map(e => e.id);
-  const toLabel = test.filter(e => !state.gold.has(e.id) && !answered.has(e.id)).map(e => e.id);
+  const withGold = test.filter(e => !!state.gold[e.id]).map(e => e.id);
+  const withAnswer = test.filter(e => !state.gold[e.id] && answered.has(e.id)).map(e => e.id);
+  const toLabel = test.filter(e => !state.gold[e.id] && !answered.has(e.id)).map(e => e.id);
   const testCostUsd = (train.per1000 * toLabel.length) / 1000;
   return {
     train,
@@ -224,7 +225,7 @@ export function recommend(s: ProjectState, optimiserRunning: EndpointId | null):
  */
 export function scoresUpdating(s: Omit<ProjectState, 'scoresUpdating'>, cannotBuild: ReadonlySet<string> = new Set()): boolean {
   const evalEx = s.examples.filter(e => e.split === 'eval');
-  if (!s.setup?.schema || !evalEx.length || evalEx.some(e => !s.gold.has(e.id))) return false;
+  if (!s.setup?.schema || !evalEx.length || evalEx.some(e => !s.gold[e.id])) return false;
   const current = new Set(s.reports.filter(r => !r.archivedNow).map(r => `${r.promptVersionId}|${r.endpoint}`));
   return s.reports.some(
     r =>

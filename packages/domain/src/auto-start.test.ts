@@ -13,7 +13,7 @@ const state = (over: Partial<ProjectState> = {}): ProjectState =>
       {id: 'ex_1', split: 'eval', features: {Title: 'a'}, type: 'video'},
       {id: 'ex_2', split: 'eval', features: {Title: 'b'}, type: 'video'},
     ],
-    gold: new Map(),
+    gold: {},
     versions: [version],
     reports: [],
     runs: [],
@@ -55,7 +55,7 @@ test('final run plan: test examples with gold or an answer are never labeled aga
       {id: 't3', split: 'test', features: {Title: 'c'}, type: 'video'},
       {id: 'r1', split: 'train', features: {Title: 'd'}, type: 'video'},
     ] as unknown as ProjectState['examples'],
-    gold: new Map([['t1', {answer: {}}]]) as unknown as ProjectState['gold'],
+    gold: {t1: {answer: {}}} as unknown as ProjectState['gold'],
   });
   const p = finalRunPlan(s, version, 'A', new Set(['t1', 't2']));
   assert.deepEqual(p.test.withGold, ['t1']);

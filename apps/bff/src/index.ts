@@ -1,3 +1,4 @@
+export * from './api.ts';
 export * from './services/app.ts';
 export * from './services/agents.ts';
 export * from './services/dataset.ts';

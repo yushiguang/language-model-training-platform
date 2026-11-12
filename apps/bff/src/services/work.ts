@@ -1,5 +1,5 @@
 import type {EndpointId, ProjectState, PromptVersion} from '@tsp/contracts';
-import {autoSpendUsd, DEFAULT_MAX_ROUNDS, dueStarts, versionLabel, type DueStart} from '@tsp/domain';
+import {autoSpendUsd, dueStarts, versionLabel, type DueStart, systemConfig} from '@tsp/domain';
 import {busy, getApp, once, optimiserLock, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {buildReport, labelEvalSet} from './evaluation.ts';
@@ -104,11 +104,11 @@ export async function tick(state: ProjectState) {
  * project), from `startVersionId` (the version selected in the list; left out: the best scored
  * version). `auto`: an agent's start tool, after the user asked in Ask AI.
  */
-export async function startOptimiser(projectId: string, maxRounds = DEFAULT_MAX_ROUNDS, startVersionId?: string, opts: {auto?: boolean} = {}): Promise<void> {
+export async function startOptimiser(projectId: string, maxRounds = systemConfig().optimiser.defaultMaxRounds, startVersionId?: string, opts: {auto?: boolean} = {}): Promise<void> {
   const state = await loadProjectState(projectId);
   const endpoint = state?.setup?.models[0]?.endpoint;
   if (!state || !endpoint) throw new Error('Pick a model in Setup first.');
-  const rounds = Math.max(1, Math.min(50, Math.round(maxRounds) || DEFAULT_MAX_ROUNDS));
+  const rounds = Math.max(1, Math.min(systemConfig().optimiser.maxRoundsCap, Math.round(maxRounds) || systemConfig().optimiser.defaultMaxRounds));
   await once('optimiser', async () => {
     // The lock covers every tab of this browser: a second tab never runs the same work twice.
     await getApp().locks.run(optimiserLock(projectId, endpoint), async () => {

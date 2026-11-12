@@ -447,8 +447,8 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
   assert.deepEqual(m.items.map(x => x.exampleId), [id(7)]);
   assert.equal(m.reviewed, 2);
   const after = await w.state();
-  assert.deepEqual(after.gold.get(id(6))!.answer, {format: ['Vlog']});
-  assert.equal(after.gold.get(id(5))!.id, s.gold.get(id(5))!.id, 'keeping a label saves no new label');
+  assert.deepEqual(after.gold[id(6)]!.answer, {format: ['Vlog']});
+  assert.equal(after.gold[id(5)]!.id, s.gold[id(5)]!.id, 'keeping a label saves no new label');
   const log = await w.catalog.find('audit_log', {projectId: w.projectId, action: 'gold.review'});
   assert.deepEqual(log.map(l => (l.data as {outcome: string}).outcome).sort(), ['changed', 'kept']);
 
@@ -473,7 +473,7 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
   m = await mismatches(w.projectId);
   assert.deepEqual(m.items.map(x => x.exampleId), [5, 6, 7].map(id));
   assert.equal(m.reviewed, 0);
-  assert.deepEqual((await w.state()).gold.get(id(6))!.answer, s.gold.get(id(6))!.answer);
+  assert.deepEqual((await w.state()).gold[id(6)]!.answer, s.gold[id(6)]!.answer);
   // Reviewed again after a reopen, the new decision stands.
   await reviewGold(w.projectId, id(5), best.id, 'kept', undefined, '  Its own words  ');
   m = await mismatches(w.projectId);

@@ -18,13 +18,9 @@ import type {
   FeatureSelection,
   Schema,
 } from '@tsp/contracts';
-import {FEATURES} from '@tsp/domain';
+import {FEATURES, systemConfig} from '@tsp/domain';
 import {agentName, presetModel, PRESETS, START_TOOLS, systemPrompt, TOOL_SPECS} from './presets.ts';
 
-/** Read-tool calls allowed in one turn, across the agents in it. */
-export const MAX_TOOL_CALLS = 4;
-/** A tool result longer than this is cut, so one call can't fill the context. */
-const MAX_RESULT_CHARS = 12_000;
 
 /** Handoffs go only to these specialists; anything else is ignored (no handoff). */
 const HANDOFF_TARGETS: AgentPreset[] = ['schema_agent', 'prompt_agent', 'evaluation_agent'];
@@ -69,7 +65,7 @@ function buildAgentContext(input: AgentTurnInput, targetAgent: AgentPreset): Rec
     task: page.context.task ?? workspace.task,
     schema: page.context.schema ?? workspace.schema,
     pageView: workspace.pageView,
-    recentHistory: workspace.history.slice(-8),
+    recentHistory: workspace.history.slice(-systemConfig().agent.recentHistoryCount),
   };
 
   if (targetAgent === 'prompt_agent') {
@@ -188,7 +184,7 @@ function toolBlurb(to: AgentPreset, host?: AgentToolHost): string {
   const paid = names.some(n => START_TOOLS.includes(n))
     ? ' Tools marked PAID spend money and start at once (the user can stop them from the page): use them only when the user asks for that work or clearly agrees.'
     : ' Tools only read.';
-  return `\nIf the page view doesn't have what you need, use a tool: answer {"tool": {"name": string, "args": object}} instead, and the result comes back as the next message.${paid} At most ${MAX_TOOL_CALLS} calls per turn. Your tools:\n${list}`;
+  return `\nIf the page view doesn't have what you need, use a tool: answer {"tool": {"name": string, "args": object}} instead, and the result comes back as the next message.${paid} At most ${systemConfig().agent.maxToolCalls} calls per turn. Your tools:\n${list}`;
 }
 
 /** One agent's part of a turn: calls the model, runs the read tools it asks for, until it answers. */
@@ -226,12 +222,12 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
       return {reply: raw.trim() && !/[{}[\]]/.test(raw) ? raw.trim() : "Sorry, my answer came out garbled. Please ask again."};
     }
     if (!out.tool) return out;
-    if (step >= MAX_TOOL_CALLS + 1) return {reply: "I couldn't find what I needed. Could you say a bit more about what you're asking?"};
+    if (step >= systemConfig().agent.maxToolCalls + 1) return {reply: "I couldn't find what I needed. Could you say a bit more about what you're asking?"};
     const name = out.tool.name;
     const args = out.tool.args && typeof out.tool.args === 'object' ? out.tool.args : {};
     let result: unknown;
     if (!tools.host || !PRESETS[to].tools.includes(name)) result = {error: `${name} is not one of your tools.`};
-    else if (tools.used.length >= MAX_TOOL_CALLS) result = {error: 'No more tool calls in this turn. Answer now with what you have.'};
+    else if (tools.used.length >= systemConfig().agent.maxToolCalls) result = {error: 'No more tool calls in this turn. Answer now with what you have.'};
     else {
       const started = Date.now();
       tools.progress?.({agent: to, working: workingLine(name, args)});
@@ -244,7 +240,7 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
       }
     }
     let text = JSON.stringify({tool_result: {name, result}});
-    if (text.length > MAX_RESULT_CHARS) text = `${text.slice(0, MAX_RESULT_CHARS)}… (cut)`;
+    if (text.length > systemConfig().agent.maxToolResultChars) text = `${text.slice(0, systemConfig().agent.maxToolResultChars)}… (cut)`;
     messages.push({role: 'assistant', content: raw}, {role: 'user', content: text});
   }
 }
@@ -366,7 +362,7 @@ async function withFeatureInfo(llm: AgentModel, preset: AgentPreset | 'optimiser
         result = {error: (e as Error).message};
       }
     }
-    messages.push({role: 'assistant', content: raw}, {role: 'user', content: JSON.stringify({tool_result: {name: out.tool.name, result}}).slice(0, MAX_RESULT_CHARS)});
+    messages.push({role: 'assistant', content: raw}, {role: 'user', content: JSON.stringify({tool_result: {name: out.tool.name, result}}).slice(0, systemConfig().agent.maxToolResultChars)});
   }
 }
 

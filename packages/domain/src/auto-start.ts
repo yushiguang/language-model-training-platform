@@ -1,3 +1,4 @@
+import {systemConfig} from './config.ts';
 import type {EndpointId, ProjectState, PromptVersion} from '@tsp/contracts';
 import {estimateTokens} from './labels.ts';
 import {renderPrompt} from './template.ts';
@@ -10,10 +11,6 @@ import {costForTokens} from './workflow.ts';
  * Stop button. The Optimiser is the exception: only the user starts it (Auto Optimise, decided
  * 2026-11-09), with a number of rounds.
  */
-/** The rounds box next to Auto Optimise is prefilled with this. */
-export const DEFAULT_MAX_ROUNDS = 10;
-/** The prompt agent's try_template labels at most this many eval examples. */
-export const TRY_TEMPLATE_MAX = 5;
 
 export type AutoStartWhat = 'score' | 'resume' | 'optimiser' | 'try_template';
 
@@ -23,11 +20,11 @@ export function evalEstimate(state: ProjectState, version: Pick<PromptVersion, '
   const sample = evalEx.slice(0, 10);
   if (!sample.length) return 0;
   const avg = sample.map(ex => estimateTokens(renderPrompt(version.template, ex, version.features, version.images))).reduce((a, b) => a + b, 0) / sample.length;
-  return costForTokens(state.endpoints, endpoint, avg, 150) * (n ?? evalEx.length);
+  return costForTokens(state.endpoints, endpoint, avg, systemConfig().gateway.evalOutputTokensEstimate) * (n ?? evalEx.length);
 }
 
 /** At most what one optimiser run costs (for the audit log only): every round labeled on the eval set. */
-export function optimiserEstimate(state: ProjectState, endpoint: EndpointId, rounds = DEFAULT_MAX_ROUNDS): number {
+export function optimiserEstimate(state: ProjectState, endpoint: EndpointId, rounds = systemConfig().optimiser.defaultMaxRounds): number {
   const v = state.versions[0];
   return v ? evalEstimate(state, v, endpoint) * rounds : 0;
 }

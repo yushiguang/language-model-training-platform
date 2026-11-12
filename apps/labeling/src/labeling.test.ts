@@ -61,7 +61,7 @@ test('runs examples in parallel (up to 4 at once) and saves one prediction each'
   assert.deepEqual([done?.done, done?.valid, done?.invalid, done?.failed], [30, 30, 0, 0]);
   assert.equal(stats.maxInFlight, 4);
   const preds = await lab.predictions(v.id, 'A', t.settingsHash);
-  assert.equal(preds.size, 30);
+  assert.equal(Object.keys(preds).length, 30);
 });
 
 test('invalid answers are results; a resumed task only labels what is missing', async () => {
@@ -154,7 +154,7 @@ test('tryTemplate labels a few examples with an unsaved template and saves nothi
   assert.ok(rows.every(r => r.answer?.format?.[0] === 'Vlog' && r.costUsd === 0.01));
   assert.equal((await labeling.listTasks('pr_1')).length, 0);
   // Nothing saved under the version that exists either.
-  assert.equal((await labeling.predictions(v.id, 'A', 'any')).size, 0);
+  assert.equal(Object.keys(await labeling.predictions(v.id, 'A', 'any')).length, 0);
 });
 
 test('relabelInvalid: an example whose only answer is invalid is labeled once more, and the valid answer wins', async () => {
@@ -175,7 +175,7 @@ test('relabelInvalid: an example whose only answer is invalid is labeled once mo
   assert.deepEqual([seen.get('0'), seen.get('1'), seen.get('2')], [2, 2, 1], 'only the invalid ones are called again');
   assert.deepEqual([r?.done, r?.valid, r?.invalid], [4, 3, 1]);
   const preds = await lab.predictions(v.id, 'A', again.settingsHash);
-  assert.ok(preds.get(ids[0])?.answer, 'the valid second answer wins');
+  assert.ok(preds[ids[0]]?.answer, 'the valid second answer wins');
   // Running it again labels nothing: each example gets one more try only.
   await lab.runTask(again.id);
   const third = await lab.createTask(input(ids, v, {relabelInvalid: true}));
@@ -309,7 +309,7 @@ test("every labeling prompt ends with the site's reason line, and the model's re
   await lab.runTask(t.id);
   assert.ok(asked.length === 2 && asked.every(a => a.startsWith('Label post') && a.endsWith(REASON_LINE)));
   const preds = await lab.predictions(v.id, 'A', t.settingsHash);
-  assert.equal(preds.get('ex_0')?.reason, 'It shows a day out.');
-  assert.deepEqual(preds.get('ex_0')?.answer, {format: ['Vlog']});
-  assert.equal(preds.get('ex_1')?.reason, undefined);
+  assert.equal(preds['ex_0']?.reason, 'It shows a day out.');
+  assert.deepEqual(preds['ex_0']?.answer, {format: ['Vlog']});
+  assert.equal(preds['ex_1']?.reason, undefined);
 });

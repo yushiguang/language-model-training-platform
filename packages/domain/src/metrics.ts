@@ -1,3 +1,4 @@
+import {DEFAULT_SYSTEM_CONFIG, systemConfig} from './config.ts';
 import type {Answer, FieldMetrics, Metrics, MixUp, Schema, Thresholds, ValueMetrics} from '@tsp/contracts';
 
 export interface Scored {
@@ -14,7 +15,6 @@ export interface Scored {
  * At most this share of answers may be invalid for a version to pass (acceptance R4-6, decided
  * 2026-11-11). Applies when the project sets no invalid-rate threshold of its own.
  */
-export const INVALID_CAP = 0.01;
 
 const f1 = (p: number, r: number) => (p + r === 0 ? 0 : (2 * p * r) / (p + r));
 const round = (x: number) => Math.round(x * 1000) / 1000;
@@ -115,7 +115,7 @@ export function judge(m: Metrics, t: Thresholds, evalCount: number): {passed: bo
   if (t.recall != null) checks.push({label: 'Lowest value recall', actual: lowest('recall').toFixed(2), need: `≥ ${t.recall.toFixed(2)}`, met: lowest('recall') >= t.recall});
   // Always checked (R4-6): invalid answers are left out of the scores, so a version must not pass
   // by giving unreadable answers on the hard examples.
-  const cap = t.invalidRate ?? INVALID_CAP;
+  const cap = t.invalidRate ?? systemConfig().evaluation.invalidRateCap;
   checks.push({label: 'Invalid outputs', actual: pct(m.invalidRate), need: `≤ ${pct(cap)}`, met: m.invalidRate <= cap});
   if (t.accuracy != null) {
     const singles = m.fields.filter(f => f.kind === 'single');
@@ -131,6 +131,6 @@ export function judge(m: Metrics, t: Thresholds, evalCount: number): {passed: bo
 export const pct = (x: number) => `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;
 
 /** Default (Setup, Evaluation settings): Macro-F1 of every field must reach 0.80 (UI design 2026-11-05). */
-export const DEFAULT_THRESHOLDS: Thresholds = {mode: 'default', macroF1: 0.8, valueF1: null, precision: null, recall: null, invalidRate: null, accuracy: null, minEval: 20};
+export const DEFAULT_THRESHOLDS: Thresholds = {mode: 'default', macroF1: DEFAULT_SYSTEM_CONFIG.evaluation.defaultMacroF1, valueF1: null, precision: null, recall: null, invalidRate: null, accuracy: null, minEval: DEFAULT_SYSTEM_CONFIG.dataset.minEvalRecommended};
 /** Custom starts from these: F1 on at 0.60, Precision and Recall off with 0.70 ready in their boxes. */
-export const CUSTOM_START = {valueF1: 0.6, precision: 0.7, recall: 0.7};
+export const CUSTOM_START = {valueF1: DEFAULT_SYSTEM_CONFIG.evaluation.customStartValueF1, precision: DEFAULT_SYSTEM_CONFIG.evaluation.customStartPrecision, recall: DEFAULT_SYSTEM_CONFIG.evaluation.customStartRecall};

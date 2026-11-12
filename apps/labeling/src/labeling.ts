@@ -18,7 +18,7 @@ import {
   type TelemetryPort,
   type TryTemplateRow,
 } from '@tsp/contracts';
-import {hashString, parseOutput, REASON_LINE, renderPrompt, settingsHash, type Part} from '@tsp/domain';
+import {hashString, parseOutput, REASON_LINE, renderPrompt, settingsHash, type Part, systemConfig} from '@tsp/domain';
 import {DocRepo, newId} from '@tsp/platform';
 import {browserLocks, type TaskLocks} from './locks.ts';
 
@@ -34,16 +34,8 @@ export interface LabelingDeps {
   telemetry?: TelemetryPort;
 }
 
-/** Examples labeled at once by default. */
-export const DEFAULT_PARALLEL = 4;
-/** The task pauses with "needs attention" when more than this share of examples failed. */
-export const MAX_FAILED_SHARE = 0.05;
-/** ...or when this many examples in a row failed. */
-export const MAX_FAILED_IN_A_ROW = 20;
 /** The task pauses when cost passes this multiple of the accepted estimate. */
 export const BUDGET_MARGIN = 1.2;
-/** How often a runner re-reads its task to see a Stop pressed in another tab. */
-const STOP_CHECK_MS = 2000;
 
 const TASKS = 'labeling_tasks';
 const PREDICTIONS = 'predictions';
@@ -105,9 +97,9 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     return out;
   }
 
-  async function predictions(promptVersionId: string, endpoint: EndpointId, hash: string): Promise<Map<string, Prediction>> {
-    const out = new Map<string, Prediction>();
-    for (const [id, ps] of await allPredictions(promptVersionId, endpoint, hash)) out.set(id, ps.find(p => p.answer) ?? ps[0]);
+  async function predictions(promptVersionId: string, endpoint: EndpointId, hash: string): Promise<Record<string, Prediction>> {
+    const out: Record<string, Prediction> = {};
+    for (const [id, ps] of await allPredictions(promptVersionId, endpoint, hash)) out[id] = ps.find(p => p.answer) ?? ps[0];
     return out;
   }
 
@@ -187,7 +179,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     const overLimit = (): LabelingTask['stopReason'] => {
       if (budgetUsd != null && counts.costUsd > budgetUsd * BUDGET_MARGIN) return 'budget';
       if (opts.budgetUsd != null && runCostUsd > opts.budgetUsd * BUDGET_MARGIN) return 'budget';
-      if (counts.failed / task.total > MAX_FAILED_SHARE || inARow >= MAX_FAILED_IN_A_ROW) return 'failures';
+      if (counts.failed / task.total > systemConfig().labeling.maxFailedShare || inARow >= systemConfig().labeling.maxFailedInARow) return 'failures';
       return null;
     };
 
@@ -200,7 +192,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           ctrl.abort();
         }
       });
-    }, STOP_CHECK_MS);
+    }, systemConfig().labeling.stopCheckMs);
     (stopTimer as {unref?: () => void}).unref?.();
 
     /**
@@ -361,7 +353,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         costUsd: 0,
         tokens: 0,
         budgetUsd: input.budgetUsd ?? null,
-        parallel: input.parallel ?? DEFAULT_PARALLEL,
+        parallel: input.parallel ?? systemConfig().labeling.defaultParallel,
         ...(input.relabelInvalid ? {relabelInvalid: true} : {}),
         state: 'queued',
         stopReason: null,

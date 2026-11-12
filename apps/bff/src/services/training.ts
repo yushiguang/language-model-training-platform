@@ -1,5 +1,5 @@
 import type {EndpointId, EvalReport, LabelingTask, PromptVersion, TrainingRow, TrainingSet} from '@tsp/contracts';
-import {estimate, finalRunPlan, MIN_PER_VALUE, minutesFor, newId, settingsHash} from '@tsp/domain';
+import {estimate, finalRunPlan, MIN_PER_VALUE, minutesFor, newId, settingsHash, toMap} from '@tsp/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {latestGold} from './evaluation.ts';
@@ -74,14 +74,14 @@ export async function startTrainingSet(
   const settings = setup.models.find(m => m.endpoint === endpoint);
   if (!settings) throw new Error(`Model ${endpoint} is not chosen in Setup.`);
   const u = await user();
-  const saved = await labeling.predictions(version.id, endpoint, settingsHash(settings));
+  const saved = toMap(await labeling.predictions(version.id, endpoint, settingsHash(settings)));
   // An invalid answer is not a label: such a test example is labeled again, like one with none.
   const valid = (id: string) => !!saved.get(id)?.answer;
   const train = state.examples.filter(e => e.split === 'train');
   const test = state.examples.filter(e => e.split === 'test');
-  const withGold = test.filter(e => state.gold.has(e.id));
-  const withAnswer = test.filter(e => !state.gold.has(e.id) && valid(e.id));
-  const toLabel = test.filter(e => !state.gold.has(e.id) && !valid(e.id));
+  const withGold = test.filter(e => !!state.gold[e.id]);
+  const withAnswer = test.filter(e => !state.gold[e.id] && valid(e.id));
+  const toLabel = test.filter(e => !state.gold[e.id] && !valid(e.id));
   const ids = [...train, ...(labelTest ? toLabel : [])].map(e => e.id);
   if (!ids.length) throw new Error('Nothing to label: there are no train examples, and every test example already has a label.');
   const task = await labeling.createTask({
@@ -153,7 +153,7 @@ export async function trainingRows(tsId: string): Promise<TrainingRow[]> {
   const task = await labeling.getTask(ts.taskId);
   if (!task) return [];
   const [preds, examples, setup] = await Promise.all([
-    labeling.predictions(task.promptVersionId, task.endpoint, task.settingsHash),
+    labeling.predictions(task.promptVersionId, task.endpoint, task.settingsHash).then(toMap),
     catalog.find('examples', {snapshotId: ts.snapshotId}),
     catalog.get('setup_versions', ts.setupVersionId),
   ]);
@@ -166,7 +166,7 @@ export async function trainingRows(tsId: string): Promise<TrainingRow[]> {
       if (!inTask.has(e.id) || !p) continue;
       rows.push({trainingSetId: ts.id, exampleId: e.id, split: 'train', answer: p.answer, labelSource: p.answer ? 'model' : null, model: p.answer, invalidReason: p.invalidReason, gold: null});
     } else if (e.split === 'test') {
-      const g = gold.get(e.id)?.answer ?? null;
+      const g = gold[e.id]?.answer ?? null;
       const answer = g ?? p?.answer ?? null;
       rows.push({trainingSetId: ts.id, exampleId: e.id, split: 'test', answer, labelSource: g ? 'gold' : answer ? 'model' : null, model: p?.answer ?? null, invalidReason: p?.invalidReason ?? null, gold: g});
     }

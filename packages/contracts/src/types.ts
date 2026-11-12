@@ -626,8 +626,8 @@ export interface ProjectState {
   setup: SetupVersion | null;
   snapshot: DatasetSnapshot | null;
   examples: Example[];
-  gold: Map<string, GoldLabel>;
-  staleGold: Map<string, GoldLabel>;
+  gold: Record<string, GoldLabel>;
+  staleGold: Record<string, GoldLabel>;
   versions: PromptVersion[];
   reports: (EvalReport & {passed: boolean; archivedNow: boolean})[];
   /** Eval and optimiser labeling (started by code). */

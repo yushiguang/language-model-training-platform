@@ -1,24 +1,5 @@
 import type {Answer, EndpointId, ExampleBrief, FeatureSelection, Prediction, OptimisationRun, OptimiserRound, OptimiserStep, ProjectState, PromptVersion, Schema, SetupVersion} from '@tsp/contracts';
-import {
-  BRIEF_WINS,
-  checkTemplate,
-  compareDryRun,
-  answersForHelpers,
-  exampleBrief,
-  dryRunSize,
-  exampleScore,
-  mergePair,
-  newId,
-  paretoFront,
-  pickDryRun,
-  pickParent,
-  placeholderKeys,
-  promptKeys,
-  settingsHash,
-  versionLabel,
-  wrongExamples,
-  type PoolEntry,
-} from '@tsp/domain';
+import {checkTemplate, compareDryRun, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, placeholderKeys, promptKeys, settingsHash, versionLabel, wrongExamples, type PoolEntry, systemConfig, toMap} from '@tsp/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {buildReport, confirmScore, labelEvalSet, labelExamples, scoreOnOptimiserHalf} from './evaluation.ts';
@@ -60,10 +41,6 @@ export function stopOptimiser(id: string): void {
     .then(o => o && postEvent(o.projectId, 'stop', 'user', 'stopped the Optimiser', {path: '/prompt'}));
 }
 
-const TRIES = 3;
-const WASTED_LIMIT = 3;
-const TIE_LIMIT = 2;
-const MERGE_EVERY = 2;
 
 const STEP_NAME: Record<OptimiserStep, string> = {
   parent: 'Labeling',
@@ -101,7 +78,7 @@ const isAbort = (e: unknown) => (e as Error)?.name === 'AbortError';
 function briefs(state: ProjectState, schema: Schema, half: string[], parent: PromptVersion, other: PromptVersion | null, answers: Map<string, Map<string, Prediction>>, entries: PoolEntry[]): ExampleBrief[] {
   const halfSet = new Set(half);
   const exs = state.examples.filter(e => halfSet.has(e.id));
-  const gold = new Map(exs.filter(e => state.gold.has(e.id)).map(e => [e.id, state.gold.get(e.id)!.answer]));
+  const gold = new Map(exs.filter(e => !!state.gold[e.id]).map(e => [e.id, state.gold[e.id]!.answer]));
   const mine = answers.get(parent.id) ?? new Map<string, Prediction>();
   if (!other) {
     const {predicted, notes} = answersForHelpers(mine.values());
@@ -115,7 +92,7 @@ function briefs(state: ProjectState, schema: Schema, half: string[], parent: Pro
   const wins = (x: Map<string, number>, y: Map<string, number>, by: 'template' | 'other', preds: Map<string, Prediction>) =>
     exs
       .filter(e => (x.get(e.id) ?? 0) > (y.get(e.id) ?? 0) && gold.has(e.id) && !preds.get(e.id)?.filtered)
-      .slice(0, BRIEF_WINS)
+      .slice(0, systemConfig().optimiser.briefMergeWins)
       .map(e => {
         const p = preds.get(e.id);
         return exampleBrief(e, keys, gold.get(e.id)!, p?.answer ?? null, by, p ? answersForHelpers([p]).notes.get(e.id) : undefined);
@@ -189,7 +166,7 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
   async function step<T>(name: OptimiserStep, version: PromptVersion | null, fn: () => Promise<T>): Promise<T> {
     await setStep(name, version?.id ?? null);
     let last: unknown;
-    for (let i = 0; i < TRIES; i++) {
+    for (let i = 0; i < systemConfig().optimiser.stepRetries; i++) {
       if (signal.aborted) throw aborted();
       try {
         return await fn();
@@ -200,7 +177,7 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
       }
     }
     const what = `${STEP_NAME[name]}${version ? ` ${versionLabel(version)}` : ''}`;
-    throw new StepFailed(name, `${what} failed after ${TRIES} tries: ${(last as Error)?.message ?? 'unknown error'}`);
+    throw new StepFailed(name, `${what} failed after ${systemConfig().optimiser.stepRetries} tries: ${(last as Error)?.message ?? 'unknown error'}`);
   }
   /** Labels examples as one try of a step; a stopped or failed task is an error. */
   const label = async (setup: SetupVersion, v: PromptVersion, ids: string[] | 'eval', pass?: number) => {
@@ -292,15 +269,15 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
       const pool = [start, ...state.versions.filter(v => kept.includes(v.id)), ...state.versions.filter(v => v.id !== start.id && !kept.includes(v.id) && scored.has(v.id))];
       const settings = setup.models.find(m => m.endpoint === endpoint);
       if (!settings) throw new StepFailed('parent', `The model is not chosen in Setup any more.`);
-      const half = state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && state.gold.has(e.id)).map(e => e.id);
+      const half = state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && !!state.gold[e.id]).map(e => e.id);
       if (!half.length) throw new StepFailed('parent', 'No version can be compared yet: the optimiser half of the eval set has no gold labels.');
       const answers = new Map<string, Map<string, Prediction>>();
-      for (const v of pool) answers.set(v.id, await getApp().labeling.predictions(v.id, endpoint, settingsHash(settings)));
+      for (const v of pool) answers.set(v.id, toMap(await getApp().labeling.predictions(v.id, endpoint, settingsHash(settings))));
       const entries: PoolEntry[] = pool.map(v => ({
         id: v.id,
         // R4-6: an answer the safety filter stopped is left out. An invalid answer still scores 0
         // here, so the Optimiser keeps fixing prompts that give unreadable answers.
-        scores: new Map(half.filter(id => answers.get(v.id)!.has(id) && !answers.get(v.id)!.get(id)!.filtered).map(id => [id, exampleScore(schema, state.gold.get(id)!.answer, answers.get(v.id)!.get(id)!.answer)])),
+        scores: new Map(half.filter(id => answers.get(v.id)!.has(id) && !answers.get(v.id)!.get(id)!.filtered).map(id => [id, exampleScore(schema, state.gold[id]!.answer, answers.get(v.id)!.get(id)!.answer)])),
       }));
       const front = paretoFront(entries, half);
 
@@ -322,14 +299,14 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
           run.stopReason = 'max_rounds';
           break;
         }
-        if (wasted >= WASTED_LIMIT || ties >= TIE_LIMIT) {
+        if (wasted >= systemConfig().optimiser.wastedRoundsLimit || ties >= systemConfig().optimiser.consecutiveTiesLimit) {
           run.stopReason = 'no_new_ideas';
           break;
         }
         // R5-7: round 1 starts from the version the user picked, as the dialog promised; later
         // rounds roam the front.
         const first = run.round === 0;
-        const pair = !first && keptSinceMerge >= MERGE_EVERY ? mergePair(entries, front) : null;
+        const pair = !first && keptSinceMerge >= systemConfig().optimiser.mergeEveryKept ? mergePair(entries, front) : null;
         const parentId = first ? start.id : pair ? pair[0] : (pickParent(front, random) ?? start.id);
         parent = pool.find(v => v.id === parentId) ?? start;
         const other = pair ? pool.find(v => v.id === pair[1])! : null;
@@ -400,13 +377,13 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
       // Dry run: examples of the optimiser half at random, up to half of them holding the weakest
       // value of the parent's lowest field.
       if (round.step === 'dry_run') {
-        const parentAnswers = answers.get(parent.id) ?? (await getApp().labeling.predictions(parent.id, endpoint, settingsHash(settings)));
+        const parentAnswers = answers.get(parent.id) ?? (toMap(await getApp().labeling.predictions(parent.id, endpoint, settingsHash(settings))));
         const pm = await scoreOnOptimiserHalf(setup, parent, endpoint, state.examples, state.gold);
         const weak = pm.lowestValue;
         // The weakest value's score suffers from both sides: examples that have it, and examples
         // the parent wrongly gave it.
         const has = (a: Answer | null | undefined) => !!weak && !!a?.[weak.field]?.includes(weak.value);
-        const focus = new Set(half.filter(id => has(state.gold.get(id)!.answer) || has(parentAnswers.get(id)?.answer)));
+        const focus = new Set(half.filter(id => has(state.gold[id]!.answer) || has(parentAnswers.get(id)?.answer)));
         const ids = pickDryRun(
           half.filter(id => parentAnswers.has(id)),
           dryRunSize(half.length),
@@ -415,12 +392,12 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
         );
         const result = await step('dry_run', cand, async () => {
           await label(setup, cand, ids);
-          const mine = await getApp().labeling.predictions(cand.id, endpoint, settingsHash(settings));
+          const mine = toMap(await getApp().labeling.predictions(cand.id, endpoint, settingsHash(settings)));
           return compareDryRun(
             schema,
             parent.id,
             // R4-6: examples where either answer was stopped by the safety filter are left out.
-            ids.filter(id => !mine.get(id)?.filtered && !parentAnswers.get(id)?.filtered).map(id => ({gold: state.gold.get(id)!.answer, candidate: mine.get(id)?.answer ?? null, parent: parentAnswers.get(id)?.answer ?? null})),
+            ids.filter(id => !mine.get(id)?.filtered && !parentAnswers.get(id)?.filtered).map(id => ({gold: state.gold[id]!.answer, candidate: mine.get(id)?.answer ?? null, parent: parentAnswers.get(id)?.answer ?? null})),
             pm.lowestField.field,
           );
         });

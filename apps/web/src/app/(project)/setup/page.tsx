@@ -89,12 +89,12 @@ function SchemaView({state, setPage}: {state: ProjectState; setPage: (p: PageCon
   const approve = async () => {
     if (!open || !draft) return;
     await saveSetup(state.project.id, {schema: draft, steps: {schema: true, evaluation: setup?.steps.evaluation ?? false, models: setup?.steps.models ?? false}});
-    await closeProposal(open, 'approved');
+    await closeProposal({projectId: state.project.id, proposalId: open.id, decision: 'approved'});
   };
   // Discarding a draft goes back to the saved schema (or none).
   const discard = async () => {
     if (!open) return;
-    await closeProposal(open, 'discarded');
+    await closeProposal({projectId: state.project.id, proposalId: open.id, decision: 'discarded'});
     setDraft(setup?.schema ?? null);
   };
   const save = async () => {

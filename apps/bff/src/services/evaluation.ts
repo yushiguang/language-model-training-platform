@@ -1,15 +1,15 @@
 import type {EndpointId, EvalReport, Example, GoldLabel, LabelingTask, ModelSettings, Prediction, PromptVersion, SetupVersion, TaskPurpose} from '@tsp/contracts';
-import {computeMetrics, judge, newId, settingsHash, versionLabel, type Scored} from '@tsp/domain';
+import {toMap, computeMetrics, judge, newId, settingsHash, versionLabel, type Scored} from '@tsp/domain';
 import {emitChange, getApp, now} from './app.ts';
 import {postEvent} from './chat-events.ts';
 
 /** Latest gold label per example for the current schema; older-schema labels are kept as hints. */
 export async function latestGold(projectId: string, schemaVersion: number) {
   const all = await getApp().catalog.find('gold_labels', {projectId}, 'createdAt');
-  const current = new Map<string, GoldLabel>();
-  const stale = new Map<string, GoldLabel>();
-  for (const g of all) (g.schemaVersion === schemaVersion ? current : stale).set(g.exampleId, g);
-  for (const id of current.keys()) stale.delete(id);
+  const current: Record<string, GoldLabel> = {};
+  const stale: Record<string, GoldLabel> = {};
+  for (const g of all) (g.schemaVersion === schemaVersion ? current : stale)[g.exampleId] = g;
+  for (const id of Object.keys(current)) delete stale[id];
   return {current, stale};
 }
 
@@ -107,7 +107,7 @@ export function stopRun(runId: string): void {
 }
 
 export async function predictionsFor(versionId: string, endpoint: EndpointId, settings: ModelSettings): Promise<Map<string, Prediction>> {
-  return getApp().labeling.predictions(versionId, endpoint, settingsHash(settings));
+  return toMap(await getApp().labeling.predictions(versionId, endpoint, settingsHash(settings)));
 }
 
 /** Reports that cannot be built from saved answers, as "versionId|endpoint|contextId" (R5-4): the answers miss part of the eval set. */
@@ -123,13 +123,13 @@ export async function buildReport(
   version: PromptVersion,
   endpoint: EndpointId,
   examples: Example[],
-  gold: Map<string, GoldLabel>,
+  gold: Record<string, GoldLabel>,
   contextId: string,
   opts: {replace?: boolean} = {},
 ): Promise<EvalReport | null> {
   const {catalog} = getApp();
   const evalExamples = examples.filter(e => e.split === 'eval');
-  if (!setup.schema || !evalExamples.length || evalExamples.some(e => !gold.has(e.id))) return null;
+  if (!setup.schema || !evalExamples.length || evalExamples.some(e => !gold[e.id])) return null;
   const existing = (await catalog.find('eval_reports', {projectId, promptVersionId: version.id, endpoint, contextId})).filter(r => !r.archived);
   if (existing.length && !opts.replace) return existing[0];
   const settings = settingsFor(setup, endpoint);
@@ -139,7 +139,7 @@ export async function buildReport(
     cannotBuild.add(`${version.id}|${endpoint}|${contextId}`);
     return null;
   }
-  const items: Scored[] = scoredOn.map(e => ({exampleId: e.id, gold: gold.get(e.id)!.answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd}));
+  const items: Scored[] = scoredOn.map(e => ({exampleId: e.id, gold: gold[e.id].answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd}));
   const report: EvalReport = {
     id: newId('er'),
     projectId,
@@ -163,21 +163,21 @@ export async function buildReport(
  * The confirmation of a pass (decided 2026-11-10): the held-out half's score from a second,
  * fresh labeling (`pass` 2), and whether it passes the same thresholds.
  */
-export async function confirmScore(setup: SetupVersion, version: PromptVersion, endpoint: EndpointId, examples: Example[], gold: Map<string, GoldLabel>): Promise<{score: number; passed: boolean}> {
+export async function confirmScore(setup: SetupVersion, version: PromptVersion, endpoint: EndpointId, examples: Example[], gold: Record<string, GoldLabel>): Promise<{score: number; passed: boolean}> {
   const byExample = await predictionsFor(version.id, endpoint, {...settingsFor(setup, endpoint), pass: 2});
   const evalExamples = examples.filter(e => e.split === 'eval');
-  const held = evalExamples.filter(e => !e.optimiserHalf && gold.has(e.id));
+  const held = evalExamples.filter(e => !e.optimiserHalf && !!gold[e.id]);
   if (held.some(e => !byExample.has(e.id))) throw new Error('the second labeling is missing answers');
-  const m = computeMetrics(setup.schema!, held.map(e => ({exampleId: e.id, gold: gold.get(e.id)!.answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd})));
+  const m = computeMetrics(setup.schema!, held.map(e => ({exampleId: e.id, gold: gold[e.id].answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd})));
   return {score: m.lowestField.macroF1, passed: !!setup.thresholds && judge(m, setup.thresholds, evalExamples.length).passed};
 }
 
 /** Scores a candidate on the optimiser's own half (used inside the optimiser loop only). */
-export async function scoreOnOptimiserHalf(setup: SetupVersion, version: PromptVersion, endpoint: EndpointId, examples: Example[], gold: Map<string, GoldLabel>) {
+export async function scoreOnOptimiserHalf(setup: SetupVersion, version: PromptVersion, endpoint: EndpointId, examples: Example[], gold: Record<string, GoldLabel>) {
   const byExample = await predictionsFor(version.id, endpoint, settingsFor(setup, endpoint));
-  const half = examples.filter(e => e.split === 'eval' && e.optimiserHalf && byExample.has(e.id) && gold.has(e.id));
+  const half = examples.filter(e => e.split === 'eval' && e.optimiserHalf && byExample.has(e.id) && !!gold[e.id]);
   return computeMetrics(
     setup.schema!,
-    half.map(e => ({exampleId: e.id, gold: gold.get(e.id)!.answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd})),
+    half.map(e => ({exampleId: e.id, gold: gold[e.id].answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd})),
   );
 }

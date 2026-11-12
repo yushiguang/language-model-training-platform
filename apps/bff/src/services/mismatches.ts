@@ -1,5 +1,5 @@
 import type {Answer, Example, ExampleBrief, MismatchList, MismatchReview, Prediction, ProjectState} from '@tsp/contracts';
-import {fieldsRight, versionLabel, visibleToAgents} from '@tsp/domain';
+import {fieldsRight, versionLabel, visibleToAgents, systemConfig} from '@tsp/domain';
 import {emitChange, getApp, now, once, tm} from './app.ts';
 import {saveGold} from './dataset.ts';
 import {buildReport, predictionsFor} from './evaluation.ts';
@@ -9,8 +9,6 @@ import {loadProjectState} from './projects.ts';
 export const GOLD_REVIEW = 'gold.review';
 /** The audit action that reopens one (acceptance R4-5, 2026-11-11). */
 export const GOLD_REOPEN = 'gold.reopen';
-/** The longest "Why" note kept (R4-4). */
-export const NOTE_MAX_CHARS = 500;
 
 interface ReviewData {
   exampleId: string;
@@ -57,7 +55,7 @@ async function standingReviews(projectId: string, state: ProjectState): Promise<
     // Oldest first (stable, so same-time records keep their order), then the newest first.
     const sorted = [...list].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)).reverse();
     const d = sorted[0];
-    if (reopened.has(`${k}|${d.at}`) || state.gold.get(d.exampleId)?.id !== d.goldId) continue;
+    if (reopened.has(`${k}|${d.at}`) || state.gold[d.exampleId]?.id !== d.goldId) continue;
     out.set(k, {...d, earlier: sorted.slice(1)});
   }
   return out;
@@ -144,7 +142,7 @@ export async function mismatches(projectId: string, versionId?: string | null): 
   const model = setup?.models[0];
   if (!state || !setup?.schema || !model) return empty;
   const schema = setup.schema;
-  const evalEx = state.examples.filter(e => e.split === 'eval' && state.gold.has(e.id));
+  const evalEx = state.examples.filter(e => e.split === 'eval' && !!state.gold[e.id]);
   if (!evalEx.length) return empty;
   const standing = await standingReviews(projectId, state);
   // Versions of the current schema with an answer for every eval example, newest first.
@@ -161,7 +159,7 @@ export async function mismatches(projectId: string, versionId?: string | null): 
   const picked = versionId && answers.has(versionId) ? versionId : best.id;
   const wrong = (vid: string, exId: string) => {
     const p = answers.get(vid)!.get(exId)!;
-    return !p.filtered && fieldsRight(schema, state.gold.get(exId)!.answer, p.answer).length < schema.fields.length;
+    return !p.filtered && fieldsRight(schema, state.gold[exId]!.answer, p.answer).length < schema.fields.length;
   };
   const of = answers.size;
   const reviewedHere = (e: Example) => standing.has(`${e.id}|${picked}`);
@@ -197,12 +195,12 @@ export async function mismatches(projectId: string, versionId?: string | null): 
 export async function reviewGold(projectId: string, exampleId: string, versionId: string, outcome: 'kept' | 'changed', answer?: Answer, note?: string): Promise<void> {
   const {catalog, user} = getApp();
   const state = await loadProjectState(projectId);
-  const current = state?.gold.get(exampleId);
+  const current = state?.gold[exampleId];
   const model = state?.setup?.models[0];
   if (!state?.setup || !current) throw new Error('This example has no gold label.');
   const g = outcome === 'changed' && answer ? await saveGold(projectId, exampleId, state.setup.schemaVersion, answer, true) : current;
   const theirs = model ? (await predictionsFor(versionId, model.endpoint, model)).get(exampleId)?.answer : null;
-  const text = note?.trim().slice(0, NOTE_MAX_CHARS) || undefined;
+  const text = note?.trim().slice(0, systemConfig().labeling.commentMaxChars) || undefined;
   const data: ReviewData = {exampleId, versionId, outcome, usedModel: outcome === 'changed' && !!theirs && !!answer && same(theirs, answer), goldId: g.id, previousGoldId: current.id, previousAnswer: current.answer, ...(text ? {note: text} : {}), at: now()};
   await catalog.audit(projectId, (await user()).name, GOLD_REVIEW, data as unknown as Record<string, unknown>);
   tm().event('gold_mismatch_reviewed', {outcome, with_note: !!text});

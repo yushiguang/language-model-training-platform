@@ -99,9 +99,9 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
   // A failed save shows the page's red banner with Retry (the Button reports it).
   const save = async (kind: 'minor' | 'major') => {
     const summary = change || (sum.added || sum.removed ? `${sum.added} line${sum.added === 1 ? '' : 's'} added, ${sum.removed} removed` : 'Features changed');
-    const v = await createVersion(state.project.id, {...draft, parent: version, madeBy, change: summary, kind, schema: state.setup!.schema!, schemaVersion: state.setup!.schemaVersion});
+    const v = await createVersion({projectId: state.project.id, template: draft.template, features: draft.features, images: draft.images, parentId: version.id, madeBy, change: summary, kind});
     // Saving is the user's start: the new version is scored right away.
-    void scoreVersion(state.project.id, v);
+    void scoreVersion({projectId: state.project.id, promptVersionId: v.id});
     await go(href('/prompt'));
   };
   const discard = () => {

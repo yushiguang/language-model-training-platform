@@ -114,7 +114,7 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
     if (tabParam === 'mismatches') setTab('mismatch');
   }, [tabParam]);
   const list = sets[tab];
-  const firstOpen = (k: SetKey) => (k === 'mismatch' ? 0 : Math.max(0, sets[k].findIndex(e => !state.gold.has(e.id))));
+  const firstOpen = (k: SetKey) => (k === 'mismatch' ? 0 : Math.max(0, sets[k].findIndex(e => !state.gold[e.id])));
   // Opens on the first example without a gold label; it stays put while labels save. On
   // Mismatches, a kept or changed example leaves the list and the next one takes its place.
   const [pos, setPos] = useState<Record<SetKey, number>>(() => ({eval: firstOpen('eval'), test: firstOpen('test'), mismatch: 0}));
@@ -136,13 +136,13 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   const versionId = mm?.versionId ?? null;
   const item = onMismatch && ex && sub === 'open' ? mm?.items.find(x => x.exampleId === ex.id) : undefined;
   const done = onMismatch && ex && sub === 'done' ? mm?.reviewedItems.find(x => x.exampleId === ex.id) : undefined;
-  const gold = ex ? state.gold.get(ex.id)?.answer : undefined;
+  const gold = ex ? state.gold[ex.id]?.answer : undefined;
   const diff = onMismatch && gold && modelAnswer ? new Set(state.setup!.schema!.fields.filter(f => !sameValues(gold[f.name], modelAnswer[f.name])).map(f => f.name)) : new Set<string>();
   const review = async (outcome: 'kept' | 'changed', note: string, answer?: Answer) => {
     if (!ex || !versionId) return;
     const at = new Date().toISOString();
     const used = outcome === 'kept' ? 'kept' : answer && modelAnswer && same(answer, modelAnswer) ? 'model' : 'other';
-    await reviewGold(state.project.id, ex.id, versionId, outcome, answer, note);
+    await reviewGold({projectId: state.project.id, exampleId: ex.id, promptVersionId: versionId, outcome, answer, note});
     edited(ex.id, {exampleId: ex.id, outcome: used, note: note.trim() || null, at});
   };
   const pickSub = (v: 'open' | 'done') => {
@@ -205,7 +205,7 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   const expectMm = state.reports.some(r => r.schemaVersion === state.setup!.schemaVersion);
   return (
     <Frame head={head}>
-      {state.staleGold.size > 0 && <Banner text={`The schema changed. ${num(state.staleGold.size)} labels were made under the old schema and need a quick re-check.`} />}
+      {Object.keys(state.staleGold).length > 0 && <Banner text={`The schema changed. ${num(Object.keys(state.staleGold).length)} labels were made under the old schema and need a quick re-check.`} />}
       <Tabs
         label="Sets"
         selected={tab}
@@ -434,7 +434,7 @@ function ModelAnswer({
       const candidates = versionId ? state.versions.filter(v => v.id === versionId) : [...state.versions].reverse();
       for (const v of candidates)
         for (const m of state.setup!.models) {
-          const p = (await predictionsFor(v.id, m.endpoint, m)).get(ex.id);
+          const p = (await predictionsFor(v.id, m.endpoint, m))[ex.id];
           if (p) {
             if (live) onFound(p.answer);
             if (live) setFound({answer: p.answer, invalid: p.invalidReason, reason: p.reason ?? null, label: versionLabel(v), endpoint: state.endpoints.find(e => e.id === m.endpoint)?.name ?? m.endpoint});
@@ -533,7 +533,7 @@ function YourAnswer({
   review?: {modelAnswer: Answer | null; done?: MismatchReview; onKeep: (note: string) => Promise<void>; onChange: (a: Answer, note: string) => Promise<void>};
 }) {
   const schema = state.setup!.schema!;
-  const saved = state.gold.get(ex.id);
+  const saved = state.gold[ex.id];
   const [answer, setAnswer] = useState<Answer>(saved?.answer ?? {});
   const savedRef = useRef(saved);
   savedRef.current = saved;

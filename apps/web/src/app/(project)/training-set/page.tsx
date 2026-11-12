@@ -103,9 +103,8 @@ function Settings({state, split, vParam, mParam}: {state: ProjectState; split: S
       // The estimate is only recorded with the run (no cost limit); it is never shown.
       const budget = estimate(state, v, ep, [split]).costUsd;
       if (split === 'train') {
-        const rep = state.reports.find(r => r.promptVersionId === v.id && r.endpoint === ep && !r.archivedNow);
-        await startTrainingSet(state.project.id, v, ep, rep?.passed ? rep : null, budget, {labelTest: false});
-      } else await labelTestSet(state.project.id, v, ep, budget);
+        await startTrainingSet({projectId: state.project.id, promptVersionId: v.id, endpoint: ep, estimateUsd: budget, labelTest: false});
+      } else await labelTestSet({projectId: state.project.id, promptVersionId: v.id, endpoint: ep, estimateUsd: budget});
     } catch (e) {
       setErr((e as Error).message);
     }
@@ -134,8 +133,8 @@ function Labeling({state, split, ts, run}: {state: ProjectState; split: SetKey; 
   const running = job.state === 'running';
   const v = state.versions.find(x => x.id === job.promptVersionId);
   const resume = async () => {
-    if (split === 'train') await startTrainingSet(state.project.id, v!, ts!.endpoint, null, ts!.estimateUsd, {existing: ts});
-    else await labelTestSet(state.project.id, v!, run!.endpoint, estimate(state, v!, run!.endpoint, ['test']).costUsd);
+    if (split === 'train') await startTrainingSet({projectId: state.project.id, promptVersionId: v!.id, endpoint: ts!.endpoint, estimateUsd: ts!.estimateUsd, resumeTrainingSetId: ts!.id});
+    else await labelTestSet({projectId: state.project.id, promptVersionId: v!.id, endpoint: run!.endpoint, estimateUsd: estimate(state, v!, run!.endpoint, ['test']).costUsd});
   };
   return (
     <Card
@@ -161,7 +160,7 @@ function Labeling({state, split, ts, run}: {state: ProjectState; split: SetKey; 
 /** The finished set's rows. Test rows take the gold label when there is one, else the model's answer. */
 function useRows(state: ProjectState, split: SetKey, job: TrainingSet | LabelingRun | undefined): Row[] | null {
   const [rows, setRows] = useState<Row[] | null>(null);
-  const key = job ? `${split}:${job.id}:${job.state}:${state.gold.size}` : '';
+  const key = job ? `${split}:${job.id}:${job.state}:${Object.keys(state.gold).length}` : '';
   useEffect(() => {
     setRows(null);
     if (!job) return;
@@ -177,8 +176,8 @@ function useRows(state: ProjectState, split: SetKey, job: TrainingSet | Labeling
         out = state.examples
           .filter(e => e.split === 'test')
           .map(e => {
-            const g = state.gold.get(e.id);
-            const p = preds.get(e.id);
+            const g = state.gold[e.id];
+            const p = preds[e.id];
             return g ? {exampleId: e.id, answer: g.answer, source: 'gold' as const} : {exampleId: e.id, answer: p?.answer ?? null, source: p?.answer ? ('model' as const) : null};
           });
       }

@@ -12,7 +12,7 @@ export function useAgentDrafts(state: ProjectState, apply: (d: {template: string
       const list = await openProposals(state.project.id, 'prompt');
       if (!alive || !list[0]) return;
       const payload = list[0].payload as {template?: string; features?: FeatureSelection; change?: string; changes?: {text: string; reason: string}[]};
-      await closeProposal(list[0], 'approved');
+      await closeProposal({projectId: state.project.id, proposalId: list[0].id, decision: 'approved'});
       if (payload.template) apply({template: payload.template, features: payload.features, change: payload.change, changes: payload.changes});
     };
     void check();

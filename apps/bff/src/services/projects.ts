@@ -63,8 +63,8 @@ export async function loadProjectState(projectId: string): Promise<ProjectState 
   const facts: WorkflowFacts = {
     setup,
     snapshot,
-    goldEvalDone: evalExamples.filter(e => gold.has(e.id)).length,
-    goldTestDone: examples.filter(e => e.split === 'test' && gold.has(e.id)).length,
+    goldEvalDone: evalExamples.filter(e => !!gold[e.id]).length,
+    goldTestDone: examples.filter(e => e.split === 'test' && !!gold[e.id]).length,
     versions: versions.length,
     passing: reports.filter(r => r.passed && setup?.models.some(m => m.endpoint === r.endpoint)).map(r => ({promptVersionId: r.promptVersionId, endpoint: r.endpoint})),
     trainingSet: trainingSets[0] ?? null,
@@ -112,7 +112,7 @@ export async function approveNode(projectId: string, node: NodeId): Promise<void
   if (project) tm().event('step_reached', {node, minutes_since_project_created: Math.round((Date.now() - Date.parse(project.createdAt)) / 60000)});
   if (project && node === 'training') {
     const ts = state.trainingSets[0];
-    tm().event('project_finished', {minutes_since_created: Math.round((Date.now() - Date.parse(project.createdAt)) / 60000), total_cost_usd: Number((state.runs.reduce((n, r) => n + r.costUsd, 0) + state.testRuns.reduce((n, r) => n + r.costUsd, 0) + (ts?.costUsd ?? 0)).toFixed(4)), versions: state.versions.length, gold_labels: state.gold.size});
+    tm().event('project_finished', {minutes_since_created: Math.round((Date.now() - Date.parse(project.createdAt)) / 60000), total_cost_usd: Number((state.runs.reduce((n, r) => n + r.costUsd, 0) + state.testRuns.reduce((n, r) => n + r.costUsd, 0) + (ts?.costUsd ?? 0)).toFixed(4)), versions: state.versions.length, gold_labels: Object.keys(state.gold).length});
   }
   emitChange();
 }

@@ -20,7 +20,7 @@ export function stepStates(s: ProjectState): Record<NodeId, StepState> {
   return {
     setup: ok('setup') ? 'done' : 'todo',
     dataset: s.samplingTask?.state === 'running' ? 'running' : s.snapshot?.split || ok('dataset') ? 'done' : 'todo',
-    gold: evalSize > 0 && s.facts.goldEvalDone >= evalSize ? 'done' : s.gold.size > 0 ? 'running' : ok('gold') ? 'done' : 'todo',
+    gold: evalSize > 0 && s.facts.goldEvalDone >= evalSize ? 'done' : Object.keys(s.gold).length > 0 ? 'running' : ok('gold') ? 'done' : 'todo',
     prompt: promptRunning ? 'running' : s.facts.passing.length || ok('prompt') ? 'done' : 'todo',
     training:
       tr?.state === 'failed' || te?.state === 'failed'
