@@ -41,6 +41,14 @@ const PATHS: Record<string, ReactNode> = {
       <circle cx="12" cy="12" r="3" />
     </>
   ),
+  'eye-off': (
+    <>
+      <path d="M9.9 4.2A10.4 10.4 0 0 1 12 4c6.5 0 10 8 10 8a17.6 17.6 0 0 1-2.2 3.2" />
+      <path d="M6.6 6.6C3.9 8.4 2 12 2 12s3.5 8 10 8a9.7 9.7 0 0 0 5.4-1.6" />
+      <path d="M14.1 14.1a3 3 0 0 1-4.2-4.2" />
+      <path d="m2 2 20 20" />
+    </>
+  ),
   doc: (
     <>
       <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" />
@@ -322,30 +330,66 @@ export const Code = ({children}: {children: ReactNode}) => <span className="code
  * opens above or to the left when there is no room below or to the right. Only terms a user may
  * not know get one (decided 2026-11-10).
  */
-export function Hov({text, tip}: {text: string; tip: string}) {
-  const ref = useRef<HTMLSpanElement>(null);
+/** Where a hover popover goes for an anchor: below unless near the bottom, from the left unless near the right edge. */
+function useTip() {
   const [at, setAt] = useState<{left?: number; right?: number; top?: number; bottom?: number} | null>(null);
   const id = useRef(`tip-${Math.random().toString(36).slice(2, 8)}`).current;
-  const show = () => {
-    const r = ref.current?.getBoundingClientRect();
+  const show = (el: Element | null) => {
+    const r = el?.getBoundingClientRect();
     if (!r) return;
     const below = window.innerHeight - r.bottom > 120;
     const fromLeft = window.innerWidth - r.left > 340;
     setAt({...(below ? {top: r.bottom + 8} : {bottom: window.innerHeight - r.top + 8}), ...(fromLeft ? {left: Math.max(8, r.left - 12)} : {right: Math.max(8, window.innerWidth - r.right - 12)})});
   };
-  const hide = () => setAt(null);
-  return (
-    <span ref={ref} className="hov" tabIndex={0} aria-describedby={at ? id : undefined} onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide} onKeyDown={e => e.key === 'Escape' && hide()}>
-      {text}
-      {at &&
-        typeof document !== 'undefined' &&
-        createPortal(
+  const pop = (tip: string) =>
+    at && typeof document !== 'undefined'
+      ? createPortal(
           <span id={id} role="tooltip" className="tip-pop" style={at}>
             {tip}
           </span>,
           document.body,
-        )}
+        )
+      : null;
+  return {at, id, show, hide: () => setAt(null), pop};
+}
+
+export function Hov({text, tip}: {text: string; tip: string}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const t = useTip();
+  const show = () => t.show(ref.current);
+  return (
+    <span ref={ref} className="hov" tabIndex={0} aria-describedby={t.at ? t.id : undefined} onMouseEnter={show} onMouseLeave={t.hide} onFocus={show} onBlur={t.hide} onKeyDown={e => e.key === 'Escape' && t.hide()}>
+      {text}
+      {t.pop(tip)}
     </span>
+  );
+}
+
+/** An icon-only on/off button whose meaning shows in a hover popover (R6-2: hide dropped versions). */
+export function IconToggle({icon, tip, pressed, onClick}: {icon: string; tip: string; pressed: boolean; onClick: () => void}) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const t = useTip();
+  const show = () => t.show(ref.current);
+  return (
+    <button
+      ref={ref}
+      type="button"
+      className={`btn btn-ghost btn-icon${pressed ? ' on' : ''}`}
+      aria-label={tip}
+      aria-pressed={pressed}
+      aria-describedby={t.at ? t.id : undefined}
+      onMouseEnter={show}
+      onMouseLeave={t.hide}
+      onFocus={show}
+      onBlur={t.hide}
+      onClick={() => {
+        t.hide();
+        onClick();
+      }}
+    >
+      <Icon name={icon} />
+      {t.pop(tip)}
+    </button>
   );
 }
 

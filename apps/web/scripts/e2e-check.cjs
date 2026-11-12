@@ -158,21 +158,26 @@ let current = null;
     await page.getByLabel('Why', {exact: true}).fill('The clip is cut from a show');
     await shot(page, '4c-mismatches');
     const tabCount = n => page.waitForFunction(k => +((document.querySelector('[role=tab][aria-selected=true]')?.textContent ?? '').match(/(\d+)\s*$/) || [0, 0])[1] === k, n, {timeout: 10000});
-    await button(page, 'Keep my label').click();
+    // R6-3: nothing saves before Save.
+    await button(page, 'Save').click();
     await tabCount(before - 1);
-    // R4-5: the review shows under Reviewed with its note, and Reopen puts it back.
+    // The review shows under Reviewed with its note, in the same editor; Save adds a review in place.
     await page.getByRole('button', {name: /^Reviewed \d+$/}).click();
     await page.getByText('Kept my label', {exact: true}).waitFor({timeout: 5000});
     if ((await page.getByLabel('Why', {exact: true}).inputValue()) !== 'The clip is cut from a show') throw new Error('the reviewed note is missing');
-    await shot(page, '4d-reviewed');
-    await button(page, 'Reopen').click();
-    await tabCount(before);
+    if (!(await button(page, 'Save').isDisabled())) throw new Error('Save is on before anything changed');
+    await page.getByLabel('Why', {exact: true}).fill('Looked again: it is cut from a show');
+    await page.getByText('Not saved', {exact: true}).waitFor();
+    await shot(page, '4d-reviewed-editing');
+    const reviewedTab = await page.getByRole('button', {name: /^Reviewed \d+$/}).innerText();
+    await button(page, 'Save').click();
+    await page.getByText('2 reviews', {exact: true}).waitFor({timeout: 5000});
+    if ((await page.getByRole('button', {name: /^Reviewed \d+$/}).innerText()) !== reviewedTab) throw new Error('editing a review moved it');
+    log('reviewed item edited in place:', reviewedTab);
     await page.getByRole('button', {name: /^To review \d+$/}).click();
-    log('reopened, to review again:', await tab.innerText());
-    await button(page, 'Keep my label').click();
-    await tabCount(before - 1);
     if (before > 1) {
       await button(page, "Use the model's answer").click();
+      await button(page, 'Save').click();
       await page.waitForFunction(n => +((document.querySelector('[role=tab][aria-selected=true]')?.textContent ?? '').match(/(\d+)\s*$/) || [0, 0])[1] === n - 2, before, {timeout: 10000});
     }
     log('mismatches after review:', await tab.innerText());
@@ -254,6 +259,13 @@ let current = null;
       await page.getByText('Dropped after dry run', {exact: true}).first().waitFor();
       await shot(page, '5d-dropped');
       await page.locator('nav.vlist button').first().click();
+      // R6-2: the eye button hides dropped versions, and shows them again.
+      await page.getByRole('button', {name: 'Hide dropped versions'}).click();
+      if (await page.locator('nav.vlist').getByText('Dropped', {exact: true}).count()) throw new Error('dropped versions still show');
+      await shot(page, '5f-dropped-hidden');
+      await page.getByRole('button', {name: 'Show dropped versions'}).click();
+      await page.locator('nav.vlist').getByText('Dropped', {exact: true}).first().waitFor();
+      log('hide dropped: works');
     }
   }
 

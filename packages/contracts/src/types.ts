@@ -143,6 +143,8 @@ export interface MismatchReview {
   /** The labeler's "Why" (R4-4): sent to the Optimiser for optimiser-half examples only. */
   note: string | null;
   at: string;
+  /** R6-3: earlier reviews of this example for this version, newest first (the newest review stands). */
+  earlier?: Omit<MismatchReview, 'earlier'>[];
 }
 
 export interface GoldLabel {

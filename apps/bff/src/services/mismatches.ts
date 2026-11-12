@@ -25,6 +25,8 @@ interface ReviewData {
   at: string;
 }
 
+const brief = (d: ReviewData): MismatchReview => ({exampleId: d.exampleId, outcome: d.outcome === 'kept' ? 'kept' : d.usedModel ? 'model' : 'other', note: d.note ?? null, at: d.at});
+
 const same = (a: Answer, b: Answer) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
 
 /**
@@ -32,21 +34,32 @@ const same = (a: Answer, b: Answer) => JSON.stringify(Object.entries(a).sort()) 
  * gold label and a version): the newest review of each pair, unless a reopen names it. A review
  * also lapses once the example's gold label changes after it.
  */
-async function standingReviews(projectId: string, state: ProjectState): Promise<Map<string, ReviewData>> {
+async function standingReviews(projectId: string, state: ProjectState): Promise<Map<string, ReviewData & {earlier: ReviewData[]}>> {
   const {catalog} = getApp();
-  const reopened = new Set(
-    (await catalog.find('audit_log', {projectId, action: GOLD_REOPEN})).map(r => {
-      const d = r.data as {exampleId: string; versionId: string; reviewAt: string};
-      return `${d.exampleId}|${d.versionId}|${d.reviewAt}`;
-    }),
-  );
-  const out = new Map<string, ReviewData>();
+  const reopens = (await catalog.find('audit_log', {projectId, action: GOLD_REOPEN})).map(r => r.data as {exampleId: string; versionId: string; reviewAt: string});
+  const reopened = new Set(reopens.map(d => `${d.exampleId}|${d.versionId}|${d.reviewAt}`));
+  // A reopen starts the pair afresh: reviews up to the one it reopened are not its history.
+  const resetAt = new Map<string, string>();
+  for (const d of reopens) {
+    const k = `${d.exampleId}|${d.versionId}`;
+    if ((resetAt.get(k) ?? '') < d.reviewAt) resetAt.set(k, d.reviewAt);
+  }
+  const all = new Map<string, ReviewData[]>();
   for (const r of await catalog.find('audit_log', {projectId, action: GOLD_REVIEW})) {
     const d = r.data as unknown as ReviewData;
     const key = `${d.exampleId}|${d.versionId}`;
-    if ((out.get(key)?.at ?? '') <= d.at) out.set(key, d);
+    if (d.at <= (resetAt.get(key) ?? '')) continue;
+    all.set(key, [...(all.get(key) ?? []), d]);
   }
-  for (const [k, d] of out) if (reopened.has(`${k}|${d.at}`) || state.gold.get(d.exampleId)?.id !== d.goldId) out.delete(k);
+  const out = new Map<string, ReviewData & {earlier: ReviewData[]}>();
+  for (const [k, list] of all) {
+    // R6-3: a reviewed item is edited by appending a review; the newest stands, the rest are its history.
+    // Oldest first (stable, so same-time records keep their order), then the newest first.
+    const sorted = [...list].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)).reverse();
+    const d = sorted[0];
+    if (reopened.has(`${k}|${d.at}`) || state.gold.get(d.exampleId)?.id !== d.goldId) continue;
+    out.set(k, {...d, earlier: sorted.slice(1)});
+  }
   return out;
 }
 
@@ -159,8 +172,10 @@ export async function mismatches(projectId: string, versionId?: string | null): 
     .sort((a, b) => b.wrongIn - a.wrongIn);
   const reviewedItems: MismatchReview[] = [...standing.values()]
     .filter(d => d.versionId === picked && evalEx.some(e => e.id === d.exampleId))
-    .map(d => ({exampleId: d.exampleId, outcome: d.outcome === 'kept' ? 'kept' : d.usedModel ? 'model' : 'other', note: d.note ?? null, at: d.at}) as MismatchReview)
-    .sort((a, b) => (a.at < b.at ? 1 : -1));
+    .map(d => ({...brief(d), earlier: d.earlier.map(brief), firstAt: d.earlier.at(-1)?.at ?? d.at}))
+    // Newest first by the first review, so editing a reviewed item (R6-3) does not move it.
+    .sort((a, b) => (a.firstAt < b.firstAt ? 1 : a.firstAt > b.firstAt ? -1 : 0))
+    .map(({firstAt: _, ...m}) => m);
   return {
     versions: versions.map(v => ({...v, best: v.id === best.id})),
     versionId: picked,

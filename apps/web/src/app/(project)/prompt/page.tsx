@@ -10,7 +10,7 @@ import {ScoreChart} from '@/components/prompt/ScoreChart';
 import {useChecks, Workbench, type Draft} from '@/components/prompt/Workbench';
 import {useAgentDrafts} from '@/components/prompt/useAgentDrafts';
 import {approveNode, createVersion, improveWithAi, mismatches, predictionsFor, retryOptimiser, scoreVersion, startOptimiser, stopOptimiser, rebuildReports, stopRun, type ProjectState} from '@/backend-api';
-import {Badge, Banner, Below, Button, Card, Code, dateTime, Dialog, Empty, Hov, Icon, Metric, num, One, Opt, PageHead, Passed, Progress, reportActionError, Score, Seg, Suggestion, Table, timeOfDay} from '@/ui';
+import {Badge, Banner, Below, Button, Card, Code, dateTime, Dialog, Empty, Hov, Icon, IconToggle, Metric, num, One, Opt, PageHead, Passed, Progress, reportActionError, Score, Seg, Suggestion, Table, timeOfDay} from '@/ui';
 import {LabelDistribution, labelCounts} from '@/components/LabelDistribution';
 import {fieldRows, modelName, reportFor, runsFor, versionScore} from '@/components/prompt/scores';
 
@@ -78,6 +78,43 @@ function FirstPrompt({state, setPage}: {state: ProjectState; setPage: (p: PageCo
   );
 }
 
+const hideKey = (projectId: string) => `pv-hide-dropped:${projectId}`;
+function readHideDropped(projectId: string): boolean {
+  try {
+    return sessionStorage.getItem(hideKey(projectId)) === '1';
+  } catch {
+    return false;
+  }
+}
+function saveHideDropped(projectId: string, on: boolean) {
+  try {
+    sessionStorage.setItem(hideKey(projectId), on ? '1' : '0');
+  } catch {
+    // Storage off: the choice holds for this page only.
+  }
+}
+
+/** The newest run, when it ended without a pass (a pass goes on to the training set and says so). */
+const endedRun = (s: ProjectState): OptimisationRun | null => {
+  const o = s.optimisation[0];
+  return o && ((o.state === 'done' && o.stopReason !== 'passes') || o.state === 'stopped') ? o : null;
+};
+const seenKey = (projectId: string) => `pv-run-end-seen:${projectId}`;
+function readSeenEnd(projectId: string): string | null {
+  try {
+    return sessionStorage.getItem(seenKey(projectId));
+  } catch {
+    return null;
+  }
+}
+function saveSeenEnd(projectId: string, runId: string) {
+  try {
+    sessionStorage.setItem(seenKey(projectId), runId);
+  } catch {
+    // Storage off: the panel goes when a version is picked, for this page only.
+  }
+}
+
 /** The run the progress panel shows: the newest, while it runs, failed or is paused. */
 const panelRun = (s: ProjectState): OptimisationRun | null => {
   const o = s.optimisation[0];
@@ -101,10 +138,30 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
   const live = state.versions.filter(v => v.schemaVersion === setup.schemaVersion && info.get(v.id)?.round.outcome !== 'failed');
   const list = live.length ? live : state.versions;
   const [view, setView] = useState<View>('all');
+  // R6-2: hide versions the Optimiser dropped (off by default, remembered for the session).
+  const [hideDropped, setHideDropped] = useState(false);
+  useEffect(() => setHideDropped(readHideDropped(state.project.id)), [state.project.id]);
+  const toggleHide = () => {
+    saveHideDropped(state.project.id, !hideDropped);
+    setHideDropped(!hideDropped);
+  };
   // null: the panel while a run is going, else the newest version.
   const [selId, setSel] = useState<string | null>(null);
   const run = panelRun(state);
-  const showPanel = !!run && (selId === null || selId === run.stepVersionId);
+  // Run end (round 6): a run that finished without a pass keeps its panel, saying how it ended,
+  // until a version is picked (remembered for the session).
+  const ended = run ? null : endedRun(state);
+  const [seenEnd, setSeenEnd] = useState<string | null>(null);
+  useEffect(() => setSeenEnd(readSeenEnd(state.project.id)), [state.project.id]);
+  const showEnd = !!ended && selId === null && seenEnd !== ended.id;
+  const showPanel = (!!run && (selId === null || selId === run.stepVersionId)) || showEnd;
+  const choose = (id: string | null) => {
+    if (showEnd && ended) {
+      saveSeenEnd(state.project.id, ended.id);
+      setSeenEnd(ended.id);
+    }
+    setSel(id);
+  };
   const sel = list.find(v => v.id === selId) ?? (run?.stepVersionId ? list.find(v => v.id === run.stepVersionId) : undefined) ?? list[0];
   const running = state.runs.some(r => r.state === 'running') || state.optimisation.some(o => o.state === 'running');
 
@@ -124,7 +181,7 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
     await approveNode(state.project.id, 'prompt');
     await go(href('/training-set', {v: vId, m: ep}));
   };
-  const pick = (id: string) => setSel(run && id === run.stepVersionId ? null : id);
+  const pick = (id: string) => choose(run && id === run.stepVersionId ? null : id);
 
   const rowRight = (v: PromptVersion, s: {score: number; passed: boolean} | null) => {
     const o = info.get(v.id)?.round;
@@ -144,7 +201,9 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
   const optTag = <Badge text="Optimiser" icon={false} />;
   const rows =
     view === 'all'
-      ? scored.map(({v, s}) => (
+      ? scored
+          .filter(({v}) => !hideDropped || info.get(v.id)?.round.outcome !== 'dropped')
+          .map(({v, s}) => (
           <button key={v.id} type="button" className="vrow" aria-current={showPanel ? v.id === run?.stepVersionId : v.id === sel.id} onClick={() => pick(v.id)}>
             <span className="v">{versionLabel(v)}</span>
             <span style={{display: 'inline-flex', gap: 6, alignItems: 'center'}}>
@@ -167,6 +226,8 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
       title="Versions"
       actions={
         hasOptimiser ? (
+          <div className="row" style={{gap: 8, alignItems: 'center'}}>
+            {view === 'all' && <IconToggle icon={hideDropped ? 'eye-off' : 'eye'} tip={hideDropped ? 'Show dropped versions' : 'Hide dropped versions'} pressed={hideDropped} onClick={toggleHide} />}
           <Seg
             label="View"
             value={view}
@@ -176,6 +237,7 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
               {value: 'major', label: 'Major'},
             ]}
           />
+          </div>
         ) : undefined
       }
       className="fill"
@@ -191,7 +253,7 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
   const chart = (
     <Card title="Score by version">
       {t && points.length > 0 ? (
-        <ScoreChart points={points} threshold={t.macroF1} selected={showPanel ? undefined : versionLabel(sel)} onSelect={l => setSel(list.find(v => versionLabel(v) === l)?.id ?? null)} />
+        <ScoreChart points={points} threshold={t.macroF1} selected={showPanel ? undefined : versionLabel(sel)} onSelect={l => choose(list.find(v => versionLabel(v) === l)?.id ?? null)} />
       ) : (
         <div className="pv-empty">
           <span className="t-3">{!t ? 'Evaluation is off, so versions have no scores' : hasGold ? 'Scores show here once a version is scored' : 'Scores show here once the eval set has gold labels'}</span>
@@ -228,7 +290,7 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
         <RightColumn advice={advice}>
           {box =>
             showPanel ? (
-              <OptimiserPanel state={state} run={run!} box={box} />
+              <OptimiserPanel state={state} run={(run ?? ended)!} box={box} onShow={choose} />
             ) : selDropped ? (
               <DroppedCard state={state} v={sel} round={selInfo!.round} box={box} />
             ) : selRunning ? (
@@ -340,15 +402,28 @@ const parentWhy = (r: OptimiserRound, parent: string) =>
       : `${parent} is the best version on ${r.parentWins} ${r.parentWins === 1 ? 'example' : 'examples'} of the optimiser half. Versions that are best on more examples are picked more often`;
 
 /** The Optimiser's progress panel: round, where it started, what it does now, every round so far. */
-function OptimiserPanel({state, run, box}: {state: ProjectState; run: OptimisationRun; box: Box}) {
+function OptimiserPanel({state, run, box, onShow}: {state: ProjectState; run: OptimisationRun; box: Box; onShow: (versionId: string) => void}) {
   const label = (id: string | null) => {
     const v = id ? state.versions.find(x => x.id === id) : undefined;
     return v ? versionLabel(v) : null;
   };
-  const tag = run.state === 'running' ? <Badge text="Running" tone="run" /> : run.state === 'failed' ? <Badge text="Failed" tone="err" /> : <Badge text="Paused" icon={false} />;
-  const act = run.state === 'running' ? <Button label="Stop" icon="stop" onClick={() => stopOptimiser(run.id)} /> : <Button label={run.state === 'failed' ? 'Retry' : 'Resume'} kind="primary" onClick={() => void retryOptimiser(run.id)} />;
+  const over = run.state === 'done' || run.state === 'stopped';
+  const tag =
+    run.state === 'running' ? (
+      <Badge text="Running" tone="run" />
+    ) : run.state === 'failed' ? (
+      <Badge text="Failed" tone="err" />
+    ) : run.state === 'done' ? (
+      <Badge text="Finished" tone="ok" />
+    ) : (
+      <Badge text={run.state === 'stopped' ? 'Stopped' : 'Paused'} icon={false} />
+    );
+  const act = over ? undefined : run.state === 'running' ? <Button label="Stop" icon="stop" onClick={() => stopOptimiser(run.id)} /> : <Button label={run.state === 'failed' ? 'Retry' : 'Resume'} kind="primary" onClick={() => void retryOptimiser(run.id)} />;
   const half = state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && state.gold.has(e.id)).length;
   const task = run.stepVersionId ? state.runs.find(r => r.promptVersionId === run.stepVersionId && r.endpoint === run.endpoint && r.state === 'running') : undefined;
+  // Best so far: the highest score among the start version and the changes this run kept.
+  const tried = [{id: run.startVersionId, s: versionScore(state, run.startVersionId)?.score}, ...run.history.filter(h => h.outcome === 'kept' && h.score != null).map(h => ({id: h.versionId, s: h.score!}))];
+  const top = tried.filter(x => x.s != null).sort((a, b) => b.s! - a.s!)[0];
   const now =
     run.state === 'running' ? (
       <div className="col" style={{gap: 8, padding: '16px 0 8px'}}>
@@ -365,6 +440,8 @@ function OptimiserPanel({state, run, box}: {state: ProjectState; run: Optimisati
         </div>
         {task && <Progress done={task.done} total={task.total} />}
       </div>
+    ) : over && top ? (
+      <EndLine state={state} run={run} top={top} label={label} onShow={onShow} />
     ) : run.state === 'failed' && run.error ? (
       <div style={{padding: '16px 0 8px'}}>
         <Banner text={run.error} tone="err" oneLine style={{margin: 0}} />
@@ -421,22 +498,48 @@ function OptimiserPanel({state, run, box}: {state: ProjectState; run: Optimisati
       ],
     };
   });
-  // Best so far: the highest score among the start version and the changes this run kept.
-  const tried = [{id: run.startVersionId, s: versionScore(state, run.startVersionId)?.score}, ...run.history.filter(h => h.outcome === 'kept' && h.score != null).map(h => ({id: h.versionId, s: h.score!}))];
-  const top = tried.filter(x => x.s != null).sort((a, b) => b.s! - a.s!)[0];
   return (
     <Card title="Optimiser" titleExtra={tag} actions={act} className={box.className} style={box.style}>
       <div className="row" style={{gap: 40, alignItems: 'flex-end'}}>
         <Metric label="Round" value={String(run.round)} unit={`/ ${run.maxRounds}`} />
         <Metric label="Started from" value={label(run.startVersionId) ?? '–'} />
-        <Metric label="Best so far" value={top ? top.s!.toFixed(2) : '–'} unit={top ? (label(top.id) ?? undefined) : undefined} />
+        <Metric label={over ? 'Best' : 'Best so far'} value={top ? top.s!.toFixed(2) : '–'} unit={top ? (label(top.id) ?? undefined) : undefined} />
         <span className="t-3" style={{fontSize: 13, paddingBottom: 4}}>
-          Started {dateTime(run.startedAt)}
+          {over && run.finishedAt ? `Finished ${dateTime(run.finishedAt)}` : `Started ${dateTime(run.startedAt)}`}
         </span>
       </div>
       {now}
       {rows.length > 0 && <Table cols={[{label: 'Round'}, {label: 'Version'}, {label: 'Change'}, {label: 'Result', kind: 'c'}]} rows={rows} widths={[72, 88, 'auto', 200]} />}
     </Card>
+  );
+}
+
+/**
+ * How a finished run ended (round 6): whether any change beat the version it started from, said
+ * plainly, so the user need not find out version by version.
+ */
+function EndLine({state, run, top, label, onShow}: {state: ProjectState; run: OptimisationRun; top: {id: string | null; s: number | undefined}; label: (id: string | null) => string | null; onShow: (versionId: string) => void}) {
+  const start = label(run.startVersionId) ?? 'the start version';
+  const won = top.id !== run.startVersionId;
+  const best = label(top.id) ?? '';
+  const startScore = versionScore(state, run.startVersionId)?.score;
+  const need = state.setup?.thresholds?.macroF1.toFixed(2) ?? '–';
+  const passes = versionScore(state, top.id!)?.passed;
+  const tried = run.history.length;
+  const text = won ? `${best} beat ${start}: ${top.s!.toFixed(2)} against ${startScore?.toFixed(2) ?? '–'}` : `No change beat ${start}. ${start} is still the best at ${top.s!.toFixed(2)}`;
+  const tip = won
+    ? `The best change this run kept.${passes ? '' : ` It does not pass yet (needs ${need})`}`
+    : `None of the ${tried} ${tried === 1 ? 'change' : 'changes'} scored higher than ${start}, or they were dropped in the dry run. Changing the wording more may not help: check your labels on the examples every version gets wrong`;
+  return (
+    <div className="row" style={{gap: 8, padding: '16px 0 8px', fontSize: 15, lineHeight: '22px', alignItems: 'center'}}>
+      <span className="t-2" style={{display: 'inline-flex'}}>
+        <Icon name={won ? 'check' : 'alert'} />
+      </span>
+      <span className="grow">
+        <Hov text={text} tip={tip} />
+      </span>
+      <Button label={`Show ${best}`} size="sm" onClick={() => onShow(top.id!)} />
+    </div>
   );
 }
 

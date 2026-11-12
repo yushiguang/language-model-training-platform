@@ -7,7 +7,7 @@ import type {Answer, Example, ExampleMedia, LabelField, MismatchList, MismatchRe
 import {FEATURES, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
-import {approveNode, exampleMedia, mismatches, predictionsFor, reopenGold, reviewGold, saveGold, type ProjectState} from '@/backend-api';
+import {approveNode, exampleMedia, mismatches, predictionsFor, reviewGold, saveGold, type ProjectState} from '@/backend-api';
 import {Badge, Banner, Button, Card, Code, dateTime, Empty, Hov, Icon, num, PageHead, reportActionError, Seg, Tabs} from '@/ui';
 
 type SetKey = 'eval' | 'test' | 'mismatch';
@@ -36,7 +36,7 @@ function GoldRouter() {
  * version or score is added; the scores the edits made out of date are rebuilt by whoever reads
  * them next (Prompt versions, Training Set, a helper, the Optimiser).
  */
-function useMismatches(state: ProjectState, versionId: string | null): {list: MismatchList | null; edited: (exampleId: string, review: MismatchReview | null) => void} {
+function useMismatches(state: ProjectState, versionId: string | null): {list: MismatchList | null; edited: (exampleId: string, review: MismatchReview) => void} {
   const [list, setList] = useState<MismatchList | null>(null);
   useEffect(() => {
     let live = true;
@@ -46,17 +46,20 @@ function useMismatches(state: ProjectState, versionId: string | null): {list: Mi
     };
     // Not on gold edits (contextId): those are applied by `edited`.
   }, [state.project.id, versionId, state.versions.length, state.reports.length]); // eslint-disable-line react-hooks/exhaustive-deps
-  const edited = (exampleId: string, review: MismatchReview | null) =>
+  const edited = (exampleId: string, review: MismatchReview) =>
     setList(l => {
       if (!l) return l;
       if (review) {
-        const reviewedItems = [review, ...l.reviewedItems.filter(r => r.exampleId !== exampleId)];
-        return {...l, items: l.items.filter(x => x.exampleId !== exampleId), reviewedItems, reviewed: reviewedItems.length, reviewedAll: l.reviewedAll + 1};
+        // R6-3: saving a reviewed item adds a review and updates it where it is; nothing moves.
+        const had = l.reviewedItems.find(r => r.exampleId === exampleId);
+        if (had) {
+          const {earlier, ...prev} = had;
+          const next = {...review, earlier: [prev, ...(earlier ?? [])]};
+          return {...l, reviewedItems: l.reviewedItems.map(r => (r.exampleId === exampleId ? next : r))};
+        }
       }
-      // Reopened: back in To review.
-      const reviewedItems = l.reviewedItems.filter(r => r.exampleId !== exampleId);
-      const back = l.items.some(x => x.exampleId === exampleId) ? l.items : [...l.items, {exampleId, wrongIn: 0, of: l.versions.length}];
-      return {...l, items: back, reviewedItems, reviewed: reviewedItems.length};
+      const reviewedItems = [review, ...l.reviewedItems];
+      return {...l, items: l.items.filter(x => x.exampleId !== exampleId), reviewedItems, reviewed: reviewedItems.length, reviewedAll: l.reviewedAll + 1};
     });
   return {list, edited};
 }
@@ -142,16 +145,6 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
     await reviewGold(state.project.id, ex.id, versionId, outcome, answer, note);
     edited(ex.id, {exampleId: ex.id, outcome: used, note: note.trim() || null, at});
   };
-  const reopen = async () => {
-    if (!ex || !versionId) return;
-    try {
-      await reopenGold(state.project.id, ex.id, versionId);
-    } catch (e) {
-      reportActionError(`The review could not be reopened: ${(e as Error).message}`);
-      return;
-    }
-    edited(ex.id, null);
-  };
   const pickSub = (v: 'open' | 'done') => {
     setSub(v);
     setPos(p => ({...p, mismatch: 0}));
@@ -187,7 +180,7 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
           )}
           <Button
             label="Next: Prompt Engineering"
-            kind="primary"
+            kind={onMismatch ? 'secondary' : 'primary'}
             disabled={!evalDone}
             title={evalDone ? undefined : 'Label every eval example first. Gold labels on the test set are optional.'}
             onClick={async () => {
@@ -285,7 +278,7 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
               state={state}
               ex={ex}
               modelShown={(showModel || seen.has(ex.id)) && !!modelAnswer}
-              review={onMismatch && picked ? {modelAnswer, done, onKeep: note => review('kept', note), onChange: (a, note) => review('changed', note, a), onReopen: reopen} : undefined}
+              review={onMismatch && picked ? {modelAnswer, done, onKeep: note => review('kept', note), onChange: (a, note) => review('changed', note, a)} : undefined}
             />
           </div>
         </div>
@@ -523,9 +516,10 @@ const same = (a: Answer, b: Answer) => JSON.stringify(Object.entries(a).sort()) 
 
 /**
  * Picking values saves the answer as soon as every field has one (no Save button in the design).
- * On Mismatches (`review`), the card keeps the label or takes the model's answer, and a third
- * answer picked on the chips is recorded as a change too. "Why" goes with the decision (R4-4). A
- * reviewed example (`review.done`) shows the decision, its time, the note, and Reopen (R4-5).
+ * On Mismatches (`review`, R6-3) nothing saves on its own: the chips and "Why" are edited and Save
+ * records the decision (the label kept, the model's answer, or a third answer). "Use the model's
+ * answer" only fills the chips. A reviewed example opens in place, filled with its standing
+ * review; Save adds a new review and the item stays where it is.
  */
 function YourAnswer({
   state,
@@ -536,7 +530,7 @@ function YourAnswer({
   state: ProjectState;
   ex: Example;
   modelShown: boolean;
-  review?: {modelAnswer: Answer | null; done?: MismatchReview; onKeep: (note: string) => Promise<void>; onChange: (a: Answer, note: string) => Promise<void>; onReopen: () => Promise<void>};
+  review?: {modelAnswer: Answer | null; done?: MismatchReview; onKeep: (note: string) => Promise<void>; onChange: (a: Answer, note: string) => Promise<void>};
 }) {
   const schema = state.setup!.schema!;
   const saved = state.gold.get(ex.id);
@@ -549,19 +543,25 @@ function YourAnswer({
   reviewRef.current = review;
   const done = review?.done;
   const [note, setNote] = useState(done?.note ?? '');
-  const noteRef = useRef(note);
-  noteRef.current = note;
+  // What the standing review says; Save is off until the chips or Why differ from it.
+  const [base, setBase] = useState({answer: saved?.answer ?? {}, note: done?.note ?? ''});
+  const dirty = !same(base.answer, answer) || base.note.trim() !== note.trim();
+  const save = async () => {
+    if (!review) return;
+    if (saved && same(saved.answer, answer)) await review.onKeep(note);
+    else await review.onChange(answer, note);
+    setBase({answer, note});
+  };
 
   // A complete answer saves a moment after the last click. Moving to another example (which
   // unmounts this card) saves at once instead of dropping the answer.
   const pending = useRef<(() => void) | null>(null);
   useEffect(() => {
-    if (!complete || (savedRef.current && same(savedRef.current.answer, answer))) return;
+    // R6-3: on Mismatches only Save saves.
+    if (reviewRef.current || !complete || (savedRef.current && same(savedRef.current.answer, answer))) return;
     const save = () => {
       pending.current = null;
-      if (reviewRef.current) {
-        if (!reviewRef.current.done) void reviewRef.current.onChange(answer, noteRef.current);
-      } else void saveGold(state.project.id, ex.id, state.setup!.schemaVersion, answer, modelShown);
+      void saveGold(state.project.id, ex.id, state.setup!.schemaVersion, answer, modelShown);
     };
     pending.current = save;
     const id = setTimeout(save, 300);
@@ -586,18 +586,31 @@ function YourAnswer({
         ) : undefined
       }
       actions={
-        review && done ? (
+        review ? (
           <div className="row" style={{gap: 8, alignItems: 'center'}}>
-            <Badge text={DONE_TEXT[done.outcome]} tone="ok" />
-            <span className="t-3" style={{fontSize: 13}}>
-              {dateTime(done.at)}
-            </span>
-            <Button label="Reopen" size="sm" onClick={review.onReopen} />
-          </div>
-        ) : review ? (
-          <div className="row" style={{gap: 8}}>
-            <Button label="Keep my label" size="sm" disabled={!isSaved} onClick={() => review.onKeep(note)} />
-            <Button label="Use the model's answer" size="sm" disabled={!review.modelAnswer} onClick={() => review.onChange(review.modelAnswer!, note)} />
+            {done && (
+              <>
+                <Badge text={DONE_TEXT[done.outcome]} tone="ok" />
+                <span className="t-3" style={{fontSize: 13}}>
+                  {dateTime(done.at)}
+                </span>
+                {!!done.earlier?.length && (
+                  <span className="t-3" style={{fontSize: 13}}>
+                    <Hov text={`${done.earlier.length + 1} reviews`} tip={`Earlier: ${done.earlier.map(e => `${DONE_TEXT[e.outcome]} · ${dateTime(e.at)}${e.note ? ` · "${e.note}"` : ''}`).join('; ')}. The newest review counts`} />
+                  </span>
+                )}
+                <span style={{width: 8}} />
+              </>
+            )}
+            {done && dirty && (
+              <span className="t-3" style={{fontSize: 13}}>
+                Not saved
+              </span>
+            )}
+            <button type="button" className="btn btn-secondary btn-sm" disabled={!review.modelAnswer} onClick={() => review.modelAnswer && setAnswer(review.modelAnswer)}>
+              <Hov text="Use the model's answer" tip="Puts the model's answer in the chips. Nothing is saved until you press Save" />
+            </button>
+            <Button label="Save" kind="primary" size="sm" disabled={!complete || (!!done && !dirty)} onClick={save} />
           </div>
         ) : undefined
       }
@@ -615,7 +628,7 @@ function YourAnswer({
               {f.values.map(v => {
                 const on = (answer[f.name] ?? []).includes(v.name);
                 return (
-                  <button key={v.name} type="button" className="ch" aria-pressed={on} title={v.definition} disabled={!!done} onClick={() => pick(f, v.name)}>
+                  <button key={v.name} type="button" className="ch" aria-pressed={on} title={v.definition} onClick={() => pick(f, v.name)}>
                     {on && <Icon name="check" />}
                     {v.name}
                   </button>
@@ -624,7 +637,7 @@ function YourAnswer({
             </div>
           </div>
         ))}
-        {review && (!done || done.note) && (
+        {review && (
           <div style={{paddingTop: 8}}>
             <div className="col" style={{gap: 8}}>
               <span className="field-l">
@@ -634,12 +647,11 @@ function YourAnswer({
                 className="input"
                 rows={3}
                 aria-label="Why"
-                readOnly={!!done}
-                placeholder={done ? undefined : 'Optional: for example, the clip is cut from a show, so it is a Clip'}
+                placeholder="Optional: for example, the clip is cut from a show, so it is a Clip"
                 maxLength={500}
                 value={note}
                 onChange={e => setNote(e.target.value)}
-                style={{height: 76, padding: '8px 12px', resize: 'none', lineHeight: '20px', ...(done ? {background: 'var(--bg-muted)', borderColor: 'transparent'} : {})}}
+                style={{height: 76, padding: '8px 12px', resize: 'none', lineHeight: '20px'}}
               />
             </div>
           </div>

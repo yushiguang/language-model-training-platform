@@ -478,6 +478,15 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
   await reviewGold(w.projectId, id(5), best.id, 'kept', undefined, '  Its own words  ');
   m = await mismatches(w.projectId);
   assert.deepEqual(m.reviewedItems.map(r => [r.exampleId, r.note]), [[id(5), 'Its own words']]);
+  assert.deepEqual(m.reviewedItems[0].earlier, [], 'a reopen starts the history afresh');
+  // R6-3: editing a reviewed item appends a review; the newest stands, the rest is its history.
+  await reviewGold(w.projectId, id(5), best.id, 'kept', undefined, 'Looked again');
+  m = await mismatches(w.projectId);
+  assert.equal(m.reviewed, 1);
+  assert.deepEqual(
+    m.reviewedItems.map(r => [r.note, r.earlier?.map(e => e.note)]),
+    [['Looked again', ['Its own words']]],
+  );
 
   // R5-4, R5-5: a gold change archives the reports; they are rebuilt from saved answers in one go.
   await reviewGold(w.projectId, id(7), best.id, 'changed', {format: ['Vlog']});

@@ -93,6 +93,7 @@ body{margin:0;background:var(--bg-body)}
 .k .btn:focus-visible{outline:2px solid var(--brand);outline-offset:3px}
 .btn-secondary{background:var(--neutral);color:var(--text)}
 .btn-ghost{background:transparent;color:var(--text)}
+.btn-ghost.on{background:var(--bg-muted)}
 .btn-ghost:hover,.btn-secondary:hover{background:var(--pressed)}
 .btn-sm{height:28px;padding:0 10px;font-size:13px;border-radius:8px}
 .btn[disabled]{opacity:.5;cursor:not-allowed}

@@ -153,6 +153,14 @@ boards; the canvas still shows the old states for them.
 | R5-6 Ties | A dry run that ties its parent (as many fields right, on different examples) goes on to the full labeling, with a grey "Tied" badge next to its score. It counts as a wasted round, and 2 ties in a row end the run |
 | R5-7 Parent | Round 1 always changes the version you started from. Each round says "from vX" before its change, with why on hover (best on N examples of the optimiser half). The dry run's Now line says "against vX". The dialog says how later rounds pick |
 
+## Done on 2026-11-12: acceptance round 6
+
+Canvas page 2, row 14 ("Acceptance round 6"), approved by Evelyn. She skipped R6-4 and R6-1.
+
+- **R6-2.** An eye icon button in the Versions header, left of All / Major, hides versions the Optimiser dropped. The hover says "Hide dropped versions"; while hiding, the eye is crossed out on a grey button and says "Show dropped versions". Off by default, remembered for the session (per project). It shows in the All view only.
+- **R6-3.** On Mismatches nothing saves on its own. The Your answer header keeps its place and holds "Use the model's answer" (it only fills the chips) and Save. Save records keeping the label, the model's answer, or a third answer, so "Keep my label" and Reopen are gone. A reviewed item opens in place with its review filled in; Save is off until the chips or Why change ("Not saved" shows), and saving adds a review, updates the item where it is, and shows "N reviews" with the earlier ones on hover. On this tab "Next: Prompt Engineering" is grey, so Save is the one accent button.
+- **Run end.** A run that finishes without a pass (or is stopped) keeps its panel, tagged Finished, until a version is picked (remembered for the session). Under the round line it says either "vX beat vY: a against b" or "No change beat vY. vY is still the best at b", with the detail on hover and a "Show vX" button. A run that passes still goes straight on to the training set.
+
 ## Still different from the canvas
 
 | Where | Canvas | Code | Why |

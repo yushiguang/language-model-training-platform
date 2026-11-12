@@ -213,7 +213,12 @@ Implications already partly specified (R3-9, R5-6, R5-7); the new asks are R6-1 
 below, plus: when a run ends, the progress panel should say plainly if no candidate beat
 the base version, instead of leaving the user to discover it version by version.
 
+**Status 2026-11-12:** the run-end line is done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-12: acceptance round 6").
+
 ## R6-4. A "Below" with a passing headline score must say which check failed
+
+**Status 2026-11-12:** skipped by Evelyn.
+
 
 Found live (internal diagnosis, aggregates only): a version whose headline lowest-field
 macro-F1 is 0.54 against a 0.50 threshold still shows "Below", because passing is the
@@ -231,6 +236,9 @@ value — the checks display should make that visible too, via the label distrib
 
 ## R6-1. AI suggestion must exist at page level, and for dropped versions
 
+**Status 2026-11-12:** skipped by Evelyn.
+
+
 The AI Suggestion card only appears under a kept version's detail card. Add a page-level
 suggestion for Prompt Versions (best current version and whether its pass is confirmed,
 the recommended next action, anything blocked), shown regardless of selection. When a
@@ -242,11 +250,17 @@ be said.
 
 ## R6-2. A "hide dropped" switch for the versions list
 
+**Status 2026-11-12:** done on PR #5 as an eye icon button (see `docs/ui-gaps.md`, "Done on 2026-11-12: acceptance round 6").
+
+
 Optimiser runs leave long tails of dropped versions in the list. Add a toggle to hide
 dropped versions (dropped = dropped in checks or dry run; kept/running/scored versions
 always show), defaulting to showing everything, remembered for the session.
 
 ## R6-3. Rework mismatch reopening: edit in Reviewed, save appends a record
+
+**Status 2026-11-12:** done on PR #5 (see `docs/ui-gaps.md`, "Done on 2026-11-12: acceptance round 6").
+
 
 Current behaviour: Reopen moves the item from Reviewed back to To review, the page does
 not follow it, the reopened editor looks different from the normal review editor, and it
