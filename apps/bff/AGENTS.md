@@ -15,7 +15,9 @@ it reads and writes through the catalog, starts labeling tasks, and asks the age
   starts pass `{auto}` to labeling so the run's cost is recorded as automatic spend; no run gets
   a budget, so nothing pauses for cost (the user stops a costly run with Stop).
   Tests: `work.test.ts` (real catalog and labeling over the stand-in store, fake model).
-- `optimiser.ts`: GEPA-style loop; each candidate is labeled as an optimiser task.
+- `api.ts`: `createBffApi()`, the bff as `BffContract` (ids and plain JSON in, records read here).
+- `optimiser-host.ts`: what the bff does for `@tsp/optimiser` (`OptimiserHost`): labels, scores and
+  saves a version through the same code as every other path, and what follows a pass.
 - `training.ts`: `labelTestSet` ("Get model answers" on Gold Labels, user-started) and the final
   run: one labeling task over the train split plus, when the user ticked it, the test examples
   with no gold label and no valid answer from the version (`relabelInvalid`: an invalid answer

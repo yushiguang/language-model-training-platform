@@ -39,7 +39,6 @@ export const runView = (t: LabelingTask): LabelingRun => ({
   auto: t.createdBy === 'auto',
   purpose: t.purpose === 'training' ? undefined : t.purpose,
   autoCostUsd: t.autoCostUsd ?? 0,
-  overBudget: t.state === 'paused' && t.stopReason === 'budget',
 });
 
 /** A training set record with its task's live counters. */

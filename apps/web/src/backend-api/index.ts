@@ -56,7 +56,6 @@ export const {
   checkLabels,
   mismatches,
   reviewGold,
-  reopenGold,
   rebuildReports,
   createVersion,
   scoreVersion,

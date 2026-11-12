@@ -470,27 +470,16 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
       [id(6), 'model'],
     ],
   );
-  // Reopen: a kept label goes back to To review; a changed label goes back to what it was.
-  const {reopenGold} = await import('./mismatches.ts');
-  await reopenGold(w.projectId, id(5), best.id);
-  await reopenGold(w.projectId, id(6), best.id);
-  m = await mismatches(w.projectId);
-  assert.deepEqual(m.items.map(x => x.exampleId), [5, 6, 7].map(id));
-  assert.equal(m.reviewed, 0);
-  assert.deepEqual((await w.state()).gold[id(6)]!.answer, s.gold[id(6)]!.answer);
-  // Reviewed again after a reopen, the new decision stands.
   await reviewGold(w.projectId, id(5), best.id, 'kept', undefined, '  Its own words  ');
   m = await mismatches(w.projectId);
-  assert.deepEqual(m.reviewedItems.map(r => [r.exampleId, r.note]), [[id(5), 'Its own words']]);
-  assert.deepEqual(m.reviewedItems[0].earlier, [], 'a reopen starts the history afresh');
+  assert.deepEqual(m.reviewedItems.find(r => r.exampleId === id(5))?.note, 'Its own words');
   // R6-3: editing a reviewed item appends a review; the newest stands, the rest is its history.
   await reviewGold(w.projectId, id(5), best.id, 'kept', undefined, 'Looked again');
   m = await mismatches(w.projectId);
-  assert.equal(m.reviewed, 1);
-  assert.deepEqual(
-    m.reviewedItems.map(r => [r.note, r.earlier?.map(e => e.note)]),
-    [['Looked again', ['Its own words']]],
-  );
+  assert.equal(m.reviewed, 2);
+  const five = m.reviewedItems.find(r => r.exampleId === id(5))!;
+  assert.equal(five.note, 'Looked again');
+  assert.equal(five.earlier?.[0].note, 'Its own words');
 
   // R5-4, R5-5: a gold change archives the reports; they are rebuilt from saved answers in one go.
   await reviewGold(w.projectId, id(7), best.id, 'changed', {format: ['Vlog']});

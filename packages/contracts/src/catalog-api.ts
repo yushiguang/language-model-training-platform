@@ -10,7 +10,6 @@ import type {
   OptimisationRun,
   Project,
   PromptVersion,
-  Recommendation,
   SetupVersion,
   StartRequest,
   TrainingSet,
@@ -47,7 +46,6 @@ export interface CatalogRecords {
   chat_messages: ChatMessage;
   agent_proposals: AgentProposal;
   start_requests: StartRequest;
-  recommendations: Recommendation;
   audit_log: AuditEntry;
 }
 

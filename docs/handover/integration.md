@@ -20,7 +20,7 @@ Keep this repo free of internal product names, internal URLs, package scopes, ke
 
 ## Where the swap happens: `@tsp/platform-impl`
 
-Only the composition root (`apps/web/src/backend-api/index.ts`) imports `@tsp/platform-impl`,
+Only the composition root (`apps/web/src/backend-api/in-process.ts`) imports `@tsp/platform-impl`,
 and only its `createPlatform(): Platform`. It resolves to:
 
 - the stand-ins, `packages/platform/src/config.ts`, by default (`tsconfig.base.json` paths and

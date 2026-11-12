@@ -4,14 +4,15 @@ The MVP produces a labeled training set and a labeled test set for one task: Set
 Gold Labels → Prompt Engineering → Training Set (the final run labels train and test). It is a fixed-workflow website with agents built into each step.
 Code decides the next step; agents explain and propose, people approve.
 
-## Eight apps, three packages
+## Nine apps, three packages
 
 ```
-apps/web ──► apps/web/src/backend-api (composition root)
+apps/web ──► apps/web/src/backend-api (the BffClient the pages call; in-process.ts is the composition root)
                  │ builds and wires:
                  ├── apps/bff ──────────┬──► catalog      (product records)
                  │   (what pages call)  ├──► labeling     (tasks, predictions) ──► llm-gateway
                  │                      ├──► agents       (presets, runtime)   ──► llm-gateway
+                 │                      ├──► optimiser    (Auto Optimise runs) ──► catalog, labeling, agents
                  │                      └──► llm-gateway  (endpoint list, agent model)
                  ├── telemetry (one port, given to every app above) ──► the platform's sink
                  └── @tsp/platform-impl (stand-ins, or the internal adapters)
@@ -31,9 +32,40 @@ composition root is the only place that knows which implementation sits behind e
 | `labeling` | Collections `labeling_tasks`, `predictions`. Runs tasks | `LabelingContract` (`labeling-api.ts`) |
 | `catalog` | All product collections (`CatalogRecords` in `catalog-api.ts`). Assigns version numbers | `CatalogContract` |
 | `agents` | Agent presets and the turn/handoff logic. Stateless | `AgentRuntimeContract` (`agent-api.ts`) |
-| `bff` | Nothing stored. Workflow, gates, when labeling starts, reports, optimiser loop | `BffContract` (`bff-api.ts`) |
+| `optimiser` | The Auto Optimise loop and the `optimisation_runs` records. Asks the bff (through `OptimiserHost`) to save a version, label examples and build a score | `OptimiserContract` (`optimiser-api.ts`) |
+| `bff` | Nothing stored. Workflow, gates, when labeling starts, reports | `BffContract` (`bff-api.ts`) |
 | `telemetry` | Metrics (Prometheus style, `tsp_*`) and product events; sends them to `Platform.telemetry` | `TelemetryPort` (`telemetry.ts`) |
-| `web` | Pages and components | calls `@/backend-api` |
+| `web` | Pages and components | calls `@/backend-api` (`BffClient`) |
+
+### Contracts are ready for an interface definition language
+
+Since 1.0.0 phase 1 every service contract is written so it maps one to one to an RPC interface
+(spec 1.0.0, section 7):
+
+- Arguments and results are plain JSON: records and arrays, never `Map`, `Set`, `File` or a
+  function. `ProjectState.gold` and a version's saved answers are records by example id.
+- A call passes ids and the user's input, never a record the caller holds. Starts take one
+  request struct (`ScoreVersionRequest`, `CreateVersionRequest`, `StartOptimiserRequest`, ...)
+  with an optional `idempotencyKey`: the same key never starts the same work twice.
+- Live updates are not methods: a client listens on an `EventStreamPort` (in-process the
+  services' bus, over HTTP Server-Sent Events or polling).
+- `apps/bff/src/api.ts` (`createBffApi`) is the bff as its contract. Services behind it still
+  pass records to each other.
+
+`apps/web/src/backend-api` has three files: `client.ts` (the `BffClient` interface pages use:
+the contract plus live listeners, file uploads and page telemetry), `in-process.ts` (the default
+client and composition root: every service runs in the page on `@tsp/platform-impl`) and
+`index.ts` (picks the client). A microservice deployment adds an HTTP client and exports it from
+`index.ts`; no page changes.
+
+### One place for every tunable number
+
+`SystemConfig` (`packages/contracts/src/config.ts`) holds every threshold, limit and estimate,
+grouped by area; the defaults are `DEFAULT_SYSTEM_CONFIG` in `packages/domain/src/config.ts`.
+Code reads `systemConfig()` at the time of use. A hosting adapter overrides any value through
+`Platform.config`, merged over the defaults at startup. `Platform` also has optional ports for
+per-tenant configuration, permission checks and a job queue (`RequestContext`,
+`TenantConfigPort`, `AuthorizationPort`, `JobQueuePort`), with single-tenant stand-ins.
 
 ## Model calls: llm-gateway
 
@@ -113,7 +145,7 @@ Both have their own design docs, which hold the design and the as-built detail:
 
 - [design/optimiser.md](design/optimiser.md): Auto Optimise (GEPA ported to TypeScript) and
   Improve with AI. Pure parts in `packages/domain/src/gepa.ts`, the loop in
-  `apps/bff/src/services/optimiser.ts`.
+  `apps/optimiser/src/optimiser.ts`.
 - [design/helpers.md](design/helpers.md): the helpers in Ask AI (agent presets, page views, read
   and start tools, what they may never see). Presets and runtime in `apps/agents`, page views and
   tools in `apps/bff/src/services/page-views.ts`.
@@ -193,7 +225,7 @@ application `id` to the store's document id.
 | Confirming a pass (second labeling of the held-out half) | `confirmScore` in `apps/bff/src/services/evaluation.ts` |
 | Mismatches between saved answers and gold labels; keep or change | `apps/bff/src/services/mismatches.ts` |
 | The label check on Dataset | `checkLabels` in `apps/bff/src/services/agents.ts` |
-| Optimiser loop: rounds, retries, Failed and Retry, the training set after a pass | `apps/bff/src/services/optimiser.ts` |
+| Optimiser loop: rounds, retries, Failed and Retry, the training set after a pass | `apps/optimiser/src/optimiser.ts` |
 | Improve with AI (a draft with marked changes, nothing labeled) | `improveWithAi` in `apps/bff/src/services/agents.ts` |
 | Test answers and the final run (train, plus unlabeled test when ticked) as labeling tasks; output rows with their label source | `apps/bff/src/services/training.ts`, `finalRunPlan` in `packages/domain/src/workflow.ts` |
 | What starts without a click | `packages/domain/src/auto-start.ts`, `tick` in `apps/bff/src/services/work.ts` |

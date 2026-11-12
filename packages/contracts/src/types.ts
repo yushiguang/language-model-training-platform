@@ -241,8 +241,6 @@ export interface LabelingRun {
   purpose?: 'eval' | 'optimiser' | 'test';
   /** What runs started by code spent on it (metrics and the audit; there is no cap). */
   autoCostUsd?: number;
-  /** Paused for its budget. The MVP sets no budgets, so this stays false; kept for the labeling app's budget support. */
-  overBudget?: boolean;
 }
 
 export interface ValueMetrics {
@@ -522,19 +520,6 @@ export interface StartRequest {
   refs: Record<string, string | string[]>;
   userRequest: string;
   note: string;
-  createdAt: string;
-}
-
-export interface Recommendation {
-  id: string;
-  projectId: string;
-  kind: 'make_training_set' | 'keep_improving' | 'label_gold' | 'rework_from_version' | 'wait';
-  title: string;
-  reasons: string[];
-  promptVersionId: string | null;
-  endpoint: EndpointId | null;
-  evidence: {label: string; href: string}[];
-  response: 'accepted' | 'dismissed' | null;
   createdAt: string;
 }
 

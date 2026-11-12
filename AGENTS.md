@@ -36,10 +36,11 @@ changing, because apps only talk through the contracts in `@tsp/contracts`.
 | `apps/catalog` | `@tsp/catalog` | Product records (projects, versions, reports, ...): CRUD, version numbers | contracts, domain, platform |
 | `apps/labeling` | `@tsp/labeling` | Labeling tasks and predictions: runs, failures, resume | contracts, domain, platform |
 | `apps/agents` | `@tsp/agents` | Agent presets and runtime, hand-written, no framework | contracts, domain |
+| `apps/optimiser` | `@tsp/optimiser` | The Auto Optimise loop behind `OptimiserContract`; asks the bff through `OptimiserHost` | contracts, domain |
 | `apps/bff` | `@tsp/bff` | What pages call: workflow, decides when labeling starts, builds reports | contracts, domain |
 | `apps/telemetry` | `@tsp/telemetry` | Prometheus-style metrics and product events, sent to the platform's sink | contracts |
 | `apps/web` | `@tsp/web` | Next.js static site. Pages call `@/backend-api` only | contracts, domain, `@/backend-api`, `@/ui`, `@/components` |
-| `apps/web/src/backend-api` | | The composition root: builds every app and wires them | anything |
+| `apps/web/src/backend-api` | | `client.ts`: the `BffClient` pages call. `in-process.ts`: the composition root, builds every app and wires them. `index.ts`: picks the client | anything |
 
 `@tsp/platform-impl` is the one injection point: it resolves to the stand-ins by default and to
 the internal adapters in the internal build. Only the composition root imports it.

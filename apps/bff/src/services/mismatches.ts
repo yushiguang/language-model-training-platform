@@ -7,8 +7,6 @@ import {loadProjectState} from './projects.ts';
 
 /** The audit action that records a decision made on the Mismatches tab. */
 export const GOLD_REVIEW = 'gold.review';
-/** The audit action that reopens one (acceptance R4-5, 2026-11-11). */
-export const GOLD_REOPEN = 'gold.reopen';
 
 interface ReviewData {
   exampleId: string;
@@ -29,24 +27,15 @@ const same = (a: Answer, b: Answer) => JSON.stringify(Object.entries(a).sort()) 
 
 /**
  * The reviews that still stand, by "exampleId|versionId" (Evelyn, 2026-11-11: a review belongs to a
- * gold label and a version): the newest review of each pair, unless a reopen names it. A review
- * also lapses once the example's gold label changes after it.
+ * gold label and a version): the newest review of each pair. A review
+ * lapses once the example's gold label changes after it.
  */
 async function standingReviews(projectId: string, state: ProjectState): Promise<Map<string, ReviewData & {earlier: ReviewData[]}>> {
   const {catalog} = getApp();
-  const reopens = (await catalog.find('audit_log', {projectId, action: GOLD_REOPEN})).map(r => r.data as {exampleId: string; versionId: string; reviewAt: string});
-  const reopened = new Set(reopens.map(d => `${d.exampleId}|${d.versionId}|${d.reviewAt}`));
-  // A reopen starts the pair afresh: reviews up to the one it reopened are not its history.
-  const resetAt = new Map<string, string>();
-  for (const d of reopens) {
-    const k = `${d.exampleId}|${d.versionId}`;
-    if ((resetAt.get(k) ?? '') < d.reviewAt) resetAt.set(k, d.reviewAt);
-  }
   const all = new Map<string, ReviewData[]>();
   for (const r of await catalog.find('audit_log', {projectId, action: GOLD_REVIEW})) {
     const d = r.data as unknown as ReviewData;
     const key = `${d.exampleId}|${d.versionId}`;
-    if (d.at <= (resetAt.get(key) ?? '')) continue;
     all.set(key, [...(all.get(key) ?? []), d]);
   }
   const out = new Map<string, ReviewData & {earlier: ReviewData[]}>();
@@ -55,7 +44,7 @@ async function standingReviews(projectId: string, state: ProjectState): Promise<
     // Oldest first (stable, so same-time records keep their order), then the newest first.
     const sorted = [...list].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)).reverse();
     const d = sorted[0];
-    if (reopened.has(`${k}|${d.at}`) || state.gold[d.exampleId]?.id !== d.goldId) continue;
+    if (state.gold[d.exampleId]?.id !== d.goldId) continue;
     out.set(k, {...d, earlier: sorted.slice(1)});
   }
   return out;
@@ -197,22 +186,6 @@ export async function reviewGold(projectId: string, exampleId: string, versionId
   const data: ReviewData = {exampleId, versionId, outcome, usedModel: outcome === 'changed' && !!theirs && !!answer && same(theirs, answer), goldId: g.id, previousGoldId: current.id, previousAnswer: current.answer, ...(text ? {note: text} : {}), at: now()};
   await catalog.audit(projectId, (await user()).name, GOLD_REVIEW, data as unknown as Record<string, unknown>);
   tm().event('gold_mismatch_reviewed', {outcome, with_note: !!text});
-  emitChange();
-}
-
-/**
- * Reopen a reviewed mismatch for one version (R4-5): the review no longer stands, and a label
- * changed by that review goes back to what it was, so the example is in To review again.
- */
-export async function reopenGold(projectId: string, exampleId: string, versionId: string): Promise<void> {
-  const {catalog, user} = getApp();
-  const state = await loadProjectState(projectId);
-  if (!state?.setup) throw new Error('The project was not found.');
-  const d = (await standingReviews(projectId, state)).get(`${exampleId}|${versionId}`);
-  if (!d) return;
-  if (d.outcome === 'changed' && d.previousAnswer) await saveGold(projectId, exampleId, state.setup.schemaVersion, d.previousAnswer, true);
-  await catalog.audit(projectId, (await user()).name, GOLD_REOPEN, {exampleId, versionId, reviewAt: d.at, at: now()});
-  tm().event('gold_mismatch_reopened', {});
   emitChange();
 }
 

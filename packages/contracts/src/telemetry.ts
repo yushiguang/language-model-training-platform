@@ -51,7 +51,6 @@ export const METRICS = {
   tsp_labeling_example_duration_seconds: {type: 'histogram', help: 'Render, call, parse and save of one example', labels: ['task_purpose'], buckets: BUCKETS.CALL},
   tsp_labeling_task_duration_seconds: {type: 'histogram', help: 'Running time of one run', labels: ['task_purpose'], buckets: BUCKETS.LONG},
   tsp_labeling_cost_usd_total: {type: 'counter', help: 'Labeling cost', labels: ['task_purpose']},
-  tsp_labeling_cost_vs_estimate_ratio: {type: 'histogram', help: 'Final cost / approved estimate, at task end', labels: ['task_purpose'], buckets: BUCKETS.RATIO},
   tsp_labeling_lock_conflicts_total: {type: 'counter', help: 'A tab asked to run a task another tab runs', labels: ['task_purpose']},
   tsp_labeling_stop_latency_seconds: {type: 'histogram', help: 'From Stop pressed to the runner stopping', labels: ['task_purpose'], buckets: BUCKETS.LONG},
   // agents
@@ -101,7 +100,7 @@ export type MetricName = keyof typeof METRICS;
 export const LABEL_VALUES: Record<string, readonly string[]> = {
   purpose: ['labeling', 'chat'],
   outcome: ['ok', 'error', 'rate_limited', 'server', 'timeout', 'rejected', 'filtered', 'aborted', 'gave_up', 'shown', 'accepted', 'cancelled', 'approved', 'discarded', 'joined', 'passes', 'no_new_ideas', 'budget', 'max_rounds', 'stopped', 'failed'],
-  reason: ['rate_limited', 'server', 'timeout', 'user', 'budget', 'failures', 'closed', 'none'],
+  reason: ['rate_limited', 'server', 'timeout', 'user', 'failures', 'closed', 'none'],
   kind: ['input', 'output', 'reasoning', 'qpm', 'tpm', 'concurrency', 'script', 'asset', 'backend', 'image', 'schema', 'prompt', 'other'],
   assumed: ['true', 'false'],
   task_purpose: ['eval', 'optimiser', 'test', 'training'],
@@ -114,13 +113,13 @@ export const LABEL_VALUES: Record<string, readonly string[]> = {
   to: ['schema_agent', 'prompt_agent', 'evaluation_agent'],
   intent: ['answer', 'propose_schema', 'revise_schema', 'check_schema', 'draft_prompt', 'revise_prompt', 'explain_version', 'explain_report', 'reflect', 'merge', 'improve'],
   tool: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions', 'check_template', 'read_feature_info', 'read_doc', 'try_template', 'score_version', 'start_optimiser'],
-  page: ['projects', 'setup', 'dataset', 'gold', 'prompt', 'prompt_edit', 'compare', 'report', 'training', 'other'],
+  page: ['projects', 'setup', 'dataset', 'gold', 'prompt', 'prompt_edit', 'training', 'other'],
   slot: ['A', 'B'],
   what: ['score', 'resume', 'optimiser', 'try_template', 'score_version', 'start_optimiser', 'final_run', 'test_answers', 'training_after_pass'],
   decision: ['started'],
   node: ['setup', 'dataset', 'gold', 'prompt', 'training'],
   action: ['approve', 'refused', 'skip'],
-  collection: ['projects', 'setup_versions', 'dataset_snapshots', 'examples', 'gold_labels', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'training_sets', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'recommendations', 'audit_log'],
+  collection: ['projects', 'setup_versions', 'dataset_snapshots', 'examples', 'gold_labels', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'training_sets', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'audit_log'],
   // Filled at startup (see above).
   endpoint: [],
   model: [],
@@ -166,8 +165,6 @@ export interface EventProps {
   gold_label_saved: {split: string; revealed: boolean; seconds_on_example: Num; matches_model: boolean | null; was_recheck: boolean};
   gold_labels_uploaded: {source: 'file' | 'bundled'; saved: Num; skipped: Num};
   gold_mismatch_reviewed: {outcome: 'kept' | 'changed'; with_note: boolean};
-  gold_mismatch_reopened: Record<string, never>;
-  gold_skipped: {eval_done: Num; eval_total: Num};
   test_answers_requested: {estimate_usd: Num; examples: Num};
   // Prompt Engineering
   prompt_draft_requested: Record<string, never>;
@@ -244,8 +241,6 @@ export const EVENT_PROP_KEYS: {[E in EventName]: readonly (keyof EventProps[E] &
   gold_label_saved: ['split', 'revealed', 'seconds_on_example', 'matches_model', 'was_recheck'],
   gold_labels_uploaded: ['source', 'saved', 'skipped'],
   gold_mismatch_reviewed: ['outcome', 'with_note'],
-  gold_mismatch_reopened: [],
-  gold_skipped: ['eval_done', 'eval_total'],
   test_answers_requested: ['estimate_usd', 'examples'],
   // Prompt Engineering
   prompt_draft_requested: [],

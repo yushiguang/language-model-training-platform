@@ -18,7 +18,6 @@ const ID_PREFIX: Record<CatalogKind, string> = {
   chat_messages: 'cm',
   agent_proposals: 'ap',
   start_requests: 'sr',
-  recommendations: 'rc',
   audit_log: 'au',
 };
 

@@ -85,7 +85,6 @@ export function createBffApi(): BffContract {
     checkLabels: agents.checkLabels,
     mismatches: mismatch.mismatches,
     reviewGold: r => mismatch.reviewGold(r.projectId, r.exampleId, r.promptVersionId, r.outcome, r.answer, r.note),
-    reopenGold: mismatch.reopenGold,
     rebuildReports: mismatch.rebuildReports,
 
     createVersion: r =>

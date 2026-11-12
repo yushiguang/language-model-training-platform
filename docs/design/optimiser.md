@@ -49,7 +49,7 @@ ever called "Optimiser" and its button "Auto Optimise"; "GEPA" appears in design
 One run
 improves the prompt on the project's one labeling model, for up to the user's Max rounds
 (default 10). The pure parts are in `packages/domain/src/gepa.ts`; the loop is
-`apps/bff/src/services/optimiser.ts`.
+`apps/optimiser/src/optimiser.ts`.
 
 - **Versions.** A run reserves the next major number when it starts; every change it tries is the
   next minor of that major (v3.1, v3.2…). The editor's Save (the main button) makes the next minor

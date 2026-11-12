@@ -11,6 +11,7 @@ where it matters, why. The code follows these; change a line here when a decisio
 - **The held-out half is not a test set.** Confirm a pass stays; an untouched test set comes with the batch labeling project.
 - **Prompt import lists what it could not carry over.**
 - **1.0.0 ships in four phases**, the first a contract and service refactor with no behaviour change.
+- **A task that just finished is never marked as left behind** (found by the browser check during phase 1): the check that pauses tasks of closed pages reads the task again before it writes.
 - **Three 0.x UI rules change in 1.0.0:** Enter sends in Ask AI (Shift+Enter adds a line, input-method safe); user-written content wraps; the Project Settings default panel shows explanations as subtitles.
 
 ## 2026-11-11

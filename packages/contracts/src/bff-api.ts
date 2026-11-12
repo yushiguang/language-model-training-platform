@@ -193,7 +193,6 @@ export interface BffContract {
   /** Examples where versions disagree with the gold label, for one version (left out: the best). */
   mismatches(projectId: string, promptVersionId?: string | null): Promise<MismatchList>;
   reviewGold(req: ReviewGoldRequest): Promise<void>;
-  reopenGold(projectId: string, exampleId: string, promptVersionId: string): Promise<void>;
   /** Rebuild scores: works every archived score out again from the saved answers. Returns how many. */
   rebuildReports(projectId: string): Promise<number>;
 
