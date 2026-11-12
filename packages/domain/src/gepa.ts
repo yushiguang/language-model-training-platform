@@ -3,8 +3,8 @@ import {placeholderKeys} from './template.ts';
 import {isImageKey} from './catalogue.ts';
 
 /**
- * Pure parts of the Optimiser (GEPA, ported to TypeScript; see the design doc "Prompt optimising
- * in Sprint"): per-example scores, the Pareto front, picking a parent and the dry-run examples,
+ * Pure parts of the Optimiser (GEPA, ported to TypeScript; see
+ * docs/design/optimiser.md): per-example scores, the Pareto front, picking a parent and the dry-run examples,
  * and comparing a change with its parent in the dry run. The loop itself is in the bff.
  */
 

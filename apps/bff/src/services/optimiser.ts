@@ -29,7 +29,7 @@ import {labelerNotes, withLabelerNotes} from './mismatches.ts';
 import {startTrainingSet} from './training.ts';
 
 /**
- * The Optimiser (GEPA, ported to TypeScript; design doc "Prompt optimising in Sprint"). Runs from
+ * The Optimiser (GEPA, ported to TypeScript; docs/design/optimiser.md). Runs from
  * the open page, only when the user starts it (Auto Optimise). Each round:
  *  1. pick a parent from the Pareto front of the pool (the start version and the kept versions),
  *     scored per example on the optimiser half of the eval set; or merge two front versions that

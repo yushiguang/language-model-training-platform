@@ -1,6 +1,6 @@
 /**
- * Contract: telemetry (`apps/telemetry`). The full list is designed in the doc
- * "Telemetry: events and metrics"; add to the doc first, then here.
+ * Contract: telemetry (`apps/telemetry`). This file is the full list; the conventions and the
+ * rules for changing it are in docs/design/telemetry.md.
  *
  * Two streams:
  * - service metrics, Prometheus style: counters, gauges and histograms with labels whose values

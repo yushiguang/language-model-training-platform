@@ -470,7 +470,7 @@ export interface Platform {
   endpoints?: EndpointConfig[];
   /**
    * Where telemetry goes (metrics are pushed as Prometheus text; events in batches). Optional:
-   * without it nothing leaves the page. See the doc "Telemetry: events and metrics".
+   * without it nothing leaves the page. See docs/design/telemetry.md.
    */
   telemetry?: TelemetrySink;
   /** Shown in the header so nobody mistakes a stand-in for the real service. */
