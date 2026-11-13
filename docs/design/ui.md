@@ -1,8 +1,8 @@
 # UI design: the Unified UI
 
 Status: the design system below is current. The page list at the end is the 1.0.0 four-step
-workflow as built on 2026-11-13; its new screens are coded from the 1.0.0 spec and are not drawn
-on the canvas yet (see [../ui-gaps.md](../ui-gaps.md)).
+workflow as built on 2026-11-13; its new screens were coded from the 1.0.0 spec and then put on the
+canvas from the built site; they await a design review (see [../ui-gaps.md](../ui-gaps.md)).
 
 The screens are drawn on the UI canvas "Sprint MVP — UI Screens", page "Unified UI", approved on
 2026-11-06 and kept in step with the code since (the canvas is a design artifact outside this

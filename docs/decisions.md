@@ -11,7 +11,7 @@ where it matters, why. The code follows these; change a line here when a decisio
 - **Project Settings are confirmed once, before the first paid run**; nothing paid starts before that.
 - **No Approve card in the chat.** A draft is approved on its page.
 - **Existing 0.x projects are not migrated** (assumed test data, to be discarded).
-- **The UI canvas keeps 51 boards** after the redundant ones were removed; the 1.0.0 screens are drawn after the build.
+- **The UI canvas was updated from the built site** (59 boards): the 1.0.0 screens are boards made from the pages' own markup.
 
 ## 2026-11-12 (review of the 1.0.0 spec)
 

@@ -9,11 +9,13 @@ does not match, or that the canvas does not decide. Items that were approved or 
 2026-11-06 and 2026-11-12 (acceptance rounds 3 to 6, the MVP review) are in
 [tmp/2026-11-ui-gaps-history.md](tmp/2026-11-ui-gaps-history.md).
 
-## 1.0.0 screens with no canvas board yet (2026-11-13)
+## 1.0.0 screens, drawn from the build (2026-11-13)
 
-Phase 2 of 1.0.0 was coded from the spec with the existing components and styles. These screens
-are not drawn on the canvas, so "looks exactly like the canvas" cannot be checked for them yet.
-The canvas should be redrawn from the built screens, then reviewed.
+Phase 2 of 1.0.0 was coded from the spec with the existing components and styles. On 2026-11-13
+the canvas was updated from the built site: each of these screens is a board made from the page's
+own markup and stylesheet, so board and code are the same. They still need a design review; the
+last column lists what to decide. Boards for states the browser check does not reach (loading,
+failed, stopped and similar) are the earlier drawings with the four-step bar.
 
 | Screen | What was built | To decide |
 | --- | --- | --- |
