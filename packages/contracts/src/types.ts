@@ -124,9 +124,27 @@ export interface DatasetSnapshot {
 export interface MismatchList {
   versions: {id: string; label: string; score: number | null; best?: boolean}[];
   versionId: string | null;
+  /** To review: the picked version's mismatches not yet reviewed for that version. */
   items: {exampleId: string; wrongIn: number; of: number}[];
   wrongEverywhere: number;
+  /** Reviewed for the picked version (acceptance R4-5, 2026-11-11: a review belongs to a gold label and a version). */
   reviewed: number;
+  /** The picked version's reviews, newest first; each can be reopened. */
+  reviewedItems: MismatchReview[];
+  /** Reviews still standing on any version: the AI Suggestion asks for a first review only while this is 0. */
+  reviewedAll: number;
+}
+
+/** A decision made on the Mismatches tab, for one gold label and one version. */
+export interface MismatchReview {
+  exampleId: string;
+  /** Kept the gold label, took the model's answer, or picked another answer. */
+  outcome: 'kept' | 'model' | 'other';
+  /** The labeler's "Why" (R4-4): sent to the Optimiser for optimiser-half examples only. */
+  note: string | null;
+  at: string;
+  /** R6-3: earlier reviews of this example for this version, newest first (the newest review stands). */
+  earlier?: Omit<MismatchReview, 'earlier'>[];
 }
 
 export interface GoldLabel {
@@ -178,6 +196,12 @@ export interface Prediction {
   output: string;
   answer: Answer | null;
   invalidReason: string | null;
+  /**
+   * The model's own short reason for its answer (decided 2026-11-11): one sentence it writes in
+   * "reason" before the values. Read by the Optimiser and Improve with AI; never a label and
+   * never in the exported files. Missing on older records and when the model gave none.
+   */
+  reason?: string;
   /** The endpoint's safety filter stopped the answer (`answer` is null). */
   filtered?: boolean;
   costUsd: number;
@@ -247,11 +271,20 @@ export interface MixUp {
 }
 
 export interface Metrics {
+  /**
+   * Examples the score rests on: answers the site could read as labels. Invalid answers and answers
+   * the safety filter stopped are left out (acceptance R4-6, 2026-11-11) and counted below.
+   */
   n: number;
+  /** Every example scored for, including those left out. Missing on reports made before 2026-11-11. */
+  total?: number;
+  /** Answers the safety filter stopped. Missing on reports made before 2026-11-11. */
+  filtered?: number;
   fields: FieldMetrics[];
   lowestField: {field: string; macroF1: number};
   lowestValue: {field: string; value: string; f1: number} | null;
   invalid: number;
+  /** Invalid answers over every example scored for (`total`). */
   invalidRate: number;
   mixUps: MixUp[];
   costPer1000: number;
@@ -301,6 +334,16 @@ export interface OptimiserRound {
   score: number | null;
   passed: boolean;
   dryRun: DryRunResult | null;
+  /**
+   * The dry run tied with the parent (acceptance R5-6): as many fields right, but on different
+   * examples. The change is labeled in full and kept in the pool, but does not count as progress.
+   */
+  tied?: boolean;
+  /**
+   * Why this parent (R5-7): on how many optimiser-half examples it is the best version. null: round
+   * 1, which always starts from the version the user picked. Missing on rounds made before.
+   */
+  parentWins?: number | null;
   /**
    * A pass is confirmed by labeling the held-out half a second time (decided 2026-11-10): the
    * second labeling's score, and whether it passes too. Only a confirmed pass ends the run.
@@ -595,6 +638,8 @@ export interface ProjectState {
   trainingSets: TrainingSet[];
   facts: WorkflowFacts;
   contextId: string;
+  /** A gold edit archived some reports and they are being rebuilt from saved answers (acceptance R5-4, R5-5). */
+  scoresUpdating: boolean;
   /** Available preset endpoints from the model runtime. */
   endpoints: EndpointInfo[];
   /** Active or recently finished sampling task, if any. */

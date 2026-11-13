@@ -269,7 +269,7 @@ function EvaluationPage() {
   );
 }
 
-type Mode = 'default' | 'custom' | 'none';
+type Mode = 'default' | 'custom';
 type Check = 'macroF1' | 'valueF1' | 'precision' | 'recall';
 const CHECKS: {key: Check; name: string; tip: string; applies: string}[] = [
   {key: 'macroF1', name: 'Macro-F1', tip: 'Per field, every value counts equally', applies: 'Each field'},
@@ -283,7 +283,8 @@ function Evaluation({state}: {state: ProjectState}) {
   const {href, refresh} = useProject();
   const s = state.setup;
   const saved = s?.thresholds ?? null;
-  const [mode, setMode] = useState<Mode>(s?.steps.evaluation ? (saved ? saved.mode : 'none') : 'default');
+  // R5-8: no "None" pass rule any more (it skipped gold labels). A project saved with none opens on Default.
+  const [mode, setMode] = useState<Mode>(saved ? saved.mode : 'default');
   const start = saved?.mode === 'custom' ? saved : null;
   const [on, setOn] = useState<Record<Check, boolean>>({macroF1: true, valueF1: start ? start.valueF1 != null : true, precision: start?.precision != null, recall: start?.recall != null});
   const [val, setVal] = useState<Record<Check, string>>({
@@ -296,7 +297,7 @@ function Evaluation({state}: {state: ProjectState}) {
   const next = async () => {
     const n = (k: Check) => (on[k] ? Math.min(1, Math.max(0, parseFloat(val[k]) || 0)) : null);
     const thresholds: Thresholds | null =
-      mode === 'none' ? null : mode === 'default' ? DEFAULT_THRESHOLDS : {...DEFAULT_THRESHOLDS, mode: 'custom', macroF1: n('macroF1') ?? DEFAULT_THRESHOLDS.macroF1, valueF1: n('valueF1'), precision: n('precision'), recall: n('recall')};
+      mode === 'default' ? DEFAULT_THRESHOLDS : {...DEFAULT_THRESHOLDS, mode: 'custom', macroF1: n('macroF1') ?? DEFAULT_THRESHOLDS.macroF1, valueF1: n('valueF1'), precision: n('precision'), recall: n('recall')};
     await saveSetup(state.project.id, {thresholds, steps: {schema: !!s?.steps.schema, evaluation: true, models: !!s?.steps.models}});
     await refresh();
     await go(href('/setup', {step: '3'}));
@@ -309,7 +310,6 @@ function Evaluation({state}: {state: ProjectState}) {
         <div className="opts" role="radiogroup" aria-label="Pass rule">
           <Opt title="Default" tip={`Macro-F1 of every field must reach ${DEFAULT_THRESHOLDS.macroF1.toFixed(2)}`} checked={mode === 'default'} onSelect={() => setMode('default')} extra={<><span className="grow" /><Badge text="Recommended" icon={false} /></>} />
           <Opt title="Custom" tip="Choose which checks count and their threshold" checked={mode === 'custom'} onSelect={() => setMode('custom')} />
-          <Opt title="None" tip="No scores, so the optimiser cannot run" checked={mode === 'none'} onSelect={() => setMode('none')} />
         </div>
       </Card>
       {mode === 'custom' && (

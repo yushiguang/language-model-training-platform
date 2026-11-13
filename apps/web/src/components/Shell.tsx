@@ -181,7 +181,6 @@ function TopNav({state, current}: {state: ProjectState; current: NodeId}) {
                 <Link className={`step${s === 'todo' ? '' : ` ${s}`}`} aria-current={n.id === current ? 'page' : undefined} href={href(n.path)}>
                   <span className="step-ic">{s === 'done' ? <Icon name="check" /> : s === 'running' ? <Icon name="ring" /> : s === 'attention' ? '!' : i + 1}</span>
                   {n.label}
-                  {n.recommended && <span className="step-opt">recommended</span>}
                 </Link>
               </span>
             );

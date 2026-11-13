@@ -1,4 +1,4 @@
-import type {Answer, DryRunResult, Example, ExampleBrief, OptimisationRun, OptimiserRound, PromptVersion, Schema} from '@tsp/contracts';
+import type {Answer, DryRunResult, Example, ExampleBrief, OptimisationRun, OptimiserRound, Prediction, PromptVersion, Schema} from '@tsp/contracts';
 import {placeholderKeys} from './template.ts';
 import {isImageKey} from './catalogue.ts';
 
@@ -42,7 +42,7 @@ export const BRIEF_IMAGES = 2;
  * An example as a helper reads it: the text features in `keys`, cut short (URLs left out), and
  * up to 2 of its images (any image feature, whether or not the prompt uses it).
  */
-export function exampleBrief(e: Example, keys: Iterable<string>, gold: Answer, predicted: Answer | null, rightIn?: 'template' | 'other'): ExampleBrief {
+export function exampleBrief(e: Example, keys: Iterable<string>, gold: Answer, predicted: Answer | null, rightIn?: 'template' | 'other', said?: HelperNote): ExampleBrief {
   const features: Record<string, string> = {};
   for (const k of keys) {
     const v = e.features[k];
@@ -54,14 +54,24 @@ export function exampleBrief(e: Example, keys: Iterable<string>, gold: Answer, p
     .flatMap(([, v]) => (Array.isArray(v) ? v : [v]))
     .filter(u => typeof u === 'string' && u.trim())
     .slice(0, BRIEF_IMAGES);
-  return {externalId: e.externalId, features, gold, predicted, ...(images.length ? {images} : {}), ...(rightIn ? {rightIn} : {})};
+  return {externalId: e.externalId, features, gold, predicted, ...(said?.reason ? {reason: said.reason} : {}), ...(said?.invalid ? {invalid: said.invalid} : {}), ...(images.length ? {images} : {}), ...(rightIn ? {rightIn} : {})};
 }
+
+/**
+ * Decided 2026-11-11 (review finding 3): no helper, agent or the Optimiser ever reads an example of
+ * the held-out half of the eval set: not its features, gold label or the model's answers. Scores
+ * and counts built on it may still be shown.
+ */
+export const visibleToAgents = (e: Pick<Example, 'split' | 'optimiserHalf'>): boolean => !(e.split === 'eval' && !e.optimiserHalf);
+
+/** What a tool says when it leaves held-out examples out, so a helper doesn't ask for them. */
+export const HIDDEN_NOTE = 'The held-out half of the eval set is hidden from helpers so its scores stay fair; it is not in this list.';
 
 /**
  * The examples a version gets wrong, worst first (fewest fields right), at most `max`. Pass only
  * optimiser-half examples: the held-out half must never reach a helper.
  */
-export function wrongExamples(schema: Schema, examples: Example[], keys: Iterable<string>, gold: Map<string, Answer>, predicted: Map<string, Answer | null>, max = BRIEF_WRONG): ExampleBrief[] {
+export function wrongExamples(schema: Schema, examples: Example[], keys: Iterable<string>, gold: Map<string, Answer>, predicted: Map<string, Answer | null>, max = BRIEF_WRONG, notes?: Map<string, HelperNote>): ExampleBrief[] {
   const ks = [...keys];
   return examples
     .filter(e => gold.has(e.id) && predicted.has(e.id))
@@ -69,7 +79,29 @@ export function wrongExamples(schema: Schema, examples: Example[], keys: Iterabl
     .filter(x => x.s < 1)
     .sort((a, b) => a.s - b.s)
     .slice(0, max)
-    .map(({e}) => exampleBrief(e, ks, gold.get(e.id)!, predicted.get(e.id)!));
+    .map(({e}) => exampleBrief(e, ks, gold.get(e.id)!, predicted.get(e.id)!, undefined, notes?.get(e.id)));
+}
+
+/** What a helper reads next to a model answer: the model's own reason, and why a reply was invalid. */
+export interface HelperNote {
+  reason?: string;
+  invalid?: string;
+}
+
+/**
+ * Saved answers as the helpers read them (decided 2026-11-11): each answer with the model's reason
+ * and the invalid reason. Answers the safety filter stopped are left out: there is nothing in
+ * them for a prompt to fix.
+ */
+export function answersForHelpers(preds: Iterable<Pick<Prediction, 'exampleId' | 'answer' | 'invalidReason' | 'reason' | 'filtered'>>): {predicted: Map<string, Answer | null>; notes: Map<string, HelperNote>} {
+  const predicted = new Map<string, Answer | null>();
+  const notes = new Map<string, HelperNote>();
+  for (const p of preds) {
+    if (p.filtered) continue;
+    predicted.set(p.exampleId, p.answer);
+    if (p.reason || (!p.answer && p.invalidReason)) notes.set(p.exampleId, {...(p.reason ? {reason: p.reason} : {}), ...(!p.answer && p.invalidReason ? {invalid: p.invalidReason} : {})});
+  }
+  return {predicted, notes};
 }
 
 /** A version in the pool with its scores on the optimiser half, by example id. */
@@ -156,7 +188,12 @@ export function pickDryRun(exampleIds: string[], size: number, focus: Set<string
  * fields right in total (finding 5), the `lowest` field counting double (finding 7: the gate is
  * that field's score). `passed` and `parentPassed` still count examples fully right.
  */
-export function compareDryRun(schema: Schema, parentId: string, items: {gold: Answer; candidate: Answer | null; parent: Answer | null}[], lowest?: string): DryRunResult & {better: boolean} {
+/**
+ * The dry run's verdict. `better`: more fields right, the lowest field counting double. `tied`
+ * (acceptance R5-6): as many, but right on different examples, so the change may hold something
+ * the parent lacks; it goes on to the full labeling without counting as progress.
+ */
+export function compareDryRun(schema: Schema, parentId: string, items: {gold: Answer; candidate: Answer | null; parent: Answer | null}[], lowest?: string): DryRunResult & {better: boolean; tied: boolean} {
   const all = (a: Answer | null, gold: Answer) => fieldsRight(schema, gold, a).length === schema.fields.length;
   const passed = items.filter(i => all(i.candidate, i.gold)).length;
   const parentPassed = items.filter(i => all(i.parent, i.gold)).length;
@@ -166,7 +203,8 @@ export function compareDryRun(schema: Schema, parentId: string, items: {gold: An
     parentPassed: items.filter(i => fieldsRight(schema, i.gold, i.parent).includes(f.name)).length,
   }));
   const weighted = (k: 'passed' | 'parentPassed') => fields.reduce((n, f) => n + f[k] * (f.field === lowest ? 2 : 1), 0);
-  return {examples: items.length, passed, parentPassed, parentId, fields, better: weighted('passed') > weighted('parentPassed')};
+  const differs = items.some(i => fieldsRight(schema, i.gold, i.candidate).join() !== fieldsRight(schema, i.gold, i.parent).join());
+  return {examples: items.length, passed, parentPassed, parentId, fields, better: weighted('passed') > weighted('parentPassed'), tied: weighted('passed') === weighted('parentPassed') && differs};
 }
 
 /** What the Optimiser did with a version, for the versions list and the version card. */
@@ -183,7 +221,7 @@ export function optimiserVersions(runs: OptimisationRun[]): Map<string, Optimise
 }
 
 /** The labels of the panel's "Now" line. */
-export function stepLine(step: OptimisationRun['step'], version: string | null, examples: number): string {
+export function stepLine(step: OptimisationRun['step'], version: string | null, examples: number, parent?: string | null): string {
   switch (step) {
     case 'parent':
       return version ? `Labeling ${version} on the eval set, the version to start from` : 'Picking the version to start from';
@@ -194,7 +232,7 @@ export function stepLine(step: OptimisationRun['step'], version: string | null, 
     case 'check':
       return `Checking ${version ?? 'the change'}`;
     case 'dry_run':
-      return `Dry run: labeling ${version ?? 'the change'} on ${examples} examples`;
+      return `Dry run: labeling ${version ?? 'the change'} on ${examples} examples${parent ? `, against ${parent}` : ''}`;
     case 'full':
       return `Labeling ${version ?? 'the change'} on the eval set`;
     case 'report':

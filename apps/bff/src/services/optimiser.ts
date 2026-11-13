@@ -3,6 +3,7 @@ import {
   BRIEF_WINS,
   checkTemplate,
   compareDryRun,
+  answersForHelpers,
   exampleBrief,
   dryRunSize,
   exampleScore,
@@ -24,6 +25,7 @@ import {buildReport, confirmScore, labelEvalSet, labelExamples, scoreOnOptimiser
 import {agentTools} from './page-views.ts';
 import {approveNode, loadProjectState} from './projects.ts';
 import {createVersion} from './prompts.ts';
+import {labelerNotes, withLabelerNotes} from './mismatches.ts';
 import {startTrainingSet} from './training.ts';
 
 /**
@@ -35,10 +37,13 @@ import {startTrainingSet} from './training.ts';
  *  2. ask the agent runtime for one change (it may read feature descriptions);
  *  3. run the editor's Checks; a failing or repeated change is dropped with no labeling;
  *  4. save it as the next minor of the run's major (v4.1, v4.2…) and dry-run it on 10 examples
- *     of the optimiser half (the parent's answers are known); drop it unless it passes more;
+ *     of the optimiser half (the parent's answers are known); drop it unless it passes more.
+ *     A tie (as many fields right, on different examples) goes on but is not progress (R5-6);
  *  5. label it on the whole eval set (the dry run's answers are reused) and build its report.
  * Stops when a version passes (then the training and test sets start), at the round limit,
- * after 3 wasted rounds in a row, on Stop, or when a step fails 3 times (Failed, with Retry).
+ * after 3 wasted rounds in a row (ties count), after 2 ties in a row, on Stop, or when a step
+ * fails 3 times (Failed, with Retry). Round 1 always starts from the version the user picked
+ * (R5-7); later rounds pick a parent from the Pareto front, weighted by the examples it wins.
  */
 
 const active = new Map<string, {ctrl: AbortController; task: string | null}>();
@@ -57,6 +62,7 @@ export function stopOptimiser(id: string): void {
 
 const TRIES = 3;
 const WASTED_LIMIT = 3;
+const TIE_LIMIT = 2;
 const MERGE_EVERY = 2;
 
 const STEP_NAME: Record<OptimiserStep, string> = {
@@ -97,7 +103,10 @@ function briefs(state: ProjectState, schema: Schema, half: string[], parent: Pro
   const exs = state.examples.filter(e => halfSet.has(e.id));
   const gold = new Map(exs.filter(e => state.gold.has(e.id)).map(e => [e.id, state.gold.get(e.id)!.answer]));
   const mine = answers.get(parent.id) ?? new Map<string, Prediction>();
-  if (!other) return wrongExamples(schema, exs, promptKeys(parent), gold, new Map([...mine].map(([id, p]) => [id, p.answer])));
+  if (!other) {
+    const {predicted, notes} = answersForHelpers(mine.values());
+    return wrongExamples(schema, exs, promptKeys(parent), gold, predicted, undefined, notes);
+  }
   const a = entries.find(x => x.id === parent.id)?.scores;
   const b = entries.find(x => x.id === other.id)?.scores;
   if (!a || !b) return [];
@@ -105,9 +114,12 @@ function briefs(state: ProjectState, schema: Schema, half: string[], parent: Pro
   const keys = new Set([...promptKeys(parent), ...promptKeys(other)]);
   const wins = (x: Map<string, number>, y: Map<string, number>, by: 'template' | 'other', preds: Map<string, Prediction>) =>
     exs
-      .filter(e => (x.get(e.id) ?? 0) > (y.get(e.id) ?? 0) && gold.has(e.id))
+      .filter(e => (x.get(e.id) ?? 0) > (y.get(e.id) ?? 0) && gold.has(e.id) && !preds.get(e.id)?.filtered)
       .slice(0, BRIEF_WINS)
-      .map(e => exampleBrief(e, keys, gold.get(e.id)!, preds.get(e.id)?.answer ?? null, by));
+      .map(e => {
+        const p = preds.get(e.id);
+        return exampleBrief(e, keys, gold.get(e.id)!, p?.answer ?? null, by, p ? answersForHelpers([p]).notes.get(e.id) : undefined);
+      });
   // `predicted` is the answer of the version that misses the example.
   return [...wins(a, b, 'template', theirs), ...wins(b, a, 'other', mine)];
 }
@@ -221,8 +233,13 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
   const settled = run.history.filter(h => h.outcome !== 'running' && h.outcome !== 'failed' && h.outcome !== 'stopped');
   let wasted = 0;
   for (const h of [...settled].reverse()) {
-    if (h.outcome === 'kept') break;
+    if (h.outcome === 'kept' && !h.tied) break;
     wasted++;
+  }
+  let ties = 0;
+  for (const h of [...settled].reverse()) {
+    if (!h.tied) break;
+    ties++;
   }
   let keptSinceMerge = 0;
   for (const h of [...settled].reverse()) {
@@ -266,8 +283,13 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
         break;
       }
 
+      // The pool (decided 2026-11-11): the start version, this run's kept versions, and every other
+      // version with a current score on this model: the user's own versions and earlier runs may
+      // hold rules the best version lacks. Reports are archived when the labels or gold labels
+      // change, so a current report means answers on today's eval set.
       const kept = run.history.filter(h => h.outcome === 'kept' && h.versionId).map(h => h.versionId!);
-      const pool = [start, ...state.versions.filter(v => kept.includes(v.id))];
+      const scored = new Set(state.reports.filter(r => r.endpoint === endpoint && !r.archivedNow).map(r => r.promptVersionId));
+      const pool = [start, ...state.versions.filter(v => kept.includes(v.id)), ...state.versions.filter(v => v.id !== start.id && !kept.includes(v.id) && scored.has(v.id))];
       const settings = setup.models.find(m => m.endpoint === endpoint);
       if (!settings) throw new StepFailed('parent', `The model is not chosen in Setup any more.`);
       const half = state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && state.gold.has(e.id)).map(e => e.id);
@@ -276,7 +298,9 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
       for (const v of pool) answers.set(v.id, await getApp().labeling.predictions(v.id, endpoint, settingsHash(settings)));
       const entries: PoolEntry[] = pool.map(v => ({
         id: v.id,
-        scores: new Map(half.filter(id => answers.get(v.id)!.has(id)).map(id => [id, exampleScore(schema, state.gold.get(id)!.answer, answers.get(v.id)!.get(id)!.answer)])),
+        // R4-6: an answer the safety filter stopped is left out. An invalid answer still scores 0
+        // here, so the Optimiser keeps fixing prompts that give unreadable answers.
+        scores: new Map(half.filter(id => answers.get(v.id)!.has(id) && !answers.get(v.id)!.get(id)!.filtered).map(id => [id, exampleScore(schema, state.gold.get(id)!.answer, answers.get(v.id)!.get(id)!.answer)])),
       }));
       const front = paretoFront(entries, half);
 
@@ -298,20 +322,25 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
           run.stopReason = 'max_rounds';
           break;
         }
-        if (wasted >= WASTED_LIMIT) {
+        if (wasted >= WASTED_LIMIT || ties >= TIE_LIMIT) {
           run.stopReason = 'no_new_ideas';
           break;
         }
-        const pair = keptSinceMerge >= MERGE_EVERY ? mergePair(entries, front) : null;
-        const parentId = pair ? pair[0] : (pickParent(front, random) ?? start.id);
+        // R5-7: round 1 starts from the version the user picked, as the dialog promised; later
+        // rounds roam the front.
+        const first = run.round === 0;
+        const pair = !first && keptSinceMerge >= MERGE_EVERY ? mergePair(entries, front) : null;
+        const parentId = first ? start.id : pair ? pair[0] : (pickParent(front, random) ?? start.id);
         parent = pool.find(v => v.id === parentId) ?? start;
         const other = pair ? pool.find(v => v.id === pair[1])! : null;
+        const parentWins = first ? null : (front.find(f => f.id === parent.id)?.wins ?? 0);
         run.round++;
-        round = {round: run.round, versionId: null, parentId: parent.id, kind: other ? 'merge' : 'change', change: '', outcome: 'running', score: null, passed: false, dryRun: null, step: other ? 'merge' : 'reflect'};
+        round = {round: run.round, versionId: null, parentId: parent.id, parentWins, kind: other ? 'merge' : 'change', change: '', outcome: 'running', score: null, passed: false, dryRun: null, step: other ? 'merge' : 'reflect'};
         await putRound(round);
 
         const m = await scoreOnOptimiserHalf(setup, parent, endpoint, state.examples, state.gold);
-        const examples = briefs(state, schema, half, parent, other, answers, entries);
+        // R4-4: the labelers' Why notes go with optimiser-half examples (never the held-out half).
+        const examples = withLabelerNotes(briefs(state, schema, half, parent, other, answers, entries), state.examples, await labelerNotes(state.project.id, state));
         const out = await step(other ? 'merge' : 'reflect', parent, () =>
           agents.reflectPrompt(
             {
@@ -390,18 +419,19 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
           return compareDryRun(
             schema,
             parent.id,
-            ids.map(id => ({gold: state.gold.get(id)!.answer, candidate: mine.get(id)?.answer ?? null, parent: parentAnswers.get(id)?.answer ?? null})),
+            // R4-6: examples where either answer was stopped by the safety filter are left out.
+            ids.filter(id => !mine.get(id)?.filtered && !parentAnswers.get(id)?.filtered).map(id => ({gold: state.gold.get(id)!.answer, candidate: mine.get(id)?.answer ?? null, parent: parentAnswers.get(id)?.answer ?? null})),
             pm.lowestField.field,
           );
         });
-        const {better, ...dryRun} = result;
-        if (!better) {
+        const {better, tied, ...dryRun} = result;
+        if (!better && !tied) {
           wasted++;
           tm().counter('tsp_optimiser_candidates_total', {slot: endpoint, result: 'dropped'});
           await putRound({...round, outcome: 'dropped', dryRun, step: undefined});
           continue;
         }
-        round = {...round, dryRun, step: 'full'};
+        round = {...round, dryRun, ...(tied ? {tied: true} : {}), step: 'full'};
         await putRound(round);
       }
       if (round.step === 'full') {
@@ -422,9 +452,16 @@ export async function runOptimiser(given: OptimisationRun, opts: {resumed?: bool
           return confirmScore(setup, cand, endpoint, fresh.examples, fresh.gold);
         });
       }
-      wasted = 0;
+      // A tie is kept in the pool but is not progress (R5-6).
+      if (round.tied) {
+        wasted++;
+        ties++;
+      } else {
+        wasted = 0;
+        ties = 0;
+      }
       keptSinceMerge = round.kind === 'merge' ? 0 : keptSinceMerge + 1;
-      tm().counter('tsp_optimiser_candidates_total', {slot: endpoint, result: 'kept'});
+      tm().counter('tsp_optimiser_candidates_total', {slot: endpoint, result: round.tied ? 'tied' : 'kept'});
       await putRound({...round, outcome: 'kept', score: s.report.metrics.lowestField.macroF1, passed: s.passed, confirm, step: undefined});
       if (s.passed && confirm?.passed) {
         passedVersion = cand;

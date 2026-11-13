@@ -88,7 +88,8 @@ let current = null;
   log('dataset:', (await page.locator('main .legend').innerText()).replace(/\s+/g, ' '));
   await shot(page, '2-dataset');
   // The label check (review finding 10): the Labels helper reads a sample in Ask AI
-  if ((await page.locator('header .step-opt').innerText()) !== 'recommended') throw new Error('Gold Labels should say recommended');
+  // R5-8: Gold Labels is an ordinary step, with no "recommended" or "optional" tag.
+  if (await page.locator('header .step-opt').count()) throw new Error('Gold Labels should have no step tag');
   await button(page, 'Check labels').click();
   await page.locator('aside.chat').getByText('Labels helper joined to answer').waitFor({timeout: 10000});
   await page.locator('aside.chat .msg-a').last().getByText(/^I read \d+ examples/).waitFor({timeout: 20000});
@@ -141,6 +142,8 @@ let current = null;
   for (let i = 0; i < 30 && !(await button(page, 'Review labels').count()) && !(await button(page, 'Improve with AI').count()); i++) await page.waitForTimeout(1000);
   if (await button(page, 'Review labels').count()) {
     log('suggestion:', (await suggestion()).replace(/\n/g, ' | '));
+    // R4-6: the version card says what the score rests on.
+    log('left out:', await page.getByText(/^Scored on \d+ of \d+ examples/).first().innerText());
     await shot(page, '4b-disagree');
     await button(page, 'Review labels').click();
     await page.waitForURL(/gold/);
@@ -149,16 +152,45 @@ let current = null;
     const before = +((await tab.innerText()).match(/(\d+)\s*$/) || [0, 0])[1];
     await page.getByLabel('Compare with').waitFor();
     log('mismatches:', before, '· compare with', await page.getByLabel('Compare with').locator('option:checked').innerText());
+    const why = await page.locator('section.card', {hasText: 'Model answer'}).innerText();
+    log('model answer card:', why.replace(/\n/g, ' | ').slice(0, 200));
+    if (!/Model's reason|Not readable/.test(why)) throw new Error("the Model answer card shows no reason");
+    await page.getByLabel('Why', {exact: true}).fill('The clip is cut from a show');
     await shot(page, '4c-mismatches');
-    await button(page, 'Keep my label').click();
-    await page.waitForFunction(n => +((document.querySelector('[role=tab][aria-selected=true]')?.textContent ?? '').match(/(\d+)\s*$/) || [0, 0])[1] === n - 1, before, {timeout: 10000});
+    const tabCount = n => page.waitForFunction(k => +((document.querySelector('[role=tab][aria-selected=true]')?.textContent ?? '').match(/(\d+)\s*$/) || [0, 0])[1] === k, n, {timeout: 10000});
+    // R6-3: nothing saves before Save.
+    await button(page, 'Save').click();
+    await tabCount(before - 1);
+    // The review shows under Reviewed with its note, in the same editor; Save adds a review in place.
+    await page.getByRole('button', {name: /^Reviewed \d+$/}).click();
+    await page.getByText('Kept my label', {exact: true}).waitFor({timeout: 5000});
+    if ((await page.getByLabel('Why', {exact: true}).inputValue()) !== 'The clip is cut from a show') throw new Error('the reviewed note is missing');
+    if (!(await button(page, 'Save').isDisabled())) throw new Error('Save is on before anything changed');
+    await page.getByLabel('Why', {exact: true}).fill('Looked again: it is cut from a show');
+    await page.getByText('Not saved', {exact: true}).waitFor();
+    await shot(page, '4d-reviewed-editing');
+    const reviewedTab = await page.getByRole('button', {name: /^Reviewed \d+$/}).innerText();
+    await button(page, 'Save').click();
+    await page.getByText('2 reviews', {exact: true}).waitFor({timeout: 5000});
+    if ((await page.getByRole('button', {name: /^Reviewed \d+$/}).innerText()) !== reviewedTab) throw new Error('editing a review moved it');
+    log('reviewed item edited in place:', reviewedTab);
+    await page.getByRole('button', {name: /^To review \d+$/}).click();
     if (before > 1) {
       await button(page, "Use the model's answer").click();
+      await button(page, 'Save').click();
       await page.waitForFunction(n => +((document.querySelector('[role=tab][aria-selected=true]')?.textContent ?? '').match(/(\d+)\s*$/) || [0, 0])[1] === n - 2, before, {timeout: 10000});
     }
     log('mismatches after review:', await tab.innerText());
     await page.goto(url('/prompt/'));
     await page.locator('nav.vlist').waitFor();
+    // 2026-11-12: a gold change leaves scores out of date until Rebuild scores is pressed.
+    if (before > 1) {
+      await page.getByText('Scores out of date', {exact: true}).first().waitFor({timeout: 5000});
+      await shot(page, '4e-scores-out-of-date');
+      await button(page, 'Rebuild scores').click();
+      await page.getByText('Scores out of date', {exact: true}).first().waitFor({state: 'detached', timeout: 10000});
+      log('scores rebuilt by hand');
+    }
   }
 
   // Below the bar: Improve with AI puts the Prompt helper's draft in the editor, saved as v1.1
@@ -188,7 +220,7 @@ let current = null;
 
   // Auto Optimise until a version passes; a pass starts the training and test sets by itself
   let optimised = false;
-  for (let i = 0; i < 180; i++) {
+  for (let i = 0; i < 360; i++) {
     await page.waitForTimeout(1500);
     const text = await suggestion();
     if (/training and test sets started/.test(text) || (await button(page, 'Make training and test sets').count())) break;
@@ -198,18 +230,29 @@ let current = null;
       if (!optimised) await shot(page, '5b-optimiser-running');
       optimised = true;
       if (await button(page, 'Retry').count()) throw new Error(`the Optimiser failed: ${await panel.innerText()}`);
+      // Round 6: a run that ended without a pass keeps its panel and says how it ended, until a
+      // version is picked.
+      if (await panel.getByText('Finished', {exact: true}).count()) {
+        const end = panel.getByRole('button', {name: /^Show v/});
+        await end.waitFor({timeout: 5000});
+        log('run ended:', (await panel.locator('.hov').first().innerText()).trim());
+        await shot(page, '5g-run-end');
+        await end.click();
+        await panel.waitFor({state: 'detached', timeout: 5000});
+      }
       continue;
     }
     const auto = button(page, 'Auto Optimise');
     if (await auto.count()) {
       await auto.click();
-      // A better minor of the selected major: the dialog asks which version to start from (R3-7).
+      // R4-3: Auto Optimise always opens one dialog: Start from (only when a better minor of the
+      // selected major exists) and Max rounds.
       const dlg = page.getByRole('dialog');
-      if (await dlg.count()) {
-        log('start dialog:', (await dlg.innerText()).replace(/\n/g, ' | '));
-        await shot(page, '5e-start-dialog');
-        await dlg.getByRole('button').last().click();
-      }
+      await dlg.waitFor({timeout: 5000});
+      if ((await dlg.getByLabel('Max rounds').inputValue()) !== '10') throw new Error('Max rounds is not prefilled with 10');
+      log('start dialog:', (await dlg.innerText()).replace(/\n/g, ' | '));
+      await shot(page, '5e-start-dialog');
+      await dlg.getByRole('button', {name: 'Start', exact: true}).click();
       log('auto optimise started');
     }
   }
@@ -226,6 +269,13 @@ let current = null;
       await page.getByText('Dropped after dry run', {exact: true}).first().waitFor();
       await shot(page, '5d-dropped');
       await page.locator('nav.vlist button').first().click();
+      // R6-2: the eye button hides dropped versions, and shows them again.
+      await page.getByRole('button', {name: 'Hide dropped versions'}).click();
+      if (await page.locator('nav.vlist').getByText('Dropped', {exact: true}).count()) throw new Error('dropped versions still show');
+      await shot(page, '5f-dropped-hidden');
+      await page.getByRole('button', {name: 'Show dropped versions'}).click();
+      await page.locator('nav.vlist').getByText('Dropped', {exact: true}).first().waitFor();
+      log('hide dropped: works');
     }
   }
 
@@ -245,6 +295,8 @@ let current = null;
   await page.getByText('Unsaved changes', {exact: true}).waitFor();
   const del = page.locator('.ed .editor .ed-del').first();
   await del.waitFor({state: 'attached'});
+  // The page may be scrolled (Ask AI open, a longer prompt): bring the mark into view first
+  await del.evaluate(el => el.scrollIntoView({block: 'center'}));
   const at = await del.evaluate(el => {
     const r = el.getClientRects()[0];
     return {x: r.left + r.width / 2, y: r.top + r.height / 2};

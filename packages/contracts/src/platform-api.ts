@@ -5,13 +5,13 @@ import type {EndpointConfig} from './gateway-api.ts';
 export type {EndpointInfo};
 
 /**
- * Contract 3: Infrastructure Runtime API (`@tsp/contracts/infra-api`).
+ * Contract 3: Platform Runtime API (`@tsp/contracts/platform-api`).
  *
- * Defines the complete set of capabilities exposed by the underlying infrastructure runtime
+ * Defines the complete set of capabilities exposed by the underlying hosting platform
  * (document database, online labeling models, agent LLM gateway, SSO identity, file storage,
  * and example pools).
  *
- * - `packages/infra` provides browser/local stand-ins so the public repository runs end-to-end.
+ * - `packages/platform` provides browser/local stand-ins so the public repository runs end-to-end.
  * - `internal/` provides the real platform adapters injected during internal builds.
  * - Keep this file completely free of internal company product or vendor names.
  */

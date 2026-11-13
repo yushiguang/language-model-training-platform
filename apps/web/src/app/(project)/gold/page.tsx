@@ -3,12 +3,12 @@
 import {useGo} from '@/components/nav';
 import {useSearchParams} from 'next/navigation';
 import {Fragment, Suspense, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import type {Answer, Example, ExampleMedia, LabelField, MismatchList} from '@tsp/contracts';
+import type {Answer, Example, ExampleMedia, LabelField, MismatchList, MismatchReview} from '@tsp/contracts';
 import {FEATURES, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {approveNode, exampleMedia, mismatches, predictionsFor, reviewGold, saveGold, type ProjectState} from '@/backend-api';
-import {Badge, Banner, Button, Card, Code, dateTime, Empty, Hov, Icon, num, PageHead, Tabs} from '@/ui';
+import {Badge, Banner, Button, Card, Code, dateTime, Empty, Hov, Icon, num, PageHead, reportActionError, Seg, Tabs} from '@/ui';
 
 type SetKey = 'eval' | 'test' | 'mismatch';
 
@@ -30,20 +30,55 @@ function GoldRouter() {
 }
 
 /**
- * The Mismatches list for the picked version (review finding 2). It reads saved answers only, so it
- * reloads when scores or gold labels change, and after each keep or change.
+ * The Mismatches list for the picked version (review finding 2). It reads saved answers only.
+ * Lazy (Evelyn, 2026-11-11): a review applies to the list here at once and nothing else is worked
+ * out. The list is worked out again only when the page opens, another version is picked, or a
+ * version or score is added; the scores the edits made out of date are rebuilt by whoever reads
+ * them next (Prompt versions, Training Set, a helper, the Optimiser).
  */
-function useMismatches(state: ProjectState, versionId: string | null): [MismatchList | null, () => void] {
+function useMismatches(state: ProjectState, versionId: string | null): {list: MismatchList | null; edited: (exampleId: string, review: MismatchReview) => void} {
   const [list, setList] = useState<MismatchList | null>(null);
-  const [n, setN] = useState(0);
   useEffect(() => {
     let live = true;
     void mismatches(state.project.id, versionId).then(m => live && setList(m));
     return () => {
       live = false;
     };
-  }, [state.project.id, versionId, state.contextId, state.reports.length, state.versions.length, n]);
-  return [list, () => setN(x => x + 1)];
+    // Not on gold edits (contextId): those are applied by `edited`.
+  }, [state.project.id, versionId, state.versions.length, state.reports.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  const edited = (exampleId: string, review: MismatchReview) =>
+    setList(l => {
+      if (!l) return l;
+      if (review) {
+        // R6-3: saving a reviewed item adds a review and updates it where it is; nothing moves.
+        const had = l.reviewedItems.find(r => r.exampleId === exampleId);
+        if (had) {
+          const {earlier, ...prev} = had;
+          const next = {...review, earlier: [prev, ...(earlier ?? [])]};
+          return {...l, reviewedItems: l.reviewedItems.map(r => (r.exampleId === exampleId ? next : r))};
+        }
+      }
+      const reviewedItems = [review, ...l.reviewedItems];
+      return {...l, items: l.items.filter(x => x.exampleId !== exampleId), reviewedItems, reviewed: reviewedItems.length, reviewedAll: l.reviewedAll + 1};
+    });
+  return {list, edited};
+}
+
+/** R5-2: the version picked in "Compare with" stays for the session (per project). */
+const pickKey = (projectId: string) => `gold-compare:${projectId}`;
+function readPick(projectId: string): string | null {
+  try {
+    return sessionStorage.getItem(pickKey(projectId));
+  } catch {
+    return null;
+  }
+}
+function savePick(projectId: string, id: string) {
+  try {
+    sessionStorage.setItem(pickKey(projectId), id);
+  } catch {
+    // Storage off: the pick stays for this page only.
+  }
 }
 
 const sameValues = (a: string[] = [], b: string[] = []) => a.length === b.length && [...a].sort().join('|') === [...b].sort().join('|');
@@ -51,16 +86,27 @@ const sameValues = (a: string[] = [], b: string[] = []) => a.length === b.length
 function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null}) {
   const go = useGo();
   const {href} = useProject();
-  const [cmp, setCmp] = useState<string | null>(null);
-  const [mm, reloadMm] = useMismatches(state, cmp);
+  const [cmp, setCmpState] = useState<string | null>(() => readPick(state.project.id));
+  const setCmp = (id: string) => {
+    setCmpState(id);
+    savePick(state.project.id, id);
+  };
+  const {list: mm, edited} = useMismatches(state, cmp);
+  // R5-2: the first list picks the best version; from then on the pick holds, and only the
+  // "(best)" mark moves when scores change.
+  useEffect(() => {
+    if (mm?.versionId && cmp !== mm.versionId && (!cmp || !mm.versions.some(v => v.id === cmp))) setCmp(mm.versionId);
+  }, [mm?.versionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // R4-5: Mismatches splits into To review and Reviewed, both for the version picked for the page.
+  const [sub, setSub] = useState<'open' | 'done'>('open');
   const byId = useMemo(() => new Map(state.examples.map(e => [e.id, e])), [state.examples]);
   const sets = useMemo(
     () => ({
       eval: state.examples.filter(e => e.split === 'eval'),
       test: state.examples.filter(e => e.split === 'test'),
-      mismatch: (mm?.items ?? []).map(x => byId.get(x.exampleId)!).filter(Boolean),
+      mismatch: (sub === 'done' ? (mm?.reviewedItems ?? []) : (mm?.items ?? [])).map(x => byId.get(x.exampleId)!).filter(Boolean),
     }),
-    [state.examples, mm, byId],
+    [state.examples, mm, byId, sub],
   );
   // "Review labels" on Prompt versions opens the Mismatches tab.
   const [tab, setTab] = useState<SetKey>(tabParam === 'mismatches' ? 'mismatch' : 'eval');
@@ -88,13 +134,20 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   const evalDone = state.facts.goldEvalDone >= sets.eval.length && sets.eval.length > 0;
   const move = (n: number) => setPos(p => ({...p, [tab]: n}));
   const versionId = mm?.versionId ?? null;
-  const item = onMismatch && ex ? mm?.items.find(x => x.exampleId === ex.id) : undefined;
+  const item = onMismatch && ex && sub === 'open' ? mm?.items.find(x => x.exampleId === ex.id) : undefined;
+  const done = onMismatch && ex && sub === 'done' ? mm?.reviewedItems.find(x => x.exampleId === ex.id) : undefined;
   const gold = ex ? state.gold.get(ex.id)?.answer : undefined;
   const diff = onMismatch && gold && modelAnswer ? new Set(state.setup!.schema!.fields.filter(f => !sameValues(gold[f.name], modelAnswer[f.name])).map(f => f.name)) : new Set<string>();
-  const review = async (outcome: 'kept' | 'changed', answer?: Answer) => {
+  const review = async (outcome: 'kept' | 'changed', note: string, answer?: Answer) => {
     if (!ex || !versionId) return;
-    await reviewGold(state.project.id, ex.id, versionId, outcome, answer);
-    reloadMm();
+    const at = new Date().toISOString();
+    const used = outcome === 'kept' ? 'kept' : answer && modelAnswer && same(answer, modelAnswer) ? 'model' : 'other';
+    await reviewGold(state.project.id, ex.id, versionId, outcome, answer, note);
+    edited(ex.id, {exampleId: ex.id, outcome: used, note: note.trim() || null, at});
+  };
+  const pickSub = (v: 'open' | 'done') => {
+    setSub(v);
+    setPos(p => ({...p, mismatch: 0}));
   };
 
   const head = (
@@ -102,6 +155,20 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
       title="Gold Labels"
       actions={
         <>
+          {onMismatch && mm && (
+            <>
+              <Seg
+                label="Mismatches"
+                value={sub}
+                onChange={pickSub}
+                options={[
+                  {value: 'open', label: `To review ${num(mm.items.length)}`},
+                  {value: 'done', label: `Reviewed ${num(mm.reviewed)}`},
+                ]}
+              />
+              <span style={{width: 8}} />
+            </>
+          )}
           {list.length > 0 && (
             <>
               <Button label="" ariaLabel="Previous" kind="ghost" icon="left" disabled={i === 0} onClick={() => move(i - 1)} />
@@ -113,7 +180,7 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
           )}
           <Button
             label="Next: Prompt Engineering"
-            kind="primary"
+            kind={onMismatch ? 'secondary' : 'primary'}
             disabled={!evalDone}
             title={evalDone ? undefined : 'Label every eval example first. Gold labels on the test set are optional.'}
             onClick={async () => {
@@ -134,6 +201,8 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
     );
 
   const picked = mm?.versions.find(v => v.id === versionId);
+  // A version has scores, so the Mismatches tab and Compare with will be there (R5-1).
+  const expectMm = state.reports.some(r => r.schemaVersion === state.setup!.schemaVersion);
   return (
     <Frame head={head}>
       {state.staleGold.size > 0 && <Banner text={`The schema changed. ${num(state.staleGold.size)} labels were made under the old schema and need a quick re-check.`} />}
@@ -145,8 +214,37 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
           {key: 'eval', label: 'Eval set', count: `${num(state.facts.goldEvalDone)} / ${num(sets.eval.length)}`},
           {key: 'test', label: 'Test set', count: `${num(state.facts.goldTestDone)} / ${num(sets.test.length)}`},
           // Once a version has answers on the whole eval set.
-          ...(mm?.versions.length ? [{key: 'mismatch' as const, label: 'Mismatches', count: num(mm.items.length)}] : []),
+          // R5-1: the tab is there from the first paint when versions have scores; its count
+          // follows once the list is worked out.
+          ...(mm?.versions.length || (!mm && expectMm) ? [{key: 'mismatch' as const, label: 'Mismatches', count: mm ? num(mm.items.length) : '–'}] : []),
         ]}
+        end={
+          // Evelyn 2026-11-11: one "Compare with" for the page. Every tab shows this version's
+          // answers, and Mismatches and reviews are for it.
+          (mm?.versions.length && versionId) || (!mm && expectMm) ? (
+            <div className="row" style={{alignItems: 'center', paddingBottom: 6}}>
+              {state.scoresUpdating && (
+                <span className="badge b-gray" style={{marginRight: 12}}>
+                  <Hov text="Scores out of date" tip="Your label changes are saved. Rebuild scores on Prompt versions to see them in the scores" />
+                </span>
+              )}
+              <span className="t-3" style={{fontSize: 13, marginRight: 8}}>
+                <Hov text="Compare with" tip="The version whose answers show on every tab. Mismatches and reviews are for this version" />
+              </span>
+              <span className="select" style={{width: 132}}>
+                <select aria-label="Compare with" style={{height: 32}} value={versionId ?? ''} disabled={!mm} onChange={e => setCmp(e.target.value)}>
+                  {(mm?.versions ?? []).map(v => (
+                    <option key={v.id} value={v.id}>
+                      {v.label}
+                      {v.best ? ' (best)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <Icon name="chev" />
+              </span>
+            </div>
+          ) : undefined
+        }
       />
       {ex ? (
         <div style={{display: 'grid', gridTemplateColumns: '520px 1fr', gap: 16, alignItems: 'start'}}>
@@ -157,7 +255,8 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
               state={state}
               ex={ex}
               versionId={versionId}
-              picker={mm?.versions.length ? {versions: mm.versions, onPick: setCmp} : undefined}
+              paged={!!mm?.versions.length}
+              why={onMismatch}
               shown={showModel}
               toggle={!onMismatch}
               diff={diff}
@@ -175,14 +274,16 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
               onFound={answer => setModel({exampleId: ex.id, answer})}
             />
             <YourAnswer
-              key={`y-${ex.id}-${tab}`}
+              key={`y-${ex.id}-${tab}-${sub}-${versionId ?? ''}`}
               state={state}
               ex={ex}
               modelShown={(showModel || seen.has(ex.id)) && !!modelAnswer}
-              review={onMismatch && picked ? {modelAnswer, onKeep: () => review('kept'), onChange: a => review('changed', a)} : undefined}
+              review={onMismatch && picked ? {modelAnswer, done, onKeep: note => review('kept', note), onChange: (a, note) => review('changed', note, a)} : undefined}
             />
           </div>
         </div>
+      ) : onMismatch && sub === 'done' ? (
+        mm && <Empty title="Nothing reviewed yet" text={`Labels you keep or change for ${picked?.label ?? 'this version'} show here.`} />
       ) : onMismatch ? (
         mm && <Empty title="No mismatches left" text={`Every label ${picked?.label ?? 'the model'} disagrees with has been checked.`} />
       ) : (
@@ -297,15 +398,18 @@ const CHIP = {cursor: 'default', background: 'var(--bg-muted)', borderColor: 'tr
 const CHIP_DIFF = {cursor: 'default', background: '#fdecec', borderColor: 'transparent', color: '#b42318'} as const;
 
 /**
- * The model's answer, from the version picked in the card (review finding 2; default: the best
- * scored version with answers on the whole eval set). Before any version has those, it is the
- * newest version with an answer for this example, with no picker.
+ * The model's answer, from the version picked for the page (review finding 2, moved to the page by
+ * Evelyn 2026-11-11; default: the best scored version with answers on the whole eval set). Before
+ * any version has those, it is the newest version with an answer for this example, named in the
+ * card. On Mismatches (`why`) it adds the model's own short reason, or why its reply could not be
+ * read (R4-4).
  */
 function ModelAnswer({
   state,
   ex,
   versionId,
-  picker,
+  paged,
+  why,
   shown,
   toggle,
   diff,
@@ -315,14 +419,15 @@ function ModelAnswer({
   state: ProjectState;
   ex: Example;
   versionId: string | null;
-  picker?: {versions: MismatchList['versions']; onPick: (id: string) => void};
+  paged: boolean;
+  why: boolean;
   shown: boolean;
   toggle: boolean;
   diff: Set<string>;
   onToggle: () => void;
   onFound: (answer: Answer | null) => void;
 }) {
-  const [found, setFound] = useState<{answer: Answer | null; invalid: string | null; label: string; endpoint: string} | null | undefined>(undefined);
+  const [found, setFound] = useState<{answer: Answer | null; invalid: string | null; reason: string | null; label: string; endpoint: string} | null | undefined>(undefined);
   useEffect(() => {
     let live = true;
     void (async () => {
@@ -332,7 +437,7 @@ function ModelAnswer({
           const p = (await predictionsFor(v.id, m.endpoint, m)).get(ex.id);
           if (p) {
             if (live) onFound(p.answer);
-            if (live) setFound({answer: p.answer, invalid: p.invalidReason, label: versionLabel(v), endpoint: state.endpoints.find(e => e.id === m.endpoint)?.name ?? m.endpoint});
+            if (live) setFound({answer: p.answer, invalid: p.invalidReason, reason: p.reason ?? null, label: versionLabel(v), endpoint: state.endpoints.find(e => e.id === m.endpoint)?.name ?? m.endpoint});
             return;
           }
         }
@@ -347,35 +452,27 @@ function ModelAnswer({
   }, [ex.id, versionId, state.versions.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const schema = state.setup!.schema!;
   // No model answer for this example (or still looking) and nothing to pick: no card at all (design, 2026-11-09).
-  if (found === undefined || (!found && !picker)) return null;
-  const pick = picker && versionId && (
-    <span className="select" style={{width: 132}}>
-      <select aria-label="Compare with" style={{height: 32}} value={versionId} onChange={e => picker.onPick(e.target.value)}>
-        {picker.versions.map(v => (
-          <option key={v.id} value={v.id}>
-            {v.label}
-            {v.best ? ' (best)' : ''}
-          </option>
-        ))}
-      </select>
-      <Icon name="chev" />
-    </span>
+  if (found === undefined || (!found && !paged)) return null;
+  const said = (lab: string, text: string, err: boolean) => (
+    <div className="row" style={{gap: 12, paddingTop: 4, fontSize: 13, lineHeight: '20px', alignItems: 'flex-start'}}>
+      <span className="t-3" style={{width: 128, flex: 'none'}}>
+        {lab}
+      </span>
+      <span className={err ? 't-err' : 't-2'}>{text}</span>
+    </div>
   );
   return (
     <Card
       title="Model answer"
       titleExtra={
-        shown && found && !picker ? (
+        shown && found && !paged ? (
           <span className="t-3 one" style={{fontSize: 13}}>
             {found.endpoint} · prompt {found.label}
           </span>
         ) : undefined
       }
       actions={
-        <div className="row" style={{gap: 8}}>
-          {pick}
-          {toggle && <Button label={shown ? 'Hide' : 'Show'} kind="ghost" size="sm" icon="eye" onClick={onToggle} />}
-        </div>
+        toggle ? <Button label={shown ? 'Hide' : 'Show'} kind="ghost" size="sm" icon="eye" onClick={onToggle} /> : undefined
       }
     >
       {!shown ? null : !found ? (
@@ -383,9 +480,15 @@ function ModelAnswer({
           No answer from this version for this example
         </span>
       ) : !found.answer ? (
-        <span className="t-3 one" style={{fontSize: 13}} title={found.invalid ?? undefined}>
-          The model&apos;s answer was invalid
-        </span>
+        why ? (
+          <div className="col" style={{gap: 12}}>
+            {said('Not readable', found.invalid ?? "The model's reply could not be read", true)}
+          </div>
+        ) : (
+          <span className="t-3 one" style={{fontSize: 13}} title={found.invalid ?? undefined}>
+            The model&apos;s answer was invalid
+          </span>
+        )
       ) : (
         <div className="col" style={{gap: 12}}>
           {schema.fields.map(fl => (
@@ -400,19 +503,23 @@ function ModelAnswer({
               ))}
             </div>
           ))}
+          {why && found.reason && said("Model's reason", found.reason, false)}
         </div>
       )}
     </Card>
   );
 }
 
+const DONE_TEXT: Record<MismatchReview['outcome'], string> = {kept: 'Kept my label', model: "Used the model's answer", other: 'Changed my label'};
 const kindText = (f: LabelField) => (f.kind === 'single' ? 'Single-select' : `Multi-select, ${f.min ?? 1} to ${f.max ?? f.values.length}`);
 const same = (a: Answer, b: Answer) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
 
 /**
  * Picking values saves the answer as soon as every field has one (no Save button in the design).
- * On Mismatches (`review`), the card keeps the label or takes the model's answer, and a third
- * answer picked on the chips is recorded as a change too.
+ * On Mismatches (`review`, R6-3) nothing saves on its own: the chips and "Why" are edited and Save
+ * records the decision (the label kept, the model's answer, or a third answer). "Use the model's
+ * answer" only fills the chips. A reviewed example opens in place, filled with its standing
+ * review; Save adds a new review and the item stays where it is.
  */
 function YourAnswer({
   state,
@@ -423,7 +530,7 @@ function YourAnswer({
   state: ProjectState;
   ex: Example;
   modelShown: boolean;
-  review?: {modelAnswer: Answer | null; onKeep: () => Promise<void>; onChange: (a: Answer) => Promise<void>};
+  review?: {modelAnswer: Answer | null; done?: MismatchReview; onKeep: (note: string) => Promise<void>; onChange: (a: Answer, note: string) => Promise<void>};
 }) {
   const schema = state.setup!.schema!;
   const saved = state.gold.get(ex.id);
@@ -434,16 +541,27 @@ function YourAnswer({
   const isSaved = !!saved && same(saved.answer, answer);
   const reviewRef = useRef(review);
   reviewRef.current = review;
+  const done = review?.done;
+  const [note, setNote] = useState(done?.note ?? '');
+  // What the standing review says; Save is off until the chips or Why differ from it.
+  const [base, setBase] = useState({answer: saved?.answer ?? {}, note: done?.note ?? ''});
+  const dirty = !same(base.answer, answer) || base.note.trim() !== note.trim();
+  const save = async () => {
+    if (!review) return;
+    if (saved && same(saved.answer, answer)) await review.onKeep(note);
+    else await review.onChange(answer, note);
+    setBase({answer, note});
+  };
 
   // A complete answer saves a moment after the last click. Moving to another example (which
   // unmounts this card) saves at once instead of dropping the answer.
   const pending = useRef<(() => void) | null>(null);
   useEffect(() => {
-    if (!complete || (savedRef.current && same(savedRef.current.answer, answer))) return;
+    // R6-3: on Mismatches only Save saves.
+    if (reviewRef.current || !complete || (savedRef.current && same(savedRef.current.answer, answer))) return;
     const save = () => {
       pending.current = null;
-      if (reviewRef.current) void reviewRef.current.onChange(answer);
-      else void saveGold(state.project.id, ex.id, state.setup!.schemaVersion, answer, modelShown);
+      void saveGold(state.project.id, ex.id, state.setup!.schemaVersion, answer, modelShown);
     };
     pending.current = save;
     const id = setTimeout(save, 300);
@@ -469,9 +587,30 @@ function YourAnswer({
       }
       actions={
         review ? (
-          <div className="row" style={{gap: 8}}>
-            <Button label="Keep my label" size="sm" disabled={!isSaved} onClick={review.onKeep} />
-            <Button label="Use the model's answer" size="sm" disabled={!review.modelAnswer} onClick={() => review.onChange(review.modelAnswer!)} />
+          <div className="row" style={{gap: 8, alignItems: 'center'}}>
+            {done && (
+              <>
+                <Badge text={DONE_TEXT[done.outcome]} tone="ok" />
+                <span className="t-3" style={{fontSize: 13}}>
+                  {dateTime(done.at)}
+                </span>
+                {!!done.earlier?.length && (
+                  <span className="t-3" style={{fontSize: 13}}>
+                    <Hov text={`${done.earlier.length + 1} reviews`} tip={`Earlier: ${done.earlier.map(e => `${DONE_TEXT[e.outcome]} · ${dateTime(e.at)}${e.note ? ` · "${e.note}"` : ''}`).join('; ')}. The newest review counts`} />
+                  </span>
+                )}
+                <span style={{width: 8}} />
+              </>
+            )}
+            {done && dirty && (
+              <span className="t-3" style={{fontSize: 13}}>
+                Not saved
+              </span>
+            )}
+            <button type="button" className="btn btn-secondary btn-sm" disabled={!review.modelAnswer} onClick={() => review.modelAnswer && setAnswer(review.modelAnswer)}>
+              <Hov text="Use the model's answer" tip="Puts the model's answer in the chips. Nothing is saved until you press Save" />
+            </button>
+            <Button label="Save" kind="primary" size="sm" disabled={!complete || (!!done && !dirty)} onClick={save} />
           </div>
         ) : undefined
       }
@@ -498,6 +637,25 @@ function YourAnswer({
             </div>
           </div>
         ))}
+        {review && (
+          <div style={{paddingTop: 8}}>
+            <div className="col" style={{gap: 8}}>
+              <span className="field-l">
+                <Hov text="Why" tip="Goes to the Optimiser with this example, so it learns what your label means. It never reaches the held-out half" />
+              </span>
+              <textarea
+                className="input"
+                rows={3}
+                aria-label="Why"
+                placeholder="Optional: for example, the clip is cut from a show, so it is a Clip"
+                maxLength={500}
+                value={note}
+                onChange={e => setNote(e.target.value)}
+                style={{height: 76, padding: '8px 12px', resize: 'none', lineHeight: '20px'}}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </Card>
   );

@@ -8,6 +8,7 @@ import {configureBff} from './app.ts';
 import {loadProjectState} from './projects.ts';
 import {agentStart} from './starts.ts';
 import {tick} from './work.ts';
+import {versionLabel} from '@tsp/domain';
 
 const schema: Schema = {fields: [{name: 'format', kind: 'single', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}]};
 /** Output price only, so every estimate is 150 tokens x $200/M = $0.03 per example. */
@@ -344,6 +345,13 @@ test('Auto Optimise: a pass is confirmed by labeling the held-out half again bef
   const run = (await w.state()).optimisation[0];
   assert.equal(run.stopReason, 'passes');
   assert.deepEqual(run.history.at(-1)?.confirm, {score: 1, passed: true});
+  // The helpers read it on the report (the Scores helper recommends a version only when its pass holds).
+  const {agentTools} = await import('./page-views.ts');
+  const s = await w.state();
+  const label = (id: string | null) => versionLabel(s.versions.find(v => v.id === id)!);
+  const rep = (v: string) => agentTools(w.projectId).call({agent: 'evaluation_agent', name: 'get_report', args: {version: v}}) as Promise<{report: {confirmed: boolean | null}}>;
+  assert.equal((await rep(label(run.history.at(-1)!.versionId))).report.confirmed, true);
+  assert.equal((await rep(label(run.startVersionId))).report.confirmed, null, 'no second labeling for the start version');
   // Each held-out example was labeled twice for the passing version.
   const heldOut = ['1', '3', '5', '7', '9'];
   assert.ok(heldOut.every(id => (w.seen.get(id) ?? 0) >= 2));
@@ -366,6 +374,10 @@ test('Auto Optimise: a pass that the second labeling does not confirm does not e
   assert.notEqual(run.stopReason, 'passes');
   const passed = run.history.filter(h => h.passed);
   assert.ok(passed.length > 0 && passed.every(h => h.confirm?.passed === false));
+  const {agentTools} = await import('./page-views.ts');
+  const ref = versionLabel(s.versions.find(v => v.id === passed[0].versionId)!);
+  const rep = (await agentTools(w.projectId).call({agent: 'evaluation_agent', name: 'get_report', args: {version: ref}})) as {report: {passed: boolean; confirmed: boolean | null}};
+  assert.deepEqual([rep.report.passed, rep.report.confirmed], [true, false], 'the report says the pass was not confirmed');
   assert.equal(run.trainingSetId, null);
   assert.equal(s.trainingSets.length, 0);
 });
@@ -439,4 +451,166 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
   assert.equal(after.gold.get(id(5))!.id, s.gold.get(id(5))!.id, 'keeping a label saves no new label');
   const log = await w.catalog.find('audit_log', {projectId: w.projectId, action: 'gold.review'});
   assert.deepEqual(log.map(l => (l.data as {outcome: string}).outcome).sort(), ['changed', 'kept']);
+
+  // R4-5 (2026-11-11): a review belongs to a gold label and a version. v1 still lists 5 (reviewed
+  // for v2 only); 6 now has v1's answer as its label, so it is no mismatch for v1.
+  m = await mismatches(w.projectId, v1);
+  assert.deepEqual(m.items.map(x => x.exampleId).sort(), [5, 7, 0, 1, 2, 3, 4].map(id).sort());
+  assert.equal(m.reviewed, 0);
+  assert.equal(m.reviewedAll, 2);
+  m = await mismatches(w.projectId);
+  assert.deepEqual(
+    m.reviewedItems.map(r => [r.exampleId, r.outcome]).sort(),
+    [
+      [id(5), 'kept'],
+      [id(6), 'model'],
+    ],
+  );
+  // Reopen: a kept label goes back to To review; a changed label goes back to what it was.
+  const {reopenGold} = await import('./mismatches.ts');
+  await reopenGold(w.projectId, id(5), best.id);
+  await reopenGold(w.projectId, id(6), best.id);
+  m = await mismatches(w.projectId);
+  assert.deepEqual(m.items.map(x => x.exampleId), [5, 6, 7].map(id));
+  assert.equal(m.reviewed, 0);
+  assert.deepEqual((await w.state()).gold.get(id(6))!.answer, s.gold.get(id(6))!.answer);
+  // Reviewed again after a reopen, the new decision stands.
+  await reviewGold(w.projectId, id(5), best.id, 'kept', undefined, '  Its own words  ');
+  m = await mismatches(w.projectId);
+  assert.deepEqual(m.reviewedItems.map(r => [r.exampleId, r.note]), [[id(5), 'Its own words']]);
+  assert.deepEqual(m.reviewedItems[0].earlier, [], 'a reopen starts the history afresh');
+  // R6-3: editing a reviewed item appends a review; the newest stands, the rest is its history.
+  await reviewGold(w.projectId, id(5), best.id, 'kept', undefined, 'Looked again');
+  m = await mismatches(w.projectId);
+  assert.equal(m.reviewed, 1);
+  assert.deepEqual(
+    m.reviewedItems.map(r => [r.note, r.earlier?.map(e => e.note)]),
+    [['Looked again', ['Its own words']]],
+  );
+
+  // R5-4, R5-5: a gold change archives the reports; they are rebuilt from saved answers in one go.
+  await reviewGold(w.projectId, id(7), best.id, 'changed', {format: ['Vlog']});
+  let st = await w.state();
+  assert.equal(st.scoresUpdating, true);
+  assert.equal(st.reports.filter(r => !r.archivedNow).length, 0);
+  // 2026-11-12: nothing rebuilds by itself; Rebuild scores on Prompt versions does, by hand.
+  const tasksBefore = (await w.state()).runs.length;
+  await tick(st);
+  const {getPageView} = await import('./page-views.ts');
+  await getPageView(w.projectId, {page: 'prompt', params: {}});
+  assert.equal((await w.state()).scoresUpdating, true, 'neither the workflow check nor a reader rebuilds');
+  const {rebuildReports} = await import('./mismatches.ts');
+  assert.equal(await rebuildReports(w.projectId), 2);
+  st = await w.state();
+  assert.equal(st.scoresUpdating, false);
+  assert.equal(st.reports.filter(r => !r.archivedNow).length, 2);
+  assert.equal(st.runs.length, tasksBefore, 'nothing is labeled again');
+  // Pressed again with nothing changed (say after a Setup change): each report is replaced, not doubled.
+  const ids = st.reports.map(r => r.id).sort();
+  assert.equal(await rebuildReports(w.projectId), 2);
+  st = await w.state();
+  assert.equal(st.reports.filter(r => !r.archivedNow).length, 2);
+  assert.notDeepEqual(st.reports.map(r => r.id).sort(), ids);
+});
+
+test('Finding 3: no helper tool or helper input carries an example of the held-out half', async () => {
+  const agents = ruleAgent();
+  const improve: Parameters<AgentRuntimeContract['draftImprovement']>[0][] = [];
+  agents.draftImprovement = async input => (improve.push(input), {template: input.template, changes: [], reply: ''});
+  const w = await world('b31', {agents, answer: ruled, macroF1: 0.99, gold: goldOf, test: 2, train: 2});
+  await w.newVersion();
+  await tick(await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
+  const s = await w.state();
+  const heldOut = new Set(s.examples.filter(e => e.split === 'eval' && !e.optimiserHalf).flatMap(e => [e.externalId, e.id]));
+  assert.equal(heldOut.size, 10);
+  const {agentTools} = await import('./page-views.ts');
+  const tools = agentTools(w.projectId);
+  const call = (name: string, args: Record<string, unknown> = {}) => tools.call({agent: 'prompt_agent', name: name as 'get_examples', args});
+  const leaks = (x: unknown) => [...heldOut].filter(id => new RegExp(`"(id|externalId|exampleId)":"${id}"`).test(JSON.stringify(x)));
+
+  const ex = (await call('get_examples', {split: 'eval', limit: 10})) as {total: number; note?: string};
+  assert.equal(ex.total, 5);
+  assert.match(ex.note ?? '', /held-out/);
+  assert.deepEqual(leaks(ex), []);
+  const byId = (await call('get_examples', {ids: ['1', '2']})) as {total: number};
+  assert.equal(byId.total, 1, 'asking for a held-out example by id gives nothing');
+  const gold = (await call('get_gold_labels', {split: 'eval', limit: 20})) as {labeled: number};
+  assert.equal(gold.labeled, 5);
+  assert.deepEqual(leaks(gold), []);
+  const preds = (await call('get_predictions', {version: 'v1', model: 'A', limit: 20})) as {matching: number};
+  assert.equal(preds.matching, 5);
+  assert.deepEqual(leaks(preds), []);
+  const report = (await call('get_report', {version: 'v1'})) as {report: {topMixUps: object[]}};
+  assert.ok(report.report.topMixUps.length > 0 && report.report.topMixUps.every(m => !('examples' in m)), 'mix-ups as counts only');
+  const tried = (await call('try_template', {n: 5})) as {rows: {id: string}[]};
+  assert.equal(tried.rows.length, 5);
+  assert.deepEqual(leaks(tried), []);
+
+  const {improveWithAi} = await import('./agents.ts');
+  await improveWithAi(w.projectId, s.versions[0].id);
+  const input = improve[0];
+  assert.ok(input.examples && input.examples.length > 0);
+  assert.deepEqual(leaks(input), [], 'examples and mix-ups come from the optimiser half');
+  assert.ok(input.mixUps.every(m => m.exampleIds.every(id => !heldOut.has(id))));
+});
+
+test('R4-4: the labeler\'s Why reaches the helpers for optimiser-half examples only', async () => {
+  const agents = ruleAgent();
+  const improve: Parameters<AgentRuntimeContract['draftImprovement']>[0][] = [];
+  agents.draftImprovement = async input => (improve.push(input), {template: input.template, changes: [], reply: ''});
+  const w = await world('b33', {agents, answer: ruled, macroF1: 0.99, gold: goldOf});
+  await w.newVersion();
+  await tick(await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
+  const s = await w.state();
+  const v = s.versions[0].id;
+  const {mismatches, reviewGold, labelerNotes} = await import('./mismatches.ts');
+  const wrong = new Set((await mismatches(w.projectId, v)).items.map(x => x.exampleId));
+  const evalEx = s.examples.filter(e => e.split === 'eval' && wrong.has(e.id));
+  const mine = evalEx.find(e => e.optimiserHalf)!;
+  const held = evalEx.find(e => !e.optimiserHalf)!;
+  assert.ok(mine && held);
+  await reviewGold(w.projectId, mine.id, v, 'kept', undefined, 'Shown at work, so it is a Tutorial');
+  await reviewGold(w.projectId, held.id, v, 'kept', undefined, 'A held-out note');
+  const notes = await labelerNotes(w.projectId, (await w.state())!);
+  assert.deepEqual([...notes], [[mine.id, 'Shown at work, so it is a Tutorial']]);
+  const {improveWithAi} = await import('./agents.ts');
+  await improveWithAi(w.projectId, v);
+  const briefs = improve[0].examples ?? [];
+  assert.equal(briefs.find(b => b.externalId === mine.externalId)?.labelerNote, 'Shown at work, so it is a Tutorial');
+  assert.ok(!JSON.stringify(improve[0]).includes('A held-out note'));
+});
+
+test("Auto Optimise: the pool holds the user's other scored versions too, and the helper reads the model's reasons", async () => {
+  const agents = ruleAgent();
+  const inputs: Parameters<AgentRuntimeContract['reflectPrompt']>[0][] = [];
+  const reflect = agents.reflectPrompt;
+  agents.reflectPrompt = async (input, ...rest) => (inputs.push(input), reflect(input, ...rest));
+  // The model gives its reason with every answer.
+  const reasoned = (id: string, n: number, prompt: string) => JSON.stringify({reason: `why ${id}`, ...JSON.parse(ruled(id, n, prompt))});
+  const w = await world('b32', {agents, answer: reasoned, macroF1: 0.99, gold: goldOf});
+  const v1 = await w.newVersion();
+  await tick(await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
+  // The user's own v1.1 has one rule: right on 0-4, where v1 is not. It is not part of any run.
+  const mine = await w.catalog.createPromptVersion({projectId: w.projectId, template: 'Label this\nRULE 1', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
+  await tick(await w.state());
+  await until(async () => (await w.state()).reports.length === 2, 'the user version scored');
+  const {startOptimiser} = await import('./work.ts');
+  setOptimiserRandom(() => 0.99); // the last version of the front
+  try {
+    await startOptimiser(w.projectId, 2, v1.id);
+  } finally {
+    setOptimiserRandom(() => 0);
+  }
+  const run = (await w.state()).optimisation[0];
+  assert.equal(run.startVersionId, v1.id);
+  // R5-7: round 1 starts from the version the user picked; later rounds roam the front.
+  assert.equal(run.history[0].parentId, v1.id, 'round 1 starts from the version the user picked');
+  assert.equal(run.history[0].parentWins, null);
+  assert.equal(run.history[1]?.parentId, mine.id, "the user's version is picked as a later parent");
+  assert.ok((run.history[1].parentWins ?? 0) > 0, 'a later parent says on how many examples it is best');
+  const ex = inputs[0].examples ?? [];
+  assert.ok(ex.length > 0 && ex.every(e => e.reason === `why ${e.externalId}`), "each wrong example carries the model's reason");
 });

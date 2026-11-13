@@ -1,7 +1,7 @@
 # Architecture
 
 The MVP produces a labeled training set and a labeled test set for one task: Setup → Dataset →
-Gold Labels (optional) → Prompt Engineering → Training Set (the final run labels train and test). It is a fixed-workflow website with agents built into each step.
+Gold Labels → Prompt Engineering → Training Set (the final run labels train and test). It is a fixed-workflow website with agents built into each step.
 Code decides the next step; agents explain and propose, people approve.
 
 ## Eight apps, three packages
@@ -124,11 +124,13 @@ improves the prompt on the project's one labeling model, for up to the user's Ma
   editor finds the mark under the pointer with `elementsFromPoint` to show the hover.
 - **Start version.** A run starts from the version selected in the list (the page asks first when
   a better minor of the same major exists); an agent's start uses the best scored version.
-- **Pool and parent.** The pool is the start version plus the run's kept versions, each scored per
-  example on the optimiser half of the eval set (share of fields right). The parent is drawn from
-  the Pareto front (versions best on at least one example and not dominated), weighted by how
-  many examples each is best on. After every 2 kept versions, two front versions that each win
-  examples the other misses are merged instead.
+- **Pool and parent.** The pool is the start version, the run's kept versions, and every other
+  version with a current score on the model (2026-11-11), each scored per example on the optimiser
+  half of the eval set (share of fields right). Round 1 always changes the start version (R5-7).
+  Later parents are drawn from the Pareto front (versions best on at least one example and not
+  dominated), weighted by how many examples each is best on; the round keeps that count
+  (`parentWins`) so the panel can say why. After every 2 kept versions, two front versions that
+  each win examples the other misses are merged instead.
 - **A round.** The agent runtime writes one change from the parent's mix-ups and up to 8 of its
   wrong examples (`ExampleBrief`: gold, the model's answer, text features cut to about 300
   characters; optimiser half only, never the held-out half; a merge gets up to 4 examples each
@@ -138,7 +140,8 @@ improves the prompt on the project's one labeling model, for up to the user's Ma
   examples, picked at random (review finding 7), up to half of them from the examples that hold
   the parent's weakest value (in the gold label or the parent's answer) → it goes on only when it
   gets more fields right than the parent on them, the parent's weakest field counting double
-  (`compareDryRun`, review finding 5) → it is labeled on the whole eval set (the dry run's
+  (`compareDryRun`, review finding 5), or ties it while being right on different examples (R5-6:
+  `tied`, labeled in full and kept in the pool, but a wasted round; 2 ties in a row end the run) → it is labeled on the whole eval set (the dry run's
   answers are reused) and scored on the held-out half. `setOptimiserRandom` fixes the random picks
   in tests.
 - **Confirming a pass** (decided 2026-11-10, review finding 6). A version that passes is not used
@@ -185,17 +188,68 @@ document service (docs/handover/integration.md, "Document links").
 once more; on a second miss it shows plain prose as it is, or a short "please ask again" line when
 the reply looks like broken JSON.
 
+**The held-out half stays hidden from every helper** (review finding 3, decided 2026-11-11).
+`visibleToAgents` in `packages/domain/src/gepa.ts` is the one rule, used wherever examples go to a
+helper:
+- the read tools (`get_examples`, `get_gold_labels`, `get_predictions`) leave held-out examples
+  out and say so in a `note`; asking for one by id gives nothing;
+- `get_report` and the report page view give mix-ups as counts only, since reports are scored on
+  the held-out half;
+- `try_template`, the label check, Improve with AI (its mistakes, mix-ups and wrong examples come
+  from `scoreOnOptimiserHalf`) and the Optimiser read the optimiser half only.
+Page views carry scores and counts only. Every preset's instructions (`common` and the
+Optimiser's) say the held-out half is hidden and why, so a helper doesn't ask for it.
+
+**The model's reason** (decided 2026-11-11). `apps/labeling` adds `REASON_LINE`
+(`packages/domain/src/labels.ts`) as the last text part of every labeling prompt and of a try. It
+is not part of the template. `parseOutput` reads the "reason" key into `Prediction.reason` (at most
+300 characters), also when the answer is invalid. `answersForHelpers` gives the Optimiser and
+Improve with AI each wrong example with `reason` and `invalid`, and leaves filtered answers out.
+Exports read `answer` only. Answers saved before this have no reason.
+
+**The Optimiser's pool** (decided 2026-11-11) is the start version, the run's kept versions and
+every other version with a current report on the model, so a parent or a merge side can be a
+version the user wrote or an earlier run made.
+
+**The helpers' instructions** (rewritten 2026-11-11) are the shared rules in `common` plus one
+text per helper in `apps/agents/src/presets.ts`. They say who does what (code runs the workflow,
+helpers explain and propose, the user approves), what good labels and a good labeling prompt look
+like, the Scores helper's six next steps, and what the Optimiser must avoid (rules that fit one
+example, repeating a tried change). No helper judges a gold label. The report view carries
+`scoredOn` and `confirmed` (the Optimiser's second labeling of the held-out half: true, false, or
+null when there was none) for the Scores helper. The texts have not been tried on real models yet.
+
 **The label check** (review finding 10). Dataset's AI Suggestion "Check the labels against your
 data" sends the Labels helper 20 random examples (never the held-out half) with their gold labels
 when they have one (`checkLabels`, intent `check_schema`). It answers in Ask AI, may put a schema
 draft on Schema settings, and keeps answering on Dataset.
 
+**Rebuild scores** (Evelyn, 2026-11-12: by hand only). A gold edit changes the evaluation context,
+so reports are archived and `ProjectState.scoresUpdating` is set ("Scores out of date" on Gold
+Labels and Prompt versions). Nothing rebuilds by itself: gold edits, Setup changes and new code all
+move scores, and sensing each one is fragile. The Rebuild scores button on Prompt versions calls
+`rebuildReports`, which gives every version of the current schema with a finished scoring a fresh
+report from saved answers (nothing labeled); a report it replaces is marked `archived` and hidden.
+`tick` builds only a version's first report. Saved answers on the whole eval set are kept in memory
+per version for the Mismatches list.
+
+**Auto-start manager** (2026-11-11). `dueStarts(state)` says what should be running; `tick` starts
+it. The project provider (`apps/web/src/components/ProjectContext.tsx`) runs `tick` on every
+change event and on a 60 s sweep, on every project page. Starts are keyed (`once()` plus the
+labeling app's lock per task), so extra runs are safe. Every auto task also has a button that
+sends the same start (Score/Resume, Optimiser Resume/Retry, training set Resume). In a microservice
+system the same split holds: one workflow service owns `dueStarts`, woken by events and a sweep.
+
 **Mismatches** (review finding 2, decided 2026-11-10). Gold Labels has a Mismatches tab: the eval
 examples where a version's saved answer differs from the gold label, for the version picked in
-the Model answer card (default: the best scored one; only versions with answers on the whole eval
-set). The examples wrong in the most versions come first. The user keeps the label or changes it
-(to the model's answer or a third answer); each decision is an audit record (`gold.review`) and
-the example leaves the list. A change saves a new gold label, so the evaluation context changes
+"Compare with" at the end of the tab row (default: the best scored one; only versions with answers
+on the whole eval set; answers the safety filter stopped are no mismatch). The examples wrong in
+the most versions come first. The user keeps the label or changes it (to the model's answer or a
+third answer), with an optional "Why"; each decision is an audit record (`gold.review`, with the
+version) and the example moves from To review to Reviewed for that version only (acceptance R4-5).
+A review stands until it is reopened (`gold.reopen`, which names the review; a changed label goes
+back to what it was) or the gold label changes. `labelerNotes` gives the standing notes on
+optimiser-half examples to the Optimiser and Improve with AI as `ExampleBrief.labelerNote`. A change saves a new gold label, so the evaluation context changes
 and reports are rebuilt from saved answers: nothing is labeled again
 (`apps/bff/src/services/mismatches.ts`). Prompt versions' AI Suggestion points to the tab right
 after the first score (before any review or Optimiser run) and when Auto Optimise ends without a
@@ -235,12 +289,13 @@ application `id` to the store's document id.
 |---|---|
 | `{{Key}}` placeholders, checks and quick fixes; rendering to text and image parts | `packages/domain/src/template.ts` |
 | Reading a model answer against the schema; settings hash; evaluation context id; token estimate | `packages/domain/src/labels.ts` |
-| Metrics (macro-F1 per field, shown as "Score"; per-value F1, accuracy, invalid rate, mix-ups) and pass/fail | `packages/domain/src/metrics.ts` |
+| Metrics (macro-F1 per field, shown as "Score" with the metric name in grey; per-value F1, accuracy, invalid rate, mix-ups; invalid and filtered answers left out of the scores and counted apart) and pass/fail (always at most 1% invalid, `INVALID_CAP`) | `packages/domain/src/metrics.ts` |
 | Versions are major.minor and never overwritten; the catalog assigns the numbers | `packages/domain/src/versions.ts`, `apps/catalog/src/catalog.ts` |
-| Gates between steps; Gold Labels is recommended, not required | `packages/domain/src/gates.ts` |
+| Gates between steps; Gold Labels is an ordinary step (R5-8) | `packages/domain/src/gates.ts` |
 | The recommended next step (the best score wins; cost only breaks a tie) | `packages/domain/src/workflow.ts` |
 | Agent prompts, handoffs (to known specialists only), read tools per preset | `apps/agents/src/presets.ts`, `apps/agents/src/runtime.ts` |
 | What an agent sees of each page (page views) and the read tools' implementation | `apps/bff/src/services/page-views.ts` |
+| No helper reads the held-out half (`visibleToAgents`) | `packages/domain/src/gepa.ts`, used in `page-views.ts`, `starts.ts`, `agents.ts` |
 | When labeling starts, reports scored on the held-out half of the eval set | `apps/bff/src/services/evaluation.ts`, `work.ts` |
 | Optimiser: Pareto front, parent, merge pair, dry-run pick and comparison | `packages/domain/src/gepa.ts` |
 | Confirming a pass (second labeling of the held-out half) | `confirmScore` in `apps/bff/src/services/evaluation.ts` |

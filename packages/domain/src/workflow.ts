@@ -214,3 +214,24 @@ export function recommend(s: ProjectState, optimiserRunning: EndpointId | null):
     endpoint: best.endpoint,
   };
 }
+
+/**
+ * Scores are being rebuilt (acceptance R5-4, R5-5): a gold edit changed the evaluation context, so
+ * a version that had a report has none for today's gold labels yet. The rebuild reads saved
+ * answers only. False while some eval example has no gold label (nothing can be scored then), and
+ * for a version whose saved answers do not cover today's eval set (`cannotBuild`: the bff's
+ * record of "versionId|endpoint|contextId" it tried).
+ */
+export function scoresUpdating(s: Omit<ProjectState, 'scoresUpdating'>, cannotBuild: ReadonlySet<string> = new Set()): boolean {
+  const evalEx = s.examples.filter(e => e.split === 'eval');
+  if (!s.setup?.schema || !evalEx.length || evalEx.some(e => !s.gold.has(e.id))) return false;
+  const current = new Set(s.reports.filter(r => !r.archivedNow).map(r => `${r.promptVersionId}|${r.endpoint}`));
+  return s.reports.some(
+    r =>
+      r.archivedNow &&
+      r.schemaVersion === s.setup!.schemaVersion &&
+      !current.has(`${r.promptVersionId}|${r.endpoint}`) &&
+      !cannotBuild.has(`${r.promptVersionId}|${r.endpoint}|${s.contextId}`) &&
+      s.versions.some(v => v.id === r.promptVersionId),
+  );
+}

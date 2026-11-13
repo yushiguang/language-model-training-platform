@@ -2,7 +2,10 @@
 
 import {useSearchParams} from 'next/navigation';
 import {createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode} from 'react';
-import {loadProjectState, subscribeChanges, type ProjectState} from '@/backend-api';
+import {loadProjectState, subscribeChanges, tick, type ProjectState} from '@/backend-api';
+
+/** How often the workflow manager checks the open project even when nothing changed. */
+const SWEEP_MS = 60_000;
 
 interface Ctx {
   projectId: string;
@@ -42,6 +45,10 @@ export function ProjectProvider({children}: {children: ReactNode}) {
     try {
       const s = await loadProjectState(projectId);
       setState(s);
+      // The workflow manager (2026-11-11): every change event, and the sweep below, runs one
+      // check of what should be running (`tick`, built on `dueStarts`). Starts are keyed, so
+      // running it often is safe. Every auto task also has a button to start it by hand.
+      if (s) void tick(s);
       setError(s ? null : 'This project does not exist.');
     } catch (e) {
       setError((e as Error).message);
@@ -73,6 +80,13 @@ export function ProjectProvider({children}: {children: ReactNode}) {
     const id = setInterval(() => void refresh(), 5000);
     return () => clearInterval(id);
   }, [running, refresh]);
+
+  // The sweep: a change this tab never heard of (another tab, a closed page) is still picked up.
+  useEffect(() => {
+    if (!projectId) return;
+    const id = setInterval(() => void refresh(), SWEEP_MS);
+    return () => clearInterval(id);
+  }, [projectId, refresh]);
 
   const href = useCallback((path: string, p?: Record<string, string | undefined>) => hrefFor(projectId, path, p), [projectId]);
   return <ProjectCtx.Provider value={{projectId, state, loading, error, refresh, href}}>{children}</ProjectCtx.Provider>;

@@ -1,9 +1,9 @@
 import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@tsp/contracts';
 import {agentStart, isStartTool} from './starts.ts';
-import {checkTemplate, defaultOutputPick, dryRunSize, finalRunPlan, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, recommend, settingsHash, stepLine, versionLabel} from '@tsp/domain';
+import {checkTemplate, defaultOutputPick, dryRunSize, finalRunPlan, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, recommend, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE} from '@tsp/domain';
 import {getApp} from './app.ts';
-import {loadProjectState} from './projects.ts';
 import {mismatches} from './mismatches.ts';
+import {loadProjectState} from './projects.ts';
 
 /**
  * Page views: each page as the agent sees it, built from the same saved data the page shows.
@@ -86,12 +86,25 @@ function optimiserView(state: ProjectState) {
     now: o.state === 'running' ? stepLine(o.step, label(o.stepVersionId), dryRunSize(state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && state.gold.has(e.id)).length)) : null,
     stopReason: o.stopReason,
     error: o.error,
-    rounds: o.history.map(r => ({round: r.round, version: label(r.versionId), from: label(r.parentId), kind: r.kind, change: r.change, outcome: r.outcome, lowestFieldMacroF1: r.score == null ? null : r2(r.score), passed: r.passed})),
+    rounds: o.history.map(r => ({round: r.round, version: label(r.versionId), from: label(r.parentId), kind: r.kind, change: r.change, outcome: r.outcome, lowestFieldMacroF1: r.score == null ? null : r2(r.score), passed: r.passed, confirmed: r.confirm ? r.confirm.passed : null})),
   };
 }
 
 function versionDetail(state: ProjectState, v: PromptVersion) {
   return {...versionRow(state, v), template: v.template, features: v.features, promptImages: v.images.length};
+}
+
+/**
+ * Whether the Optimiser's second labeling of the held-out half agreed with a version's pass:
+ * true or false, or null when there was no second labeling (a version scored outside a run, or
+ * one that did not pass).
+ */
+function confirmedOf(state: ProjectState, versionId: string): boolean | null {
+  for (const o of state.optimisation) {
+    const c = o.history.find(h => h.versionId === versionId)?.confirm;
+    if (c) return c.passed;
+  }
+  return null;
 }
 
 /** A report as the Eval report page shows it: scores, the threshold checks, mix-ups, trend. */
@@ -102,7 +115,6 @@ function reportView(state: ProjectState, v: PromptVersion | undefined, model: En
   const ver = state.versions.find(x => x.id === r.promptVersionId)!;
   const t = state.setup?.thresholds;
   const nEval = state.examples.filter(e => e.split === 'eval').length;
-  const byId = new Map(state.examples.map(e => [e.id, e]));
   const trend = state.reports
     .filter(x => x.endpoint === r.endpoint && !x.archivedNow)
     .map(x => ({version: versionLabel(state.versions.find(v2 => v2.id === x.promptVersionId)!), lowestFieldMacroF1: r2(x.metrics.lowestField.macroF1), passed: x.passed}))
@@ -112,14 +124,20 @@ function reportView(state: ProjectState, v: PromptVersion | undefined, model: En
       version: versionLabel(ver),
       versionId: ver.id,
       model: modelName(state, r.endpoint),
+      // R4-6: invalid and filtered answers are left out of the score; scoredOn counts what is left.
       scoredOn: r.metrics.n,
+      examples: r.metrics.total ?? r.metrics.n,
+      invalid: r.metrics.invalid,
+      filtered: r.metrics.filtered ?? 0,
       passed: r.passed,
+      confirmed: confirmedOf(state, ver.id),
       fields: r.metrics.fields.map(f => ({field: f.field, kind: f.kind, macroF1: r2(f.macroF1), accuracy: r2(f.accuracy), weakestValues: [...f.values].sort((a, b) => a.f1 - b.f1).slice(0, 3).map(x => ({value: x.value, f1: r2(x.f1)}))})),
       lowestField: {field: r.metrics.lowestField.field, macroF1: r2(r.metrics.lowestField.macroF1)},
       lowestValue: r.metrics.lowestValue ? {...r.metrics.lowestValue, f1: r2(r.metrics.lowestValue.f1)} : null,
       invalidRate: r2(r.metrics.invalidRate),
       checks: t ? judge(r.metrics, t, nEval).checks : null,
-      topMixUps: r.metrics.mixUps.slice(0, 5).map(m => ({field: m.field, kind: m.kind, gold: m.gold, predicted: m.predicted, count: m.count, examples: m.exampleIds.slice(0, 3).map(id => byId.get(id)?.externalId)})),
+      // Scored on the held-out half, so mix-ups go as counts only: no example ids (finding 3).
+      topMixUps: r.metrics.mixUps.slice(0, 5).map(m => ({field: m.field, kind: m.kind, gold: m.gold, predicted: m.predicted, count: m.count})),
     },
     thresholds: t,
     trend,
@@ -298,13 +316,14 @@ export function agentTools(projectId: string): AgentToolHost {
         case 'get_examples': {
           const ids = Array.isArray(args.ids) ? new Set(args.ids.map(String)) : null;
           const split = typeof args.split === 'string' ? args.split : null;
-          const list = state.examples.filter(e => (!ids || ids.has(e.externalId) || ids.has(e.id)) && (!split || e.split === split));
-          return {total: list.length, examples: list.slice(0, limitOf(args.limit, 10, 5)).map(exampleView)};
+          const all = state.examples.filter(e => (!ids || ids.has(e.externalId) || ids.has(e.id)) && (!split || e.split === split));
+          const list = all.filter(visibleToAgents);
+          return {total: list.length, examples: list.slice(0, limitOf(args.limit, 10, 5)).map(exampleView), ...(list.length < all.length ? {note: HIDDEN_NOTE} : {})};
         }
         case 'get_gold_labels': {
           const split = args.split === 'test' ? 'test' : 'eval';
-          const list = state.examples.filter(e => e.split === split && state.gold.has(e.id));
-          return {split, labeled: list.length, labels: list.slice(0, limitOf(args.limit, 20, 10)).map(e => ({id: e.externalId, title: e.title, answer: state.gold.get(e.id)!.answer}))};
+          const list = state.examples.filter(e => e.split === split && state.gold.has(e.id) && visibleToAgents(e));
+          return {split, labeled: list.length, ...(split === 'eval' ? {note: HIDDEN_NOTE} : {}), labels: list.slice(0, limitOf(args.limit, 20, 10)).map(e => ({id: e.externalId, title: e.title, answer: state.gold.get(e.id)!.answer}))};
         }
         case 'get_predictions': {
           const v = findVersion(state, args.version);
@@ -314,10 +333,10 @@ export function agentTools(projectId: string): AgentToolHost {
           const preds = await labeling.predictions(v.id, settings.endpoint, settingsHash(settings));
           const same = (a?: string[], b?: string[]) => JSON.stringify([...(a ?? [])].sort()) === JSON.stringify([...(b ?? [])].sort());
           const rows = state.examples
-            .filter(e => e.split === 'eval' && preds.has(e.id))
+            .filter(e => e.split === 'eval' && visibleToAgents(e) && preds.has(e.id))
             .map(e => ({e, p: preds.get(e.id)!, g: state.gold.get(e.id)?.answer ?? null}))
             .filter(({p, g}) => !args.mixedUpOnly || !p.answer || (g && state.setup!.schema!.fields.some(f => !same(g[f.name], p.answer![f.name]))));
-          return {version: versionLabel(v), model: modelName(state, settings.endpoint), rows: rows.slice(0, limitOf(args.limit, 20, 10)).map(({e, p, g}) => ({id: e.externalId, title: e.title, model: p.answer, invalid: p.invalidReason, gold: g})), matching: rows.length};
+          return {version: versionLabel(v), model: modelName(state, settings.endpoint), note: HIDDEN_NOTE, rows: rows.slice(0, limitOf(args.limit, 20, 10)).map(({e, p, g}) => ({id: e.externalId, title: e.title, model: p.answer, ...(p.reason ? {reason: p.reason} : {}), invalid: p.invalidReason, gold: g})), matching: rows.length};
         }
         case 'check_template': {
           const template = typeof args.template === 'string' ? args.template : '';

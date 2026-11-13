@@ -110,6 +110,9 @@ export async function predictionsFor(versionId: string, endpoint: EndpointId, se
   return getApp().labeling.predictions(versionId, endpoint, settingsHash(settings));
 }
 
+/** Reports that cannot be built from saved answers, as "versionId|endpoint|contextId" (R5-4): the answers miss part of the eval set. */
+export const cannotBuild = new Set<string>();
+
 /**
  * Builds the report for a version on a model, once the eval set is fully labeled and has gold
  * labels. Scores use only the held-out half of the eval set.
@@ -122,17 +125,21 @@ export async function buildReport(
   examples: Example[],
   gold: Map<string, GoldLabel>,
   contextId: string,
+  opts: {replace?: boolean} = {},
 ): Promise<EvalReport | null> {
   const {catalog} = getApp();
   const evalExamples = examples.filter(e => e.split === 'eval');
   if (!setup.schema || !evalExamples.length || evalExamples.some(e => !gold.has(e.id))) return null;
-  const existing = await catalog.find('eval_reports', {projectId, promptVersionId: version.id, endpoint, contextId});
-  if (existing.length) return existing[0];
+  const existing = (await catalog.find('eval_reports', {projectId, promptVersionId: version.id, endpoint, contextId})).filter(r => !r.archived);
+  if (existing.length && !opts.replace) return existing[0];
   const settings = settingsFor(setup, endpoint);
   const byExample = await predictionsFor(version.id, endpoint, settings);
   const scoredOn = evalExamples.filter(e => !e.optimiserHalf);
-  if (scoredOn.some(e => !byExample.has(e.id))) return null;
-  const items: Scored[] = scoredOn.map(e => ({exampleId: e.id, gold: gold.get(e.id)!.answer, predicted: byExample.get(e.id)!.answer, costUsd: byExample.get(e.id)!.costUsd}));
+  if (scoredOn.some(e => !byExample.has(e.id))) {
+    cannotBuild.add(`${version.id}|${endpoint}|${contextId}`);
+    return null;
+  }
+  const items: Scored[] = scoredOn.map(e => ({exampleId: e.id, gold: gold.get(e.id)!.answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd}));
   const report: EvalReport = {
     id: newId('er'),
     projectId,
@@ -146,6 +153,8 @@ export async function buildReport(
     createdAt: now(),
   };
   await catalog.insert('eval_reports', report);
+  // Rebuild scores (2026-11-12): the new report replaces the one for the same context.
+  for (const old of existing) await catalog.patch('eval_reports', old.id, {archived: true});
   emitChange();
   return report;
 }
@@ -159,7 +168,7 @@ export async function confirmScore(setup: SetupVersion, version: PromptVersion, 
   const evalExamples = examples.filter(e => e.split === 'eval');
   const held = evalExamples.filter(e => !e.optimiserHalf && gold.has(e.id));
   if (held.some(e => !byExample.has(e.id))) throw new Error('the second labeling is missing answers');
-  const m = computeMetrics(setup.schema!, held.map(e => ({exampleId: e.id, gold: gold.get(e.id)!.answer, predicted: byExample.get(e.id)!.answer, costUsd: byExample.get(e.id)!.costUsd})));
+  const m = computeMetrics(setup.schema!, held.map(e => ({exampleId: e.id, gold: gold.get(e.id)!.answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd})));
   return {score: m.lowestField.macroF1, passed: !!setup.thresholds && judge(m, setup.thresholds, evalExamples.length).passed};
 }
 
@@ -169,6 +178,6 @@ export async function scoreOnOptimiserHalf(setup: SetupVersion, version: PromptV
   const half = examples.filter(e => e.split === 'eval' && e.optimiserHalf && byExample.has(e.id) && gold.has(e.id));
   return computeMetrics(
     setup.schema!,
-    half.map(e => ({exampleId: e.id, gold: gold.get(e.id)!.answer, predicted: byExample.get(e.id)!.answer, costUsd: byExample.get(e.id)!.costUsd})),
+    half.map(e => ({exampleId: e.id, gold: gold.get(e.id)!.answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd})),
   );
 }

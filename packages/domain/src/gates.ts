@@ -1,9 +1,11 @@
 import type {NodeId, WorkflowFacts} from '@tsp/contracts';
 
-export const NODES: {id: NodeId; label: string; recommended?: boolean; path: string}[] = [
+export const NODES: {id: NodeId; label: string; path: string}[] = [
   {id: 'setup', label: 'Setup', path: '/setup'},
   {id: 'dataset', label: 'Dataset', path: '/dataset'},
-  {id: 'gold', label: 'Gold Labels', recommended: true, path: '/gold'},
+  // Acceptance R5-8 (2026-11-11): an ordinary step, not optional or "recommended": scores, mismatch
+  // review and the Optimiser all rest on gold labels.
+  {id: 'gold', label: 'Gold Labels', path: '/gold'},
   {id: 'prompt', label: 'Prompt Engineering', path: '/prompt'},
   {id: 'training', label: 'Training Set', path: '/training-set'},
 ];

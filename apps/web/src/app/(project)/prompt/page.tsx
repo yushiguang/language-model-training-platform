@@ -3,14 +3,14 @@
 import {useGo} from '@/components/nav';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode} from 'react';
 import type {Answer, EndpointId, LabelingRun, MismatchList, OptimisationRun, OptimiserRound, PageContext, PromptVersion} from '@tsp/contracts';
-import {DEFAULT_MAX_ROUNDS, dryRunSize, optimiserVersions, recommend, stepLine, versionLabel} from '@tsp/domain';
+import {DEFAULT_MAX_ROUNDS, dryRunSize, INVALID_CAP, optimiserVersions, recommend, stepLine, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage, useOpenAskAi} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {ScoreChart} from '@/components/prompt/ScoreChart';
 import {useChecks, Workbench, type Draft} from '@/components/prompt/Workbench';
 import {useAgentDrafts} from '@/components/prompt/useAgentDrafts';
-import {approveNode, createVersion, improveWithAi, mismatches, predictionsFor, retryOptimiser, scoreVersion, startOptimiser, stopOptimiser, stopRun, tick, type ProjectState} from '@/backend-api';
-import {Badge, Banner, Below, Button, Card, Code, dateTime, Dialog, Empty, Hov, Icon, Metric, num, One, PageHead, Passed, Progress, reportActionError, Score, Seg, Suggestion, Table, timeOfDay} from '@/ui';
+import {approveNode, createVersion, improveWithAi, mismatches, predictionsFor, retryOptimiser, scoreVersion, startOptimiser, stopOptimiser, rebuildReports, stopRun, type ProjectState} from '@/backend-api';
+import {Badge, Banner, Below, Button, Card, Code, dateTime, Dialog, Empty, Hov, Icon, IconToggle, Metric, num, One, Opt, PageHead, Passed, Progress, reportActionError, Score, Seg, Suggestion, Table, timeOfDay} from '@/ui';
 import {LabelDistribution, labelCounts} from '@/components/LabelDistribution';
 import {fieldRows, modelName, reportFor, runsFor, versionScore} from '@/components/prompt/scores';
 
@@ -78,6 +78,43 @@ function FirstPrompt({state, setPage}: {state: ProjectState; setPage: (p: PageCo
   );
 }
 
+const hideKey = (projectId: string) => `pv-hide-dropped:${projectId}`;
+function readHideDropped(projectId: string): boolean {
+  try {
+    return sessionStorage.getItem(hideKey(projectId)) === '1';
+  } catch {
+    return false;
+  }
+}
+function saveHideDropped(projectId: string, on: boolean) {
+  try {
+    sessionStorage.setItem(hideKey(projectId), on ? '1' : '0');
+  } catch {
+    // Storage off: the choice holds for this page only.
+  }
+}
+
+/** The newest run, when it ended without a pass (a pass goes on to the training set and says so). */
+const endedRun = (s: ProjectState): OptimisationRun | null => {
+  const o = s.optimisation[0];
+  return o && ((o.state === 'done' && o.stopReason !== 'passes') || o.state === 'stopped') ? o : null;
+};
+const seenKey = (projectId: string) => `pv-run-end-seen:${projectId}`;
+function readSeenEnd(projectId: string): string | null {
+  try {
+    return sessionStorage.getItem(seenKey(projectId));
+  } catch {
+    return null;
+  }
+}
+function saveSeenEnd(projectId: string, runId: string) {
+  try {
+    sessionStorage.setItem(seenKey(projectId), runId);
+  } catch {
+    // Storage off: the panel goes when a version is picked, for this page only.
+  }
+}
+
 /** The run the progress panel shows: the newest, while it runs, failed or is paused. */
 const panelRun = (s: ProjectState): OptimisationRun | null => {
   const o = s.optimisation[0];
@@ -101,16 +138,33 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
   const live = state.versions.filter(v => v.schemaVersion === setup.schemaVersion && info.get(v.id)?.round.outcome !== 'failed');
   const list = live.length ? live : state.versions;
   const [view, setView] = useState<View>('all');
+  // R6-2: hide versions the Optimiser dropped (off by default, remembered for the session).
+  const [hideDropped, setHideDropped] = useState(false);
+  useEffect(() => setHideDropped(readHideDropped(state.project.id)), [state.project.id]);
+  const toggleHide = () => {
+    saveHideDropped(state.project.id, !hideDropped);
+    setHideDropped(!hideDropped);
+  };
   // null: the panel while a run is going, else the newest version.
   const [selId, setSel] = useState<string | null>(null);
   const run = panelRun(state);
-  const showPanel = !!run && (selId === null || selId === run.stepVersionId);
+  // Run end (round 6): a run that finished without a pass keeps its panel, saying how it ended,
+  // until a version is picked (remembered for the session).
+  const ended = run ? null : endedRun(state);
+  const [seenEnd, setSeenEnd] = useState<string | null>(null);
+  useEffect(() => setSeenEnd(readSeenEnd(state.project.id)), [state.project.id]);
+  const showEnd = !!ended && selId === null && seenEnd !== ended.id;
+  const showPanel = (!!run && (selId === null || selId === run.stepVersionId)) || showEnd;
+  const choose = (id: string | null) => {
+    if (showEnd && ended) {
+      saveSeenEnd(state.project.id, ended.id);
+      setSeenEnd(ended.id);
+    }
+    setSel(id);
+  };
   const sel = list.find(v => v.id === selId) ?? (run?.stepVersionId ? list.find(v => v.id === run.stepVersionId) : undefined) ?? list[0];
   const running = state.runs.some(r => r.state === 'running') || state.optimisation.some(o => o.state === 'running');
 
-  useEffect(() => {
-    void tick(state);
-  }, [state]);
   useEffect(() => {
     setPage({...VERSIONS_PAGE, label: `Prompt versions · ${versionLabel(sel)}`, context: {version: versionLabel(sel)}});
   }, [sel.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -127,7 +181,7 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
     await approveNode(state.project.id, 'prompt');
     await go(href('/training-set', {v: vId, m: ep}));
   };
-  const pick = (id: string) => setSel(run && id === run.stepVersionId ? null : id);
+  const pick = (id: string) => choose(run && id === run.stepVersionId ? null : id);
 
   const rowRight = (v: PromptVersion, s: {score: number; passed: boolean} | null) => {
     const o = info.get(v.id)?.round;
@@ -147,7 +201,9 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
   const optTag = <Badge text="Optimiser" icon={false} />;
   const rows =
     view === 'all'
-      ? scored.map(({v, s}) => (
+      ? scored
+          .filter(({v}) => !hideDropped || info.get(v.id)?.round.outcome !== 'dropped')
+          .map(({v, s}) => (
           <button key={v.id} type="button" className="vrow" aria-current={showPanel ? v.id === run?.stepVersionId : v.id === sel.id} onClick={() => pick(v.id)}>
             <span className="v">{versionLabel(v)}</span>
             <span style={{display: 'inline-flex', gap: 6, alignItems: 'center'}}>
@@ -170,6 +226,8 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
       title="Versions"
       actions={
         hasOptimiser ? (
+          <div className="row" style={{gap: 8, alignItems: 'center'}}>
+            {view === 'all' && <IconToggle icon={hideDropped ? 'eye-off' : 'eye'} tip={hideDropped ? 'Show dropped versions' : 'Hide dropped versions'} pressed={hideDropped} onClick={toggleHide} />}
           <Seg
             label="View"
             value={view}
@@ -179,6 +237,7 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
               {value: 'major', label: 'Major'},
             ]}
           />
+          </div>
         ) : undefined
       }
       className="fill"
@@ -194,7 +253,7 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
   const chart = (
     <Card title="Score by version">
       {t && points.length > 0 ? (
-        <ScoreChart points={points} threshold={t.macroF1} selected={showPanel ? undefined : versionLabel(sel)} onSelect={l => setSel(list.find(v => versionLabel(v) === l)?.id ?? null)} />
+        <ScoreChart points={points} threshold={t.macroF1} selected={showPanel ? undefined : versionLabel(sel)} onSelect={l => choose(list.find(v => versionLabel(v) === l)?.id ?? null)} />
       ) : (
         <div className="pv-empty">
           <span className="t-3">{!t ? 'Evaluation is off, so versions have no scores' : hasGold ? 'Scores show here once a version is scored' : 'Scores show here once the eval set has gold labels'}</span>
@@ -203,16 +262,35 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
     </Card>
   );
 
-  const advice = !running && !showPanel && !selDropped ? <Advice state={state} onMake={onMake} selId={sel.id} /> : null;
+  // No advice from scores that are out of date (Rebuild scores first).
+  const advice = !running && !showPanel && !selDropped && !state.scoresUpdating ? <Advice state={state} onMake={onMake} selId={sel.id} onStarted={() => setSel(null)} /> : null;
   return (
-    <Frame head={<PageHead title="Prompt versions" />}>
+    <Frame
+      head={
+        <PageHead
+          title="Prompt versions"
+          actions={
+            // Evelyn 2026-11-12: scores are rebuilt only here, by hand. Gold edits, Setup changes
+            // and new code all move scores; nothing tries to sense them one by one.
+            <>
+              {state.scoresUpdating && (
+                <span className="badge b-gray">
+                  <Hov text="Scores out of date" tip={OOD_TIP} />
+                </span>
+              )}
+              <Button label="Rebuild scores" disabled={running} title={running ? 'Wait until the running work ends' : undefined} onClick={() => rebuildReports(state.project.id)} />
+            </>
+          }
+        />
+      }
+    >
       {chart}
       <div style={{display: 'grid', gridTemplateColumns: '360px 1fr', gap: 16, alignItems: 'start'}}>
         {versions}
         <RightColumn advice={advice}>
           {box =>
             showPanel ? (
-              <OptimiserPanel state={state} run={run!} box={box} />
+              <OptimiserPanel state={state} run={(run ?? ended)!} box={box} onShow={choose} />
             ) : selDropped ? (
               <DroppedCard state={state} v={sel} round={selInfo!.round} box={box} />
             ) : selRunning ? (
@@ -277,8 +355,31 @@ function majors(scored: {v: PromptVersion; s: {score: number; passed: boolean} |
     });
 }
 
-const SCORE_TIP = "The lowest field's Macro-F1: how well the model finds each value, every value counting the same";
-const FIELD_TIP = "The field's Macro-F1: how well the model finds each of its values, every value counting the same";
+/** R4-1 (2026-11-11): the label stays "Score", with the real metric name in small grey text next to it. */
+const named = (name: string) => (
+  <span>
+    Score
+    <span className="t-3" style={{fontSize: 13, fontWeight: 400, marginLeft: 6}}>
+      {name}
+    </span>
+  </span>
+);
+const LEFT_OUT_TIP = "Answers that can't be read as labels (invalid) or that the safety filter stopped are left out of the score. A version passes only when at most 1% of its answers are invalid";
+/** R4-6: how many answers the score rests on, and how many were left out. Red when invalid answers are over the cap. */
+function LeftOut({m, cap}: {m: ProjectState['reports'][number]['metrics']; cap: number}) {
+  const total = m.total ?? m.n;
+  if (!total) return null;
+  const filtered = m.filtered ?? 0;
+  const over = m.invalidRate > cap;
+  const txt = `Scored on ${m.n} of ${total} examples · ${m.invalid} invalid (${Math.round(100 * m.invalidRate)}%${over ? `, above ${+(100 * cap).toFixed(1)}%` : ''}) · ${filtered} filtered left out`;
+  return (
+    <div className="row" style={{paddingTop: 12, fontSize: 13}}>
+      <span className={over ? 't-err' : 't-3'}>
+        <Hov text={txt} tip={LEFT_OUT_TIP} />
+      </span>
+    </div>
+  );
+}
 
 const ROUND_RESULT: Record<OptimiserRound['outcome'], {text: string; tone?: 'run' | 'err'} | null> = {
   running: {text: 'Running', tone: 'run'},
@@ -290,23 +391,46 @@ const ROUND_RESULT: Record<OptimiserRound['outcome'], {text: string; tone?: 'run
   stopped: {text: 'Stopped'},
 };
 
+const OOD_TIP = "Gold labels changed since these scores were made. Press Rebuild scores to work them out again from saved answers";
+
+/** Why the Optimiser picked a round's parent (R5-7). */
+const parentWhy = (r: OptimiserRound, parent: string) =>
+  r.parentWins === null
+    ? `Round 1 changes ${parent}, the version you started from`
+    : r.parentWins === undefined
+      ? `The change was made to ${parent}`
+      : `${parent} is the best version on ${r.parentWins} ${r.parentWins === 1 ? 'example' : 'examples'} of the optimiser half. Versions that are best on more examples are picked more often`;
+
 /** The Optimiser's progress panel: round, where it started, what it does now, every round so far. */
-function OptimiserPanel({state, run, box}: {state: ProjectState; run: OptimisationRun; box: Box}) {
+function OptimiserPanel({state, run, box, onShow}: {state: ProjectState; run: OptimisationRun; box: Box; onShow: (versionId: string) => void}) {
   const label = (id: string | null) => {
     const v = id ? state.versions.find(x => x.id === id) : undefined;
     return v ? versionLabel(v) : null;
   };
-  const tag = run.state === 'running' ? <Badge text="Running" tone="run" /> : run.state === 'failed' ? <Badge text="Failed" tone="err" /> : <Badge text="Paused" icon={false} />;
-  const act = run.state === 'running' ? <Button label="Stop" icon="stop" onClick={() => stopOptimiser(run.id)} /> : <Button label={run.state === 'failed' ? 'Retry' : 'Resume'} kind="primary" onClick={() => void retryOptimiser(run.id)} />;
+  const over = run.state === 'done' || run.state === 'stopped';
+  const tag =
+    run.state === 'running' ? (
+      <Badge text="Running" tone="run" />
+    ) : run.state === 'failed' ? (
+      <Badge text="Failed" tone="err" />
+    ) : run.state === 'done' ? (
+      <Badge text="Finished" tone="ok" />
+    ) : (
+      <Badge text={run.state === 'stopped' ? 'Stopped' : 'Paused'} icon={false} />
+    );
+  const act = over ? undefined : run.state === 'running' ? <Button label="Stop" icon="stop" onClick={() => stopOptimiser(run.id)} /> : <Button label={run.state === 'failed' ? 'Retry' : 'Resume'} kind="primary" onClick={() => void retryOptimiser(run.id)} />;
   const half = state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && state.gold.has(e.id)).length;
   const task = run.stepVersionId ? state.runs.find(r => r.promptVersionId === run.stepVersionId && r.endpoint === run.endpoint && r.state === 'running') : undefined;
+  // Best so far: the highest score among the start version and the changes this run kept.
+  const tried = [{id: run.startVersionId, s: versionScore(state, run.startVersionId)?.score}, ...run.history.filter(h => h.outcome === 'kept' && h.score != null).map(h => ({id: h.versionId, s: h.score!}))];
+  const top = tried.filter(x => x.s != null).sort((a, b) => b.s! - a.s!)[0];
   const now =
     run.state === 'running' ? (
       <div className="col" style={{gap: 8, padding: '16px 0 8px'}}>
         <div className="row" style={{gap: 8}}>
           <div className="live grow">
             <Icon name="ring" />
-            <span>{stepLine(run.step, label(run.stepVersionId), dryRunSize(half))}</span>
+            <span>{stepLine(run.step, label(run.stepVersionId), dryRunSize(half), label(run.history.at(-1)?.parentId ?? null))}</span>
           </div>
           {run.stepStartedAt && (
             <span className="t-3" style={{fontSize: 13}}>
@@ -316,6 +440,8 @@ function OptimiserPanel({state, run, box}: {state: ProjectState; run: Optimisati
         </div>
         {task && <Progress done={task.done} total={task.total} />}
       </div>
+    ) : over && top ? (
+      <EndLine state={state} run={run} top={top} label={label} onShow={onShow} />
     ) : run.state === 'failed' && run.error ? (
       <div style={{padding: '16px 0 8px'}}>
         <Banner text={run.error} tone="err" oneLine style={{margin: 0}} />
@@ -336,7 +462,14 @@ function OptimiserPanel({state, run, box}: {state: ProjectState; run: Optimisati
             None
           </span>
         ),
-        <One key="c" text={r.change || 'Writing a change'} />,
+        <span key="c" className="row" style={{gap: 8, minWidth: 0}}>
+          {label(r.parentId) && (
+            <span className="t-3" style={{flex: 'none'}}>
+              <Hov text={`from ${label(r.parentId)}`} tip={parentWhy(r, label(r.parentId)!)} />
+            </span>
+          )}
+          <One text={r.change || 'Writing a change'} />
+        </span>,
         res ? (
           <Badge key="r" text={res.text} tone={res.tone ?? 'gray'} icon={res.tone === 'run' || res.tone === 'err'} />
         ) : r.score != null && r.passed && r.confirm && !r.confirm.passed ? (
@@ -345,6 +478,14 @@ function OptimiserPanel({state, run, box}: {state: ProjectState; run: Optimisati
             <Score v={r.score} ok />
             <span className="badge b-gray">
               <Hov text="Not confirmed" tip={`The second labeling of the held-out half scored ${r.confirm.score.toFixed(2)}, below the bar`} />
+            </span>
+          </span>
+        ) : r.score != null && r.tied ? (
+          // R5-6: a tie is labeled in full but is not progress.
+          <span key="r" className="row" style={{gap: 8, justifyContent: 'center'}}>
+            <Score v={r.score} ok={r.passed} />
+            <span className="badge b-gray">
+              <Hov text="Tied" tip={`In the dry run it got as many fields right as ${label(r.parentId) ?? 'its parent'}, on different examples. It was labeled in full but does not count as progress`} />
             </span>
           </span>
         ) : r.score != null ? (
@@ -357,22 +498,48 @@ function OptimiserPanel({state, run, box}: {state: ProjectState; run: Optimisati
       ],
     };
   });
-  // Best so far: the highest score among the start version and the changes this run kept.
-  const tried = [{id: run.startVersionId, s: versionScore(state, run.startVersionId)?.score}, ...run.history.filter(h => h.outcome === 'kept' && h.score != null).map(h => ({id: h.versionId, s: h.score!}))];
-  const top = tried.filter(x => x.s != null).sort((a, b) => b.s! - a.s!)[0];
   return (
     <Card title="Optimiser" titleExtra={tag} actions={act} className={box.className} style={box.style}>
       <div className="row" style={{gap: 40, alignItems: 'flex-end'}}>
         <Metric label="Round" value={String(run.round)} unit={`/ ${run.maxRounds}`} />
         <Metric label="Started from" value={label(run.startVersionId) ?? '–'} />
-        <Metric label="Best so far" value={top ? top.s!.toFixed(2) : '–'} unit={top ? (label(top.id) ?? undefined) : undefined} />
+        <Metric label={over ? 'Best' : 'Best so far'} value={top ? top.s!.toFixed(2) : '–'} unit={top ? (label(top.id) ?? undefined) : undefined} />
         <span className="t-3" style={{fontSize: 13, paddingBottom: 4}}>
-          Started {dateTime(run.startedAt)}
+          {over && run.finishedAt ? `Finished ${dateTime(run.finishedAt)}` : `Started ${dateTime(run.startedAt)}`}
         </span>
       </div>
       {now}
       {rows.length > 0 && <Table cols={[{label: 'Round'}, {label: 'Version'}, {label: 'Change'}, {label: 'Result', kind: 'c'}]} rows={rows} widths={[72, 88, 'auto', 200]} />}
     </Card>
+  );
+}
+
+/**
+ * How a finished run ended (round 6): whether any change beat the version it started from, said
+ * plainly, so the user need not find out version by version.
+ */
+function EndLine({state, run, top, label, onShow}: {state: ProjectState; run: OptimisationRun; top: {id: string | null; s: number | undefined}; label: (id: string | null) => string | null; onShow: (versionId: string) => void}) {
+  const start = label(run.startVersionId) ?? 'the start version';
+  const won = top.id !== run.startVersionId;
+  const best = label(top.id) ?? '';
+  const startScore = versionScore(state, run.startVersionId)?.score;
+  const need = state.setup?.thresholds?.macroF1.toFixed(2) ?? '–';
+  const passes = versionScore(state, top.id!)?.passed;
+  const tried = run.history.length;
+  const text = won ? `${best} beat ${start}: ${top.s!.toFixed(2)} against ${startScore?.toFixed(2) ?? '–'}` : `No change beat ${start}. ${start} is still the best at ${top.s!.toFixed(2)}`;
+  const tip = won
+    ? `The best change this run kept.${passes ? '' : ` It does not pass yet (needs ${need})`}`
+    : `None of the ${tried} ${tried === 1 ? 'change' : 'changes'} scored higher than ${start}, or they were dropped in the dry run. Changing the wording more may not help: check your labels on the examples every version gets wrong`;
+  return (
+    <div className="row" style={{gap: 8, padding: '16px 0 8px', fontSize: 15, lineHeight: '22px', alignItems: 'center'}}>
+      <span className="t-2" style={{display: 'inline-flex'}}>
+        <Icon name={won ? 'check' : 'alert'} />
+      </span>
+      <span className="grow">
+        <Hov text={text} tip={tip} />
+      </span>
+      <Button label={`Show ${best}`} size="sm" onClick={() => onShow(top.id!)} />
+    </div>
   );
 }
 
@@ -535,7 +702,14 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
           {actions}
         </div>
         <div className="row" style={{gap: 12}}>
-          <span className="t-3">{why}</span>
+          {/* A gold edit archived the score; Rebuild scores works it out again from saved answers. */}
+          {state.scoresUpdating && runs.some(r => r.state === 'done') ? (
+            <span className="badge b-gray">
+              <Hov text="Scores out of date" tip={OOD_TIP} />
+            </span>
+          ) : (
+            <span className="t-3">{why}</span>
+          )}
           {canScore && <Button label={runs.length ? 'Resume' : 'Score'} size="sm" icon="play" onClick={() => void scoreVersion(state.project.id, v)} />}
         </div>
       </Card>
@@ -545,7 +719,7 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
   return (
     <Card className={box.className} style={box.style}>
       <div style={{display: 'flex', alignItems: 'flex-end', gap: 16, paddingBottom: 16}}>
-        <Metric label={<Hov text="Score" tip={SCORE_TIP} />} value={rep.metrics.lowestField.macroF1.toFixed(2)} unit={`/ ${+t.macroF1.toFixed(2)}`} tone={rep.passed ? 'ok' : 'err'} size="lg" />
+        <Metric label={named('Lowest field macro-F1')} value={rep.metrics.lowestField.macroF1.toFixed(2)} unit={`/ ${+t.macroF1.toFixed(2)}`} tone={rep.passed ? 'ok' : 'err'} size="lg" />
         <div style={{display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 9}}>
           {rep.passed ? <Passed /> : <Below />}
           <span className="t-3" style={{fontSize: 13}}>
@@ -555,9 +729,10 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
         {actions}
       </div>
       <Table
-        cols={[{label: 'Field'}, {label: <Hov text="Score" tip={FIELD_TIP} />, kind: 'c'}, {label: 'Precision', kind: 'c'}, {label: 'Recall', kind: 'c'}, {label: 'Result', kind: 'c'}]}
+        cols={[{label: 'Field'}, {label: named('Macro-F1'), kind: 'c'}, {label: 'Precision', kind: 'c'}, {label: 'Recall', kind: 'c'}, {label: 'Result', kind: 'c'}]}
         rows={rows.map(r => ({key: r.field, cells: [<Code key="f">{r.field}</Code>, <Score key="s" v={r.f1} ok={r.passed} />, r.precision.toFixed(2), r.recall.toFixed(2), r.passed ? <Passed key="p" /> : <Below key="b" />]}))}
       />
+      <LeftOut m={rep.metrics} cap={t.invalidRate ?? INVALID_CAP} />
     </Card>
   );
 }
@@ -565,9 +740,9 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
 /**
  * The AI Suggestion card. The next step is chosen by code from the reports; the card is hidden
  * while scoring or the Optimiser runs (design: no card while it waits). Below the bar it offers
- * Improve with AI (a draft in the editor) or Auto Optimise for up to N rounds.
+ * Improve with AI (a draft in the editor) or Auto Optimise, whose dialog asks for the rounds.
  */
-function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId: string, endpoint: EndpointId) => Promise<void>; selId: string}) {
+function Advice({state, onMake, selId, onStarted}: {state: ProjectState; onMake: (versionId: string, endpoint: EndpointId) => Promise<void>; selId: string; onStarted: () => void}) {
   const {href} = useProject();
   const go = useGo();
   const [rounds, setRounds] = useState(String(DEFAULT_MAX_ROUNDS));
@@ -589,15 +764,17 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
     improveWithAi(state.project.id, versionId).catch(e => reportActionError(`Improve with AI failed: ${(e as Error).message}`, () => improve(versionId)));
     return go(href('/prompt/edit', {v: versionId}));
   };
-  // Auto Optimise starts from the version selected in the list (R3-7). When a better minor of the
-  // same major exists, a dialog asks which one (design: U-F-Optimise-Confirm).
-  const [ask, setAsk] = useState<{sel: PromptVersion; selScore: number | null; best: PromptVersion; bestScore: number; n: number} | null>(null);
+  // Auto Optimise starts from the version selected in the list (R3-7). It always opens one dialog
+  // (R4-3, design: U-J-Optimise-Dialog): where to start, shown only when a better minor of the same
+  // major exists, and the most rounds to try.
+  const [ask, setAsk] = useState<{sel: PromptVersion; selScore: number | null; best: PromptVersion | null; bestScore: number; from: string} | null>(null);
   const start = (versionId: string, n: number) => {
     setAsk(null);
+    // R5-4: starting a run takes the user to it (the progress panel), not the version they left.
+    onStarted();
     startOptimiser(state.project.id, n, versionId).catch(e => reportActionError(`The Optimiser could not start: ${(e as Error).message}`, () => start(versionId, n)));
   };
   const auto = () => {
-    const n = Math.max(1, Math.min(50, Math.round(Number(rounds)) || DEFAULT_MAX_ROUNDS));
     const sel = state.versions.find(v => v.id === selId) ?? latest;
     const selScore = versionScore(state, sel.id)?.score ?? null;
     const best = state.versions
@@ -605,8 +782,9 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
       .map(v => ({v, s: versionScore(state, v.id)?.score}))
       .filter(x => x.s != null)
       .sort((a, b) => b.s! - a.s!)[0];
-    if (best && best.v.id !== sel.id && (selScore == null || best.s! > selScore)) setAsk({sel, selScore, best: best.v, bestScore: best.s!, n});
-    else start(sel.id, n);
+    const better = best && best.v.id !== sel.id && (selScore == null || best.s! > selScore);
+    setRounds(String(DEFAULT_MAX_ROUNDS));
+    setAsk({sel, selScore, best: better ? best.v : null, bestScore: better ? best.s! : 0, from: better ? best.v.id : sel.id});
   };
   // The newest run that passed and started the training and test sets.
   const done = state.optimisation[0];
@@ -615,7 +793,7 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
   let text: string;
   let acts: React.ReactNode;
   const lastRun = state.optimisation[0];
-  const disagree = !!mm && !lastRun && mm.reviewed === 0 && mm.items.length > 0;
+  const disagree = !!mm && !lastRun && mm.reviewedAll === 0 && mm.items.length > 0;
   const wrongEverywhere = !!mm && lastRun?.state === 'done' && lastRun.stopReason !== 'passes' && mm.wrongEverywhere > 0;
   if (a.kind === 'make_training_set' && passedBy && a.versionId === passedBy) {
     title = `${name(passedBy)} passes, training and test sets started`;
@@ -653,26 +831,16 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
     acts = (
       <div className="row" style={{gap: 8}}>
         <Button label="Auto Optimise" onClick={auto} />
-        <input className="input sm" style={{width: 56, textAlign: 'center'}} value={rounds} inputMode="numeric" aria-label="Max rounds" onChange={e => setRounds(e.target.value.replace(/\D/g, '').slice(0, 2))} />
-        <span style={{fontSize: 13, color: 'var(--text-2)'}}>
-          <Hov text="rounds" tip="Most rounds to try. Each round tries one change to the prompt" />
-        </span>
         <Button label="Review labels" kind="primary" onClick={() => go(href('/gold', {tab: 'mismatches'}))} />
       </div>
     );
   } else if (a.kind === 'keep_improving' && a.versionId) {
     title = a.title;
     text = a.reasons[0] ?? '';
-    const or = <span style={{fontSize: 13, color: 'var(--text-2)'}}>or</span>;
     acts = (
       <div className="row" style={{gap: 8}}>
         <Button label="Improve with AI" onClick={() => improve(a.versionId!)} />
-        {or}
         <Button label="Auto Optimise" kind="primary" onClick={auto} />
-        <input className="input sm" style={{width: 56, textAlign: 'center'}} value={rounds} inputMode="numeric" aria-label="Max rounds" onChange={e => setRounds(e.target.value.replace(/\D/g, '').slice(0, 2))} />
-        <span style={{fontSize: 13, color: 'var(--text-2)'}}>
-          <Hov text="rounds" tip="Most rounds to try. Each round tries one change to the prompt" />
-        </span>
       </div>
     );
   } else return null;
@@ -681,16 +849,35 @@ function Advice({state, onMake, selId}: {state: ProjectState; onMake: (versionId
       <Suggestion title={title} text={text} actions={acts} />
       {ask && (
         <Dialog
-          title={`Start from ${versionLabel(ask.sel)}`}
-          text={`${versionLabel(ask.best)} is the best version in v${ask.sel.major}, at ${ask.bestScore.toFixed(2)} ${ask.selScore == null ? `while ${versionLabel(ask.sel)} has no score yet` : `against ${ask.selScore.toFixed(2)} for ${versionLabel(ask.sel)}`}`}
+          title="Auto Optimise"
           onClose={() => setAsk(null)}
           actions={
             <>
-              <Button label={`Start from ${versionLabel(ask.sel)}`} onClick={() => start(ask.sel.id, ask.n)} />
-              <Button label={`Start from ${versionLabel(ask.best)}`} kind="primary" onClick={() => start(ask.best.id, ask.n)} />
+              <Button label="Cancel" onClick={() => setAsk(null)} />
+              <Button label="Start" kind="primary" onClick={() => start(ask.from, Math.max(1, Math.min(50, Math.round(Number(rounds)) || DEFAULT_MAX_ROUNDS)))} />
             </>
           }
-        />
+        >
+          {ask.best && (
+            <div className="col" style={{gap: 8}}>
+              <span className="field-l">Start from</span>
+              <div className="opts" role="radiogroup" aria-label="Start from">
+                <Opt title={versionLabel(ask.best)} tip={`The best version in v${ask.sel.major}`} checked={ask.from === ask.best.id} onSelect={() => setAsk({...ask, from: ask.best!.id})} extra={<span className="t-3" style={{fontSize: 13, marginLeft: 'auto'}}>{`Best in v${ask.sel.major} · ${ask.bestScore.toFixed(2)}`}</span>} />
+                <Opt title={versionLabel(ask.sel)} tip="The version you selected" checked={ask.from === ask.sel.id} onSelect={() => setAsk({...ask, from: ask.sel.id})} extra={<span className="t-3" style={{fontSize: 13, marginLeft: 'auto'}}>{`Selected · ${ask.selScore == null ? 'no score yet' : ask.selScore.toFixed(2)}`}</span>} />
+              </div>
+            </div>
+          )}
+          <div className="col" style={{gap: 8}}>
+            <span className="field-l">
+              <Hov text="Max rounds" tip="Most rounds to try. Each round tries one change to the prompt" />
+            </span>
+            <input className="input sm" style={{width: 72, textAlign: 'center'}} value={rounds} inputMode="numeric" aria-label="Max rounds" onChange={e => setRounds(e.target.value.replace(/\D/g, '').slice(0, 2))} />
+          </div>
+          {/* R5-7: how the parent of each round is picked. */}
+          <span className="t-3" style={{fontSize: 13, lineHeight: '20px'}}>
+            Round 1 changes the version you start from. Later rounds can start from any scored version, most often one that is best on many examples
+          </span>
+        </Dialog>
       )}
     </section>
   );

@@ -72,7 +72,6 @@ export interface BffContract {
   getProject(id: string): Promise<Project | null>;
   loadProjectState(projectId: string): Promise<ProjectState | null>;
   approveNode(projectId: string, node: NodeId): Promise<void>;
-  skipGold(projectId: string): Promise<void>;
 
   // Setup
   saveSetup(projectId: string, patch: SetupPatch): Promise<SetupVersion>;

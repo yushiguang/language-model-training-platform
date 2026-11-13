@@ -11,11 +11,13 @@ import type {
   Schema,
   StartRequest,
 } from '@tsp/contracts';
-import {agentName, exampleBrief, fieldsRight, newId, promptKeys, settingsHash, versionLabel, wrongExamples} from '@tsp/domain';
+import {agentName, answersForHelpers, exampleBrief, fieldsRight, newId, promptKeys, settingsHash, versionLabel, visibleToAgents, wrongExamples} from '@tsp/domain';
 import {loadProjectState} from './projects.ts';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {agentTools, getPageView} from './page-views.ts';
+import {scoreOnOptimiserHalf} from './evaluation.ts';
+import {labelerNotes, withLabelerNotes} from './mismatches.ts';
 
 export type {PageContext};
 
@@ -294,7 +296,7 @@ export const CHECK_SAMPLE = 20;
 export async function checkLabels(projectId: string, page: PageContext): Promise<AgentProposal | null> {
   const state = await loadProjectState(projectId);
   if (!state?.setup?.schema) throw new Error('Set the labels first.');
-  const pool = state.examples.filter(e => !(e.split === 'eval' && !e.optimiserHalf));
+  const pool = state.examples.filter(visibleToAgents);
   const sample = [...pool].sort(() => Math.random() - 0.5).slice(0, CHECK_SAMPLE);
   const examples = sample.map(e => {
     const gold = state.gold.get(e.id)?.answer;
@@ -315,17 +317,19 @@ export async function improveWithAi(projectId: string, versionId: string): Promi
   const settings = setup.models.find(m => m.endpoint === report.endpoint);
   const answers = settings ? await labeling.predictions(v.id, report.endpoint, settingsHash(settings)) : new Map();
   const schema = setup.schema;
-  const mistakes = state.examples.filter(e => e.split === 'eval' && state.gold.has(e.id) && fieldsRight(schema, state.gold.get(e.id)!.answer, answers.get(e.id)?.answer ?? null).length < schema.fields.length).length;
-  // R3-9 (D3): up to 8 wrong examples from the optimiser half; the held-out half never reaches the helper.
-  const half = state.examples.filter(e => e.split === 'eval' && e.optimiserHalf);
+  // R3-9 (D3) and finding 3: the mistakes, mix-ups and up to 8 wrong examples all come from the
+  // optimiser half; nothing of the held-out half reaches the helper.
+  const half = state.examples.filter(e => e.split === 'eval' && visibleToAgents(e));
+  const mistakes = half.filter(e => state.gold.has(e.id) && fieldsRight(schema, state.gold.get(e.id)!.answer, answers.get(e.id)?.answer ?? null).length < schema.fields.length).length;
   const gold = new Map(half.filter(e => state.gold.has(e.id)).map(e => [e.id, state.gold.get(e.id)!.answer]));
-  const examples = wrongExamples(schema, half, promptKeys(v), gold, new Map(half.filter(e => answers.has(e.id)).map(e => [e.id, answers.get(e.id)!.answer])));
+  const said = answersForHelpers(half.filter(e => answers.has(e.id)).map(e => answers.get(e.id)!));
+  const examples = withLabelerNotes(wrongExamples(schema, half, promptKeys(v), gold, said.predicted, undefined, said.notes), half, await labelerNotes(projectId, state));
   busyProjects.add(projectId);
   setLive(projectId, {agent: 'prompt_agent', working: `Reading the ${versionLabel(v)} mistakes…`, reply: null});
   await postEvent(projectId, 'start', 'user', `asked the Prompt helper to improve ${versionLabel(v)}`, {path: '/prompt'});
   let outcome = 'error';
   try {
-    const m = report.metrics;
+    const m = await scoreOnOptimiserHalf(setup, v, report.endpoint, state.examples, state.gold);
     const out = await agents.draftImprovement(
       {version: versionLabel(v), template: v.template, features: v.features, schema, mixUps: m.mixUps.slice(0, 8), lowestField: m.lowestField, lowestValue: m.lowestValue, mistakes, examples},
       gateway.agentModel(),

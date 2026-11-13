@@ -83,7 +83,8 @@ export async function tick(state: ProjectState) {
   // Reports for scoring that finished while no page built them cost nothing: always built.
   if (state.setup?.schema) {
     for (const r of state.runs.filter(r => r.state === 'done')) {
-      if (state.reports.some(x => x.promptVersionId === r.promptVersionId && x.endpoint === r.endpoint && !x.archivedNow)) continue;
+      // Only a first report: one a gold edit archived is rebuilt by the next reader of scores (lazy).
+      if (state.reports.some(x => x.promptVersionId === r.promptVersionId && x.endpoint === r.endpoint)) continue;
       const v = state.versions.find(v => v.id === r.promptVersionId);
       if (v) void once(`report:${v.id}:${r.endpoint}`, () => buildReport(projectId, state.setup!, v, r.endpoint, state.examples, state.gold, state.contextId));
     }

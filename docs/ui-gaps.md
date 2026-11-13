@@ -120,6 +120,47 @@ Canvas rows 11 ("Fixes from the MVP review") and 12 ("Mismatches on Gold Labels"
 | Gold Labels (finding 2) | The Model answer card picks the version to compare with (default: the best scored version with answers on the whole eval set). A Mismatches tab lists the eval examples where that version disagrees with the gold label, wrong in the most versions first, with the model's answer shown and the different field in red. "Keep my label" and "Use the model's answer" (or a third answer on the chips) take the example off the list and are recorded |
 | Prompt versions (finding 2) | The AI Suggestion "The model disagrees with N of your labels" right after the first score, and "N examples were wrong in every version" when Auto Optimise ends without a pass; Review labels opens the Mismatches tab |
 
+## Done on 2026-11-11: acceptance round 4
+
+Evelyn approved canvas row 13 ("Acceptance round 4") and asked for the code (2026-11-11). What the
+code does:
+
+| Item | What the code does |
+| --- | --- |
+| R4-1 Score | "Score" stays, with the real metric in small grey text next to it: "Lowest field macro-F1" on the big number, "Macro-F1" on the field column. No hover |
+| R4-2 Fade | No fade at the bottom of the version card or the Versions list |
+| R4-3 Rounds | The AI Suggestion has no rounds box. Auto Optimise always opens one dialog: "Start from" (only when a better minor of the same major exists; the best is picked), "Max rounds" (prefilled 10), Cancel and Start. The "model disagrees" suggestion also lost its rounds box |
+| R4-4 Why | On Mismatches the Model answer card adds "Model's reason" (the model's own sentence), or "Not readable" with the invalid reason in red. Your answer adds "Why", saved with Keep or Change. Notes on optimiser-half examples go to the Optimiser and Improve with AI as the person's own reading of the label; notes on the held-out half never reach a helper |
+| R4-5 Reviewed | One "Compare with" for the page, at the end of the tab row: every tab shows that version's answers. A review belongs to a gold label and a version. Mismatches has "To review N / Reviewed M" for the picked version; a reviewed example shows the decision ("Kept my label", "Used the model's answer" or "Changed my label"), its time, the note read-only, and Reopen. Reopen puts it back in To review, and a changed label goes back to what it was |
+| R4-6 Invalid | Invalid answers and answers the safety filter stopped are left out of every score (reports, the Optimiser's comparisons) and counted on their own: "Scored on 16 of 17 examples · 1 invalid (6%, above 1%) · 0 filtered left out" under the field table, red when over the cap. Every pass also needs at most 1% invalid answers (the project's own limit when Setup sets one). The Optimiser's per-example score still counts an invalid answer as 0 and skips filtered ones |
+
+Not drawn, decided in code: a reviewed example with no note shows no Why box; "Reviewed" with
+nothing in it shows "Nothing reviewed yet".
+
+## Done on 2026-11-11: acceptance round 5
+
+Evelyn said go on Claude's picks (2026-11-11). These are small changes coded without new canvas
+boards; the canvas still shows the old states for them.
+
+| Item | What the code does |
+| --- | --- |
+| R5-8 Gold Labels | An ordinary step: no "recommended" tag in the step bar. Setup's pass rule has no "None" any more (it skipped gold labels; a project saved with none opens on Default), and the unused skip call is gone |
+| R5-1 Mismatches | When a version has scores, the Mismatches tab (count "–") and Compare with (disabled) are there from the first paint, so nothing pops in |
+| R5-2 Compare with | The first visit picks the best version; from then on the pick holds for the session (per project). Only the "(best)" mark moves |
+| R5-3 AI Suggestion | No "or" between Improve with AI and Auto Optimise |
+| R5-4 After gold edits | Reports the edits archived are rebuilt from saved answers (nothing is labeled). Meanwhile the version card shows a "Scores updating" badge instead of "Not scored", and there is no AI Suggestion. Start in the Auto Optimise dialog takes you to the Optimiser panel |
+| R5-5 Many edits | A review applies to the list at once, so you keep going. Nothing else is worked out: a grey "Scores out of date" note (why on hover) shows next to Compare with and on Prompt versions. Prompt versions has a "Rebuild scores" button in the page head (2026-11-12, not drawn), which works every score out again from saved answers |
+| R5-6 Ties | A dry run that ties its parent (as many fields right, on different examples) goes on to the full labeling, with a grey "Tied" badge next to its score. It counts as a wasted round, and 2 ties in a row end the run |
+| R5-7 Parent | Round 1 always changes the version you started from. Each round says "from vX" before its change, with why on hover (best on N examples of the optimiser half). The dry run's Now line says "against vX". The dialog says how later rounds pick |
+
+## Done on 2026-11-12: acceptance round 6
+
+Canvas page 2, row 14 ("Acceptance round 6"), approved by Evelyn. She skipped R6-4 and R6-1.
+
+- **R6-2.** An eye icon button in the Versions header, left of All / Major, hides versions the Optimiser dropped. The hover says "Hide dropped versions"; while hiding, the eye is crossed out on a grey button and says "Show dropped versions". Off by default, remembered for the session (per project). It shows in the All view only.
+- **R6-3.** On Mismatches nothing saves on its own. The Your answer header keeps its place and holds "Use the model's answer" (it only fills the chips) and Save. Save records keeping the label, the model's answer, or a third answer, so "Keep my label" and Reopen are gone. A reviewed item opens in place with its review filled in; Save is off until the chips or Why change ("Not saved" shows), and saving adds a review, updates the item where it is, and shows "N reviews" with the earlier ones on hover. On this tab "Next: Prompt Engineering" is grey, so Save is the one accent button.
+- **Run end.** A run that finishes without a pass (or is stopped) keeps its panel, tagged Finished, until a version is picked (remembered for the session). Under the round line it says either "vX beat vY: a against b" or "No change beat vY. vY is still the best at b", with the detail on hover and a "Show vX" button. A run that passes still goes straight on to the training set.
+
 ## Still different from the canvas
 
 | Where | Canvas | Code | Why |
@@ -151,7 +192,7 @@ Canvas rows 11 ("Fixes from the MVP review") and 12 ("Mismatches on Gold Labels"
 | Choosing which models to use | One labeling model per project, chosen on Setup (decided 2026-11-09). Comparing models comes later |
 | Reading document links | The helpers read a linked document with the `read_doc` tool. The public build's stand-in opens nothing, so the helper asks for the pasted text; the internal agent connects the real document service (docs/handover/integration.md) |
 | Agent replies | The helpers read model names and version labels the way the pages show them. The page views hold no cost or time, and the helpers' rules say never to mention either (MVP review finding 16) |
-| Gold Labels, a version with no answer for an example | The Model answer card keeps its version picker and says "No answer from this version for this example" (not drawn) |
+| Gold Labels, a version with no answer for an example | The Model answer card says "No answer from this version for this example" (not drawn) |
 | Gold Labels, no mismatches left | The Mismatches tab shows "No mismatches left" with the usual empty-state look (not drawn) |
 
 ## Tech changes

@@ -294,3 +294,22 @@ test('relabelInvalid does not try again an invalid answer the same task saved be
   assert.deepEqual([done?.state, done?.done, done?.invalid], ['done', 6, 6]);
   assert.equal(stats.calls, 6, 'each example called once: its own invalid answers are results');
 });
+
+test("every labeling prompt ends with the site's reason line, and the model's reason is kept with the answer", async () => {
+  const {REASON_LINE} = await import('@tsp/domain');
+  const {db, catalog, v, ids} = await setup(2, 'lab-reason');
+  const asked: string[] = [];
+  const gateway = fakeGateway(async req => {
+    const c = req.messages[0].content;
+    asked.push(typeof c === 'string' ? c : c.map(p => (p.type === 'text' ? p.text : '')).join(''));
+    return req.traceId === '0' ? '{"reason": "It shows a day out.", "format": "Vlog"}' : '{"format": "Vlog"}';
+  });
+  const lab = createLabeling({db, catalog, gateway, locks: memoryLocks()});
+  const t = await lab.createTask(input(ids, v));
+  await lab.runTask(t.id);
+  assert.ok(asked.length === 2 && asked.every(a => a.startsWith('Label post') && a.endsWith(REASON_LINE)));
+  const preds = await lab.predictions(v.id, 'A', t.settingsHash);
+  assert.equal(preds.get('ex_0')?.reason, 'It shows a day out.');
+  assert.deepEqual(preds.get('ex_0')?.answer, {format: ['Vlog']});
+  assert.equal(preds.get('ex_1')?.reason, undefined);
+});
