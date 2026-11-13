@@ -9,7 +9,6 @@ import type {
   DatasetSnapshot,
   EndpointId,
   EndpointInfo,
-  FeatureSelection,
   GoldLabel,
   ModelSettings,
   NodeId,
@@ -18,14 +17,11 @@ import type {
   Project,
   MismatchList,
   ProjectState,
-  PromptImage,
   PromptVersion,
   Schema,
-  SetupVersion,
-  TrainingRow,
-  TrainingSet,
+  ProjectSettings,
+  StructuredPrompt,
 } from './types.ts';
-import type {LabelingTask} from './labeling-api.ts';
 import type {ExampleMedia, FeatureInfo} from './platform-api.ts';
 
 /**
@@ -41,13 +37,9 @@ import type {ExampleMedia, FeatureInfo} from './platform-api.ts';
  * part of this contract: they come from an `EventStreamPort`.
  */
 
-export type SetupPatch = Partial<Pick<SetupVersion, 'task' | 'schema' | 'thresholds' | 'models' | 'steps'>>;
-
 /** A new version as the services pass it around (never sent by the client; see `CreateVersionRequest`). */
 export interface NewVersion {
-  template: string;
-  features: FeatureSelection;
-  images: PromptImage[];
+  structured: StructuredPrompt;
   /** The version this one was edited from; null for the first version. */
   parent: PromptVersion | null;
   madeBy: Actor;
@@ -55,8 +47,6 @@ export interface NewVersion {
   kind: 'minor' | 'major';
   /** An Optimiser change: a minor in the run's own major. */
   inMajor?: number;
-  schema: Schema;
-  schemaVersion: number;
 }
 
 export interface RuntimeInfo {
@@ -77,9 +67,8 @@ export interface TickRequest {
 
 export interface CreateVersionRequest extends Idempotent {
   projectId: string;
-  template: string;
-  features: FeatureSelection;
-  images: PromptImage[];
+  /** The prompt's parts; the bff compiles the text the model reads. */
+  structured: StructuredPrompt;
   /** The version this one was edited from; null for the first version. */
   parentId: string | null;
   /** Who wrote the text: the user, or the Prompt helper whose draft the user saved. */
@@ -137,22 +126,12 @@ export interface ReviewGoldRequest {
   note?: string;
 }
 
-export interface LabelTestSetRequest extends Idempotent {
+export interface SaveSettingsRequest extends ProjectSettings {
   projectId: string;
-  promptVersionId: string;
-  endpoint: EndpointId;
-  estimateUsd: number;
 }
 
-export interface StartTrainingSetRequest extends Idempotent {
+export interface DeleteProjectRequest {
   projectId: string;
-  promptVersionId: string;
-  endpoint: EndpointId;
-  estimateUsd: number;
-  /** Also label the test examples that have no gold label and no answer from this version. */
-  labelTest?: boolean;
-  /** Resume this training set instead of starting a new one. */
-  resumeTrainingSetId?: string;
 }
 
 export interface SendMessageRequest {
@@ -174,8 +153,14 @@ export interface BffContract {
   /** One check of what should be running in a project (keyed starts, safe to call often). */
   tick(req: TickRequest): Promise<void>;
 
-  // Setup
-  saveSetup(projectId: string, patch: SetupPatch): Promise<SetupVersion>;
+  /**
+   * Deletes a project for good: stops its sampling, labeling and Optimiser runs first, then removes
+   * every record it owns (dataset, gold labels, versions, answers, reports, runs, chat).
+   */
+  deleteProject(req: DeleteProjectRequest): Promise<void>;
+
+  // Project Settings (the pass rule and the labeling model). Saving also confirms them.
+  saveSettings(req: SaveSettingsRequest): Promise<void>;
 
   // Dataset & Gold labels
   getSamplePoolSize(): Promise<number>;
@@ -184,12 +169,9 @@ export interface BffContract {
   startSampleDataset(projectId: string, count: number): Promise<DatasetSnapshot | null>;
   stopSampleDataset(projectId: string): Promise<void>;
   uploadDatasetText(projectId: string, name: string, text: string): Promise<DatasetUploadResult>;
-  applySplit(projectId: string, snapshotId: string, evalSize: number, testSize: number): Promise<void>;
   saveGold(projectId: string, exampleId: string, schemaVersion: number, answer: Answer, revealed: boolean, source?: GoldLabel['source']): Promise<GoldLabel>;
   uploadGold(req: UploadGoldRequest): Promise<GoldUploadResult>;
   importBundledGold(projectId: string): Promise<GoldUploadResult>;
-  /** Dataset's Check labels: the Labels helper reads a sample and may propose schema changes. */
-  checkLabels(projectId: string, page: PageContext): Promise<AgentProposal | null>;
   /** Examples where versions disagree with the gold label, for one version (left out: the best). */
   mismatches(projectId: string, promptVersionId?: string | null): Promise<MismatchList>;
   reviewGold(req: ReviewGoldRequest): Promise<void>;
@@ -197,7 +179,10 @@ export interface BffContract {
   rebuildReports(projectId: string): Promise<number>;
 
   // Prompts, evaluation & optimiser
-  /** Version numbers are assigned by the catalog, never by the browser. */
+  /**
+   * Saves a structured prompt as a new version. Version numbers are assigned by the catalog. A
+   * change to the label signature (field or value names, kind, bounds) bumps the schema version.
+   */
   createVersion(req: CreateVersionRequest): Promise<PromptVersion>;
   /** A click on Score, Resume or Rerun: always starts (the user's start). */
   scoreVersion(req: ScoreVersionRequest): Promise<void>;
@@ -214,12 +199,6 @@ export interface BffContract {
   /** A version's saved answers on one model, by example id. */
   predictionsFor(promptVersionId: string, endpoint: EndpointId, settings: ModelSettings): Promise<Record<string, Prediction>>;
 
-  // Test set answers (Gold Labels) and the final run (train + test). Leaves with the 0.x Training Set step.
-  labelTestSet(req: LabelTestSetRequest): Promise<LabelingTask>;
-  startTrainingSet(req: StartTrainingSetRequest): Promise<TrainingSet>;
-  stopTrainingSet(trainingSetId: string): Promise<void>;
-  trainingRows(trainingSetId: string): Promise<TrainingRow[]>;
-
   // Assistant & proposals
   chatHistory(projectId: string): Promise<ChatMessage[]>;
   /** The turn running now, if any: who works, what it is doing, the reply so far. */
@@ -227,9 +206,9 @@ export interface BffContract {
   /** Which helper answers the next message on this page: one that joined on it stays until the page changes. */
   getAnsweringAgent(projectId: string, page: PageContext): Promise<AgentPreset>;
   sendUserMessage(req: SendMessageRequest): Promise<AgentProposal | null>;
-  openProposals(projectId: string, kind: AgentProposal['kind']): Promise<AgentProposal[]>;
+  openProposals(projectId: string): Promise<AgentProposal[]>;
   /** Open and approved proposals, oldest first (Ask AI cards). */
-  proposals(projectId: string, kind: AgentProposal['kind']): Promise<AgentProposal[]>;
+  proposals(projectId: string): Promise<AgentProposal[]>;
   closeProposal(req: CloseProposalRequest): Promise<void>;
 }
 

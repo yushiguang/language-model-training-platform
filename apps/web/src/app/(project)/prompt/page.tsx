@@ -2,79 +2,33 @@
 
 import {useGo} from '@/components/nav';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode} from 'react';
-import type {Answer, EndpointId, LabelingRun, MismatchList, OptimisationRun, OptimiserRound, PageContext, PromptVersion} from '@tsp/contracts';
-import {dryRunSize, optimiserVersions, recommend, stepLine, versionLabel, systemConfig} from '@tsp/domain';
+import type {Answer, LabelingRun, MismatchList, OptimisationRun, OptimiserRound, PageContext, PromptVersion} from '@tsp/contracts';
+import {aiSuggestion, canScore, compilePrompt, dryRunSize, optimiserVersions, stepLine, versionLabel, systemConfig, type SuggestionAction} from '@tsp/domain';
 import {Frame, ProjectPage, useOpenAskAi} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {ScoreChart} from '@/components/prompt/ScoreChart';
-import {useChecks, Workbench, type Draft} from '@/components/prompt/Workbench';
-import {useAgentDrafts} from '@/components/prompt/useAgentDrafts';
-import {approveNode, createVersion, improveWithAi, mismatches, predictionsFor, retryOptimiser, scoreVersion, startOptimiser, stopOptimiser, rebuildReports, stopRun, type ProjectState} from '@/backend-api';
-import {Badge, Banner, Below, Button, Card, Code, dateTime, Dialog, Empty, Hov, Icon, IconToggle, Metric, num, One, Opt, PageHead, Passed, Progress, reportActionError, Score, Seg, Suggestion, Table, timeOfDay} from '@/ui';
+import {useSettings} from '@/components/ProjectSettings';
+import {approveNode, improveWithAi, mismatches, predictionsFor, retryOptimiser, scoreVersion, startOptimiser, stopOptimiser, rebuildReports, stopRun, track, type ProjectState} from '@/backend-api';
+import {Badge, Banner, Below, Button, Card, Code, dateTime, Dialog, Empty, Hov, Icon, IconToggle, Metric, num, One, Opt, PageHead, Passed, Progress, reportActionError, Score, Seg, Suggestion, Table, timeOfDay, useCopy} from '@/ui';
 import {LabelDistribution, labelCounts} from '@/components/LabelDistribution';
 import {fieldRows, modelName, reportFor, runsFor, versionScore} from '@/components/prompt/scores';
 
-const VERSIONS_PAGE: PageContext = {label: 'Prompt versions', agent: 'front_desk', intent: 'answer', hint: 'Ask me about any version.', context: {}};
+const VERSIONS_PAGE: PageContext = {label: 'Prompt Tuning', agent: 'front_desk', intent: 'answer', hint: 'Ask me about any version.', context: {}};
 
 export default function PromptPage() {
   const [page, setPage] = useState<PageContext>(VERSIONS_PAGE);
   return (
     <ProjectPage node="prompt" page={page}>
       {({state}) =>
-        !state.snapshot?.split || !state.setup?.schema ? (
-          <Frame head={<PageHead title="Prompt versions" />}>
-            <Empty title="No dataset yet" text="Split the dataset first, then write the first prompt here." />
+        !state.versions.length || !state.setup?.schema ? (
+          <Frame head={<PageHead title="Prompt Tuning" />}>
+            <Empty title="No prompt yet" text="Write and approve the first prompt on Prompt Design." />
           </Frame>
-        ) : state.versions.length ? (
-          <Versions state={state} setPage={setPage} />
         ) : (
-          <FirstPrompt state={state} setPage={setPage} />
+          <Versions state={state} setPage={setPage} />
         )
       }
     </ProjectPage>
-  );
-}
-
-const EMPTY: Draft = {template: '', features: {video: [], photo_text: [], metadata: []}, images: []};
-
-/** The first prompt becomes v1 and is scored right away (the click is the user's start). */
-function FirstPrompt({state, setPage}: {state: ProjectState; setPage: (p: PageContext) => void}) {
-  const [draft, setDraft] = useState<Draft>(EMPTY);
-  const types = useMemo(() => [...new Set(state.examples.map(e => e.type))], [state.examples]);
-  const check = useChecks(draft, state.setup?.schema, types);
-  useEffect(() => {
-    setPage({
-      label: 'First prompt',
-      agent: 'prompt_agent',
-      intent: draft.template.trim() ? 'revise_prompt' : 'draft_prompt',
-      hint: 'Paste the prompt you use today, or ask me to draft one from your schema.',
-      context: {schema: state.setup?.schema, task: state.setup?.task, template: draft.template, features: draft.features, images: draft.images},
-    });
-  }, [draft.template, draft.features, draft.images]); // eslint-disable-line react-hooks/exhaustive-deps
-  useAgentDrafts(state, d => setDraft(cur => ({...cur, template: d.template, features: d.features ?? cur.features})));
-  // A failed create shows the page's red banner with Retry (the Button reports it).
-  const create = async () => {
-    const v = await createVersion({projectId: state.project.id, template: draft.template, features: draft.features, images: draft.images, parentId: null, madeBy: 'user', change: 'First prompt', kind: 'major'});
-    void scoreVersion({projectId: state.project.id, promptVersionId: v.id});
-  };
-  const dirty = draft.template !== '' || Object.values(draft.features).some(l => l.length);
-  const blocked = check.errors.length > 0 || !draft.template.trim();
-  return (
-    <Frame
-      head={
-        <PageHead
-          title="First prompt"
-          actions={
-            <>
-              <Button label="Discard" kind="ghost" disabled={!dirty} onClick={() => setDraft(EMPTY)} />
-              <Button label="Create and score" kind="primary" disabled={blocked} onClick={create} />
-            </>
-          }
-        />
-      }
-    >
-      <Workbench draft={draft} onChange={setDraft} check={check} />
-    </Frame>
   );
 }
 
@@ -94,7 +48,7 @@ function saveHideDropped(projectId: string, on: boolean) {
   }
 }
 
-/** The newest run, when it ended without a pass (a pass goes on to the training set and says so). */
+/** The newest run, when it ended without a pass (a pass shows on its version). */
 const endedRun = (s: ProjectState): OptimisationRun | null => {
   const o = s.optimisation[0];
   return o && ((o.state === 'done' && o.stopReason !== 'passes') || o.state === 'stopped') ? o : null;
@@ -166,7 +120,7 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
   const running = state.runs.some(r => r.state === 'running') || state.optimisation.some(o => o.state === 'running');
 
   useEffect(() => {
-    setPage({...VERSIONS_PAGE, label: `Prompt versions · ${versionLabel(sel)}`, context: {version: versionLabel(sel)}});
+    setPage({...VERSIONS_PAGE, label: `Prompt Tuning · ${versionLabel(sel)}`, context: {version: versionLabel(sel)}});
   }, [sel.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const scored = list.map(v => ({v, s: versionScore(state, v.id)}));
@@ -177,17 +131,18 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
   const selRunning = runsFor(state, sel.id).some(r => r.state === 'running' && r.purpose !== 'optimiser');
   // A version labeled while the eval set has no gold labels: what can be known without scores.
   const selNoGold = !showPanel && !selDropped && !selRunning && !versionScore(state, sel.id) && labeledRuns(state, sel.id).length > 0;
-  const onMake = async (vId: string, ep: EndpointId) => {
-    await approveNode(state.project.id, 'prompt');
-    await go(href('/training-set', {v: vId, m: ep}));
-  };
   const pick = (id: string) => choose(run && id === run.stepVersionId ? null : id);
 
   const rowRight = (v: PromptVersion, s: {score: number; passed: boolean} | null) => {
     const o = info.get(v.id)?.round;
     const lab = labeledRuns(state, v.id)[0];
     if (o?.outcome === 'running' || runsFor(state, v.id).some(r => r.state === 'running' && r.purpose !== 'optimiser')) return <Badge text="Running" tone="run" />;
-    if (o?.outcome === 'dropped') return <Badge text="Dropped" icon={false} />;
+    if (o?.outcome === 'dropped')
+      return (
+        <span className="badge b-gray">
+          <Hov text="Dropped" tip={droppedWhy(state, v, o)} />
+        </span>
+      );
     if (o?.outcome === 'stopped') return <Badge text="Stopped" icon={false} />;
     if (s) return <Score v={s.score} ok={s.passed} />;
     if (lab)
@@ -256,21 +211,22 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
         <ScoreChart points={points} threshold={t.macroF1} selected={showPanel ? undefined : versionLabel(sel)} onSelect={l => choose(list.find(v => versionLabel(v) === l)?.id ?? null)} />
       ) : (
         <div className="pv-empty">
-          <span className="t-3">{!t ? 'Evaluation is off, so versions have no scores' : hasGold ? 'Scores show here once a version is scored' : 'Scores show here once the eval set has gold labels'}</span>
+          <span className="t-3">{hasGold ? 'Scores show here once a version is scored' : 'Scores show here once the eval set has gold labels'}</span>
         </div>
       )}
     </Card>
   );
 
   // No advice from scores that are out of date (Rebuild scores first).
-  const advice = !running && !showPanel && !selDropped && !state.scoresUpdating ? <Advice state={state} onMake={onMake} selId={sel.id} onStarted={() => setSel(null)} /> : null;
+  // A dropped version gets one too: it says which version to go back to (spec 6.3).
+  const advice = !running && !showPanel && !state.scoresUpdating ? <Advice state={state} selId={sel.id} onStarted={() => setSel(null)} onSwitch={id => choose(id)} /> : null;
   return (
     <Frame
       head={
         <PageHead
-          title="Prompt versions"
+          title="Prompt Tuning"
           actions={
-            // Evelyn 2026-11-12: scores are rebuilt only here, by hand. Gold edits, Setup changes
+            // Evelyn 2026-11-12: scores are rebuilt only here, by hand. Gold edits, settings changes
             // and new code all move scores; nothing tries to sense them one by one.
             <>
               {state.scoresUpdating && (
@@ -379,6 +335,14 @@ function LeftOut({m, cap}: {m: ProjectState['reports'][number]['metrics']; cap: 
       </span>
     </div>
   );
+}
+
+/** Why the Optimiser dropped a version, for the hover on its Dropped badge (spec 6.3). */
+function droppedWhy(state: ProjectState, v: PromptVersion, r: OptimiserRound): string {
+  const d = r.dryRun;
+  if (!d) return 'The Optimiser dropped this change before scoring it';
+  const parent = state.versions.find(x => x.id === d.parentId);
+  return `In the dry run ${versionLabel(v)} got ${d.passed} of ${d.examples} examples fully right and ${parent ? versionLabel(parent) : 'the version it changed'} got ${d.parentPassed}. It was no better, so it was not scored on the eval set`;
 }
 
 const ROUND_RESULT: Record<OptimiserRound['outcome'], {text: string; tone?: 'run' | 'err'} | null> = {
@@ -669,6 +633,12 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
   // One labeling model per project.
   const ep = setup.models[0]?.endpoint;
   const rep = ep ? reportFor(state, v.id, ep) : undefined;
+  const settings = useSettings();
+  // A click on Score is the user's own start; the first one confirms Project Settings (spec 2.3).
+  const score = async () => {
+    if (!(await settings.confirmed())) return;
+    void scoreVersion({projectId: state.project.id, promptVersionId: v.id});
+  };
   const actions = (
     <div style={{marginLeft: 'auto', display: 'flex', gap: 8, paddingBottom: rep ? 8 : 0}}>
       <Button label="Edit prompt" kind="ghost" href={href('/prompt/edit', {v: v.id})} />
@@ -678,9 +648,10 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
   if (!t || !rep) {
     const runs = runsFor(state, v.id);
     const last = runs[0];
-    const stopped = !!t && !runs.some(r => r.state === 'done') && !runs.some(r => r.state === 'failed') && !!last;
-    const why = !t
-      ? 'Evaluation is off, so versions have no scores.'
+    const stopped = !runs.some(r => r.state === 'done') && !runs.some(r => r.state === 'failed') && !!last;
+    const ready = canScore(state.facts);
+    const why = !ready
+      ? 'Scores appear once enough examples have gold labels.'
       : runs.some(r => r.state === 'done')
         ? 'Scores appear when the eval set has gold labels.'
         : runs.some(r => r.state === 'failed')
@@ -688,7 +659,7 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
           : last
             ? `Scoring stopped at ${num(last.done)} of ${num(last.total)}.`
             : 'Not scored yet.';
-    const canScore = t && !runs.some(r => r.state === 'done');
+    const scorable = ready && !runs.some(r => r.state === 'done');
     return (
       <Card className={box.className} style={box.style}>
         <div style={{display: 'flex', alignItems: 'center', gap: 16}}>
@@ -710,7 +681,7 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
           ) : (
             <span className="t-3">{why}</span>
           )}
-          {canScore && <Button label={runs.length ? 'Resume' : 'Score'} size="sm" icon="play" onClick={() => void scoreVersion({projectId: state.project.id, promptVersionId: v.id})} />}
+          {scorable && <Button label={runs.length ? 'Resume' : 'Score'} size="sm" icon="play" onClick={score} />}
         </div>
       </Card>
     );
@@ -738,25 +709,28 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
 }
 
 /**
- * The AI Suggestion card. The next step is chosen by code from the reports; the card is hidden
- * while scoring or the Optimiser runs (design: no card while it waits). Below the bar it offers
- * Improve with AI (a draft in the editor) or Auto Optimise, whose dialog asks for the rounds.
+ * The AI Suggestion card (spec 1.0.0, 6.3). Code picks one of six fixed templates from the
+ * project's records (`aiSuggestion`), so the headline always says what to do. The card is hidden
+ * while scoring or the Optimiser runs. Improve with AI drafts in the editor; Auto Optimise opens
+ * one dialog that asks for the rounds.
  */
-function Advice({state, onMake, selId, onStarted}: {state: ProjectState; onMake: (versionId: string, endpoint: EndpointId) => Promise<void>; selId: string; onStarted: () => void}) {
+function Advice({state, selId, onStarted, onSwitch}: {state: ProjectState; selId: string; onStarted: () => void; onSwitch: (versionId: string) => void}) {
   const {href} = useProject();
   const go = useGo();
+  const settings = useSettings();
   const [rounds, setRounds] = useState(String(systemConfig().optimiser.defaultMaxRounds));
-  const a = recommend(state, null);
   // Review finding 2: where the model disagrees with gold labels (saved answers only, nothing labeled).
   const [mm, setMm] = useState<MismatchList | null>(null);
+  const scored = state.reports.some(r => !r.archivedNow);
   useEffect(() => {
     let live = true;
-    if (a.kind === 'keep_improving') void mismatches(state.project.id).then(m => live && setMm(m));
+    if (scored) void mismatches(state.project.id).then(m => live && setMm(m));
     return () => {
       live = false;
     };
-  }, [state.project.id, a.kind, state.contextId, state.reports.length, state.optimisation[0]?.state]); // eslint-disable-line react-hooks/exhaustive-deps
-  const name = (id: string | null) => (id ? versionLabel(state.versions.find(v => v.id === id)!) : '');
+  }, [state.project.id, scored, state.contextId, state.reports.length, state.optimisation[0]?.state]); // eslint-disable-line react-hooks/exhaustive-deps
+  const a = aiSuggestion(state, {selectedId: selId, mismatches: mm ? {open: mm.items.length, wrongEverywhere: mm.wrongEverywhere, reviewedAll: mm.reviewedAll} : null});
+  const [copied, copy] = useCopy();
   const latest = state.versions[0];
   const openAskAi = useOpenAskAi();
   const improve = (versionId: string) => {
@@ -774,76 +748,63 @@ function Advice({state, onMake, selId, onStarted}: {state: ProjectState; onMake:
     onStarted();
     startOptimiser({projectId: state.project.id, maxRounds: n, startVersionId: versionId}).catch(e => reportActionError(`The Optimiser could not start: ${(e as Error).message}`, () => start(versionId, n)));
   };
-  const auto = () => {
+  const auto = async () => {
+    // Paid work: the first start confirms Project Settings (spec 2.3).
+    if (!(await settings.confirmed())) return;
     const sel = state.versions.find(v => v.id === selId) ?? latest;
     const selScore = versionScore(state, sel.id)?.score ?? null;
     const best = state.versions
       .filter(v => v.major === sel.major && v.schemaVersion === sel.schemaVersion)
       .map(v => ({v, s: versionScore(state, v.id)?.score}))
       .filter(x => x.s != null)
-      .sort((a, b) => b.s! - a.s!)[0];
+      .sort((x, y) => y.s! - x.s!)[0];
     const better = best && best.v.id !== sel.id && (selScore == null || best.s! > selScore);
     setRounds(String(systemConfig().optimiser.defaultMaxRounds));
     setAsk({sel, selScore, best: better ? best.v : null, bestScore: better ? best.s! : 0, from: better ? best.v.id : sel.id});
   };
-  // The newest run that passed and started the training and test sets.
-  const done = state.optimisation[0];
-  const passedBy = done?.state === 'done' && done.stopReason === 'passes' && done.trainingSetId ? done.history.filter(h => h.passed && h.confirm?.passed !== false).at(-1)?.versionId : null;
-  let title: string;
-  let text: string;
-  let acts: React.ReactNode;
-  const lastRun = state.optimisation[0];
-  const disagree = !!mm && !lastRun && mm.reviewedAll === 0 && mm.items.length > 0;
-  const wrongEverywhere = !!mm && lastRun?.state === 'done' && lastRun.stopReason !== 'passes' && mm.wrongEverywhere > 0;
-  if (a.kind === 'make_training_set' && passedBy && a.versionId === passedBy) {
-    title = `${name(passedBy)} passes, training and test sets started`;
-    text = `The Optimiser stopped after round ${done!.round} of ${done!.maxRounds}. Labeling started with ${name(passedBy)}.`;
-    acts = <Button label="Go to Training Set" kind="primary" onClick={() => go(href('/training-set'))} />;
-  } else if (a.kind === 'make_training_set' && a.versionId && a.endpoint) {
-    const latestScore = versionScore(state, latest.id);
-    if (latest.id !== a.versionId && latestScore?.passed) {
-      title = `${versionLabel(latest)} passes, ${name(a.versionId)} is still the best`;
-      text = `${name(a.versionId)} still scores higher (${reportFor(state, a.versionId, a.endpoint)!.metrics.lowestField.macroF1.toFixed(2)}). Use ${name(a.versionId)} for the training and test sets.`;
-    } else {
-      title = `${name(a.versionId)} passes`;
-      text = 'Use it to make the training and test sets.';
+  if (!a) return null;
+  const target = a.versionId ? state.versions.find(v => v.id === a.versionId) : undefined;
+  const finished = state.project.approvedNodes.includes('prompt');
+  const copyPrompt = () => {
+    if (!target) return;
+    copy(compilePrompt(target.structured));
+    track('prompt_copied', {from: 'suggestion'});
+  };
+  // One button per action of the template, in its order; the last is the main one.
+  const button = (act: SuggestionAction, main: boolean) => {
+    const kind = main ? ('primary' as const) : ('secondary' as const);
+    switch (act) {
+      case 'go_gold':
+        return <Button key={act} label="Go to Gold Labels" kind={kind} onClick={() => go(href('/gold'))} />;
+      case 'add_examples':
+        return <Button key={act} label="Add examples" kind={kind} onClick={() => go(href('/dataset'))} />;
+      case 'review_labels':
+        return <Button key={act} label="Review labels" kind={kind} onClick={() => go(href('/gold', {tab: 'mismatches'}))} />;
+      case 'auto_optimise':
+        return <Button key={act} label="Auto Optimise" kind={kind} onClick={auto} />;
+      case 'improve':
+        return <Button key={act} label="Improve with AI" kind={kind} onClick={() => improve(a.versionId!)} />;
+      case 'switch':
+        return <Button key={act} label={`Switch to ${target ? versionLabel(target) : 'it'}`} kind={kind} onClick={() => void (a.versionId && onSwitch(a.versionId))} />;
+      case 'copy_prompt':
+        return <Button key={act} label={copied ? 'Copied' : 'Copy prompt'} icon={copied ? 'check' : 'copy'} kind="secondary" onClick={copyPrompt} />;
+      case 'finish':
+        return finished ? (
+          <span key={act} className="done-at" style={{margin: 0}}>
+            <Badge text="Finished" tone="ok" />
+          </span>
+        ) : (
+          <Button key={act} label="Finish" kind={kind} title="Marks this project as finished. You can still come back and change it." onClick={() => approveNode(state.project.id, 'prompt')} />
+        );
     }
-    acts = (
-      <>
-        <Button label="Improve with AI" onClick={() => improve(a.versionId!)} />
-        <Button label="Make training and test sets" kind="primary" onClick={() => onMake(a.versionId!, a.endpoint!)} />
-      </>
-    );
-  } else if (a.kind === 'no_eval' && a.versionId && a.endpoint) {
-    title = `Make the training and test sets with ${name(a.versionId)}`;
-    text = 'Evaluation is off, so versions have no scores.';
-    acts = <Button label="Make training and test sets" kind="primary" onClick={() => onMake(a.versionId!, a.endpoint!)} />;
-  } else if (a.kind === 'label_gold') {
-    title = a.title;
-    text = 'Scores need gold labels for the eval set.';
-    acts = <Button label="Go to Gold Labels" kind="primary" onClick={() => go(href('/gold'))} />;
-  } else if (a.kind === 'keep_improving' && a.versionId && mm && (disagree || wrongEverywhere)) {
-    // The helpers point to the Mismatches tab right after the first score (before any review or
-    // Optimiser run), and when Auto Optimise ends without a pass. Counts only: they never say
-    // which side is right.
-    title = disagree ? `The model disagrees with ${mm.items.length} of your labels` : `${mm.wrongEverywhere} examples were wrong in every version`;
-    text = disagree ? 'Check them in Gold Labels first, so the Optimiser learns from the right labels' : 'Check your labels for them in Gold Labels';
-    acts = (
-      <div className="row" style={{gap: 8}}>
-        <Button label="Auto Optimise" onClick={auto} />
-        <Button label="Review labels" kind="primary" onClick={() => go(href('/gold', {tab: 'mismatches'}))} />
-      </div>
-    );
-  } else if (a.kind === 'keep_improving' && a.versionId) {
-    title = a.title;
-    text = a.reasons[0] ?? '';
-    acts = (
-      <div className="row" style={{gap: 8}}>
-        <Button label="Improve with AI" onClick={() => improve(a.versionId!)} />
-        <Button label="Auto Optimise" kind="primary" onClick={auto} />
-      </div>
-    );
-  } else return null;
+  };
+  const title = a.title;
+  const text = a.text;
+  const acts = (
+    <div className="row" style={{gap: 8}}>
+      {a.actions.map((x, i) => button(x, i === a.actions.length - 1))}
+    </div>
+  );
   return (
     <section className="card ai" aria-label="AI Suggestion">
       <Suggestion title={title} text={text} actions={acts} />

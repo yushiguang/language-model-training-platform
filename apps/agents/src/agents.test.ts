@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import type {StructuredPrompt} from '@tsp/contracts';
 import {scriptedAgent} from '@tsp/platform';
 import {draftImprovement, partialReply, reflectPrompt, runAgentTurn} from './runtime.ts';
 
-test('runAgentTurn hands off from front_desk to schema_agent and returns a schema proposal', async () => {
+test('runAgentTurn hands off from front_desk to the Prompt helper and returns a structured prompt draft', async () => {
   const llm = scriptedAgent();
   const out = await runAgentTurn(
     {
-      userText: 'Please add value "News" to primary_value in the schema',
+      userText: 'Please add value "News" to primary_value',
       page: {
-        label: 'Setup · evaluation',
+        label: 'Prompt Design',
         agent: 'front_desk',
         intent: 'answer',
         context: {},
@@ -17,7 +18,7 @@ test('runAgentTurn hands off from front_desk to schema_agent and returns a schem
       workspace: {
         projectId: 'pr_1',
         task: 'Tag short videos',
-        schema: null,
+        prompt: null,
         history: [],
         pageView: null,
       },
@@ -27,9 +28,11 @@ test('runAgentTurn hands off from front_desk to schema_agent and returns a schem
 
   assert.equal(out.invocations.length, 2);
   assert.equal(out.invocations[0].to, 'front_desk');
-  assert.equal(out.invocations[1].to, 'schema_agent');
-  assert.equal(out.proposal?.kind, 'schema');
-  assert.ok(out.messages.some(m => m.role === 'event' && m.event === 'join' && m.text === 'Labels helper joined to answer'));
+  assert.equal(out.invocations[1].to, 'prompt_agent');
+  assert.equal(out.proposal?.kind, 'prompt');
+  assert.ok(out.proposal!.payload.structured.fields.length > 0);
+  assert.deepEqual(out.proposal!.payload.unmapped, []);
+  assert.ok(out.messages.some(m => m.role === 'event' && m.event === 'join' && m.text === 'Prompt helper joined to answer'));
   // The front desk's "I'll bring in…" is not shown: the join line says who answers.
   assert.equal(out.messages.filter(m => m.role === 'agent' && m.agent === 'front_desk').length, 0);
 });
@@ -41,7 +44,7 @@ test('an unknown handoff target is ignored and the front desk answers itself', a
     },
   } as unknown as Parameters<typeof runAgentTurn>[1];
   const out = await runAgentTurn(
-    {userText: 'hi', page: {label: 'Setup', agent: 'front_desk', intent: 'answer', context: {}}, workspace: {projectId: 'pr_1', task: '', schema: null, history: [], pageView: null}},
+    {userText: 'hi', page: {label: 'Setup', agent: 'front_desk', intent: 'answer', context: {}}, workspace: {projectId: 'pr_1', task: '', prompt: null, history: [], pageView: null}},
     llm,
   );
   assert.equal(out.invocations.length, 1);
@@ -60,7 +63,7 @@ test('off the report page, the evaluation agent reads the report with a tool and
     {
       userText: 'Is v1.2 good enough?',
       page: {label: 'Prompt versions', agent: 'evaluation_agent', intent: 'explain_report', context: {}},
-      workspace: {projectId: 'pr_1', task: '', schema: null, history: [], pageView: {page: 'prompt', title: 'Prompt versions', summary: '', data: {}}},
+      workspace: {projectId: 'pr_1', task: '', prompt: null, history: [], pageView: {page: 'prompt', title: 'Prompt versions', summary: '', data: {}}},
     },
     scriptedAgent(),
     host,
@@ -75,7 +78,7 @@ test('a tool outside the preset list is refused, and a model that keeps asking s
   const llm = {
     async chat() {
       n++;
-      return JSON.stringify({tool: {name: 'check_template', args: {}}});
+      return JSON.stringify({tool: {name: 'check_prompt', args: {}}});
     },
   } as unknown as Parameters<typeof runAgentTurn>[1];
   const host = {
@@ -84,7 +87,7 @@ test('a tool outside the preset list is refused, and a model that keeps asking s
     },
   };
   const out = await runAgentTurn(
-    {userText: 'hi', page: {label: 'Setup', agent: 'evaluation_agent', intent: 'explain_report', context: {}}, workspace: {projectId: 'pr_1', task: '', schema: null, history: [], pageView: null}},
+    {userText: 'hi', page: {label: 'Setup', agent: 'evaluation_agent', intent: 'explain_report', context: {}}, workspace: {projectId: 'pr_1', task: '', prompt: null, history: [], pageView: null}},
     llm,
     host,
   );
@@ -102,7 +105,7 @@ test('the front desk cannot use start tools; the scripted prompt agent starts sc
     },
   };
   const out = await runAgentTurn(
-    {userText: 'Please score v1.2 on model A', page: {label: 'Prompt versions', agent: 'front_desk', intent: 'answer', context: {}}, workspace: {projectId: 'pr_1', task: '', schema: null, history: [], pageView: null}},
+    {userText: 'Please score v1.2 on model A', page: {label: 'Prompt versions', agent: 'front_desk', intent: 'answer', context: {}}, workspace: {projectId: 'pr_1', task: '', prompt: null, history: [], pageView: null}},
     scriptedAgent(),
     host,
   );
@@ -123,7 +126,7 @@ test('the reply of a JSON answer is read while it arrives', () => {
 test('with progress, the turn reports the live line, the streamed reply and each message as it is final', async () => {
   const seen: string[] = [];
   const out = await runAgentTurn(
-    {userText: 'Is v1 good enough?', page: {label: 'Prompt versions', agent: 'front_desk', intent: 'answer', context: {}}, workspace: {projectId: 'pr_1', task: '', schema: null, history: [], pageView: null}},
+    {userText: 'Is v1 good enough?', page: {label: 'Prompt versions', agent: 'front_desk', intent: 'answer', context: {}}, workspace: {projectId: 'pr_1', task: '', prompt: null, history: [], pageView: null}},
     scriptedAgent(),
     {async call() {
       return {report: null, why: 'No report yet.'};
@@ -140,9 +143,14 @@ test('with progress, the turn reports the live line, the streamed reply and each
   assert.equal(seen.at(-1), 'message:agent');
 });
 
-const optSchema = {fields: [{name: 'format', kind: 'single' as const, values: [{name: 'Vlog', definition: 'a day in a life'}, {name: 'Clip', definition: 'a cut from a longer video'}]}]};
-const optTemplate = 'Label the post.\n\n### 1. format\n  Pick one.\n\n## Output\nJSON';
-const noFeatures = {video: [], photo_text: [], metadata: []};
+const optPrompt: StructuredPrompt = {
+  taskSummary: 'Label the post.',
+  features: {video: ['Description'], photo_text: [], metadata: []},
+  fields: [{name: 'format', kind: 'single', values: [{name: 'Vlog', definition: 'a day in a life'}, {name: 'Clip', definition: 'a cut from a longer video'}]}],
+  generalRules: '',
+  images: [],
+};
+const withNote = (note: string): StructuredPrompt => ({...optPrompt, fields: [{...optPrompt.fields[0], note}]});
 const mix = {field: 'format', kind: 'confused' as const, gold: 'Clip', predicted: 'Vlog', count: 5, exampleIds: []};
 
 test('the Optimiser may read feature descriptions before its change, through the tool host', async () => {
@@ -160,65 +168,101 @@ test('the Optimiser may read feature descriptions before its change, through the
     },
   };
   const out = await reflectPrompt(
-    {template: optTemplate, features: noFeatures, schema: optSchema, triedChanges: [], mixUps: [mix], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null},
+    {prompt: optPrompt, triedChanges: [], mixUps: [mix], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null},
     reading,
     {call: async c => (asked.push(c.name), {OCR_Text: {description: 'text on screen'}})},
   );
   assert.deepEqual(asked, ['read_feature_info']);
-  assert.match(out.template, /Before choosing Vlog/);
+  assert.match(out.prompt.fields[0].note ?? '', /Before choosing Vlog/);
 });
 
 test('merge keeps the rules of both versions', async () => {
-  const a = optTemplate.replace('  Pick one.', '  Pick one.\n  Rule A.');
-  const b = optTemplate.replace('  Pick one.', '  Pick one.\n  Rule B.');
   const out = await reflectPrompt(
-    {mode: 'merge', template: a, features: noFeatures, schema: optSchema, triedChanges: [], mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, other: {template: b, features: noFeatures, change: 'Rule B'}},
+    {mode: 'merge', prompt: withNote('Rule A.'), triedChanges: [], mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, other: {prompt: withNote('Rule B.'), change: 'Rule B'}},
     scriptedAgent(),
   );
-  assert.match(out.template, /Rule A\.[\s\S]*Rule B\./);
+  assert.equal(out.prompt.fields[0].note, 'Rule A.\nRule B.');
+});
+
+test('a helper that renames a value or drops a field is overruled: the Optimiser changes wording only', async () => {
+  const answer = {prompt: {...optPrompt, taskSummary: 'New task.', fields: [{name: 'format', kind: 'multi', values: [{name: 'Daily vlog', definition: 'x'}, {name: 'Clip', definition: 'sharper'}]}, {name: 'extra', kind: 'single', values: []}]}, change: 'c'};
+  const llm = {chat: async () => JSON.stringify(answer)} as unknown as Parameters<typeof runAgentTurn>[1];
+  const out = await reflectPrompt({prompt: optPrompt, triedChanges: [], mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null}, llm);
+  assert.equal(out.prompt.taskSummary, 'New task.');
+  assert.deepEqual(out.prompt.fields.map(f => [f.name, f.kind, f.values.map(v => v.name)]), [['format', 'single', ['Vlog', 'Clip']]]);
+  assert.equal(out.prompt.fields[0].values[1].definition, 'sharper');
 });
 
 test('Improve with AI returns a draft with each change and its reason', async () => {
   const out = await draftImprovement(
-    {version: 'v2', template: optTemplate, features: noFeatures, schema: optSchema, mixUps: [mix], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, mistakes: 5},
+    {version: 'v2', prompt: optPrompt, mixUps: [mix], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, mistakes: 5},
     scriptedAgent(),
   );
   assert.equal(out.changes.length, 1);
   assert.equal(out.changes[0].reason, '5 Clip examples were read as Vlog');
-  assert.ok(out.template.includes(out.changes[0].text));
+  assert.ok(out.prompt.fields[0].note!.includes(out.changes[0].text));
 });
 
 test('a question on a page gets an answer and never a draft (R3-10)', async () => {
-  const ws = {projectId: 'pr_1', task: '', schema: optSchema, history: [], pageView: null};
-  const ask = (userText: string, agent: 'prompt_agent' | 'schema_agent', intent: string, context: Record<string, unknown>) => runAgentTurn({userText, page: {label: 'Edit prompt', agent, intent, context}, workspace: ws}, scriptedAgent());
-  const q = await ask('What does this prompt do with Clips?', 'prompt_agent', 'revise_prompt', {template: optTemplate, schema: optSchema});
+  const ws = {projectId: 'pr_1', task: '', prompt: optPrompt, history: [], pageView: null};
+  const ask = (userText: string, intent: string) => runAgentTurn({userText, page: {label: 'Edit prompt', agent: 'prompt_agent', intent, context: {}}, workspace: ws}, scriptedAgent());
+  const q = await ask('What does this prompt do with Clips?', 'revise_prompt');
   assert.equal(q.proposal, null);
   assert.ok(q.messages.some(m => m.role === 'agent' && /changed nothing/.test(m.text)));
-  const vague = await ask('improve it', 'prompt_agent', 'revise_prompt', {template: optTemplate, schema: optSchema});
+  const vague = await ask('improve it', 'revise_prompt');
   assert.equal(vague.proposal, null);
   assert.ok(vague.messages.some(m => m.role === 'agent' && m.text.endsWith('?')));
-  const labels = await ask('How many fields are there?', 'schema_agent', 'revise_schema', {schema: optSchema});
-  assert.equal(labels.proposal, null);
-  // A request still drafts.
-  const change = await ask('Treat cooking clips as Tutorial', 'prompt_agent', 'revise_prompt', {template: optTemplate, schema: optSchema});
+  // A request still drafts: the rule lands in the note of the field it names.
+  const change = await ask('In format, treat cooking clips as Clip', 'revise_prompt');
   assert.equal(change.proposal?.kind, 'prompt');
+  assert.match(change.proposal!.payload.structured.fields[0].note ?? '', /cooking clips/);
+});
+
+test('importing a pasted prompt sorts it into the structured parts and lists what has no place', async () => {
+  const pasted = [
+    'You label customer messages for a support team.',
+    '',
+    '## Intent',
+    '- Complaint: something went wrong and the customer wants it fixed',
+    '- Question: the customer asks how to do something',
+    'When a message does both, choose Complaint.',
+    '',
+    '## Rules',
+    '- If the message is empty, choose Question.',
+    '',
+    '## Examples',
+    'Message: "my order is late" -> Complaint',
+    '',
+    '## Output',
+    'Return JSON only.',
+  ].join('\n');
+  const out = await runAgentTurn({userText: pasted, page: {label: 'Prompt Design', agent: 'front_desk', intent: 'answer', context: {}}, workspace: {projectId: 'pr_1', task: '', prompt: null, history: [], pageView: null}}, scriptedAgent());
+  assert.deepEqual(out.invocations.map(i => `${i.to}:${i.intent}`), ['front_desk:answer', 'prompt_agent:import_prompt']);
+  const p = out.proposal!.payload;
+  assert.equal(p.structured.taskSummary, 'You label customer messages for a support team.');
+  assert.deepEqual(p.structured.fields.map(f => [f.name, f.values.map(v => v.name), f.note]), [['intent', ['Complaint', 'Question'], 'When a message does both, choose Complaint.']]);
+  assert.equal(p.structured.generalRules, 'If the message is empty, choose Question.');
+  // Examples and the output format have no slot: they are reported word for word, never dropped.
+  assert.deepEqual(p.unmapped, ['## Examples\nMessage: "my order is late" -> Complaint', '## Output\nReturn JSON only.']);
+  assert.match(out.messages.at(-1)!.text, /2 passages have no place/);
 });
 
 test('an answer with a question, or with the same prompt, proposes nothing', async () => {
   const llm = (o: object) => ({chat: async () => JSON.stringify(o)}) as unknown as Parameters<typeof runAgentTurn>[1];
-  const turn = (o: object) => runAgentTurn({userText: 'x', page: {label: 'Edit prompt', agent: 'prompt_agent', intent: 'revise_prompt', context: {template: optTemplate}}, workspace: {projectId: 'pr_1', task: '', schema: optSchema, history: [], pageView: null}}, llm(o));
-  const a = await turn({reply: 'Sure.', question: 'Which field?', template: optTemplate + '\nMore.'});
+  const turn = (o: object) => runAgentTurn({userText: 'x', page: {label: 'Edit prompt', agent: 'prompt_agent', intent: 'revise_prompt', context: {}}, workspace: {projectId: 'pr_1', task: '', prompt: optPrompt, history: [], pageView: null}}, llm(o));
+  const a = await turn({reply: 'Sure.', question: 'Which field?', prompt: {...optPrompt, generalRules: 'More.'}});
   assert.equal(a.proposal, null);
   assert.deepEqual(a.messages.map(m => m.text), ['Sure.\n\nWhich field?']);
-  assert.equal((await turn({reply: 'It reads the title first.', template: optTemplate})).proposal, null);
+  assert.equal((await turn({reply: 'It reads the description first.', prompt: optPrompt})).proposal, null);
+  assert.equal((await turn({reply: 'Done.', prompt: {...optPrompt, generalRules: 'More.'}})).proposal?.payload.structured.generalRules, 'More.');
 });
 
 test('the Optimiser and Improve with AI get the wrong examples', async () => {
   const seen: string[] = [];
-  const llm = {chat: async (msgs: {content: string}[]) => (seen.push(msgs.at(-1)!.content), JSON.stringify({template: optTemplate, change: 'x', changes: [], reply: ''}))} as unknown as Parameters<typeof runAgentTurn>[1];
+  const llm = {chat: async (msgs: {content: string}[]) => (seen.push(msgs.at(-1)!.content), JSON.stringify({prompt: optPrompt, change: 'x', changes: [], reply: ''}))} as unknown as Parameters<typeof runAgentTurn>[1];
   const examples = [{externalId: 'ex-7', features: {Title: 'cooking'}, gold: {format: ['Tutorial']}, predicted: {format: ['Vlog']}}];
-  await reflectPrompt({template: optTemplate, features: noFeatures, schema: optSchema, triedChanges: [], mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, examples}, llm);
-  await draftImprovement({version: 'v2', template: optTemplate, features: noFeatures, schema: optSchema, mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, mistakes: 1, examples}, llm);
+  await reflectPrompt({prompt: optPrompt, triedChanges: [], mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, examples}, llm);
+  await draftImprovement({version: 'v2', prompt: optPrompt, mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, mistakes: 1, examples}, llm);
   assert.equal(seen.filter(c => c.includes('"ex-7"')).length, 2);
 });
 
@@ -227,7 +271,7 @@ test('a reply that is not JSON is asked again once, then never shown as broken o
     let i = 0;
     return {chat: async () => xs[Math.min(i++, xs.length - 1)]} as unknown as Parameters<typeof runAgentTurn>[1];
   };
-  const turn = (llm: Parameters<typeof runAgentTurn>[1]) => runAgentTurn({userText: 'hi', page: {label: 'Setup', agent: 'front_desk', intent: 'answer', context: {}}, workspace: {projectId: 'pr_1', task: '', schema: null, history: [], pageView: null}}, llm);
+  const turn = (llm: Parameters<typeof runAgentTurn>[1]) => runAgentTurn({userText: 'hi', page: {label: 'Setup', agent: 'front_desk', intent: 'answer', context: {}}, workspace: {projectId: 'pr_1', task: '', prompt: null, history: [], pageView: null}}, llm);
   assert.deepEqual((await turn(replies(['{"reply": "Hel', '{"reply": "Hello."}']))).messages.map(m => m.text), ['Hello.']);
   assert.deepEqual((await turn(replies(['{"reply": "Hel', '{"reply": "Hel']))).messages.map(m => m.text), ['Sorry, my answer came out garbled. Please ask again.']);
   assert.deepEqual((await turn(replies(['Hello there.']))).messages.map(m => m.text), ['Hello there.']);

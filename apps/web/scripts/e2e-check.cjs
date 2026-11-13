@@ -1,11 +1,12 @@
 /**
- * End-to-end check of the static build on the stand-ins (100 examples), on the Unified UI pages:
- * a new project through Setup (schema drafted in Ask AI and approved), Dataset (auto sampling),
- * Gold Labels (labeled on the page with the answers bundled with the sample file), the first
- * prompt drafted in Ask AI, Improve with AI, scoring and Auto Optimise until a version passes, an agent question,
- * an agent start (it runs at once, no card), then the training set watched from a second tab,
- * interrupted by a reload and resumed from the other tab, the test set, the downloads, and the
- * telemetry events and metrics.
+ * End-to-end check of the static build on the stand-ins, on the 1.0.0 four-step flow: the Projects
+ * list (create, and Delete with the exact-name confirmation), Prompt Design (an existing prompt
+ * pasted into Ask AI is imported with its "Not carried over" list; a prompt drafted from a
+ * description is approved as v1 with the page's Approve button, never in the chat), Eval Dataset
+ * (auto sampling, no split), Gold Labels (labeled on the page with the answers bundled with the
+ * sample file), the Project Settings confirmation before the first paid run, then Prompt Tuning:
+ * scoring, the fixed AI Suggestion cards, Mismatches, Improve with AI with word marks, Auto
+ * Optimise until a version passes, Copy prompt and Finish; and the telemetry events and metrics.
  *
  * Needs Playwright with Chromium. Run:
  *   npm run build && npx serve apps/web/out -l 4173   (any static server)
@@ -19,6 +20,8 @@ const path = require('node:path');
 const BASE = process.argv[2] || 'http://localhost:4173';
 const SHOTS = process.argv[3] || path.join(__dirname, '..', '..', '..', 'docs', 'e2e');
 const LABELS = new Map(JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'public', 'sample-data', 'examples.json'), 'utf8')).labels.map(l => [l.externalId, l.answer]));
+/** Examples in the eval dataset of this check. */
+const N = 40;
 const errors = [];
 let current = null;
 
@@ -51,50 +54,103 @@ let current = null;
     await p.locator('aside.chat').getByRole('button', {name: 'Send'}).click();
   };
 
-  // Projects
+  // Projects: one light list; Delete asks for the exact project name
   await page.goto(BASE + '/');
+  await page.getByPlaceholder('Short-video tagging').fill('Scratch project');
+  await button(page, 'Create project').click();
+  await page.waitForURL(/prompt-design/);
+  await page.goto(BASE + '/');
+  await page.getByRole('link', {name: 'Scratch project'}).waitFor();
+  if (await page.getByText('Current step', {exact: true}).count()) throw new Error('the Projects list still has a Current step column');
+  await page.getByRole('button', {name: 'Delete Scratch project'}).click();
+  const del = page.getByRole('dialog');
+  await del.waitFor();
+  if (!(await button(del, 'Delete project').isDisabled())) throw new Error('Delete project is on before the name is typed');
+  await del.getByLabel('Project name').fill('scratch project');
+  if (!(await button(del, 'Delete project').isDisabled())) throw new Error('Delete project accepts a name that is not exact');
+  await shot(page, '0-delete-project');
+  await del.getByLabel('Project name').fill('Scratch project');
+  await button(del, 'Delete project').click();
+  await del.waitFor({state: 'detached', timeout: 10000});
+  await page.getByRole('link', {name: 'Scratch project'}).waitFor({state: 'detached', timeout: 10000});
+  log('project deleted after typing its exact name');
+
   await page.getByPlaceholder('Short-video tagging').fill('Short-video tagging');
   await button(page, 'Create project').click();
-  await page.waitForURL(/setup/);
+  await page.waitForURL(/prompt-design/);
   const pid = new URL(page.url()).searchParams.get('p');
   const url = p => `${BASE}${p}?p=${pid}`;
+  const approveBtn = page.locator('main').getByRole('button', {name: 'Approve', exact: true});
 
-  // Setup: the task goes in Ask AI, the draft is approved there
+  // Prompt Design: an existing prompt pasted into Ask AI is sorted into the structured parts,
+  // and what has no place is listed word for word (spec 3.2).
+  const pasted = [
+    'You label customer messages for a support team.',
+    '',
+    '## Intent',
+    '- Complaint: something went wrong and the customer wants it fixed',
+    '- Question: the customer asks how to do something',
+    'When a message does both, choose Complaint.',
+    '',
+    '## Rules',
+    '- If the message is empty, choose Question.',
+    '',
+    '## Examples',
+    'Message: "my order is late" -> Complaint',
+    '',
+    '## Output',
+    'Return JSON only.',
+  ].join('\n');
+  await ask(page, pasted);
+  const lost = page.locator('section[aria-label="Not carried over"]');
+  await lost.waitFor({timeout: 20000});
+  const lostText = await lost.innerText();
+  if (!/2 passages/.test(lostText) || !lostText.includes('my order is late') || !lostText.includes('Return JSON only.')) throw new Error(`the Not carried over list is wrong: ${lostText}`);
+  if ((await page.getByLabel('Field name').inputValue()) !== 'intent') throw new Error('the imported field is missing');
+  // Approval is the page's button, with its attention halo; the chat never shows an Approve card.
+  if (await page.locator('aside.chat').getByRole('button', {name: 'Approve', exact: true}).count()) throw new Error('the chat shows an Approve card');
+  if (!(await approveBtn.evaluate(el => el.classList.contains('btn-cue')))) throw new Error('Approve has no attention halo while a draft waits');
+  log('import:', (await page.locator('aside.chat .msg-a').last().innerText()).replace(/\n/g, ' ').slice(0, 200));
+  await shot(page, '1-import-not-carried-over');
+  await button(page, 'Discard').click();
+  await lost.waitFor({state: 'detached', timeout: 10000});
+
+  // The prompt for this project: drafted from a description, checked as full text, approved as v1
   await ask(page, 'Tag short videos by what the viewer gets from them: primary value, format and topics.');
-  await page.locator('aside.chat').getByRole('button', {name: 'Approve'}).click({timeout: 20000});
-  await page.locator('aside.chat').getByText('Approved', {exact: true}).waitFor();
-  await shot(page, '1-schema-approved');
-  await button(page, 'Next: Evaluation').click();
-  await button(page, 'Next: Models').click();
-  await page.getByRole('radiogroup', {name: 'Model'}).waitFor();
-  await page.waitForTimeout(400);
-  await shot(page, '1b-labeling-model');
-  await button(page, 'Next: Dataset').click();
-  await page.waitForURL(/dataset/);
-  // A finished Setup opens on its summary
-  await page.goto(url('/setup/'));
-  await page.getByText('Labeling model', {exact: true}).waitFor();
-  await page.waitForTimeout(400);
-  await shot(page, '1c-setup-summary');
-  await button(page, 'Next: Dataset').click();
-  log('setup done');
+  await page.getByText('AI draft', {exact: true}).waitFor({timeout: 20000});
+  await page.waitForFunction(() => document.querySelector('[aria-label="Field name"]')?.value === 'primary_value', null, {timeout: 10000});
+  // Long definitions are multi-line boxes, never clipped (spec 3.3)
+  const clipped = await page.locator('textarea[aria-label="Definition"]').evaluateAll(els => els.filter(el => el.scrollHeight > el.clientHeight + 2).length);
+  if (clipped) throw new Error(`${clipped} definitions are clipped`);
+  await shot(page, '1b-prompt-design-draft');
+  await button(page, 'View full prompt').click();
+  const full = page.getByRole('dialog');
+  const fullText = await full.locator('pre').innerText();
+  if (!fullText.includes('{{Description}}') || !fullText.includes('Return JSON only') || !fullText.includes('primary_value')) throw new Error('the full prompt is not compiled from the parts');
+  await shot(page, '1c-full-prompt');
+  await button(full, 'Copy prompt').click();
+  await button(full, 'Close').click();
+  await approveBtn.click();
+  await page.getByText('Approved as v1', {exact: true}).waitFor({timeout: 10000});
+  // The helper says what comes next (spec 6.2)
+  await page.locator('aside.chat').getByText(/v1 is saved\. Next, click "Next: Eval Dataset" at the top right/).waitFor({timeout: 10000});
+  await shot(page, '1d-prompt-approved');
+  await button(page, 'Next: Eval Dataset').click();
+  log('prompt design done');
 
-  // Dataset: auto sampling with the prefilled count; the recommended split saves by itself
+  // Eval Dataset: auto sampling; every example is used for evaluation, there is no split to set
   await page.waitForURL(/dataset/);
+  // The default is prefilled: every example available
+  await page.waitForFunction(() => +document.querySelector('[aria-label="Example count"]')?.value > 0, null, {timeout: 10000});
+  await page.getByLabel('Example count').fill(String(N));
   await button(page, 'Auto sampling').click();
   const next = button(page, 'Next: Gold Labels');
   await next.waitFor({timeout: 60000});
   await page.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent === 'Next: Gold Labels' && !b.disabled), null, {timeout: 10000});
-  log('dataset:', (await page.locator('main .legend').innerText()).replace(/\s+/g, ' '));
+  if (await page.getByText('Split', {exact: true}).count()) throw new Error('the Eval Dataset page still has a split');
+  if (await button(page, 'Check labels').count()) throw new Error('the Eval Dataset page still has the Check labels card');
+  log('dataset:', (await page.locator('main .metrics').innerText()).replace(/\s+/g, ' '));
   await shot(page, '2-dataset');
-  // The label check (review finding 10): the Labels helper reads a sample in Ask AI
-  // R5-8: Gold Labels is an ordinary step, with no "recommended" or "optional" tag.
-  if (await page.locator('header .step-opt').count()) throw new Error('Gold Labels should have no step tag');
-  await button(page, 'Check labels').click();
-  await page.locator('aside.chat').getByText('Labels helper joined to answer').waitFor({timeout: 10000});
-  await page.locator('aside.chat .msg-a').last().getByText(/^I read \d+ examples/).waitFor({timeout: 20000});
-  log('label check:', (await page.locator('aside.chat .msg-a').last().innerText()).replace(/\n/g, ' ').slice(0, 160));
-  await shot(page, '2b-label-check');
   await next.click();
 
   // Gold Labels: every eval example and some test examples, picked on the page
@@ -116,25 +172,31 @@ let current = null;
     }
   };
   const nEval = +((await page.getByRole('tab', {name: /^Eval set/}).innerText()).match(/\/\s*(\d+)/) || [0, 0])[1];
+  if (nEval !== N) throw new Error(`the eval set has ${nEval} examples, not ${N}`);
+  if (await page.getByRole('tab', {name: /^Test set/}).count()) throw new Error('Gold Labels still has a Test set tab');
   await labelSet(nEval);
   await shot(page, '3-gold-labels');
-  await page.getByRole('tab', {name: /^Test set/}).click();
-  const nTest = +((await page.getByRole('tab', {name: /^Test set/}).innerText()).match(/\/\s*(\d+)/) || [0, 0])[1];
-  const testGold = Math.max(0, nTest - 3);
-  await labelSet(testGold);
   log('gold labels:', await page.getByRole('tablist', {name: 'Sets'}).innerText());
-  await button(page, 'Next: Prompt Engineering').click();
 
-  // First prompt: drafted in Ask AI, then Create and score
-  await page.waitForURL(/prompt/);
-  await ask(page, 'Please draft a starting prompt for these labels.');
-  await page.waitForFunction(() => (document.querySelector('#tpl')?.value ?? '').includes('{{'), null, {timeout: 20000});
-  const create = button(page, 'Create and score');
-  if (!(await create.isEnabled())) log('checks:', await page.locator('[aria-label="Checks"]').innerText());
-  await shot(page, '4-first-prompt');
-  await create.click();
+  // The first paid run is about to start: Project Settings opens once, to be confirmed (spec 2.3)
+  await button(page, 'Next: Prompt Tuning').click();
+  const set = page.getByRole('dialog');
+  await set.getByText('Project Settings', {exact: true}).waitFor({timeout: 5000});
+  // Default shows its exact thresholds, locked; each check's meaning is a line under its name
+  const f1 = set.getByLabel('Macro-F1 threshold');
+  if ((await f1.inputValue()) !== '0.80' || !(await f1.isDisabled())) throw new Error('Default does not show Macro-F1 0.80 locked');
+  if ((await set.getByLabel('Value F1 threshold').inputValue()) !== '–') throw new Error('Default does not show Value F1 as off');
+  if ((await set.getByLabel('Invalid outputs limit').inputValue()) !== '≤ 1%') throw new Error('Invalid outputs is not shown as locked at 1%');
+  if (!(await set.getByText('Per field. Every value counts the same, so rare values matter.').count())) throw new Error('a check has no plain subtitle');
+  if (await set.locator('.hov').count()) throw new Error('Project Settings still uses hover text');
+  await shot(page, '3b-project-settings');
+  await set.getByRole('radio', {name: /^Custom/}).click();
+  if (await f1.isDisabled()) throw new Error('Custom does not unlock the thresholds');
+  await set.getByRole('radio', {name: /^Default/}).click();
+  await button(set, 'Confirm').click();
+  await page.waitForURL(/\/prompt\/?\?/);
   await page.locator('nav.vlist').waitFor();
-  log('scoring started');
+  log('settings confirmed; scoring starts by itself');
 
   const suggestion = async () => ((await page.locator('.card.ai').count()) ? page.locator('.card.ai').first().innerText() : '');
   // Right after the first score, the model disagrees with some gold labels: Review labels opens
@@ -199,31 +261,27 @@ let current = null;
     await button(page, 'Improve with AI').first().click();
     await page.waitForURL(/prompt\/edit/);
     await page.getByText('Draft from Prompt helper', {exact: true}).waitFor({timeout: 20000});
-    log('improve with AI:', await page.locator('.ed .editor .ed-add').count(), 'changes marked');
-    // Hovering a change shows its reason (the marks sit under the text box)
-    const why = page.locator('.ed .editor .ed-add.why').first();
-    if (await why.count()) {
-      const b = (await why.evaluate(el => {
-        const r = el.getClientRects()[0];
-        return {x: r.left + 4, y: r.top + r.height / 2};
-      }));
-      await page.mouse.move(b.x, b.y);
-      await page.locator('.ed-pop').waitFor({timeout: 5000});
-      log('change reason on hover:', await page.locator('.ed-pop').innerText());
-    } else throw new Error('the helper draft has no change with a reason');
+    await page.locator('.sp-marks ins').first().waitFor({timeout: 10000});
+    log('improve with AI:', await page.locator('.sp-marks ins').count(), 'changes marked');
+    // Each change carries its reason
+    const why = page.locator('.sp-marks ins.why').first();
+    if (!(await why.count())) throw new Error('the helper draft has no change with a reason');
+    log('change reason:', await why.getAttribute('title'));
+    // Improve with AI changes wording only: no warning about the label fields
+    if (await page.getByText(/This changes the label fields or values/).count()) throw new Error('Improve with AI changed the label fields');
+    if (!(await button(page, 'Save').evaluate(el => el.classList.contains('btn-cue')))) throw new Error('Save has no attention halo for a helper draft');
     await shot(page, '5a-improve-draft');
-    await page.mouse.move(5, 5);
     if (!(await page.getByRole('button', {name: /^Save as v\d+$/}).count())) throw new Error('Save as vN (next major) is missing');
     await page.getByRole('button', {name: 'Save', exact: true}).click();
     await page.waitForURL(/\/prompt\/?\?/);
   }
 
-  // Auto Optimise until a version passes; a pass starts the training and test sets by itself
+  // Auto Optimise until a version passes: the card then says to use it as the final prompt (T6)
   let optimised = false;
   for (let i = 0; i < 360; i++) {
     await page.waitForTimeout(1500);
     const text = await suggestion();
-    if (/training and test sets started/.test(text) || (await button(page, 'Make training and test sets').count())) break;
+    if (/as your final prompt/.test(text)) break;
     const panel = page.locator('section[aria-label="Optimiser"]');
     if (await panel.count()) {
       if (i % 4 === 0) log('optimiser:', (await panel.innerText()).replace(/\n/g, ' ').slice(0, 160));
@@ -267,7 +325,16 @@ let current = null;
     if (await dropped.count()) {
       await dropped.click();
       await page.getByText('Dropped after dry run', {exact: true}).first().waitFor();
+      // A dropped version gets a suggestion too: switch back to the best one (T5), and its badge says why on hover
+      const back = page.getByRole('button', {name: /^Switch to v/});
+      await back.waitFor({timeout: 5000});
+      log('dropped suggestion:', (await suggestion()).replace(/\n/g, ' | '));
+      await page.locator('nav.vlist .hov', {hasText: 'Dropped'}).first().hover();
+      await page.getByRole('tooltip').getByText(/In the dry run/).waitFor({timeout: 5000});
       await shot(page, '5d-dropped');
+      await page.mouse.move(5, 5);
+      await back.click();
+      await page.getByText('Dropped after dry run', {exact: true}).first().waitFor({state: 'detached', timeout: 5000});
       await page.locator('nav.vlist button').first().click();
       // R6-2: the eye button hides dropped versions, and shows them again.
       await page.getByRole('button', {name: 'Hide dropped versions'}).click();
@@ -279,36 +346,44 @@ let current = null;
     }
   }
 
-  // The prompt page for a version: editor, checks and features
+  // T6: copy the final prompt, then mark the project finished
+  await page.locator('nav.vlist button').first().click();
+  await page.getByRole('button', {name: 'Copy prompt', exact: true}).click();
+  await page.getByRole('button', {name: 'Copied', exact: true}).waitFor({timeout: 5000});
+  await button(page, 'Finish').click();
+  await page.locator('.card.ai').getByText('Finished', {exact: true}).waitFor({timeout: 10000});
+  await shot(page, '5h-finished');
+
+  // The prompt editor for a version: the same three parts, with word marks against the saved text
   await page.locator('main').getByRole('link', {name: 'Edit prompt', exact: true}).click();
   await page.waitForURL(/prompt\/edit/);
-  await page.locator('[aria-label="Checks"]').waitFor();
-  log('checks:', (await page.locator('[aria-label="Checks"]').innerText()).replace(/\n/g, ' | '));
-  log('opened version marks:', await page.locator('.ed .editor [data-mark]').count(), (await page.locator('.ph-actions .badge').allInnerTexts()).join(', ') || '(no badge)');
+  await page.getByLabel('Task summary').waitFor();
+  log('opened version marks:', await page.locator('.sp-marks').count(), (await page.locator('.ph-actions .badge').allInnerTexts()).join(', ') || '(no badge)');
   await shot(page, '6-prompt-edit');
-  // Your own edits: removed text is a red space, and hovering it shows what was removed
-  const tpl = page.locator('#tpl');
-  const before = await tpl.inputValue();
-  const cut = before.match(/[^\n.]{20,}\. /)?.[0];
-  if (!cut) throw new Error('no sentence to remove in the prompt');
-  await tpl.fill(before.replace(cut, ''));
+  // Your own edits: new wording is marked, and it does not touch gold labels
+  const def = page.locator('textarea[aria-label="Definition"]').first();
+  const before = await def.inputValue();
+  await def.fill(`${before}, such as jokes`);
   await page.getByText('Unsaved changes', {exact: true}).waitFor();
-  const del = page.locator('.ed .editor .ed-del').first();
-  await del.waitFor({state: 'attached'});
-  // The page may be scrolled (Ask AI open, a longer prompt): bring the mark into view first
-  await del.evaluate(el => el.scrollIntoView({block: 'center'}));
-  const at = await del.evaluate(el => {
-    const r = el.getClientRects()[0];
-    return {x: r.left + r.width / 2, y: r.top + r.height / 2};
-  });
-  await page.mouse.move(at.x, at.y);
-  await page.locator('.ed-pop').waitFor({timeout: 5000});
-  const pop = await page.locator('.ed-pop').innerText();
-  if (!pop.startsWith('Removed') || !pop.includes(cut.trim().slice(0, 15))) throw new Error(`the removed-text hover is wrong: ${pop}`);
-  log('removed text on hover:', pop.replace(/\n/g, ' | '));
-  await shot(page, '6b-prompt-edit-removed');
-  await page.mouse.move(5, 5);
+  await page.locator('.sp-marks ins', {hasText: 'jokes'}).waitFor({timeout: 5000});
+  if (await page.getByText(/This changes the label fields or values/).count()) throw new Error('new wording was treated as a change to the labels');
+  // A renamed value changes the labels: the page says what that costs before the save
+  const value = page.locator('input[aria-label="Value"]').first();
+  const name = await value.inputValue();
+  await value.fill(`${name} content`);
+  const warn = page.getByText(/This changes the label fields or values\. After you save, \d+ gold labels need a re-check/);
+  await warn.waitFor({timeout: 5000});
+  log('label change warning:', await warn.innerText());
+  await shot(page, '6b-prompt-edit-label-change');
   await button(page, 'Discard').click();
+  await page.getByText('Unsaved changes', {exact: true}).waitFor({state: 'detached'});
+
+  // Settings at the top opens Project Settings at any time
+  await button(page, 'Settings').click();
+  const again = page.getByRole('dialog');
+  await again.getByText('Project Settings', {exact: true}).waitFor();
+  if (!(await button(again, 'Save').count())) throw new Error('Project Settings has no Save');
+  await button(again, 'Cancel').click();
 
   // An agent question: the evaluation agent reads the report with a tool
   await page.goto(url('/prompt/'));
@@ -334,86 +409,44 @@ let current = null;
   log('agent start:', tried.split('\n')[0], '|', (await page.locator('aside.chat .evt').allInnerTexts()).map(t => t.replace(/\n/g, ' ')).join(' / '));
   await shot(page, '7b-ask-ai-actions');
 
-  // Training set: started by the Optimiser's pass, or here in tab 1
-  await page.goto(url('/training-set/'));
-  await page.locator('main').getByText(/Labeling settings|Training set/).first().waitFor();
-  if (await button(page, 'Start labeling').count()) await button(page, 'Start labeling').click();
-  await page.locator('main .progress').waitFor();
-  await page.waitForTimeout(2000);
-  log('tab 1 runs:', await progress(page));
-  await shot(page, '8-training-set-labeling');
-
-  // Tab 2 watches; it does not start a second runner
-  const tab2 = await ctx.newPage();
-  watch(tab2);
-  await tab2.setViewportSize({width: 1920, height: 1080});
-  await tab2.goto(url('/training-set/'));
-  await tab2.waitForTimeout(3000);
-  log('tab 2 sees:', await progress(tab2));
-
-  // Reload tab 1 mid-run: the run stops, both tabs show it
-  const stillRunning = !(await tab2.getByRole('tab', {name: /^Training set.*Finished/}).count());
-  log('reload tab 1 at:', await progress(page), stillRunning ? '' : '(already finished)');
-  if (stillRunning) {
-  await page.reload();
-  await page.locator('main').getByText('Stopped', {exact: true}).waitFor({timeout: 15000});
-  await tab2.locator('main').getByText('Stopped', {exact: true}).waitFor({timeout: 15000});
-  log('after reload, tab 1:', await progress(page), '| tab 2:', await progress(tab2));
-
-  // Resume from tab 2; tab 1 follows
-  await button(tab2, 'Resume').click();
-  await page.waitForTimeout(5500);
-  log('resumed in tab 2, tab 1 sees:', await progress(page));
-  }
-  await tab2.getByRole('tab', {name: /^Training set.*Finished/}).waitFor({timeout: 180000});
-  await tab2.waitForTimeout(1000);
-  await shot(tab2, '9-training-set-done');
-  const download = async name => {
-    const [d] = await Promise.all([tab2.waitForEvent('download'), button(tab2, name).click()]);
-    return fs.readFileSync(await d.path(), 'utf8').trim().split('\n');
-  };
-  const trainLines = await download('Download JSONL');
-  const trainCsv = await download('Download CSV');
-
-  // Test set: its own labeling; gold labels are kept, the rest come from the model
-  await tab2.getByRole('tab', {name: /^Test set/}).click();
-  if (await button(tab2, 'Start labeling').count()) await button(tab2, 'Start labeling').click();
-  await tab2.getByRole('tab', {name: /^Test set.*Finished/}).waitFor({timeout: 120000});
-  await tab2.waitForTimeout(1000);
-  await shot(tab2, '10-test-set-done');
-  const testLines = await download('Download JSONL');
-  const testCsv = await download('Download CSV');
-  const sources = testLines.map(l => JSON.parse(l).label_source);
-  const exportFacts = {train: trainLines.length, trainCsvRows: trainCsv.length - 1, test: testLines.length, testCsvRows: testCsv.length - 1, fromGold: sources.filter(s => s === 'gold').length, fromModel: sources.filter(s => s === 'model').length, testCsvHead: testCsv[0]};
-  log('exports:', JSON.stringify(exportFacts));
-
-  const facts = await tab2.evaluate(() => {
+  const facts = await page.evaluate(() => {
     const docs = k => JSON.parse(localStorage.getItem('tsp-doc:' + k) || '[]').map(d => d.data);
-    const task = docs('labeling_tasks').filter(t => t.purpose === 'training').pop();
-    const testTask = docs('labeling_tasks').filter(t => t.purpose === 'test').pop();
-    const tools = docs('audit_log').filter(a => a.action === 'agent.tool').map(a => a.data?.name);
-    const preds = docs('predictions').filter(p => p.promptVersionId === task.promptVersionId && p.endpoint === task.endpoint && p.settingsHash === task.settingsHash && task.exampleIds.includes(p.exampleId));
+    const project = docs('projects').find(p => p.name === 'Short-video tagging');
+    const mine = k => docs(k).filter(d => d.projectId === project.id);
+    const versions = mine('prompt_versions');
     const ids = JSON.parse(localStorage.getItem('tsp-doc:predictions') || '[]').map(d => d.data._appId);
-    const audit = docs('audit_log').map(a => a.action);
-    const ts = docs('training_sets').pop();
-    // A pass from the Optimiser starts the training set with the unlabeled test examples too.
-    const toLabel = ts.trainTotal + (ts.labelTest ? ts.testToLabel ?? 0 : 0);
-    return {state: task.state, done: task.done, total: task.total, failed: task.failed, predictions: preds.length, uniqueExamples: new Set(preds.map(p => p.exampleId)).size, duplicatePredictionIds: ids.length - new Set(ids).size, testTask: testTask && {state: testTask.state, done: testTask.done, total: testTask.total}, trainTotal: toLabel, toolCalls: tools, autoStarts: audit.filter(a => a === 'auto_start').length, actionLines: docs('chat_messages').filter(m => m.role === 'event' && m.event).length};
+    const audit = mine('audit_log').map(a => a.action);
+    return {
+      projects: docs('projects').length,
+      kind: project.kind,
+      settingsConfirmed: project.settingsConfirmed,
+      approved: project.approvedNodes,
+      versions: versions.length,
+      structured: versions.every(v => v.structured && v.structured.fields.length === 3 && typeof v.template === 'string'),
+      schemaVersions: [...new Set(versions.map(v => v.schemaVersion))],
+      reports: mine('eval_reports').length,
+      proposals: mine('agent_proposals').map(p => `${p.kind}:${p.state}`),
+      duplicatePredictionIds: ids.length - new Set(ids).size,
+      toolCalls: mine('audit_log').filter(a => a.action === 'agent.tool').map(a => a.data?.name),
+      autoStarts: audit.filter(a => a === 'auto_start').length,
+      actionLines: mine('chat_messages').filter(m => m.role === 'event' && m.event).length,
+      leftovers: ['training_sets', 'setup'].filter(k => localStorage.getItem('tsp-doc:' + k)),
+    };
   });
-  log('training task:', JSON.stringify(facts));
+  log('project:', JSON.stringify(facts));
   // Telemetry: flush, then read what the stand-in sink kept (events in localStorage, metrics text)
-  await tab2.evaluate(
+  await page.evaluate(
     () =>
       new Promise(r => {
         document.dispatchEvent(new Event('visibilitychange'));
         setTimeout(r, 300);
       }),
   );
-  const tel = await tab2.evaluate(() => {
+  const tel = await page.evaluate(() => {
     const ev = JSON.parse(localStorage.getItem('tsp-telemetry-events') || '[]');
     const names = {};
     for (const e of ev) names[e.event] = (names[e.event] || 0) + 1;
-    const leaks = ev.filter(e => /Short-video tagging|Tag short videos/.test(JSON.stringify(e))).length;
+    const leaks = ev.filter(e => /Short-video tagging|Scratch project|Tag short videos|customer messages/.test(JSON.stringify(e))).length;
     const text = globalThis.__tspMetrics || '';
     const series = [...new Set(text.split('\n').filter(l => l && !l.startsWith('#')).map(l => l.split(/[{ ]/)[0].replace(/_(bucket|sum|count)$/, '')))];
     // Labels whose values come from the running apps: none should fall back to "other".
@@ -423,21 +456,24 @@ let current = null;
   log('telemetry:', JSON.stringify(tel));
   log('console errors:', errors.length ? errors : 'none');
   await ctx.close();
+  const need = ['project_deleted', 'settings_saved', 'full_prompt_opened', 'prompt_copied', 'prompt_proposal_shown', 'signature_changed', 'version_scored'];
+  const missing = need.filter(n => !tel.names[n]);
+  if (missing.length) log('missing events:', missing.join(', '));
   const ok =
-    facts.state === 'done' &&
-    facts.done === facts.total &&
-    facts.predictions === facts.total &&
-    facts.uniqueExamples === facts.total &&
+    facts.projects === 1 &&
+    facts.kind === 'prompt_tuning' &&
+    facts.settingsConfirmed === true &&
+    ['prompt_design', 'dataset', 'gold', 'prompt'].every(n => facts.approved.includes(n)) &&
+    facts.versions >= 2 &&
+    facts.structured &&
+    facts.schemaVersions.length === 1 &&
+    facts.reports > 0 &&
+    facts.proposals.every(p => p.startsWith('prompt:') && !p.endsWith(':open')) &&
     facts.duplicatePredictionIds === 0 &&
-    facts.total === facts.trainTotal &&
-    facts.testTask?.state === 'done' &&
     facts.autoStarts > 0 &&
     facts.actionLines > 0 &&
-    exportFacts.train === exportFacts.trainCsvRows &&
-    exportFacts.test === exportFacts.testCsvRows &&
-    exportFacts.test > 0 &&
-    exportFacts.fromGold === testGold &&
-    exportFacts.fromGold + exportFacts.fromModel === exportFacts.test &&
+    facts.leftovers.length === 0 &&
+    missing.length === 0 &&
     tel.events > 0 &&
     tel.leaks === 0 &&
     tel.undeclared.length === 0 &&

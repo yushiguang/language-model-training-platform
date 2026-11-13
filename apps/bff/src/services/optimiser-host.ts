@@ -1,13 +1,10 @@
-import type {OptimisationRun, OptimiserHost, ProjectState, PromptVersion} from '@tsp/contracts';
-import {versionLabel} from '@tsp/domain';
-import {emitChange, getApp, tm} from './app.ts';
+import type {OptimiserHost, ProjectState, PromptVersion} from '@tsp/contracts';
 import {postEvent} from './chat-events.ts';
 import {buildReport, confirmScore, labelEvalSet, labelExamples, scoreOnOptimiserHalf} from './evaluation.ts';
 import {labelerNotes} from './mismatches.ts';
 import {agentTools} from './page-views.ts';
-import {approveNode, loadProjectState} from './projects.ts';
+import {loadProjectState} from './projects.ts';
 import {createVersion} from './prompts.ts';
-import {startTrainingSet} from './training.ts';
 
 /**
  * What the bff does for the Optimiser service (`OptimiserHost`): the Optimiser decides what to
@@ -49,9 +46,9 @@ export function optimiserHost(): OptimiserHost {
       const m = await scoreOnOptimiserHalf(setup, version(state, promptVersionId), endpoint, state.examples, state.gold);
       return {mixUps: m.mixUps, lowestField: m.lowestField, lowestValue: m.lowestValue};
     },
-    async createVersion({projectId, template, features, images, parentId, change, inMajor}) {
-      const {state, setup} = await loaded(projectId);
-      return createVersion(projectId, {template, features, images, parent: version(state, parentId), madeBy: 'optimiser', change, kind: 'minor', inMajor, schema: setup.schema!, schemaVersion: setup.schemaVersion});
+    async createVersion({projectId, structured, parentId, change, inMajor}) {
+      const {state} = await loaded(projectId);
+      return createVersion(projectId, {structured, parent: version(state, parentId), madeBy: 'optimiser', change, kind: 'minor', inMajor});
     },
     async labelerNotes(projectId) {
       const {state} = await loaded(projectId);
@@ -59,31 +56,5 @@ export function optimiserHost(): OptimiserHost {
     },
     tools: agentTools,
     postEvent: ({projectId, event, actor, what, link}) => postEvent(projectId, event, actor, what, link),
-    async versionPassed({projectId, runId, promptVersionId, endpoint}) {
-      const {state} = await loaded(projectId);
-      const run = state.optimisation.find(o => o.id === runId);
-      if (run) await afterPass({...run, projectId, endpoint}, version(state, promptVersionId));
-    },
   };
-}
-
-/**
- * A version passed: the Prompt step is approved and the training and test sets start with it
- * (test examples without a gold label get the model's answers too). Said in Ask AI.
- */
-async function afterPass(run: OptimisationRun, v: PromptVersion): Promise<void> {
-  const {catalog} = getApp();
-  const state: ProjectState | null = await loadProjectState(run.projectId);
-  if (!state) return;
-  const report = state.reports.find(r => r.promptVersionId === v.id && r.endpoint === run.endpoint && !r.archivedNow) ?? null;
-  try {
-    if (!state.project.approvedNodes.includes('prompt')) await approveNode(run.projectId, 'prompt');
-    const ts = await startTrainingSet(run.projectId, v, run.endpoint, report, 0, {labelTest: true});
-    await catalog.patch('optimisation_runs', run.id, {trainingSetId: ts.id});
-    emitChange();
-    tm().counter('tsp_auto_starts_total', {what: 'training_after_pass', decision: 'started'});
-    await postEvent(run.projectId, 'auto', 'workflow', `started the training and test sets with ${versionLabel(v)}`, {path: '/training-set'});
-  } catch (e) {
-    await postEvent(run.projectId, 'auto', 'workflow', `could not start the training set: ${(e as Error).message}`, {path: '/training-set'});
-  }
 }

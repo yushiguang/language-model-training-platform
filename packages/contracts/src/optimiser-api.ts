@@ -1,6 +1,6 @@
 import type {AgentToolHost} from './agent-api.ts';
 import type {LabelingTask} from './labeling-api.ts';
-import type {ChatEvent, ChatLink, EndpointId, EvalReport, FeatureSelection, MixUp, OptimisationRun, ProjectState, PromptImage, PromptVersion} from './types.ts';
+import type {ChatEvent, ChatLink, EndpointId, EvalReport, MixUp, OptimisationRun, ProjectState, PromptVersion, StructuredPrompt} from './types.ts';
 
 /**
  * Contract: the Optimiser service (`@tsp/optimiser`, spec 1.0.0 section 7.2). It owns the
@@ -33,6 +33,8 @@ export interface OptimiserContract {
   listRuns(projectId: string): Promise<OptimisationRun[]>;
   /** True while this runner works on the run, or is starting one. */
   isRunning(runId: string): Promise<boolean>;
+  /** Stops the project's runs and removes their records (the project is being deleted). */
+  deleteProject(projectId: string): Promise<void>;
 }
 
 /** One runner per piece of work (in the browser: the Web Locks API, covering every tab). */
@@ -68,13 +70,11 @@ export interface OptimiserHost {
   confirmScore(req: {projectId: string; promptVersionId: string; endpoint: EndpointId}): Promise<{score: number; passed: boolean}>;
   halfScore(req: {projectId: string; promptVersionId: string; endpoint: EndpointId}): Promise<HalfScore>;
   /** Saves a change as the next minor of the run's major. */
-  createVersion(req: {projectId: string; template: string; features: FeatureSelection; images: PromptImage[]; parentId: string; change: string; inMajor: number}): Promise<PromptVersion>;
+  createVersion(req: {projectId: string; structured: StructuredPrompt; parentId: string; change: string; inMajor: number}): Promise<PromptVersion>;
   /** The labelers' notes the helpers may read, by example id (optimiser half only). */
   labelerNotes(projectId: string): Promise<Record<string, string>>;
   /** The read tools lent to the helper that writes a change. */
   tools(projectId: string): AgentToolHost;
   /** A grey action line in the project's Ask AI conversation. */
   postEvent(req: {projectId: string; event: ChatEvent; actor: 'user' | 'workflow'; what: string; link?: ChatLink}): Promise<void>;
-  /** A version passed and its pass was confirmed: what follows in the workflow. */
-  versionPassed(req: {projectId: string; runId: string; promptVersionId: string; endpoint: EndpointId}): Promise<void>;
 }

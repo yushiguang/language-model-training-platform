@@ -1,6 +1,6 @@
-import type {AgentModel, AgentRuntimeContract, Answer, CatalogContract, EndpointId, Example, ExampleBrief, FeatureSelection, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@tsp/contracts';
+import type {AgentModel, AgentRuntimeContract, Answer, CatalogContract, EndpointId, Example, ExampleBrief, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@tsp/contracts';
 import {NO_TELEMETRY} from '@tsp/contracts';
-import {checkTemplate, compareDryRun, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, placeholderKeys, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withLabelerNotes, wrongExamples, type PoolEntry} from '@tsp/domain';
+import {checkStructured, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withLabelerNotes, wrongExamples, type PoolEntry} from '@tsp/domain';
 
 /**
  * The Optimiser (GEPA, ported to TypeScript; docs/design/optimiser.md). Runs from
@@ -125,7 +125,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
   const onChange = deps.onChange ?? (() => {});
   const random = () => (deps.random ?? Math.random)();
   /** Runs this runner is working on, and whether it is starting one. */
-  const active = new Map<string, {ctrl: AbortController}>();
+  const active = new Map<string, {ctrl: AbortController; projectId: string}>();
   let starting = false;
 
   /** One start at a time in this runner; a second one while the first is being set up does nothing. */
@@ -169,7 +169,6 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       startedAt: nowIso(),
       finishedAt: null,
       auto: !!opts.auto,
-      trainingSetId: null,
     };
     await catalog.insert('optimisation_runs', run);
     return run;
@@ -179,7 +178,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
   async function runLoop(given: OptimisationRun, opts: {resumed?: boolean} = {}): Promise<OptimisationRun> {
     const run: OptimisationRun = {...given, state: 'running', error: null, finishedAt: null, history: [...(given.history ?? [])]};
     const {projectId, endpoint} = run;
-    const entry = {ctrl: new AbortController()};
+    const entry = {ctrl: new AbortController(), projectId};
     active.set(run.id, entry);
     const signal = entry.ctrl.signal;
     const save = async (extra: Partial<OptimisationRun> = {}) => {
@@ -347,15 +346,13 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
             agents.reflectPrompt(
               {
                 mode: other ? 'merge' : 'change',
-                template: parent.template,
-                features: parent.features,
-                schema,
+                prompt: parent.structured,
                 triedChanges: run.history.filter(h => h.parentId === parent.id && h.change).map(h => h.change),
                 mixUps: m.mixUps,
                 lowestField: m.lowestField,
                 lowestValue: m.lowestValue,
                 examples,
-                ...(other ? {other: {template: other.template, features: other.features, change: other.change}} : {}),
+                ...(other ? {other: {prompt: other.structured, change: other.change}} : {}),
                 signal,
               },
               agentModel(),
@@ -366,15 +363,15 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
           round = {...round, change: out.change || (other ? `Merged ${versionLabel(parent)} and ${versionLabel(other)}` : 'A change'), step: 'check'};
           await putRound(round);
 
-          // Checks: the same rules as the editor. A change that fails them, or repeats a version,
-          // is dropped without labeling.
-          const features: FeatureSelection = out.features ?? parent.features;
+          // Checks: a change may reword and tick features, never touch the label signature (gold
+          // labels and scores are tied to it). A change that fails, or repeats a version, is
+          // dropped without labeling.
+          const next = tidyStructured(rewordOnly(parent.structured, out.prompt));
           const verdict = await step('check', parent, async () => {
-            const featuresSame = JSON.stringify(features) === JSON.stringify(parent.features);
-            const keysSame = [...placeholderKeys(out.template)].sort().join() === [...placeholderKeys(parent.template)].sort().join();
             const fresh = (await host.loadState(projectId))!;
-            if (fresh.versions.some(v => v.template === out.template && JSON.stringify(v.features) === JSON.stringify(features))) return 'repeat' as const;
-            if ((featuresSame && !keysSame) || checkTemplate(out.template, features, {schema, images: parent.images}).errors.length) return 'checks' as const;
+            const text = compilePrompt(next);
+            if (fresh.versions.some(v => v.template === text)) return 'repeat' as const;
+            if (checkStructured(next).length || !sameSignature(signatureOf(next), signatureOf(parent.structured))) return 'checks' as const;
             return 'ok' as const;
           });
           if (verdict !== 'ok') {
@@ -383,7 +380,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
             await putRound({...round, outcome: verdict, step: undefined});
             continue;
           }
-          cand = await host.createVersion({projectId, template: out.template, features, images: parent.images, parentId: parent.id, change: round.change, inMajor: run.major});
+          cand = await host.createVersion({projectId, structured: next, parentId: parent.id, change: round.change, inMajor: run.major});
           round = {...round, versionId: cand.id, step: 'dry_run'};
           await putRound(round);
         }
@@ -488,7 +485,6 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
         best_lowest_field_macro_f1: kept.length ? Math.max(...kept.map(h => h.score ?? 0)) : null,
       });
     }
-    if (passedVersion) await host.versionPassed({projectId, runId: run.id, promptVersionId: (passedVersion as PromptVersion).id, endpoint});
     return run;
   }
 
@@ -529,5 +525,10 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
     getRun: runId => catalog.get('optimisation_runs', runId),
     listRuns: projectId => catalog.find('optimisation_runs', {projectId}, 'startedAt desc'),
     isRunning: async runId => active.has(runId) || starting,
+
+    /** The project is being deleted: stop its runs here; the catalog removes their records. */
+    async deleteProject(projectId) {
+      for (const [, a] of active) if (a.projectId === projectId) a.ctrl.abort();
+    },
   };
 }

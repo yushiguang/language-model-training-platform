@@ -7,9 +7,10 @@ import {createPortal} from 'react-dom';
 import {NODES} from '@tsp/domain';
 import type {NodeId, PageContext} from '@tsp/contracts';
 import {getRuntimeInfo, type ProjectState} from '@/backend-api';
-import {ActionErrorBanner, clearActionError, Icon} from '@/ui';
+import {ActionErrorBanner, Button, clearActionError, Icon} from '@/ui';
 import {AskAi} from './AskAi';
 import {ProjectProvider, useProject} from './ProjectContext';
+import {SettingsProvider, useSettings} from './ProjectSettings';
 import {stepStates} from './steps';
 
 type Ctx = ReturnType<typeof useProject> & {state: ProjectState};
@@ -19,21 +20,17 @@ interface Props {
   node: NodeId;
   /** What Ask AI reads on this page. */
   page: PageContext;
-  /** Ask AI starts open (Schema settings). */
+  /** Ask AI starts open (Prompt Design, before the first prompt). */
   chatOpen?: boolean;
   /** Renders the page: its content is a `<Frame>`. */
   children: (ctx: Ctx) => ReactNode;
 }
 
 interface ChatSlot {
-  /** Cards the page adds after the messages (a schema draft waiting for Approve). */
-  extra?: ReactNode;
   chips?: string[];
   placeholder?: string;
   /** The agent's opening line, shown first. */
   first?: string;
-  /** Runs before a message goes to the agent (Setup saves the first message as the task). */
-  onSend?: (text: string) => Promise<void>;
 }
 
 interface Shell {
@@ -86,6 +83,7 @@ function ShellInner({children}: {children: ReactNode}) {
   const state = ctx.state?.project.id === ctx.projectId ? ctx.state : null;
   return (
     <ShellCtx.Provider value={shell}>
+     <SettingsProvider state={state}>
       <div className="k app b">
         <div className="b-body" ref={setSide}>
           <main className="b-main">
@@ -100,6 +98,7 @@ function ShellInner({children}: {children: ReactNode}) {
           </button>
         )}
       </div>
+     </SettingsProvider>
     </ShellCtx.Provider>
   );
 }
@@ -124,7 +123,7 @@ export function Loading({panel}: {panel?: boolean}) {
 export function ProjectPage({page, chatOpen = false, children}: Props) {
   const ctx = useProject();
   const {setOpen} = useContext(ShellCtx);
-  // A page that starts with Ask AI open (Schema settings) opens it; other pages keep it as it was.
+  // A page that starts with Ask AI open (Prompt Design) opens it; other pages keep it as it was.
   useEffect(() => {
     if (chatOpen) setOpen(true);
   }, [chatOpen, setOpen]);
@@ -186,14 +185,15 @@ function TopNav({state, current}: {state: ProjectState; current: NodeId}) {
             );
           })}
         </nav>
-        <UserEnd />
+        <UserEnd settings />
       </div>
     </header>
   );
 }
 
-/** The right end of the top island: the stand-in tag (while stand-ins run) and the user's avatar. */
-export function UserEnd() {
+/** The right end of the top island: the stand-in tag (while stand-ins run), Settings inside a project, and the user's avatar. */
+export function UserEnd({settings}: {settings?: boolean}) {
+  const {open} = useSettings();
   const [user, setUser] = useState('');
   const [standIns, setStandIns] = useState<string[]>([]);
   const loaded = useRef(false);
@@ -212,6 +212,7 @@ export function UserEnd() {
           Stand-in services
         </span>
       )}
+      {settings && <Button label="Settings" kind="ghost" size="sm" icon="settings" title="Project Settings: the pass rule and the labeling model" onClick={open} />}
       <span className="avatar" aria-label={user} title={user}>
         {user.slice(0, 1).toUpperCase()}
       </span>

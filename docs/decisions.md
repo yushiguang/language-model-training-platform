@@ -3,6 +3,16 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-13 (building 1.0.0 phase 2)
+
+- **The structured prompt is the only thing edited**; the text sent to the model is compiled from it and shown read-only.
+- **Only a changed field or value starts a new schema version.** New wording keeps gold labels and scores valid.
+- **The Optimiser and Improve with AI change wording only.** Fields and values are changed by people, on Prompt Design or in the editor.
+- **Project Settings are confirmed once, before the first paid run**; nothing paid starts before that.
+- **No Approve card in the chat.** A draft is approved on its page.
+- **Existing 0.x projects are not migrated** (assumed test data, to be discarded).
+- **The UI canvas keeps 51 boards** after the redundant ones were removed; the 1.0.0 screens are drawn after the build.
+
 ## 2026-11-12 (review of the 1.0.0 spec)
 
 - **No pass verdict under 20 scored examples.** The score shows as a rough reading and Finish stays closed.

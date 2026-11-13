@@ -1,11 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import {Fragment, useEffect, useRef, useState, useSyncExternalStore, type ReactNode} from 'react';
+import {Fragment, useEffect, useRef, useState, useSyncExternalStore} from 'react';
 import type {AgentPreset, ChatEvent, ChatMessage, PageContext} from '@tsp/contracts';
 import {agentName, pageFromPath} from '@tsp/domain';
 import {agentLive, answeringAgent, chatHistory, isAgentBusy, sendUserMessage, subscribeAgentLive, subscribeChanges} from '@/backend-api';
-import {Badge, dateTime, Icon, LinkChip} from '@/ui';
+import {dateTime, Icon, LinkChip} from '@/ui';
 import {useProject} from './ProjectContext';
 
 /** A document link pasted into the chat, shown as a chip (the text still goes to the agent as-is). */
@@ -13,7 +13,8 @@ const DOC_LINK = /https?:\/\/[^\s]+\/(?:docx|docs|wiki)\/[^\s]+/gi;
 
 /**
  * Ask AI (design: "Ask AI panel", "Agents, motion and states"): the only way users give the
- * helpers anything, as text or document links. One conversation per project; the helper reads the
+ * helpers anything, as text or document links. A helper's draft appears on the page and is approved
+ * there: the chat never shows an Approve card (spec 1.0.0, 6.2). One conversation per project; the helper reads the
  * page it is opened on. Each answer names its helper; grey action lines record what helpers, the
  * workflow and the user did; while a turn runs, a live line says what the helper is doing and
  * then its reply streams in.
@@ -21,22 +22,16 @@ const DOC_LINK = /https?:\/\/[^\s]+\/(?:docx|docs|wiki)\/[^\s]+/gi;
 export function AskAi({
   page,
   onClose,
-  extra,
   chips,
   placeholder = 'Ask about this page',
   first,
-  onSend,
 }: {
   page: PageContext;
   onClose: () => void;
-  /** Cards the page adds after the messages (a schema draft waiting for Approve). */
-  extra?: ReactNode;
   chips?: string[];
   placeholder?: string;
   /** The opening line of the page's helper, shown first. */
   first?: string;
-  /** Runs before the message goes to the agent (Setup saves the first message as the task). */
-  onSend?: (text: string) => Promise<void>;
 }) {
   const {projectId, state} = useProject();
   const [messages, setMessages] = useState<ChatMessage[]>(() => seen.get(projectId) ?? []);
@@ -61,12 +56,11 @@ export function AskAi({
   }, [projectId]);
   useEffect(() => {
     bodyRef.current?.scrollTo({top: bodyRef.current.scrollHeight});
-  }, [messages.length, busy, !!extra, liveTurn?.working, liveTurn?.reply?.length]);
+  }, [messages.length, busy, liveTurn?.working, liveTurn?.reply?.length]);
 
   const send = async (text: string) => {
     setBusy(true);
     try {
-      await onSend?.(text);
       // The agent sees the page through the backend's page view; the page only says where it is.
       const params = Object.fromEntries([...new URLSearchParams(location.search)].filter(([k]) => k !== 'p'));
       await sendUserMessage({projectId, text, page: {...page, where: {page: pageFromPath(location.pathname), params}}});
@@ -78,14 +72,11 @@ export function AskAi({
   const follow = chips ?? (last?.choices?.length ? last.choices : []);
   const where = {...page, where: {page: pageFromPath(typeof location === 'undefined' ? '/' : location.pathname), params: {}}};
   const answering = liveTurn?.agent ?? answeringAgent(projectId, where);
-  // The newest start line of work that is still running spins (R2-5): scoring and the Optimiser
-  // on Prompt versions, the test set's answers on Gold Labels, the training set.
+  // The newest start line of work that is still running spins (R2-5): scoring and the Optimiser.
   const active = new Set<string>();
   if (state) {
     const busy: Record<string, boolean> = {
       '/prompt': state.runs.some(r => r.state === 'running') || state.optimisation.some(o => o.state === 'running'),
-      '/gold': state.testRuns.some(r => r.state === 'running'),
-      '/training-set': state.trainingSets.some(t => t.state === 'running'),
     };
     const done = new Set<string>();
     for (const m of [...messages].reverse()) {
@@ -124,7 +115,6 @@ export function AskAi({
             <Message m={m} active={active.has(m.id)} />
           </Fragment>
         ))}
-        {extra}
         {liveTurn?.reply ? (
           <AgentText who={liveTurn.agent} text={liveTurn.reply} streaming />
         ) : (
@@ -219,19 +209,6 @@ function Message({m, active}: {m: ChatMessage; active?: boolean}) {
   if (m.role === 'user') return <UserText text={m.text} />;
   if (m.role === 'event') return <EventLine m={m} active={active} />;
   return m.text ? <AgentText who={m.agent} text={m.text} /> : null;
-}
-
-export function ApprovedCard({title}: {title: string}) {
-  return (
-    <section className="card ai approved">
-      <div className="row" style={{gap: 12}}>
-        <span className="agent-t one grow" title={title}>
-          {title}
-        </span>
-        <Badge text="Approved" tone="ok" />
-      </div>
-    </section>
-  );
 }
 
 function Composer({onSend, disabled, placeholder}: {onSend: (text: string) => void | Promise<void>; disabled?: boolean; placeholder: string}) {

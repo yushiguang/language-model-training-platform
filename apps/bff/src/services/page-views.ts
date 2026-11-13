@@ -1,6 +1,6 @@
 import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@tsp/contracts';
 import {agentStart, isStartTool} from './starts.ts';
-import {checkTemplate, defaultOutputPick, dryRunSize, finalRunPlan, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, recommend, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap} from '@tsp/domain';
+import {aiSuggestion, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap} from '@tsp/domain';
 import {getApp} from './app.ts';
 import {mismatches} from './mismatches.ts';
 import {loadProjectState} from './projects.ts';
@@ -14,14 +14,11 @@ import {loadProjectState} from './projects.ts';
 
 const TITLES: Record<PageId, string> = {
   projects: 'Projects',
-  setup: 'Setup',
-  dataset: 'Dataset',
+  prompt_design: 'Prompt Design',
+  dataset: 'Eval Dataset',
   gold: 'Gold Labels',
-  prompt: 'Prompt Engineering · prompt versions',
+  prompt: 'Prompt Tuning · prompt versions',
   prompt_edit: 'Prompt editor',
-  compare: 'Compare two scores',
-  report: 'Eval report',
-  training: 'Training and test sets',
 };
 
 /** Two decimals, the same way the pages print them (toFixed), so the agent quotes what people see. */
@@ -91,7 +88,7 @@ function optimiserView(state: ProjectState) {
 }
 
 function versionDetail(state: ProjectState, v: PromptVersion) {
-  return {...versionRow(state, v), template: v.template, features: v.features, promptImages: v.images.length};
+  return {...versionRow(state, v), prompt: v.structured, fullPrompt: v.template, promptImages: v.images.length};
 }
 
 /**
@@ -153,52 +150,42 @@ function exampleView(e: Example) {
       features[k] = s.length > 500 ? `${s.slice(0, 500)}…` : s;
     }
   }
-  return {id: e.externalId, type: e.type, split: e.split, title: e.title, features};
+  return {id: e.externalId, type: e.type, title: e.title, features};
 }
 
 function adviceOf(state: ProjectState) {
-  const running = state.optimisation.find(o => o.state === 'running');
-  const a = recommend(state, running?.endpoint ?? null);
-  return {nextStep: a.title, reasons: a.reasons};
+  const a = aiSuggestion(state);
+  return a ? {nextStep: a.title, reason: a.text} : null;
 }
 
-/** Test examples with a valid saved answer from the version the final run would use now. */
-async function answeredTest(state: ProjectState, page: PageId): Promise<ReadonlySet<string>> {
-  const pick = page === 'training' ? defaultOutputPick(state) : null;
-  const settings = pick && state.setup?.models.find(m => m.endpoint === pick.endpoint);
-  if (!pick || !settings) return new Set();
-  const preds = toMap(await getApp().labeling.predictions(pick.version.id, pick.endpoint, settingsHash(settings)));
-  return new Set(state.examples.filter(e => e.split === 'test' && preds.get(e.id)?.answer).map(e => e.id));
-}
-
-function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, unknown>, answered: ReadonlySet<string> = new Set()): PageView {
+function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, unknown>): PageView {
   const {page, params} = loc;
   const s = state.setup;
-  const counts = {eval: 0, test: 0, train: 0} as Record<string, number>;
-  for (const e of state.examples) if (e.split) counts[e.split]++;
+  const total = state.examples.length;
+  const settings = {thresholds: s?.thresholds ?? null, model: s?.models[0] ? modelName(state, s.models[0].endpoint) : null, confirmed: state.facts.settingsConfirmed};
   const base = (summary: string, data: Record<string, unknown>): PageView => ({page, title: TITLES[page], summary, data: {...data, ...(Object.keys(unsaved).length ? {unsaved} : {})}});
 
   switch (page) {
-    case 'setup': {
-      const step = params.step ?? '1';
-      return base(
-        step === '1' ? 'Setup step 1: the task and the labels (schema).' : step === '2' ? 'Setup step 2: how prompts are evaluated (thresholds).' : 'Setup step 3: which labeling models to use.',
-        {step, task: s?.task ?? '', schema: s?.schema ?? null, thresholds: s?.thresholds ?? null, models: s?.models ?? [], availableModels: state.endpoints.map(e => ({id: e.id, name: e.name, speed: e.speed}))},
-      );
+    case 'prompt_design': {
+      const v = state.versions[0];
+      return base(v ? 'Prompt Design: the prompt was approved as v1. Later changes are made on Prompt Tuning.' : 'Prompt Design: the first prompt is being written. The user approves it as v1 with the Approve button at the top right.', {
+        approved: !!v,
+        prompt: v ? v.structured : null,
+        settings,
+      });
     }
     case 'dataset': {
       const snap = state.snapshot;
-      return base(snap ? `Dataset ${snap.number} from ${snap.sourceName}: ${snap.counts.valid} valid examples (${snap.counts.video} video, ${snap.counts.photoText} photo&text).${snap.split ? ` Split: ${snap.split.eval} eval, ${snap.split.test} test, ${snap.split.train} train.` : ' Not split yet.'}` : 'No dataset yet.', {
-        snapshot: snap ? {number: snap.number, source: snap.source, name: snap.sourceName, counts: snap.counts, split: snap.split} : null,
+      return base(snap ? `Eval dataset ${snap.number} from ${snap.sourceName}: ${snap.counts.valid} valid examples (${snap.counts.video} video, ${snap.counts.photoText} photo&text). All of them are used for evaluation.` : 'No eval dataset yet.', {
+        snapshot: snap ? {number: snap.number, source: snap.source, name: snap.sourceName, counts: snap.counts} : null,
         sampling: state.samplingTask ? {state: state.samplingTask.state, done: state.samplingTask.fetched, total: state.samplingTask.total} : null,
       });
     }
     case 'gold': {
-      const testRun = state.testRuns[0];
-      return base(`Gold labels: eval ${state.facts.goldEvalDone} of ${counts.eval}, test ${state.facts.goldTestDone} of ${counts.test}. Eval labels are needed for scores; test labels are optional.`, {
-        eval: {done: state.facts.goldEvalDone, total: counts.eval},
-        test: {done: state.facts.goldTestDone, total: counts.test, modelAnswers: testRun ? {state: testRun.state, done: testRun.done, total: testRun.total, model: modelName(state, testRun.endpoint)} : null},
-        needRecheckAfterSchemaChange: Object.keys(state.staleGold).length,
+      return base(`Gold labels: ${state.facts.goldEvalDone} of ${total} examples labeled. Scores are worked out on the labeled examples.`, {
+        labeled: state.facts.goldEvalDone,
+        total,
+        needRecheckAfterLabelChange: Object.keys(state.staleGold).length,
         note: 'Model answers stay hidden while people label, so as not to sway them. Do not reveal them unless asked.',
       });
     }
@@ -208,49 +195,12 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
         moreVersions: Math.max(0, state.versions.length - 12),
         optimiser: optimiserView(state),
         advice: adviceOf(state),
+        settings,
       });
     }
     case 'prompt_edit': {
       const v = findVersion(state, params.v) ?? state.versions[0];
       return base(v ? `Editing ${versionLabel(v)}. Saving makes a new version, which is scored right away.` : 'Writing the first prompt version.', {version: v ? versionDetail(state, v) : null});
-    }
-    case 'compare': {
-      const a = findVersion(state, params.a);
-      const b = findVersion(state, params.b);
-      const one = (v: PromptVersion | undefined, m: unknown) => (v ? {...versionRow(state, v), ...reportView(state, v, asModel(m, state) ?? 'A')} : null);
-      return base(a && b ? `Comparing ${versionLabel(a)} (Model ${params.am ?? 'A'}) with ${versionLabel(b)} (Model ${params.bm ?? 'A'}).` : 'Pick two scores to compare.', {a: one(a, params.am), b: one(b, params.bm)});
-    }
-    case 'report': {
-      const v = findVersion(state, params.v);
-      const view = reportView(state, v, asModel(params.m, state));
-      return base(view.report ? `Eval report for ${view.report.version} on ${view.report.model}: lowest field macro-F1 ${view.report.lowestField.macroF1} (${view.report.lowestField.field}), ${view.report.passed ? 'passes' : 'below'} the threshold.` : view.why!, {...view, advice: adviceOf(state)});
-    }
-    case 'training': {
-      const ts = state.trainingSets[0];
-      const pick = defaultOutputPick(state);
-      if (ts) {
-        const v = state.versions.find(x => x.id === ts.promptVersionId);
-        return base(`Training and test sets with ${v ? versionLabel(v) : 'a version'} on ${modelName(state, ts.endpoint)}: ${ts.state}, ${ts.done} of ${ts.total} labeled.`, {
-          run: {state: ts.state, version: v ? versionLabel(v) : null, model: modelName(state, ts.endpoint), done: ts.done, total: ts.total, train: ts.trainTotal ?? ts.total, test: ts.testTotal ?? 0, labeled: ts.labeled, invalid: ts.invalid, failed: ts.failed, evaluated: ts.evaluated},
-        });
-      }
-      // The same plan as the page's confirm: train is labeled; a test example uses its gold label,
-      // else the version's valid answer, and only the rest are labeled if the user ticks it.
-      const p = pick ? finalRunPlan(state, pick.version, pick.endpoint, answered) : null;
-      if (!pick || !p) return base('Not generated yet: there is no prompt version.', {plan: null});
-      const t = p.test;
-      return base(
-        `Not generated yet. It would use ${versionLabel(pick.version)} on ${modelName(state, pick.endpoint)}: ${p.train.count} train examples. Test set: ${t.withGold.length} with a gold label, ${t.withAnswer.length} with an answer from it, ${t.toLabel.length} with no label.`,
-        {
-          plan: {
-            version: versionLabel(pick.version),
-            model: modelName(state, pick.endpoint),
-            train: p.train.count,
-            test: {total: t.total, withGold: t.withGold.length, withAnswer: t.withAnswer.length, noLabel: t.toLabel.length},
-            evaluated: !!p.report && !!state.reports.find(r => r.id === p.report!.id)?.passed,
-          },
-        },
-      );
     }
     default:
       return base(`Project ${state.project.name}.`, {steps: state.facts.approved});
@@ -262,8 +212,7 @@ export {pageFromPath};
 export async function getPageView(projectId: string, loc: PageLocation, unsaved: Record<string, unknown> = {}): Promise<PageView> {
   const state = await loadProjectState(projectId);
   if (!state) return {page: loc.page, title: TITLES[loc.page], summary: 'The project was not found.', data: {}};
-  const view = build(state, loc, unsaved, await answeredTest(state, loc.page));
-  if (!state.setup) view.data.note = 'Setup is not finished yet.';
+  const view = build(state, loc, unsaved);
   // Review finding 2: where the model disagrees with gold labels. Counts only; say which side is
   // right never (the user decides on Gold Labels' Mismatches tab).
   if (loc.page === 'gold' || loc.page === 'prompt') {
@@ -299,10 +248,10 @@ export function agentTools(projectId: string): AgentToolHost {
         case 'get_page_view': {
           const page = (typeof args.page === 'string' && args.page in TITLES ? args.page : 'projects') as PageId;
           const params: Record<string, string> = {};
-          for (const k of ['v', 'm', 'a', 'b', 'am', 'bm', 'step']) if (typeof args[k] === 'string') params[k] = args[k] as string;
+          for (const k of ['v', 'm']) if (typeof args[k] === 'string') params[k] = args[k] as string;
           if (params.v) params.v = findVersion(state, params.v)?.id ?? params.v;
           if (params.m) params.m = asModel(params.m, state) ?? params.m;
-          return build(state, {page, params}, {}, await answeredTest(state, page));
+          return build(state, {page, params}, {});
         }
         case 'list_versions':
           return state.versions.map(v => versionRow(state, v));
@@ -315,15 +264,13 @@ export function agentTools(projectId: string): AgentToolHost {
           return reportView(state, findVersion(state, args.version), asModel(args.model, state));
         case 'get_examples': {
           const ids = Array.isArray(args.ids) ? new Set(args.ids.map(String)) : null;
-          const split = typeof args.split === 'string' ? args.split : null;
-          const all = state.examples.filter(e => (!ids || ids.has(e.externalId) || ids.has(e.id)) && (!split || e.split === split));
+          const all = state.examples.filter(e => !ids || ids.has(e.externalId) || ids.has(e.id));
           const list = all.filter(visibleToAgents);
           return {total: list.length, examples: list.slice(0, limitOf(args.limit, 10, 5)).map(exampleView), ...(list.length < all.length ? {note: HIDDEN_NOTE} : {})};
         }
         case 'get_gold_labels': {
-          const split = args.split === 'test' ? 'test' : 'eval';
-          const list = state.examples.filter(e => e.split === split && !!state.gold[e.id] && visibleToAgents(e));
-          return {split, labeled: list.length, ...(split === 'eval' ? {note: HIDDEN_NOTE} : {}), labels: list.slice(0, limitOf(args.limit, 20, 10)).map(e => ({id: e.externalId, title: e.title, answer: state.gold[e.id]!.answer}))};
+          const list = state.examples.filter(e => !!state.gold[e.id] && visibleToAgents(e));
+          return {labeled: list.length, note: HIDDEN_NOTE, labels: list.slice(0, limitOf(args.limit, 20, 10)).map(e => ({id: e.externalId, title: e.title, answer: state.gold[e.id]!.answer}))};
         }
         case 'get_predictions': {
           const v = findVersion(state, args.version);
@@ -338,12 +285,10 @@ export function agentTools(projectId: string): AgentToolHost {
             .filter(({p, g}) => !args.mixedUpOnly || !p.answer || (g && state.setup!.schema!.fields.some(f => !same(g[f.name], p.answer![f.name]))));
           return {version: versionLabel(v), model: modelName(state, settings.endpoint), note: HIDDEN_NOTE, rows: rows.slice(0, limitOf(args.limit, 20, 10)).map(({e, p, g}) => ({id: e.externalId, title: e.title, model: p.answer, ...(p.reason ? {reason: p.reason} : {}), invalid: p.invalidReason, gold: g})), matching: rows.length};
         }
-        case 'check_template': {
-          const template = typeof args.template === 'string' ? args.template : '';
-          const v = state.versions[0];
-          const features = (args.features as PromptVersion['features'] | undefined) ?? v?.features ?? {video: [], photo_text: [], metadata: []};
-          const r = checkTemplate(template, features, {schema: state.setup?.schema, types: [...new Set(state.examples.map(e => e.type))], images: v?.images ?? []});
-          return {errors: r.errors.map(e => e.message), warnings: r.warnings.map(w => w.message)};
+        case 'check_prompt': {
+          const prompt = readStructured(args.prompt, state.versions[0]?.structured);
+          if (!prompt) throw new Error('Give the structured prompt to check.');
+          return {errors: checkStructured(prompt).map(i => i.message), fullPrompt: compilePrompt(prompt)};
         }
         case 'read_feature_info': {
           const keys = Array.isArray(args.keys) ? args.keys.map(String).slice(0, 30) : [];

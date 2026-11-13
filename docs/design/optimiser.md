@@ -55,10 +55,11 @@ improves the prompt on the project's one labeling model, for up to the user's Ma
   next minor of that major (v3.1, v3.2…). The editor's Save (the main button) makes the next minor
   of the version's own major; Save as vN makes the next major, written without ".0"
   (2026-11-10). The catalog assigns every number.
-- **Change marks.** The editor diffs word by word (`diffWords` in `packages/domain/src/template.ts`)
-  and gives each change a reason with `withReasons`: the helper's change that shares its words, or
-  for an Optimiser version, the round's change line. The marks are drawn under the text box; the
-  editor finds the mark under the pointer with `elementsFromPoint` to show the hover.
+- **Change marks.** The editor compares each part of the structured prompt (task summary, each
+  definition, each field's tie-break rules, general rules) word by word with the version it came
+  from (`diffWords` in `packages/domain/src/template.ts`). A changed box shows a strip under it
+  with added words in green and removed words struck through; a helper's or a round's reason sits
+  on the mark as its hover text.
 - **Start version.** A run starts from the version selected in the list (the page asks first when
   a better minor of the same major exists); an agent's start uses the best scored version.
 - **Pool and parent.** The pool is the start version, the run's kept versions, and every other
@@ -84,11 +85,11 @@ improves the prompt on the project's one labeling model, for up to the user's Ma
 - **Confirming a pass** (decided 2026-11-10, review finding 6). A version that passes is not used
   yet: the held-out half is labeled a second time with the same version and settings (`pass: 2`
   in `ModelSettings`, so the answers are saved apart from the first labeling) and scored again
-  (`confirmScore`). Only when both pass does the run end and the training and test sets start. A
+  (`confirmScore`). Only when both pass does the run end. A
   pass the second labeling does not confirm stays a kept version, shows "Not confirmed" in the
   Optimiser panel (`OptimiserRound.confirm`), and the run goes on.
-- **Ends** when a version passes and the pass is confirmed (the Prompt step is approved and the training and test sets
-  start with it, test examples without gold included), at Max rounds, after 3 wasted rounds in a
+- **Ends** when a version passes and the pass is confirmed (the Prompt Tuning step is approved and
+  the AI Suggestion card offers Copy prompt and Finish), at Max rounds, after 3 wasted rounds in a
   row, on Stop, or when a step fails 3 times in a row: the run shows Failed with the step and the
   error, and nothing else starts until the user presses Retry, which goes on from that step. A
   run whose page closed shows Paused with Resume.
@@ -105,16 +106,16 @@ version the user wrote or an earlier run made.
 Improve with AI is the same reflection, one step at a time and under the user's hand. The Prompt
 helper reads the selected version's mistakes on the optimiser half (the same wrong examples the
 Optimiser reads) and opens the prompt editor with a draft. It may propose several changes at
-once. Added text is marked green and removed text is a small red space; hovering a mark shows
-what changed and the helper's reason. Nothing is labeled until the user saves, and the draft
+once, wording only: field and value names stay as they are. Added words are marked green and
+removed words struck through under each changed box; hovering a mark shows the helper's reason. Nothing is labeled until the user saves, and the draft
 never saves itself. A saved draft is the user's own version and is scored like any other
 (`improveWithAi` in `apps/bff/src/services/agents.ts`).
 
-## What 1.0.0 changes
+## Still to come in 1.0.0
 
-From [the 1.0.0 spec](../specs/2026-11-12-v1.0.0-workflow-and-ddd-spec.md): the loop moves out of
-the bff into `apps/optimiser` behind `OptimiserContract`; changes edit a structured prompt
-(value definitions and general rules) instead of free template text; human comments on
-optimiser-half examples replace the single "Why" note; the run no longer starts a training set
-after a pass, because batch labeling becomes a separate project kind; the thresholds named above
+Built in phases 1 and 2: the loop lives in `apps/optimiser` behind `OptimiserContract`; changes
+edit the structured prompt (definitions, tie-break rules, general rules) and never the label
+fields or values; a run no longer starts a training set after a pass; the thresholds are in
+`SystemConfig`. Phase 3 ([spec](../specs/2026-11-12-v1.0.0-workflow-and-ddd-spec.md), section 5):
+human comments on optimiser-half examples replace the single "Why" note.
 move into `SystemConfig`.

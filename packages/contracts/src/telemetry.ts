@@ -108,18 +108,18 @@ export const LABEL_VALUES: Record<string, readonly string[]> = {
   state: ['queued', 'running', 'paused', 'needs_attention', 'done', 'stopped', 'failed'],
   result: ['valid', 'invalid', 'filtered', 'failed', 'kept', 'rejected', 'placeholders_changed', 'dropped', 'checks', 'repeat'],
   step: ['parent', 'reflect', 'merge', 'check', 'dry_run', 'full', 'report', 'confirm'],
-  agent: ['front_desk', 'schema_agent', 'prompt_agent', 'evaluation_agent'],
-  from: ['front_desk', 'schema_agent', 'prompt_agent', 'evaluation_agent'],
-  to: ['schema_agent', 'prompt_agent', 'evaluation_agent'],
-  intent: ['answer', 'propose_schema', 'revise_schema', 'check_schema', 'draft_prompt', 'revise_prompt', 'explain_version', 'explain_report', 'reflect', 'merge', 'improve'],
-  tool: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions', 'check_template', 'read_feature_info', 'read_doc', 'try_template', 'score_version', 'start_optimiser'],
-  page: ['projects', 'setup', 'dataset', 'gold', 'prompt', 'prompt_edit', 'training', 'other'],
+  agent: ['front_desk', 'prompt_agent', 'evaluation_agent'],
+  from: ['front_desk', 'prompt_agent', 'evaluation_agent'],
+  to: ['prompt_agent', 'evaluation_agent'],
+  intent: ['answer', 'follow_up', 'draft_prompt', 'import_prompt', 'revise_prompt', 'explain_version', 'explain_report', 'reflect', 'merge', 'improve'],
+  tool: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions', 'check_prompt', 'read_feature_info', 'read_doc', 'try_prompt', 'score_version', 'start_optimiser'],
+  page: ['projects', 'prompt_design', 'dataset', 'gold', 'prompt', 'prompt_edit', 'other'],
   slot: ['A', 'B'],
-  what: ['score', 'resume', 'optimiser', 'try_template', 'score_version', 'start_optimiser', 'final_run', 'test_answers', 'training_after_pass'],
+  what: ['score', 'resume', 'optimiser', 'try_prompt', 'score_version', 'start_optimiser'],
   decision: ['started'],
-  node: ['setup', 'dataset', 'gold', 'prompt', 'training'],
+  node: ['prompt_design', 'dataset', 'gold', 'prompt'],
   action: ['approve', 'refused', 'skip'],
-  collection: ['projects', 'setup_versions', 'dataset_snapshots', 'examples', 'gold_labels', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'training_sets', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'audit_log'],
+  collection: ['projects', 'setup_versions', 'dataset_snapshots', 'examples', 'gold_labels', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'audit_log'],
   // Filled at startup (see above).
   endpoint: [],
   model: [],
@@ -146,57 +146,42 @@ export interface EventProps {
   project_created: Record<string, never>;
   project_opened: {node: string; days_since_last_open: Num | null};
   project_finished: {minutes_since_created: Num; total_cost_usd: Num; versions: Num; gold_labels: Num};
-  // Setup
-  task_described: {chars: Num; attachments: Num; example_ids: Num};
-  schema_proposal_shown: {agent: string; fields: Num; values: Num; revision: Num};
-  schema_approved: {fields: Num; values: Num; schema_version: Num; revisions_before: Num; edited_before_approve: boolean};
-  schema_discarded: {revision: Num};
-  schema_changed_after_labels: {gold_labels_needing_recheck: Num; reports_archived: Num};
+  project_deleted: {versions: Num; examples: Num; gold_labels: Num};
+  // Project Settings and the label signature
+  settings_saved: {mode: 'default' | 'custom'; first_confirm: boolean};
+  signature_changed: {fields: Num; values: Num; schema_version: Num; gold_labels_needing_recheck: Num};
   thresholds_saved: {mode: 'default' | 'custom' | 'none'; changed: string};
-  models_saved: {slots: 'A' | 'B' | 'both'; temperature_changed: boolean};
   // Dataset
   sample_started: {requested: Num};
   sample_finished: {fetched: Num; seconds: Num; outcome: 'done' | 'stopped' | 'failed'};
   dataset_uploaded: {rows: Num; valid: Num; invalid: Num; video: Num; photo_text: Num};
   dataset_upload_failed: {reason: 'format' | 'empty' | 'too_large' | 'other'};
-  split_applied: {eval: Num; test: Num; train: Num; used_recommended: boolean};
   // Gold Labels
   model_answer_revealed: {split: string; had_answer: boolean};
   gold_label_saved: {split: string; revealed: boolean; seconds_on_example: Num; matches_model: boolean | null; was_recheck: boolean};
   gold_labels_uploaded: {source: 'file' | 'bundled'; saved: Num; skipped: Num};
   gold_mismatch_reviewed: {outcome: 'kept' | 'changed'; with_note: boolean};
-  test_answers_requested: {estimate_usd: Num; examples: Num};
   // Prompt Engineering
   prompt_draft_requested: Record<string, never>;
-  template_fix_applied: {code: string; fix: string};
   feature_toggled: {group: string; key: string; on: boolean};
   prompt_image_added: {images_now: Num};
-  prompt_preview_opened: {example_type: string};
+  full_prompt_opened: Record<string, never>;
+  prompt_copied: {from: 'dialog' | 'suggestion'};
   version_created: {made_by: string; kind: 'minor' | 'major'; from_version_id: Id | null; warnings: Num; lines_added: Num; lines_removed: Num};
   version_scored: {version_id: Id; slot: Slot; lowest_field_macro_f1: Num; passed: boolean; cost_usd: Num; trigger: string};
-  report_opened: {version_id: Id; slot: Slot; from_page: string | null};
-  compare_opened: Record<string, never>;
   advice_shown: {kind: string};
   advice_followed: {kind: string; seconds_after_shown: Num};
   optimiser_started: {slot: Slot; trigger: string; resumed: boolean; max_rounds: Num};
   optimiser_stopped_by_user: {slot: Slot; candidates: Num; cost_usd: Num};
   optimiser_ended: {slot: Slot; outcome: string; rounds: Num; candidates: Num; kept: Num; cost_usd: Num; best_lowest_field_macro_f1: Num | null};
   rerun_requested: {version_id: Id; slot: Slot};
-  // Training and test sets
-  final_run_confirm_shown: {train: Num; test_to_label: Num; test_with_gold: Num; test_with_answers: Num; estimate_usd: Num; evaluated: boolean};
-  final_run_started: {version_id: Id; slot: Slot; label_test: boolean; estimate_usd: Num};
-  final_run_resumed: {after: string; done: Num; total: Num};
-  final_run_stopped_by_user: {done: Num; total: Num};
-  final_run_ended: {state: string; train_rows: Num; test_rows: Num; invalid_rate: Num; cost_usd: Num; estimate_usd: Num; minutes: Num};
-  low_count_warning_shown: {values_below_min: Num};
-  export_downloaded: {set: 'training' | 'test' | 'both'; format: 'jsonl' | 'csv'; rows: Num};
   // Assistant and agents
   assistant_opened: Record<string, never>;
   assistant_minimised: Record<string, never>;
   chat_message_sent: {entry_agent: string; chars: Num; attachments: Num};
   agent_replied: {agent: string; seconds: Num; handoff_to: string | null; tool_calls: Num; proposal_kind: string | null};
   agent_tool_called: {agent: string; tool: string; ok: boolean; ms: Num};
-  prompt_proposal_shown: {agent: string};
+  prompt_proposal_shown: {agent: string; unmapped: Num};
   prompt_proposal_approved: {agent: string; edited_before_approve: boolean};
   prompt_proposal_discarded: {agent: string};
   auto_started: {what: string; estimate_usd: Num; project_auto_spend_usd: Num};
@@ -222,57 +207,42 @@ export const EVENT_PROP_KEYS: {[E in EventName]: readonly (keyof EventProps[E] &
   project_created: [],
   project_opened: ['node', 'days_since_last_open'],
   project_finished: ['minutes_since_created', 'total_cost_usd', 'versions', 'gold_labels'],
-  // Setup
-  task_described: ['chars', 'attachments', 'example_ids'],
-  schema_proposal_shown: ['agent', 'fields', 'values', 'revision'],
-  schema_approved: ['fields', 'values', 'schema_version', 'revisions_before', 'edited_before_approve'],
-  schema_discarded: ['revision'],
-  schema_changed_after_labels: ['gold_labels_needing_recheck', 'reports_archived'],
+  project_deleted: ['versions', 'examples', 'gold_labels'],
+  // Project Settings and the label signature
+  settings_saved: ['mode', 'first_confirm'],
+  signature_changed: ['fields', 'values', 'schema_version', 'gold_labels_needing_recheck'],
   thresholds_saved: ['mode', 'changed'],
-  models_saved: ['slots', 'temperature_changed'],
   // Dataset
   sample_started: ['requested'],
   sample_finished: ['fetched', 'seconds', 'outcome'],
   dataset_uploaded: ['rows', 'valid', 'invalid', 'video', 'photo_text'],
   dataset_upload_failed: ['reason'],
-  split_applied: ['eval', 'test', 'train', 'used_recommended'],
   // Gold Labels
   model_answer_revealed: ['split', 'had_answer'],
   gold_label_saved: ['split', 'revealed', 'seconds_on_example', 'matches_model', 'was_recheck'],
   gold_labels_uploaded: ['source', 'saved', 'skipped'],
   gold_mismatch_reviewed: ['outcome', 'with_note'],
-  test_answers_requested: ['estimate_usd', 'examples'],
   // Prompt Engineering
   prompt_draft_requested: [],
-  template_fix_applied: ['code', 'fix'],
   feature_toggled: ['group', 'key', 'on'],
   prompt_image_added: ['images_now'],
-  prompt_preview_opened: ['example_type'],
+  full_prompt_opened: [],
+  prompt_copied: ['from'],
   version_created: ['made_by', 'kind', 'from_version_id', 'warnings', 'lines_added', 'lines_removed'],
   version_scored: ['version_id', 'slot', 'lowest_field_macro_f1', 'passed', 'cost_usd', 'trigger'],
-  report_opened: ['version_id', 'slot', 'from_page'],
-  compare_opened: [],
   advice_shown: ['kind'],
   advice_followed: ['kind', 'seconds_after_shown'],
   optimiser_started: ['slot', 'trigger', 'resumed', 'max_rounds'],
   optimiser_stopped_by_user: ['slot', 'candidates', 'cost_usd'],
   optimiser_ended: ['slot', 'outcome', 'rounds', 'candidates', 'kept', 'cost_usd', 'best_lowest_field_macro_f1'],
   rerun_requested: ['version_id', 'slot'],
-  // Training and test sets
-  final_run_confirm_shown: ['train', 'test_to_label', 'test_with_gold', 'test_with_answers', 'estimate_usd', 'evaluated'],
-  final_run_started: ['version_id', 'slot', 'label_test', 'estimate_usd'],
-  final_run_resumed: ['after', 'done', 'total'],
-  final_run_stopped_by_user: ['done', 'total'],
-  final_run_ended: ['state', 'train_rows', 'test_rows', 'invalid_rate', 'cost_usd', 'estimate_usd', 'minutes'],
-  low_count_warning_shown: ['values_below_min'],
-  export_downloaded: ['set', 'format', 'rows'],
   // Assistant and agents
   assistant_opened: [],
   assistant_minimised: [],
   chat_message_sent: ['entry_agent', 'chars', 'attachments'],
   agent_replied: ['agent', 'seconds', 'handoff_to', 'tool_calls', 'proposal_kind'],
   agent_tool_called: ['agent', 'tool', 'ok', 'ms'],
-  prompt_proposal_shown: ['agent'],
+  prompt_proposal_shown: ['agent', 'unmapped'],
   prompt_proposal_approved: ['agent', 'edited_before_approve'],
   prompt_proposal_discarded: ['agent'],
   auto_started: ['what', 'estimate_usd', 'project_auto_spend_usd'],

@@ -4,7 +4,7 @@ import {busy, getApp, once, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {buildReport, labelEvalSet} from './evaluation.ts';
 import {modelName} from './page-views.ts';
-import {approveNode, loadProjectState} from './projects.ts';
+import {loadProjectState} from './projects.ts';
 
 /**
  * Background work that runs from the open page. The bff decides when labeling starts (system
@@ -69,14 +69,6 @@ export async function tick(state: ProjectState) {
     const fresh = await optimiser.getRun(o.id);
     if (fresh?.state === 'running' && !(await optimiser.isRunning(o.id))) await catalog.patch('optimisation_runs', o.id, {state: 'paused'});
   }
-  // The project is finished once the training set is done and the test set is done too (or there
-  // is no test set): recorded once, like any step approval.
-  const nTest = state.examples.filter(e => e.split === 'test').length;
-  const testDone = nTest === 0 || state.testRuns[0]?.state === 'done';
-  if (state.trainingSets[0]?.state === 'done' && testDone && !state.project.approvedNodes.includes('training')) {
-    void once(`finish:${projectId}`, () => approveNode(projectId, 'training'));
-  }
-
   // A task left running by a closed page shows as paused (listTasks marks it).
   await labeling.listTasks(projectId);
 
@@ -107,7 +99,7 @@ export async function tick(state: ProjectState) {
 export async function startOptimiser(projectId: string, maxRounds = systemConfig().optimiser.defaultMaxRounds, startVersionId?: string, opts: {auto?: boolean} = {}): Promise<void> {
   const state = await loadProjectState(projectId);
   const endpoint = state?.setup?.models[0]?.endpoint;
-  if (!state || !endpoint) throw new Error('Pick a model in Setup first.');
+  if (!state || !endpoint) throw new Error('Pick a labeling model in Project Settings first.');
   await optimiserService().startRun({projectId, endpoint, maxRounds, startVersionId, auto: opts.auto});
 }
 

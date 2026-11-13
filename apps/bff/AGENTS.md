@@ -18,16 +18,13 @@ it reads and writes through the catalog, starts labeling tasks, and asks the age
 - `api.ts`: `createBffApi()`, the bff as `BffContract` (ids and plain JSON in, records read here).
 - `optimiser-host.ts`: what the bff does for `@tsp/optimiser` (`OptimiserHost`): labels, scores and
   saves a version through the same code as every other path, and what follows a pass.
-- `training.ts`: `labelTestSet` ("Get model answers" on Gold Labels, user-started) and the final
-  run: one labeling task over the train split plus, when the user ticked it, the test examples
-  with no gold label and no valid answer from the version (`relabelInvalid`: an invalid answer
-  gets one more try). "Get model answers" reuses a task only for the same test examples. `trainingRows`: train rows from the run,
-  every test row labeled with gold, else the saved answer (`labelSource`). User-started tasks
-  don't resume by themselves after a reload.
+- `settings.ts`: Project Settings (pass rule, labeling model) and their one-time confirmation
+  before the first paid run. `prompts.ts`: saving a version from a structured prompt (compiles the
+  text, bumps the schema version when the label signature changes).
 - `starts.ts`: the agents' start tools. Runs them at once and audits them.
 - `page-views.ts`: `getPageView(projectId, where)` builds each page as the agent sees it from saved
   data, and `agentTools(projectId)` runs the agents' read tools (each call goes to the audit log).
   `agents.ts` sends the view of the user's page with every turn and lends the tools.
-- `views.ts`: task → page views (`LabelingRun`, training set counters).
+- `views.ts`: task → page views (`LabelingRun`).
 
 Rules: imports contracts and domain only; everything else arrives through `configureBff`.

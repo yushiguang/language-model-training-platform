@@ -9,6 +9,29 @@ does not match, or that the canvas does not decide. Items that were approved or 
 2026-11-06 and 2026-11-12 (acceptance rounds 3 to 6, the MVP review) are in
 [tmp/2026-11-ui-gaps-history.md](tmp/2026-11-ui-gaps-history.md).
 
+## 1.0.0 screens with no canvas board yet (2026-11-13)
+
+Phase 2 of 1.0.0 was coded from the spec with the existing components and styles. These screens
+are not drawn on the canvas, so "looks exactly like the canvas" cannot be checked for them yet.
+The canvas should be redrawn from the built screens, then reviewed.
+
+| Screen | What was built | To decide |
+| --- | --- | --- |
+| Prompt Design | The structured prompt in four sections; "AI draft" badge, View full prompt, Discard and Approve in the header; a "Not carried over" card above the prompt after an import | Layout and order of the sections |
+| Prompt editor | The same structured parts in place of the free-text editor | — |
+| Change marks | A strip under each changed box: added words green, removed words struck through, the reason as hover text | The spec asks for marks inside the text; a plain text box cannot colour words, so they sit under it |
+| View full prompt | A dialog with the compiled text, read-only, and Copy prompt | — |
+| Project Settings | One dialog: pass rule (Default or Custom), the checks with a subtitle each and locked values for Default, the labeling model | — |
+| Settings button | A ghost button in the top island, left of the avatar | Placement |
+| Projects list, Delete | A trash button per row; the dialog asks for the exact name | — |
+| Attention halo | Approve and Save pulse softly while a helper's draft waits | Motion is settled in phase 4 |
+| AI Suggestion on Prompt Tuning | Six fixed headlines (too few gold labels, add examples, review mismatches, optimise, switch back from a dropped version, use as final prompt) | The "add examples" card appears with append in phase 3 |
+| Dropped badge | Hover says why the version was dropped | — |
+| Finish | The final card shows Copy prompt and Finish, then a Finished badge | — |
+
+Rows below that name Setup, Schema settings, the Training Set page or the approved card in Ask AI
+describe 0.x screens that 1.0.0 removed.
+
 ## Still different from the canvas
 
 | Where | Canvas | Code | Why |

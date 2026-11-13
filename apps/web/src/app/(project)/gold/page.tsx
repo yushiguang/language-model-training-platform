@@ -4,13 +4,14 @@ import {useGo} from '@/components/nav';
 import {useSearchParams} from 'next/navigation';
 import {Fragment, Suspense, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import type {Answer, Example, ExampleMedia, LabelField, MismatchList, MismatchReview} from '@tsp/contracts';
-import {FEATURES, versionLabel} from '@tsp/domain';
+import {FEATURES, gate, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
+import {useSettings} from '@/components/ProjectSettings';
 import {approveNode, exampleMedia, mismatches, predictionsFor, reviewGold, saveGold, type ProjectState} from '@/backend-api';
 import {Badge, Banner, Button, Card, Code, dateTime, Empty, Hov, Icon, num, PageHead, reportActionError, Seg, Tabs} from '@/ui';
 
-type SetKey = 'eval' | 'test' | 'mismatch';
+type SetKey = 'eval' | 'mismatch';
 
 export default function GoldPage() {
   return (
@@ -23,7 +24,7 @@ export default function GoldPage() {
 function GoldRouter() {
   const q = useSearchParams();
   return (
-    <ProjectPage node="gold" page={{label: 'Gold Labels', agent: 'front_desk', intent: 'answer', hint: "If an example doesn't fit any value, tell me and I'll bring in the schema agent.", context: {}}}>
+    <ProjectPage node="gold" page={{label: 'Gold Labels', agent: 'front_desk', intent: 'answer', hint: "If an example doesn't fit any value, tell me and I'll bring in the Prompt helper.", context: {}}}>
       {({state}) => <Gold state={state} tabParam={q.get('tab')} />}
     </ProjectPage>
   );
@@ -34,7 +35,7 @@ function GoldRouter() {
  * Lazy (Evelyn, 2026-11-11): a review applies to the list here at once and nothing else is worked
  * out. The list is worked out again only when the page opens, another version is picked, or a
  * version or score is added; the scores the edits made out of date are rebuilt by whoever reads
- * them next (Prompt versions, Training Set, a helper, the Optimiser).
+ * them next (Prompt versions, a helper, the Optimiser).
  */
 function useMismatches(state: ProjectState, versionId: string | null): {list: MismatchList | null; edited: (exampleId: string, review: MismatchReview) => void} {
   const [list, setList] = useState<MismatchList | null>(null);
@@ -103,7 +104,6 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   const sets = useMemo(
     () => ({
       eval: state.examples.filter(e => e.split === 'eval'),
-      test: state.examples.filter(e => e.split === 'test'),
       mismatch: (sub === 'done' ? (mm?.reviewedItems ?? []) : (mm?.items ?? [])).map(x => byId.get(x.exampleId)!).filter(Boolean),
     }),
     [state.examples, mm, byId, sub],
@@ -117,7 +117,7 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   const firstOpen = (k: SetKey) => (k === 'mismatch' ? 0 : Math.max(0, sets[k].findIndex(e => !state.gold[e.id])));
   // Opens on the first example without a gold label; it stays put while labels save. On
   // Mismatches, a kept or changed example leaves the list and the next one takes its place.
-  const [pos, setPos] = useState<Record<SetKey, number>>(() => ({eval: firstOpen('eval'), test: firstOpen('test'), mismatch: 0}));
+  const [pos, setPos] = useState<Record<SetKey, number>>(() => ({eval: firstOpen('eval'), mismatch: 0}));
   const i = Math.min(pos[tab], Math.max(0, list.length - 1));
   const ex = list[i];
   const onMismatch = tab === 'mismatch';
@@ -131,7 +131,9 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   // "model answer seen" when there was one to see.
   const [model, setModel] = useState<{exampleId: string; answer: Answer | null} | null>(null);
   const modelAnswer = model && ex && model.exampleId === ex.id ? model.answer : null;
-  const evalDone = state.facts.goldEvalDone >= sets.eval.length && sets.eval.length > 0;
+  // Scoring never waits for every example (spec 2.5): a few labels in each half are enough to go on.
+  const next = gate('gold', state.facts);
+  const settings = useSettings();
   const move = (n: number) => setPos(p => ({...p, [tab]: n}));
   const versionId = mm?.versionId ?? null;
   const item = onMismatch && ex && sub === 'open' ? mm?.items.find(x => x.exampleId === ex.id) : undefined;
@@ -179,11 +181,13 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
             </>
           )}
           <Button
-            label="Next: Prompt Engineering"
+            label="Next: Prompt Tuning"
             kind={onMismatch ? 'secondary' : 'primary'}
-            disabled={!evalDone}
-            title={evalDone ? undefined : 'Label every eval example first. Gold labels on the test set are optional.'}
+            disabled={!next.ready}
+            title={next.ready ? undefined : (next.reason ?? undefined)}
             onClick={async () => {
+              // The first paid run is about to start: the user confirms Project Settings once.
+              if (!(await settings.confirmed())) return;
               await approveNode(state.project.id, 'gold');
               await go(href('/prompt'));
             }}
@@ -193,10 +197,10 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
     />
   );
 
-  if (!state.snapshot?.split || !state.setup?.schema)
+  if (!state.snapshot || !state.setup?.schema)
     return (
       <Frame head={<PageHead title="Gold Labels" />}>
-        <Empty title="No examples to label yet" text="Split the dataset first, then label the eval set here." />
+        <Empty title="No examples to label yet" text={state.setup?.schema ? 'Add examples on Eval Dataset first, then label them here.' : 'Approve the prompt on Prompt Design first: its fields and values are what you label with.'} />
       </Frame>
     );
 
@@ -205,14 +209,13 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   const expectMm = state.reports.some(r => r.schemaVersion === state.setup!.schemaVersion);
   return (
     <Frame head={head}>
-      {Object.keys(state.staleGold).length > 0 && <Banner text={`The schema changed. ${num(Object.keys(state.staleGold).length)} labels were made under the old schema and need a quick re-check.`} />}
+      {Object.keys(state.staleGold).length > 0 && <Banner text={`The label fields or values changed. ${num(Object.keys(state.staleGold).length)} labels were made before the change and need a quick re-check.`} />}
       <Tabs
         label="Sets"
         selected={tab}
         onSelect={setTab}
         items={[
           {key: 'eval', label: 'Eval set', count: `${num(state.facts.goldEvalDone)} / ${num(sets.eval.length)}`},
-          {key: 'test', label: 'Test set', count: `${num(state.facts.goldTestDone)} / ${num(sets.test.length)}`},
           // Once a version has answers on the whole eval set.
           // R5-1: the tab is there from the first paint when versions have scores; its count
           // follows once the list is worked out.
@@ -287,7 +290,7 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
       ) : onMismatch ? (
         mm && <Empty title="No mismatches left" text={`Every label ${picked?.label ?? 'the model'} disagrees with has been checked.`} />
       ) : (
-        <Empty title="No examples in this set" text="Change the split on the Dataset page to add some." />
+        <Empty title="No examples yet" text="Add examples on the Eval Dataset page." />
       )}
     </Frame>
   );

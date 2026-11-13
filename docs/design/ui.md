@@ -1,7 +1,8 @@
 # UI design: the Unified UI
 
-Status: the design system below is current. The page list at the end is the 0.x workflow; the
-1.0.0 spec replaces Setup and Training Set and reshapes the other pages.
+Status: the design system below is current. The page list at the end is the 1.0.0 four-step
+workflow as built on 2026-11-13; its new screens are coded from the 1.0.0 spec and are not drawn
+on the canvas yet (see [../ui-gaps.md](../ui-gaps.md)).
 
 The screens are drawn on the UI canvas "Sprint MVP — UI Screens", page "Unified UI", approved on
 2026-11-06 and kept in step with the code since (the canvas is a design artifact outside this
@@ -52,7 +53,7 @@ tokens, not a second copy of the numbers.
 
 | Text style | Size / line · weight | Example |
 | --- | --- | --- |
-| Page title | 24 / 32 · 600 | Prompt versions |
+| Page title | 24 / 32 · 600 | Prompt Tuning |
 | Card title | 17 / 24 · 700 | Versions |
 | Body | 14 / 20 · 400 | Use it to make the training and test sets |
 | Label | 14 / 20 · 500 | Prompt |
@@ -133,9 +134,9 @@ place helpers speak on a page. Who the helpers are and what they may do is in
 - One conversation per project, the same on every page; 400 px on the right, and the page shifts
   left.
 - Top: the title "Ask AI" with a close button, one grey line saying who answers on this page, and
-  a context chip naming what the helper is reading ("Prompt versions · v4").
+  a context chip naming what the helper is reading ("Prompt Tuning · v4").
 - Messages: the user's in grey bubbles on the right; a helper's as plain text with no bubble,
-  signed with its name (Assistant, Labels helper, Prompt helper, Scores helper). Follow-up chips
+  signed with its name (Assistant, Prompt helper, Scores helper). Follow-up chips
   under the last message send a question in one click.
 - Input: text and document links only; a pasted link shows as a chip. No files and no item IDs.
   The box grows to 6 lines, then scrolls. In 0.x Enter adds a new line and only the button sends;
@@ -152,8 +153,7 @@ place helpers speak on a page. Who the helpers are and what they may do is in
 | --- | --- | --- |
 | On a page | Has a suggestion | Accent frame and tint; a small "AI Suggestion" label, one bold headline and one grey line on the left, its actions on the right (for example Keep improving and Make training and test sets) |
 | On a page | Agent is waiting for a task and has nothing to say yet | Hidden; the card comes back when there is a suggestion |
-| In Ask AI | Waiting for approval | Same frame, no spark and no label; headline, one grey line ("Check them on the left.") and Approve on the right |
-| In Ask AI | Approved | Neutral, one line: headline on the left, Approved tag on the right; no timestamp |
+| In Ask AI (0.x only) | Waiting for approval, Approved | Removed in 1.0.0: the chat shows no Approve card. A draft is approved with the page's main button, which gets a soft halo while the draft waits; the chat keeps one record line ("You approved the prompt as v1") |
 
 Nothing a helper proposes changes the page until the user approves it. In a chat card there is no
 spark icon and no "AI Suggestion" label.
@@ -168,13 +168,16 @@ these rules are not yet met, and the motion tokens proposed for the design syste
 
 ## Pages
 
-| Step (0.x) | Pages | In 1.0.0 |
+| Step | Pages | Notes |
 | --- | --- | --- |
-| Setup | Schema settings, Evaluation settings, Labeling model | Removed. Labels move into Prompt Design; evaluation and model become a Project Settings dialog |
-| Dataset | Empty, sampling or loading, ready (examples and split) | Becomes Eval Dataset: no train/test split, append and prune, label balance card |
-| Gold Labels | Eval set, Test set, Mismatches | Eval set and Mismatches, each with a To do / Done filter, explicit Save, comments |
-| Prompt Engineering | Prompt editor, Prompt versions, Optimiser panel | Becomes Prompt Tuning, with a structured prompt editor; Prompt Design is the new first step |
-| Training Set | Training set and test set tabs | Removed from this workflow; batch labeling becomes its own project kind later |
+| (Projects) | The list: Project, Created, Delete | Delete asks for the project's exact name |
+| Prompt Design | The structured prompt (Output Labels & Definitions, Input Features, Task summary, General rules), a helper's draft with Approve and Discard, "Not carried over", View full prompt | Replaces Setup's Schema settings. Everything starts in Ask AI: describe the task or paste a prompt |
+| Eval Dataset | Empty, sampling or loading, ready | No split: every example is used for scoring. Append, prune and the label balance card come in phase 3 |
+| Gold Labels | Eval set, Mismatches | The Test set tab is gone. Filters, explicit Save and comments come in phase 3 |
+| Prompt Tuning | Versions with scores, the fixed AI Suggestion card, the Optimiser panel; the prompt editor (same structured parts, change marks under each changed box) | Ends with Copy prompt and Finish |
+| (dialog) | Project Settings: pass rule with its checks, labeling model | Opens from Settings in the top island, and once before the first paid run. Explanations are subtitles, not hovers |
+
+Setup and Training Set are removed; batch labeling becomes its own project kind later.
 
 Screen-by-screen descriptions are not kept in this repo: the canvas is the source for screens,
 and [the 1.0.0 spec](../specs/2026-11-12-v1.0.0-workflow-and-ddd-spec.md) describes the new ones.

@@ -12,7 +12,7 @@ async function setup(n: number, prefix: string) {
   const db = localDocRuntime(prefix);
   const catalog = createCatalog(db);
   await catalog.insert('setup_versions', {id: 'sv_1', projectId: 'pr_1', number: 1, schemaVersion: 1, task: '', schema, thresholds: null, models: [], steps: {schema: true, evaluation: true, models: true}, createdAt: '', createdBy: ''});
-  const v = await catalog.createPromptVersion({projectId: 'pr_1', template: 'Label {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
+  const v = await catalog.createPromptVersion({projectId: 'pr_1', structured: {taskSummary: '', features: {video: [], photo_text: [], metadata: []}, fields: [], generalRules: '', images: []}, template: 'Label {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
   const ids = Array.from({length: n}, (_, i) => `ex_${i}`);
   await catalog.insertMany('examples', ids.map((id, i) => ({id, snapshotId: 'ds_1', externalId: String(i), type: 'video' as const, title: '', features: {Description: `post ${i}`}, split: 'train' as const, optimiserHalf: false})));
   return {db, catalog, v, ids};

@@ -3,11 +3,11 @@
 import {useGo} from '@/components/nav';
 import {useEffect, useRef, useState} from 'react';
 import type {PageContext} from '@tsp/contracts';
-import {gate} from '@tsp/domain';
-import {Frame, ProjectPage, useOpenAskAi} from '@/components/Shell';
+import {gate, systemConfig} from '@tsp/domain';
+import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
-import {applySplit, approveNode, checkLabels, getSamplePoolSize, startSampleDataset, stopSampleDataset, uploadDatasetFile, type ProjectState} from '@/backend-api';
-import {Badge, Button, Card, CenterProgress, dateTime, Empty, Field, LinkChip, Metric, Metrics, num, PageHead, reportActionError, Suggestion} from '@/ui';
+import {approveNode, getSamplePoolSize, startSampleDataset, stopSampleDataset, uploadDatasetFile, type ProjectState} from '@/backend-api';
+import {Badge, Banner, Button, Card, CenterProgress, dateTime, Empty, LinkChip, Metric, Metrics, num, PageHead} from '@/ui';
 
 export default function DatasetPage() {
   return (
@@ -17,16 +17,12 @@ export default function DatasetPage() {
   );
 }
 
-const PAGE: PageContext = {label: 'Dataset', agent: 'front_desk', intent: 'answer', hint: 'Ask how big the eval and test sets should be.', context: {}};
+const PAGE: PageContext = {label: 'Eval Dataset', agent: 'front_desk', intent: 'answer', hint: 'Ask how many examples the eval dataset needs.', context: {}};
 
 function Dataset({state}: {state: ProjectState}) {
   const snap = state.snapshot;
   const task = state.samplingTask?.state === 'running' ? state.samplingTask : null;
-  // Split sizes save a moment after typing; Next saves any change still waiting first, and is off
-  // while the sizes are invalid, so the step never moves on with old numbers.
-  const flush = useRef<() => Promise<void>>(async () => undefined);
-  const [splitOk, setSplitOk] = useState(true);
-  const head = <PageHead title="Dataset" actions={snap && !task ? <NextButton state={state} flush={flush} splitOk={splitOk} /> : undefined} />;
+  const head = <PageHead title="Eval Dataset" actions={snap && !task ? <NextButton state={state} /> : undefined} />;
   if (task)
     return (
       <Frame head={head}>
@@ -48,25 +44,8 @@ function Dataset({state}: {state: ProjectState}) {
     );
   return (
     <Frame head={head}>
-      <Ready state={state} flush={flush} onValid={setSplitOk} />
-      {state.setup?.schema && <CheckLabels state={state} />}
+      <Ready state={state} />
     </Frame>
-  );
-}
-
-/** Review finding 10: the Labels helper reads a sample of the data against the labels, in Ask AI. */
-function CheckLabels({state}: {state: ProjectState}) {
-  const openAskAi = useOpenAskAi();
-  const check = () => {
-    openAskAi();
-    checkLabels(state.project.id, {...PAGE, where: {page: 'dataset', params: {}}}).catch(e => reportActionError(`Check labels failed: ${(e as Error).message}`, check));
-  };
-  return (
-    <div style={{paddingTop: 16}}>
-      <section className="card ai" aria-label="AI Suggestion">
-        <Suggestion title="Check the labels against your data" text="The Labels helper reads 20 examples and says which values never show up and which examples fit no value" actions={<Button label="Check labels" onClick={check} />} />
-      </section>
-    </div>
   );
 }
 
@@ -85,7 +64,7 @@ function Start({state}: {state: ProjectState}) {
     if (file.current) file.current.value = '';
   };
   return (
-    <Empty title="No examples yet" text="Upload a file of item IDs, or let the platform pick examples at random.">
+    <Empty title="No examples yet" text="Every example here is used to score your prompt. Upload a file of item IDs, or let the platform pick examples at random.">
       <div className="row" style={{gap: 12}}>
         <Button label="Upload dataset" icon="upload" onClick={() => file.current?.click()} />
         <input ref={file} type="file" className="sr-only" accept=".txt,.csv,.jsonl,.json" aria-label="Upload dataset" onChange={e => e.target.files?.[0] && void upload(e.target.files[0])} />
@@ -102,61 +81,32 @@ function Start({state}: {state: ProjectState}) {
   );
 }
 
-function recommended(total: number, minEval: number | null) {
-  const evalSize = minEval == null ? 0 : Math.min(total - 2, Math.max(minEval, Math.round(total * 0.35)));
-  const test = Math.max(1, Math.round(total * 0.1));
-  return {evalSize, test};
-}
-
-function NextButton({state, flush, splitOk}: {state: ProjectState; flush: {current: () => Promise<void>}; splitOk: boolean}) {
+function NextButton({state}: {state: ProjectState}) {
   const go = useGo();
   const {href} = useProject();
-  const evalOn = !!state.setup?.thresholds;
   const g = gate('dataset', state.facts);
   return (
     <Button
-      label={evalOn ? 'Next: Gold Labels' : 'Next: Prompt Engineering'}
+      label="Next: Gold Labels"
       kind="primary"
-      disabled={!g.ready || !splitOk}
-      title={!splitOk ? 'Fix the split sizes first' : g.ready ? undefined : (g.reason ?? undefined)}
+      disabled={!g.ready}
+      title={g.ready ? undefined : (g.reason ?? undefined)}
       onClick={async () => {
-        await flush.current();
         await approveNode(state.project.id, 'dataset');
-        await go(href(evalOn ? '/gold' : '/prompt'));
+        await go(href('/gold'));
       }}
     />
   );
 }
 
-function Ready({state, flush, onValid}: {state: ProjectState; flush: {current: () => Promise<void>}; onValid: (ok: boolean) => void}) {
+/** The eval dataset: every valid example is used for evaluation (spec 1.0.0, 2.1). No split to set. */
+function Ready({state}: {state: ProjectState}) {
   const snap = state.snapshot!;
-  const t = state.setup?.thresholds ?? null;
-  const evalOn = !!t;
-  const total = snap.counts.valid;
-  const rec = recommended(total, t?.minEval ?? null);
-  const [evalSize, setEval] = useState(String(snap.split?.eval ?? rec.evalSize));
-  const [test, setTest] = useState(String(snap.split?.test ?? rec.test));
-  const locked = Object.keys(state.gold).length > 0;
-  const e = evalOn ? parseInt(evalSize) || 0 : 0;
-  const te = parseInt(test) || 0;
-  const train = Math.max(0, total - e - te);
-  const err = e + te >= total ? 'Leave some examples for train' : evalOn && e < t!.minEval ? `The eval set needs at least ${t!.minEval} examples` : null;
-
-  // Sizes save as they are typed (no Apply button).
-  const unsaved = !locked && !err && !(snap.split && snap.split.eval === e && snap.split.test === te);
-  useEffect(() => {
-    if (!unsaved) return;
-    const id = setTimeout(() => void applySplit(state.project.id, snap.id, e, te), 400);
-    return () => clearTimeout(id);
-  }, [e, te, locked, err]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => onValid(locked || !err), [locked, err]); // eslint-disable-line react-hooks/exhaustive-deps
-  flush.current = async () => {
-    if (unsaved) await applySplit(state.project.id, snap.id, e, te);
-  };
-
-  const lockTip = locked ? 'The split is fixed because gold labels exist for it' : undefined;
+  const {minEvalRecommended} = systemConfig().dataset;
+  const few = snap.counts.valid < minEvalRecommended;
   return (
-    <div className="grid-split" style={{gridTemplateColumns: '1fr 1fr', alignItems: 'stretch'}}>
+    <div className="col" style={{gap: 16, width: 706}}>
+      {few && <Banner text={`Scores from fewer than ${minEvalRecommended} examples are a rough reading. You can go on, and add more examples later.`} style={{margin: 0}} />}
       <Card title="Examples">
         <Metrics>
           <Metric label="Examples" value={num(snap.counts.rows)} />
@@ -167,49 +117,6 @@ function Ready({state, flush, onValid}: {state: ProjectState; flush: {current: (
           <Badge text={snap.source === 'sample' ? 'Sampled' : 'Uploaded'} icon={false} />
           <span className="t-3 one" style={{fontSize: 13}} title={snap.source === 'upload' ? snap.sourceName : undefined}>
             {dateTime(snap.createdAt)} · {num(snap.counts.video)} videos · {num(snap.counts.photoText)} photo and text
-          </span>
-        </div>
-      </Card>
-      <Card title="Split" className="form">
-        <div className="row" style={{gap: 16, alignItems: 'flex-end'}}>
-          {evalOn && (
-            <Field label="Eval size" width={160}>
-              <input className="input" value={evalSize} disabled={locked} title={lockTip} onChange={x => setEval(x.target.value.replace(/\D/g, ''))} />
-            </Field>
-          )}
-          <Field label="Test size" width={160}>
-            <input className="input" value={test} disabled={locked} title={lockTip} onChange={x => setTest(x.target.value.replace(/\D/g, ''))} />
-          </Field>
-          <Field label="Train size" width={160}>
-            <span className="input" style={{display: 'flex', alignItems: 'center', background: 'var(--bg-muted)', borderColor: 'transparent'}}>
-              {num(train)}
-            </span>
-          </Field>
-        </div>
-        {err && (
-          <span className="t-err" style={{fontSize: 13}}>
-            {err}
-          </span>
-        )}
-        <div className="split" style={{marginTop: 16}}>
-          {evalOn && <i style={{flex: Math.max(e, 0), background: '#1b1b1b'}} />}
-          <i style={{flex: Math.max(te, 0), background: '#6a6a6a'}} />
-          <i style={{flex: Math.max(train, 0), background: '#d4d4d4'}} />
-        </div>
-        <div className="legend">
-          {evalOn && (
-            <span>
-              <i style={{background: '#1b1b1b'}} />
-              Eval <b>{num(e)}</b>
-            </span>
-          )}
-          <span>
-            <i style={{background: '#6a6a6a'}} />
-            Test <b>{num(te)}</b>
-          </span>
-          <span>
-            <i style={{background: '#d4d4d4'}} />
-            Train <b>{num(train)}</b>
           </span>
         </div>
       </Card>

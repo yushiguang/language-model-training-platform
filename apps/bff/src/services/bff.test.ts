@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema} from '@tsp/contracts';
+import type {AgentRuntimeContract, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt} from '@tsp/contracts';
 import {createCatalog} from '@tsp/catalog';
 import {createLabeling, memoryLocks} from '@tsp/labeling';
 import {createOptimiser} from '@tsp/optimiser';
@@ -10,27 +10,28 @@ import {optimiserHost} from './optimiser-host.ts';
 import {loadProjectState} from './projects.ts';
 import {agentStart} from './starts.ts';
 import {tick} from './work.ts';
-import {versionLabel} from '@tsp/domain';
+import {compilePrompt, DEFAULT_THRESHOLDS, versionLabel} from '@tsp/domain';
 
 const schema: Schema = {fields: [{name: 'format', kind: 'single', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}]};
 /** Output price only, so every estimate is 150 tokens x $200/M = $0.03 per example. */
 const endpoint: EndpointInfo = {id: 'A', name: 'Model A', description: '', badge: '', cost: 'Lower', speed: 'Faster', supportsTemperature: true, priceIn: 0, priceOut: 200};
 const EVAL = 10;
+/** A structured prompt over the test labels; `rules` become its general rules. */
+const sp = (rules = ''): StructuredPrompt => ({taskSummary: 'Label this', features: {video: ['Description'], photo_text: [], metadata: []}, fields: schema.fields.map(f => ({...f, values: f.values.map(v => ({...v}))})), generalRules: rules, images: []});
 
 /** A bff over the real catalog and labeling apps, with a fake model that costs `perCall` per example. */
 interface WorldOpts {
   perCall?: number;
   delayMs?: number;
-  /** Test and train examples besides the 10 eval ones (external ids t0.., r0..). */
-  test?: number;
-  train?: number;
   /** The model's reply for an example (by external id), on its nth call. */
   answer?: (externalId: string, n: number, prompt: string) => string;
   /** Pass/fail bar on the lowest field Macro-F1 (no thresholds when missing). */
   macroF1?: number;
-  /** Gold labels for the eval set, by external id. */
-  gold?: (externalId: string) => string;
+  /** Gold labels for the eval set, by external id (default: Vlog everywhere); null: none. */
+  gold?: ((externalId: string) => string) | null;
   agents?: AgentRuntimeContract;
+  /** Project Settings confirmed (default true). */
+  confirmed?: boolean;
 }
 
 async function world(prefix: string, opts: WorldOpts = {}) {
@@ -66,22 +67,18 @@ async function world(prefix: string, opts: WorldOpts = {}) {
   });
   const projectId = `pr_${prefix}`;
   await catalog.insert('setup_versions', {id: `sv_${prefix}`, projectId, number: 1, schemaVersion: 1, task: '', schema, thresholds: opts.macroF1 == null ? null : {mode: 'custom', macroF1: opts.macroF1, valueF1: null, invalidRate: null, accuracy: null, minEval: EVAL}, models: [{endpoint: 'A', maxOutputTokens: 150, temperature: null}], steps: {schema: true, evaluation: true, models: true}, createdAt: '', createdBy: ''});
-  const nTest = opts.test ?? 0;
-  const nTrain = opts.train ?? 0;
-  const total = EVAL + nTest + nTrain;
-  await catalog.insert('dataset_snapshots', {id: `ds_${prefix}`, projectId, number: 1, source: 'sample', sourceName: 'test', createdAt: '', counts: {rows: total, valid: total, invalid: 0, video: total, photoText: 0}, split: {eval: EVAL, test: nTest, train: nTrain}});
-  const ex = (key: string, split: 'eval' | 'test' | 'train') => ({id: `ex_${prefix}_${key}`, snapshotId: `ds_${prefix}`, externalId: key, type: 'video' as const, title: '', features: {}, split, optimiserHalf: split === 'eval' && Number(key) % 2 === 0});
-  await catalog.insertMany('examples', [
-    ...Array.from({length: EVAL}, (_, i) => ex(String(i), 'eval')),
-    ...Array.from({length: nTest}, (_, i) => ex(`t${i}`, 'test')),
-    ...Array.from({length: nTrain}, (_, i) => ex(`r${i}`, 'train')),
-  ]);
-  if (opts.gold) {
+  await catalog.insert('dataset_snapshots', {id: `ds_${prefix}`, projectId, number: 1, source: 'sample', sourceName: 'test', createdAt: '', counts: {rows: EVAL, valid: EVAL, invalid: 0, video: EVAL, photoText: 0}, split: {eval: EVAL, test: 0, train: 0}});
+  await catalog.insertMany('examples', Array.from({length: EVAL}, (_, i) => ({id: `ex_${prefix}_${i}`, snapshotId: `ds_${prefix}`, externalId: String(i), type: 'video' as const, title: '', features: {}, split: 'eval' as const, optimiserHalf: i % 2 === 0})));
+  const gold = opts.gold === undefined ? () => 'Vlog' : opts.gold;
+  if (gold) {
     for (let i = 0; i < EVAL; i++)
-      await catalog.insert('gold_labels', {id: `gl_${prefix}_${i}`, projectId, exampleId: `ex_${prefix}_${i}`, schemaVersion: 1, answer: {format: [opts.gold(String(i))]}, source: 'labeled', revealed: false, createdAt: '', createdBy: 'Tester'});
+      await catalog.insert('gold_labels', {id: `gl_${prefix}_${i}`, projectId, exampleId: `ex_${prefix}_${i}`, schemaVersion: 1, answer: {format: [gold(String(i))]}, source: 'labeled', revealed: false, createdAt: '', createdBy: 'Tester'});
   }
-  await catalog.insert('projects', {id: projectId, name: 'p', createdAt: '', createdBy: '', setupVersionId: `sv_${prefix}`, snapshotId: `ds_${prefix}`, approvedNodes: []});
-  const newVersion = () => catalog.createPromptVersion({projectId, template: 'Label this', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
+  await catalog.insert('projects', {id: projectId, name: 'p', createdAt: '', createdBy: '', kind: 'prompt_tuning', settingsConfirmed: opts.confirmed ?? true, setupVersionId: `sv_${prefix}`, snapshotId: `ds_${prefix}`, approvedNodes: []});
+  const newVersion = (rules = '') => {
+    const structured = sp(rules);
+    return catalog.createPromptVersion({projectId, structured, template: compilePrompt(structured), features: structured.features, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
+  };
   const state = async () => (await loadProjectState(projectId))!;
   return {db, catalog, labeling, projectId, calls, seen, newVersion, state};
 }
@@ -109,7 +106,7 @@ test('Save: the new version is scored by itself, audited, and counted as automat
 
 test('there is no cost limit: a start goes ahead after a lot of automatic spend, and a costly run is not paused', async () => {
   const w = await world('b3', {perCall: 0.5});
-  await w.catalog.audit(w.projectId, 'system', 'auto_spend', {what: 'try_template', costUsd: 50});
+  await w.catalog.audit(w.projectId, 'system', 'auto_spend', {what: 'try_prompt', costUsd: 50});
   await w.newVersion();
   await tick(await w.state());
   await until(async () => (await w.state()).runs[0]?.state === 'done', 'scoring');
@@ -136,7 +133,7 @@ test('an automatic resume of a task the user started counts as automatic spend',
 
 test('agent start tools start at once, with no card, and leave an action line', async () => {
   const w = await world('b6', {delayMs: 20});
-  await w.catalog.audit(w.projectId, 'system', 'auto_spend', {what: 'try_template', costUsd: 50});
+  await w.catalog.audit(w.projectId, 'system', 'auto_spend', {what: 'try_prompt', costUsd: 50});
   const v1 = await w.newVersion();
   const v2 = await w.newVersion();
   const a = (await agentStart(w.projectId, 'prompt_agent', 'score_version', {version: v1.id, model: 'A'})) as Record<string, unknown>;
@@ -155,75 +152,118 @@ test('agent start tools start at once, with no card, and leave an action line', 
   );
 });
 
-test('Get model answers after a re-split with the same count labels the new test set', async () => {
-  const w = await world('b8', {test: 3, train: 2});
-  const {labelTestSet} = await import('./training.ts');
-  const v = await w.newVersion();
-  const first = await labelTestSet(w.projectId, v, 'A', 1);
-  await until(async () => (await w.labeling.getTask(first.id))?.state === 'done', 'test answers');
-  // Swap one test example for a train one: still 3 test examples, but not the same ones.
-  await w.catalog.patch('examples', 'ex_b8_t2', {split: 'train'});
-  await w.catalog.patch('examples', 'ex_b8_r0', {split: 'test'});
-  const second = await labelTestSet(w.projectId, v, 'A', 1);
-  assert.notEqual(second.id, first.id);
-  assert.deepEqual([...second.exampleIds].sort(), ['ex_b8_r0', 'ex_b8_t0', 'ex_b8_t1']);
-  await until(async () => (await w.labeling.getTask(second.id))?.state === 'done', 'new test answers');
-  assert.equal(w.seen.get('r0'), 1, 'the new member was labeled');
-  assert.equal(w.seen.get('t0'), 1, 'answers already saved are reused');
+test('nothing is scored by itself until Project Settings are confirmed and enough gold labels exist (spec 2.5)', async () => {
+  const unconfirmed = await world('b8', {confirmed: false});
+  await unconfirmed.newVersion();
+  await tick(await unconfirmed.state());
+  await new Promise(r => setTimeout(r, 30));
+  assert.equal(unconfirmed.calls.n, 0);
+  // Saving the settings is the confirmation; the next check starts scoring.
+  const {saveSettings} = await import('./settings.ts');
+  const s = await unconfirmed.state();
+  await saveSettings(unconfirmed.projectId, {thresholds: DEFAULT_THRESHOLDS, model: s.setup!.models[0]});
+  assert.equal((await unconfirmed.state()).facts.settingsConfirmed, true);
+  await tick(await unconfirmed.state());
+  await until(async () => (await unconfirmed.state()).runs[0]?.state === 'done', 'scoring after the confirmation');
+
+  const noGold = await world('b9', {gold: null});
+  await noGold.newVersion();
+  await tick(await noGold.state());
+  await new Promise(r => setTimeout(r, 30));
+  assert.equal(noGold.calls.n, 0);
 });
 
-test('the final run labels a test example whose saved answer is invalid, when the user ticks it', async () => {
-  // t1's first answer is not valid; its second is.
-  const w = await world('b9', {test: 3, train: 2, answer: (id, n) => (id === 't1' && n === 1 ? 'not json' : '{"format": "Vlog"}')});
-  const {labelTestSet, startTrainingSet, trainingRows} = await import('./training.ts');
+test('a new project starts with default settings, unconfirmed; v1 sets the labels and the helper says what is next', async () => {
+  const w = await world('b10');
+  const {createProject} = await import('./projects.ts');
+  const {createVersion} = await import('./prompts.ts');
+  const p = await createProject('Fresh');
+  let s = (await loadProjectState(p.id))!;
+  assert.equal(s.project.kind, 'prompt_tuning');
+  assert.equal(s.facts.settingsConfirmed, false);
+  assert.deepEqual([s.setup?.thresholds?.mode, s.setup?.thresholds?.macroF1, s.setup?.models[0].endpoint, s.setup?.models[0].maxOutputTokens, s.setup?.schema], ['default', 0.8, 'A', 1024, null]);
+  await assert.rejects(createVersion(p.id, {structured: {...sp(), features: {video: [], photo_text: [], metadata: []}}, parent: null, madeBy: 'user', change: '', kind: 'major'}), /at least one input feature/);
+  const v1 = await createVersion(p.id, {structured: sp(), parent: null, madeBy: 'user', change: 'First prompt', kind: 'major'});
+  s = (await loadProjectState(p.id))!;
+  assert.equal(s.setup?.schemaVersion, 1);
+  assert.deepEqual(s.setup?.schema?.fields.map(f => f.name), ['format']);
+  // The text the model reads is compiled from the parts: features, the field's values, the output keys.
+  assert.match(v1.template, /Description: \{\{Description\}\}[\s\S]*format[\s\S]*Vlog[\s\S]*Return JSON only/);
+  const chat = await w.catalog.find('chat_messages', {projectId: p.id}, 'createdAt');
+  assert.match(chat.at(-1)!.text, /v1 is saved\. Next, click "Next: Eval Dataset" at the top right/);
+  assert.equal(chat.at(-1)!.agent, 'prompt_agent');
+
+  // New wording: a new version, the same labels, gold labels stand.
+  const reworded = sp('When unsure, choose Vlog.');
+  reworded.fields[0].values[0].definition = 'a day in a life';
+  const v2 = await createVersion(p.id, {structured: reworded, parent: v1, madeBy: 'user', change: '', kind: 'minor'});
+  s = (await loadProjectState(p.id))!;
+  assert.equal(v2.schemaVersion, 1);
+  assert.equal(s.setup?.schema?.fields[0].values[0].definition, 'a day in a life');
+  // A new value changes the label signature: the schema version goes up.
+  const wider = sp();
+  wider.fields[0].values.push({name: 'Clip', definition: ''});
+  const v3 = await createVersion(p.id, {structured: wider, parent: v2, madeBy: 'user', change: '', kind: 'major'});
+  assert.equal(v3.schemaVersion, 2);
+  // The Optimiser may not do that.
+  const widest = sp();
+  widest.fields[0].values.push({name: 'Clip', definition: ''}, {name: 'Skit', definition: ''});
+  await assert.rejects(createVersion(p.id, {structured: widest, parent: v3, madeBy: 'optimiser', change: '', kind: 'minor'}), /may not change the label fields/);
+});
+
+test('Delete project removes its records everywhere and leaves other projects alone', async () => {
+  const w = await world('b11');
   const v = await w.newVersion();
-  const answers = await labelTestSet(w.projectId, v, 'A', 1);
-  await until(async () => (await w.labeling.getTask(answers.id))?.state === 'done', 'test answers');
-  const ts = await startTrainingSet(w.projectId, v, 'A', null, 1, {labelTest: true});
-  assert.deepEqual([ts.testWithAnswers, ts.testToLabel], [2, 1]);
-  await until(async () => (await w.labeling.getTask(ts.taskId))?.state === 'done', 'the final run');
-  assert.equal(w.seen.get('t1'), 2);
-  assert.equal(w.seen.get('t0'), 1);
-  const rows = await trainingRows(ts.id);
-  const t1 = rows.find(r => r.exampleId === 'ex_b9_t1')!;
-  assert.equal(t1.labelSource, 'model');
-  assert.ok(t1.answer);
-  assert.equal(rows.filter(r => r.split === 'train').length, 2);
+  await tick(await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
+  const {createProject, deleteProject, listProjects} = await import('./projects.ts');
+  const {createVersion} = await import('./prompts.ts');
+  const other = await createProject('Other');
+  await createVersion(other.id, {structured: sp(), parent: null, madeBy: 'user', change: '', kind: 'major'});
+  await deleteProject(w.projectId);
+  assert.equal(await loadProjectState(w.projectId), null);
+  assert.deepEqual((await listProjects()).map(p => p.id), [other.id]);
+  for (const kind of ['prompt_versions', 'eval_reports', 'gold_labels', 'chat_messages', 'setup_versions'] as const) assert.equal((await w.catalog.find(kind, {projectId: w.projectId})).length, 0, kind);
+  assert.equal((await w.catalog.find('examples', {snapshotId: 'ds_b11'})).length, 0);
+  assert.equal((await w.labeling.listTasks(w.projectId)).length, 0);
+  assert.equal(Object.keys(await w.labeling.predictions(v.id, 'A', 'x')).length, 0);
+  assert.equal((await w.catalog.find('prompt_versions', {projectId: other.id})).length, 1);
+  await assert.rejects(deleteProject(w.projectId), /does not exist/);
 });
 
 test('a helper that joined keeps answering on its page; on another page the page helper answers, with a line', async () => {
   const seen: string[] = [];
-  // The front desk always hands off to the schema agent; a specialist answers itself.
+  // The front desk always hands off to the Prompt helper; a specialist answers itself.
   const agents = {
     async runAgentTurn(input, _llm, _tools, progress) {
       seen.push(`${input.page.agent}:${input.page.intent}`);
       if (input.page.agent === 'front_desk') {
-        progress?.({message: {role: 'event', agent: null, event: 'join', text: 'Labels helper joined to answer'}});
-        progress?.({agent: 'schema_agent', reply: 'Sure'});
-        progress?.({message: {role: 'agent', agent: 'schema_agent', text: 'Sure.'}});
-        return {invocations: [{from: 'user', to: 'front_desk', intent: 'answer', note: ''}, {from: 'front_desk', to: 'schema_agent', intent: 'revise_schema', note: ''}], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
+        progress?.({message: {role: 'event', agent: null, event: 'join', text: 'Prompt helper joined to answer'}});
+        progress?.({agent: 'prompt_agent', reply: 'Sure'});
+        progress?.({message: {role: 'agent', agent: 'prompt_agent', text: 'Sure.'}});
+        return {invocations: [{from: 'user', to: 'front_desk', intent: 'answer', note: ''}, {from: 'front_desk', to: 'prompt_agent', intent: 'revise_prompt', note: ''}], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
       }
       progress?.({message: {role: 'agent', agent: input.page.agent, text: 'Again.'}});
       return {invocations: [{from: 'user', to: input.page.agent, intent: input.page.intent, note: ''}], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
     },
-    reflectPrompt: async () => ({template: '', change: ''}),
-    draftImprovement: async () => ({template: '', changes: [], reply: ''}),
+    reflectPrompt: async () => ({prompt: sp(), change: ''}),
+    draftImprovement: async () => ({prompt: sp(), changes: [], reply: ''}),
   } satisfies AgentRuntimeContract;
   const w = await world('b12', {agents});
   const {sendUserMessage, answeringAgent, agentLive} = await import('./agents.ts');
   const gold = {label: 'Gold Labels', agent: 'front_desk' as const, intent: 'answer', context: {}, where: {page: 'gold' as const, params: {}}};
   const dataset = {...gold, label: 'Dataset', where: {page: 'dataset' as const, params: {}}};
   await sendUserMessage(w.projectId, 'add a value', gold);
-  assert.equal(answeringAgent(w.projectId, gold), 'schema_agent');
+  assert.equal(answeringAgent(w.projectId, gold), 'prompt_agent');
   await sendUserMessage(w.projectId, 'and another', gold);
   assert.equal(answeringAgent(w.projectId, dataset), 'front_desk');
   await sendUserMessage(w.projectId, 'hello', dataset);
-  assert.deepEqual(seen, ['front_desk:answer', 'schema_agent:follow_up', 'front_desk:answer']);
+  assert.deepEqual(seen, ['front_desk:answer', 'prompt_agent:follow_up', 'front_desk:answer']);
   assert.equal(agentLive(w.projectId), null, 'nothing is live after the turn');
   const chat = await w.catalog.find('chat_messages', {projectId: w.projectId}, 'createdAt');
   assert.deepEqual(
     chat.map(m => (m.role === 'event' ? `-- ${m.text}` : `${m.agent ?? 'user'}: ${m.text}`)),
-    ['user: add a value', '-- Labels helper joined to answer', 'schema_agent: Sure.', 'user: and another', 'schema_agent: Again.', '-- Assistant answers on Dataset', 'user: hello', '-- Labels helper joined to answer', 'schema_agent: Sure.'],
+    ['user: add a value', '-- Prompt helper joined to answer', 'prompt_agent: Sure.', 'user: and another', 'prompt_agent: Again.', '-- Assistant answers on Dataset', 'user: hello', '-- Prompt helper joined to answer', 'prompt_agent: Sure.'],
   );
 });
 
@@ -243,14 +283,14 @@ const ruleAgent = (fail: {left: number} = {left: 0}): AgentRuntimeContract => ({
       fail.left--;
       throw new Error('boom');
     }
-    const k = (input.template.match(/RULE/g) ?? []).length + 1;
-    return {template: `${input.template}\nRULE ${k}`, change: `rule ${k}`};
+    const k = (input.prompt.generalRules.match(/RULE/g) ?? []).length + 1;
+    return {prompt: {...input.prompt, generalRules: `${input.prompt.generalRules}\nRULE ${k}`.trim()}, change: `rule ${k}`};
   },
-  draftImprovement: async input => ({template: input.template, changes: [], reply: ''}),
+  draftImprovement: async input => ({prompt: input.prompt, changes: [], reply: ''}),
 });
 
 test('Auto Optimise: dry run, full labeling, stops when a version passes; versions are minors of the run major', async () => {
-  const w = await world('b20', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf, train: 3, test: 1});
+  const w = await world('b20', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf});
   await w.newVersion();
   const {startOptimiser} = await import('./work.ts');
   await startOptimiser(w.projectId, 10);
@@ -270,15 +310,11 @@ test('Auto Optimise: dry run, full labeling, stops when a version passes; versio
   assert.ok(run.history.every(h => h.dryRun && h.dryRun.passed > h.dryRun.parentPassed && h.dryRun.examples === 2));
   assert.deepEqual(s.versions.map(v => `${v.major}.${v.minor}`), ['2.2', '2.1', '1.0']);
   assert.ok(s.reports.some(r => r.promptVersionId === run.history[1].versionId && r.passed));
-  const lines = (await w.catalog.find('chat_messages', {projectId: w.projectId}, 'createdAt')).map(m => m.text);
-  assert.ok(lines.includes('Workflow started the training and test sets with v2.2'), lines.join('\n'));
-  assert.ok(run.trainingSetId, 'the training set started with the passing version');
-  assert.equal(s.trainingSets[0]?.promptVersionId, run.history[1].versionId);
 });
 
 test('Auto Optimise: a change that is no better in the dry run is dropped, unlabeled; 3 in a row end the run', async () => {
   const agents = ruleAgent();
-  agents.reflectPrompt = async input => ({template: `${input.template}\nNOTE ${Math.random()}`, change: 'a note'});
+  agents.reflectPrompt = async input => ({prompt: {...input.prompt, generalRules: `${input.prompt.generalRules}\nNOTE ${Math.random()}`.trim()}, change: 'a note'});
   const w = await world('b21', {agents, answer: ruled, macroF1: 0.99, gold: goldOf});
   await w.newVersion();
   const {startOptimiser} = await import('./work.ts');
@@ -342,7 +378,7 @@ test('Auto Optimise starts from the chosen version, and the helper reads wrong e
 });
 
 test('Auto Optimise: a pass is confirmed by labeling the held-out half again before the final labeling', async () => {
-  const w = await world('b25', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf, train: 3, test: 1});
+  const w = await world('b25', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf});
   await w.newVersion();
   const {startOptimiser} = await import('./work.ts');
   await startOptimiser(w.projectId, 10);
@@ -369,7 +405,7 @@ test('Auto Optimise: a pass that the second labeling does not confirm does not e
     asked.set(k, (asked.get(k) ?? 0) + 1);
     return Number(id) % 2 === 1 && asked.get(k)! > 1 ? JSON.stringify({format: goldOf(id) === 'Vlog' ? 'Tutorial' : 'Vlog'}) : ruled(id, n, prompt);
   };
-  const w = await world('b26', {agents: ruleAgent(), answer: lucky, macroF1: 0.99, gold: goldOf, train: 3, test: 1});
+  const w = await world('b26', {agents: ruleAgent(), answer: lucky, macroF1: 0.99, gold: goldOf});
   await w.newVersion();
   const {startOptimiser} = await import('./work.ts');
   await startOptimiser(w.projectId, 3);
@@ -382,45 +418,13 @@ test('Auto Optimise: a pass that the second labeling does not confirm does not e
   const ref = versionLabel(s.versions.find(v => v.id === passed[0].versionId)!);
   const rep = (await agentTools(w.projectId).call({agent: 'evaluation_agent', name: 'get_report', args: {version: ref}})) as {report: {passed: boolean; confirmed: boolean | null}};
   assert.deepEqual([rep.report.passed, rep.report.confirmed], [true, false], 'the report says the pass was not confirmed');
-  assert.equal(run.trainingSetId, null);
-  assert.equal(s.trainingSets.length, 0);
 });
 
 test('read_doc: a link that cannot be opened says so, so the helper asks for the text', async () => {
   const w = await world('b28');
   const {agentTools} = await import('./page-views.ts');
-  const out = (await agentTools(w.projectId).call({agent: 'schema_agent', name: 'read_doc', args: {url: 'https://docs.example.com/docx/abc'}})) as {error?: string};
+  const out = (await agentTools(w.projectId).call({agent: 'prompt_agent', name: 'read_doc', args: {url: 'https://docs.example.com/docx/abc'}})) as {error?: string};
   assert.match(out.error ?? '', /cannot be opened/);
-});
-
-test('Check labels: the Labels helper joins, reads a sample without the held-out half, and keeps answering on Dataset', async () => {
-  const seen: {agent: string; intent: string; ids: string[]}[] = [];
-  const agents = {
-    async runAgentTurn(input, _llm, _tools, progress) {
-      const ids = ((input.page.context.examples ?? []) as {externalId: string}[]).map(e => e.externalId);
-      seen.push({agent: input.page.agent, intent: input.page.intent, ids});
-      progress?.({message: {role: 'agent', agent: input.page.agent, text: 'Checked.'}});
-      return {invocations: [{from: 'user', to: input.page.agent, intent: input.page.intent, note: ''}], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
-    },
-    reflectPrompt: async () => ({template: '', change: ''}),
-    draftImprovement: async () => ({template: '', changes: [], reply: ''}),
-  } satisfies AgentRuntimeContract;
-  const w = await world('b29', {agents, test: 4, train: 6});
-  const {checkLabels, answeringAgent} = await import('./agents.ts');
-  const dataset = {label: 'Dataset', agent: 'front_desk' as const, intent: 'answer', context: {}, where: {page: 'dataset' as const, params: {}}};
-  await checkLabels(w.projectId, dataset);
-  const s = (await loadProjectState(w.projectId))!;
-  const heldOut = new Set(s.examples.filter(e => e.split === 'eval' && !e.optimiserHalf).map(e => e.externalId));
-  assert.equal(seen[0].agent, 'schema_agent');
-  assert.equal(seen[0].intent, 'check_schema');
-  assert.equal(seen[0].ids.length, 20 - heldOut.size);
-  assert.ok(heldOut.size > 0 && seen[0].ids.every(id => !heldOut.has(id)), 'no held-out example reaches the helper');
-  assert.equal(answeringAgent(w.projectId, dataset), 'schema_agent');
-  const chat = await w.catalog.find('chat_messages', {projectId: w.projectId}, 'createdAt');
-  assert.deepEqual(
-    chat.map(m => (m.role === 'event' ? `-- ${m.text}` : `${m.agent ?? 'user'}: ${m.text}`)),
-    [`user: Check the labels against ${20 - heldOut.size} examples of my data`, '-- Labels helper joined to answer', 'schema_agent: Checked.'],
-  );
 });
 
 test('Mismatches: versions with answers on the whole eval set, wrong in the most versions first; keep or change leaves the list, and is recorded', async () => {
@@ -429,7 +433,7 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
   await w.newVersion();
   await tick(await w.state());
   await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
-  await w.catalog.createPromptVersion({projectId: w.projectId, template: 'Label this\nRULE 1', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
+  await w.newVersion('RULE 1');
   await tick(await w.state());
   await until(async () => (await w.state()).reports.length === 2, 'v2 scored');
   const {mismatches, reviewGold} = await import('./mismatches.ts');
@@ -509,8 +513,8 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
 test('Finding 3: no helper tool or helper input carries an example of the held-out half', async () => {
   const agents = ruleAgent();
   const improve: Parameters<AgentRuntimeContract['draftImprovement']>[0][] = [];
-  agents.draftImprovement = async input => (improve.push(input), {template: input.template, changes: [], reply: ''});
-  const w = await world('b31', {agents, answer: ruled, macroF1: 0.99, gold: goldOf, test: 2, train: 2});
+  agents.draftImprovement = async input => (improve.push(input), {prompt: input.prompt, changes: [], reply: ''});
+  const w = await world('b31', {agents, answer: ruled, macroF1: 0.99, gold: goldOf});
   await w.newVersion();
   await tick(await w.state());
   await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
@@ -536,7 +540,7 @@ test('Finding 3: no helper tool or helper input carries an example of the held-o
   assert.deepEqual(leaks(preds), []);
   const report = (await call('get_report', {version: 'v1'})) as {report: {topMixUps: object[]}};
   assert.ok(report.report.topMixUps.length > 0 && report.report.topMixUps.every(m => !('examples' in m)), 'mix-ups as counts only');
-  const tried = (await call('try_template', {n: 5})) as {rows: {id: string}[]};
+  const tried = (await call('try_prompt', {n: 5})) as {rows: {id: string}[]};
   assert.equal(tried.rows.length, 5);
   assert.deepEqual(leaks(tried), []);
 
@@ -551,7 +555,7 @@ test('Finding 3: no helper tool or helper input carries an example of the held-o
 test('R4-4: the labeler\'s Why reaches the helpers for optimiser-half examples only', async () => {
   const agents = ruleAgent();
   const improve: Parameters<AgentRuntimeContract['draftImprovement']>[0][] = [];
-  agents.draftImprovement = async input => (improve.push(input), {template: input.template, changes: [], reply: ''});
+  agents.draftImprovement = async input => (improve.push(input), {prompt: input.prompt, changes: [], reply: ''});
   const w = await world('b33', {agents, answer: ruled, macroF1: 0.99, gold: goldOf});
   await w.newVersion();
   await tick(await w.state());
@@ -587,7 +591,7 @@ test("Auto Optimise: the pool holds the user's other scored versions too, and th
   await tick(await w.state());
   await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
   // The user's own v1.1 has one rule: right on 0-4, where v1 is not. It is not part of any run.
-  const mine = await w.catalog.createPromptVersion({projectId: w.projectId, template: 'Label this\nRULE 1', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
+  const mine = await w.newVersion('RULE 1');
   await tick(await w.state());
   await until(async () => (await w.state()).reports.length === 2, 'the user version scored');
   const {startOptimiser} = await import('./work.ts');

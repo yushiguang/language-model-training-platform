@@ -15,7 +15,7 @@ export async function latestGold(projectId: string, schemaVersion: number) {
 
 const settingsFor = (setup: SetupVersion, endpoint: EndpointId): ModelSettings => {
   const s = setup.models.find(m => m.endpoint === endpoint);
-  if (!s) throw new Error(`Model ${endpoint} is not chosen in Setup.`);
+  if (!s) throw new Error(`Model ${endpoint} is not the project's labeling model.`);
   return s;
 };
 
@@ -102,7 +102,6 @@ export function stopRun(runId: string): void {
     if (!t) return;
     const v = await catalog.get('prompt_versions', t.promptVersionId);
     if (t.purpose === 'eval') await postEvent(t.projectId, 'stop', 'user', `stopped scoring ${v ? versionLabel(v) : 'a version'}`, {path: '/prompt'});
-    else if (t.purpose === 'test') await postEvent(t.projectId, 'stop', 'user', 'stopped the model answers for the test set', {path: '/gold'});
   });
 }
 
@@ -114,8 +113,8 @@ export async function predictionsFor(versionId: string, endpoint: EndpointId, se
 export const cannotBuild = new Set<string>();
 
 /**
- * Builds the report for a version on a model, once the eval set is fully labeled and has gold
- * labels. Scores use only the held-out half of the eval set.
+ * Builds the report for a version on a model from its saved answers. Scores use only the
+ * held-out half of the eval set, and of it the examples with a gold label.
  */
 export async function buildReport(
   projectId: string,
@@ -129,12 +128,15 @@ export async function buildReport(
 ): Promise<EvalReport | null> {
   const {catalog} = getApp();
   const evalExamples = examples.filter(e => e.split === 'eval');
-  if (!setup.schema || !evalExamples.length || evalExamples.some(e => !gold[e.id])) return null;
+  // Scored on the held-out examples that have a gold label now (spec 1.0.0, 2.5 and 4.4): scoring
+  // never waits for every example. It needs 2 gold labels in each half.
+  const labeled = evalExamples.filter(e => !!gold[e.id]);
+  if (!setup.schema || labeled.filter(e => !e.optimiserHalf).length < 2 || labeled.filter(e => e.optimiserHalf).length < 2) return null;
   const existing = (await catalog.find('eval_reports', {projectId, promptVersionId: version.id, endpoint, contextId})).filter(r => !r.archived);
   if (existing.length && !opts.replace) return existing[0];
   const settings = settingsFor(setup, endpoint);
   const byExample = await predictionsFor(version.id, endpoint, settings);
-  const scoredOn = evalExamples.filter(e => !e.optimiserHalf);
+  const scoredOn = labeled.filter(e => !e.optimiserHalf);
   if (scoredOn.some(e => !byExample.has(e.id))) {
     cannotBuild.add(`${version.id}|${endpoint}|${contextId}`);
     return null;

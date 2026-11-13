@@ -5,12 +5,12 @@ import type {
   ChatAttachment,
   ChatEvent,
   ChatMessage,
-  FeatureSelection,
   FieldMetrics,
   MixUp,
   PageContext,
   PageView,
-  Schema,
+  StructuredPrompt,
+  StructuredPromptProposal,
 } from './types.ts';
 
 /**
@@ -28,8 +28,8 @@ import type {
 export interface AgentWorkspaceSnapshot {
   projectId: string;
   task: string;
-  /** Current active or proposed schema, if any. */
-  schema: Schema | null;
+  /** The structured prompt the user is looking at: the page's unsaved draft, else the newest version's. */
+  prompt: StructuredPrompt | null;
   /** Recent conversation history in chronological order. */
   history: Pick<ChatMessage, 'role' | 'agent' | 'text' | 'page' | 'createdAt'>[];
   /** Example posts resolved from IDs mentioned in user attachments. */
@@ -41,7 +41,7 @@ export interface AgentWorkspaceSnapshot {
 /**
  * Read tools: an agent explores the project beyond the current page, the way a coding agent
  * reads files in a repo. They run as the signed-in user, change nothing and cost nothing.
- * Changes stay proposals (a schema or a template in the answer). Start-work tools come later.
+ * Changes stay proposals (a structured prompt in the answer). Start-work tools come later.
  */
 export type AgentToolName =
   | 'get_page_view'
@@ -51,14 +51,14 @@ export type AgentToolName =
   | 'get_examples'
   | 'get_gold_labels'
   | 'get_predictions'
-  | 'check_template'
+  | 'check_prompt'
   /** Feature descriptions by key (what a feature holds, when it helps, its caveats). */
   | 'read_feature_info'
   /** A document the user linked in Ask AI, as text. */
   | 'read_doc'
   // Start-work tools: paid. They run at once when automatic starts are allowed, else they ask
   // the user with a card in the chat and the turn ends.
-  | 'try_template'
+  | 'try_prompt'
   | 'score_version'
   | 'start_optimiser';
 
@@ -95,23 +95,13 @@ export interface AgentEmittedMessage {
  */
 export type AgentTurnProgress = (p: {message: AgentEmittedMessage} | {agent: AgentPreset; working: string} | {agent: AgentPreset; reply: string}) => void;
 
-export type AgentProposalDraft =
-  | {
-      kind: 'schema';
-      agent: AgentPreset;
-      brief: string;
-      payload: Schema;
-    }
-  | {
-      kind: 'prompt';
-      agent: AgentPreset;
-      brief: string;
-      payload: {
-        template: string;
-        features?: FeatureSelection;
-        change?: string;
-      };
-    };
+/** A structured prompt the Prompt helper proposes; the user approves or saves it on the page. */
+export interface AgentProposalDraft {
+  kind: 'prompt';
+  agent: AgentPreset;
+  brief: string;
+  payload: StructuredPromptProposal;
+}
 
 export interface AgentTurnOutput {
   /** Audit trail of agent invocations executed during this turn (including handoffs). */
@@ -123,7 +113,7 @@ export interface AgentTurnOutput {
   }[];
   /** Messages to append to the project's chat log in order. */
   messages: AgentEmittedMessage[];
-  /** Optional schema or prompt proposal produced by the specialist agent. */
+  /** A structured prompt proposal, when the Prompt helper wrote or changed one. */
   proposal: AgentProposalDraft | null;
   /** Read tools the agents called during this turn, in order (also written to the audit log by the host). */
   toolCalls: {agent: AgentPreset; name: string; args: Record<string, unknown>; ok: boolean; ms: number}[];
@@ -160,11 +150,10 @@ export interface ExampleBrief {
 }
 
 export interface OptimiserReflectInput {
-  /** 'change': one change from the parent's mistakes. 'merge': combine `template` with `other`. */
+  /** 'change': one change from the parent's mistakes. 'merge': combine `prompt` with `other`. */
   mode?: 'change' | 'merge';
-  template: string;
-  features: FeatureSelection;
-  schema: Schema;
+  /** The parent's structured prompt. Field and value names are fixed: only wording and features change. */
+  prompt: StructuredPrompt;
   triedChanges: string[];
   mixUps: MixUp[];
   lowestField: Pick<FieldMetrics, 'field' | 'macroF1'>;
@@ -175,23 +164,20 @@ export interface OptimiserReflectInput {
    */
   examples?: ExampleBrief[];
   /** Merge only: the second version. */
-  other?: {template: string; features: FeatureSelection; change: string};
+  other?: {prompt: StructuredPrompt; change: string};
   signal?: AbortSignal;
 }
 
 export interface OptimiserReflectOutput {
-  template: string;
-  /** Ticked features after the change (unchanged when missing). */
-  features?: FeatureSelection;
+  /** The changed prompt, with the parent's field and value names. */
+  prompt: StructuredPrompt;
   change: string;
 }
 
 /** Improve with AI: the Prompt helper drafts several changes to a version, each with a reason. */
 export interface DraftImprovementInput {
   version: string;
-  template: string;
-  features: FeatureSelection;
-  schema: Schema;
+  prompt: StructuredPrompt;
   mixUps: MixUp[];
   lowestField: Pick<FieldMetrics, 'field' | 'macroF1'>;
   lowestValue: {field: string; value: string; f1: number} | null;
@@ -202,8 +188,7 @@ export interface DraftImprovementInput {
 }
 
 export interface DraftImprovementOutput {
-  template: string;
-  features?: FeatureSelection;
+  prompt: StructuredPrompt;
   /** One entry per change: `text` quotes the words it adds (or removes); `reason` shows on hover over its mark in the editor and in Ask AI. */
   changes: {text: string; reason: string}[];
   /** A few lines for Ask AI. */

@@ -1,47 +1,23 @@
 import {systemConfig} from './config.ts';
-import {renderPrompt} from './template.ts';
-import type {Actor, AgentPreset, EndpointId, EndpointInfo, FeatureSelection, ProjectState, PromptImage, PromptVersion} from '@tsp/contracts';
+import type {Actor, AgentPreset, EndpointId, EndpointInfo, ProjectState} from '@tsp/contracts';
 import {versionLabel} from './versions.ts';
-import {estimateTokens} from './labels.ts';
 import {judge} from './metrics.ts';
-import type {Metrics, Thresholds} from '@tsp/contracts';
-
-/** Names the check a report fails: the lowest field can be above its bar while another check is not. */
-function whyBelow(m: Metrics, t: Thresholds, evalCount: number): string {
-  const lw = m.lowestField;
-  const failing = judge(m, t, evalCount).checks.find(c => !c.met);
-  if (lw.macroF1 < t.macroF1 || !failing) return ` at ${lw.macroF1.toFixed(2)} on ${lw.field}, below ${t.macroF1.toFixed(2)}.`;
-  if (failing.label === 'Lowest value F1' && m.lowestValue)
-    return `: every field is at ${t.macroF1.toFixed(2)} or higher, but "${m.lowestValue.value}" of ${m.lowestValue.field} is at ${m.lowestValue.f1.toFixed(2)}, below ${t.valueF1!.toFixed(2)}.`;
-  return `: every field is at ${t.macroF1.toFixed(2)} or higher, but ${failing.label.toLowerCase()} is ${failing.actual} (needs ${failing.need}).`;
-}
 
 export const MADE_BY: Record<Actor, string> = {
   user: 'You',
   prompt_agent: 'Prompt helper',
   optimiser: 'Optimiser',
-  schema_agent: 'Labels helper',
   system: 'System',
 };
 
 /** The helpers' names in Ask AI (plain words; the presets keep their technical ids). */
 const AGENT_NAMES: Record<AgentPreset, string> = {
   front_desk: 'Assistant',
-  schema_agent: 'Labels helper',
   prompt_agent: 'Prompt helper',
   evaluation_agent: 'Scores helper',
 };
 
 export const agentName = (preset: AgentPreset): string => AGENT_NAMES[preset];
-
-/**
- * Values with fewer labeled train examples than this get a warning on the finished training set.
- * Open question in the product design ([MIN PER VALUE]); 5 is a placeholder until it is decided.
- */
-export const MIN_PER_VALUE = 5;
-
-/** Measured labeling speed: about 30 minutes per 3,000 examples. */
-export const minutesFor = (n: number) => Math.max(1, Math.round(n / 100));
 
 export function costForTokens(endpoints: EndpointInfo[], endpoint: EndpointId, inputTokens: number, outputTokens: number): number {
   const ep = endpoints.find(e => e.id === endpoint);
@@ -49,183 +25,155 @@ export function costForTokens(endpoints: EndpointInfo[], endpoint: EndpointId, i
   return (inputTokens * ep.priceIn + outputTokens * ep.priceOut) / 1e6;
 }
 
-/** Cost and time to label the eval set with a draft on every chosen model, from rendered prompts. */
-export function estimateLabeling(state: ProjectState, draft: {template: string; features: FeatureSelection; images: PromptImage[]}) {
-  const evalEx = state.examples.filter(e => e.split === 'eval');
-  const sample = evalEx.slice(0, 10);
-  let costUsd = 0;
-  for (const m of state.setup?.models ?? []) {
-    const tokens = sample.map(ex =>
-      estimateTokens(renderPrompt(draft.template, ex, draft.features, draft.images)),
-    );
-    const avg = tokens.length ? tokens.reduce((a, b) => a + b, 0) / tokens.length : 0;
-    costUsd += costForTokens(state.endpoints, m.endpoint, avg, systemConfig().gateway.evalOutputTokensEstimate) * evalEx.length;
-  }
-  return {count: evalEx.length, costUsd, minutes: minutesFor(evalEx.length)};
+/** The best current report: the highest lowest-field Macro-F1 (cost breaks a tie). */
+export function bestReport(s: Pick<ProjectState, 'reports'>, passingOnly = false) {
+  return [...s.reports.filter(r => !r.archivedNow && (!passingOnly || r.passed))].sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1 || a.metrics.costPer1000 - b.metrics.costPer1000)[0] ?? null;
 }
 
-/**
- * Cost and time estimate for labeling splits with a version on one model. The final run labels
- * train and test together; "Get model answers" on Gold Labels labels test only. Test examples
- * that already have a prediction for this version, model and settings are free (`reused`).
- */
-export function estimate(state: ProjectState, version: PromptVersion, endpoint: EndpointId, splits: ('train' | 'test')[] = ['train', 'test'], alreadyLabeled: ReadonlySet<string> = new Set()) {
-  const all = state.examples.filter(e => (splits as string[]).includes(e.split ?? ''));
-  const todo = all.filter(e => !alreadyLabeled.has(e.id));
-  const train = all.filter(e => e.split === 'train').length;
-  const test = all.length - train;
-  const report = state.reports.find(r => r.promptVersionId === version.id && r.endpoint === endpoint && !r.archivedNow);
-  let per1000 = report?.metrics.costPer1000;
-  if (!per1000) {
-    const sample = (all.length ? all : state.examples).slice(0, 20);
-    const tokens = sample.map(ex => {
-      const parts = renderPrompt(version.template, ex, version.features, version.images);
-      return estimateTokens(parts);
-    });
-    per1000 = sample.length ? costForTokens(state.endpoints, endpoint, tokens.reduce((a, b) => a + b, 0) / sample.length, systemConfig().gateway.evalOutputTokensEstimate) * 1000 : 0;
-  }
-  return {count: all.length, train, test, reused: all.length - todo.length, costUsd: (per1000 * todo.length) / 1000, minutes: todo.length ? minutesFor(todo.length) : 0, per1000, report: report ?? null};
-}
+/** What a button on an AI Suggestion card does; the page maps each to its own action. */
+export type SuggestionAction = 'add_examples' | 'go_gold' | 'auto_optimise' | 'review_labels' | 'improve' | 'switch' | 'copy_prompt' | 'finish';
 
 /**
- * What the final run does with the test set. A test example's label is its gold label when
- * someone gave one, else the chosen version's saved answer; only examples with neither need the
- * model, and only when the user ticks "label the rest" in the confirm.
+ * One AI Suggestion card (spec 1.0.0, 6.3). Every card uses one of six fixed templates with an
+ * imperative headline, so the action is clear at a glance. Code picks the template from the
+ * project's records; no model writes these lines.
  */
-export function finalRunPlan(state: ProjectState, version: PromptVersion, endpoint: EndpointId, answered: ReadonlySet<string> = new Set()) {
-  const train = estimate(state, version, endpoint, ['train'], answered);
-  const test = state.examples.filter(e => e.split === 'test');
-  const withGold = test.filter(e => !!state.gold[e.id]).map(e => e.id);
-  const withAnswer = test.filter(e => !state.gold[e.id] && answered.has(e.id)).map(e => e.id);
-  const toLabel = test.filter(e => !state.gold[e.id] && !answered.has(e.id)).map(e => e.id);
-  const testCostUsd = (train.per1000 * toLabel.length) / 1000;
+export interface AiSuggestion {
+  template: 'T1' | 'T2' | 'T3' | 'T4' | 'T5' | 'T6';
+  title: string;
+  text: string;
+  actions: SuggestionAction[];
+  /** The version the actions work on (improve, switch, copy), when there is one. */
+  versionId: string | null;
+}
+
+/** Gold-labeled eval examples per value, for the rare-value check. */
+export function goldValueCounts(s: Pick<ProjectState, 'examples' | 'gold' | 'setup'>): {field: string; value: string; count: number}[] {
+  const out: {field: string; value: string; count: number}[] = [];
+  const labeled = s.examples.filter(e => e.split === 'eval' && !!s.gold[e.id]);
+  for (const f of s.setup?.schema?.fields ?? []) for (const v of f.values) out.push({field: f.name, value: v.name, count: labeled.filter(e => (s.gold[e.id]!.answer[f.name] ?? []).includes(v.name)).length});
+  return out;
+}
+
+/** T1: values with too few gold-labeled examples to score fairly; null when none (or no gold yet). */
+export function rareValueSuggestion(s: Pick<ProjectState, 'examples' | 'gold' | 'setup'>): AiSuggestion | null {
+  const min = systemConfig().dataset.rareValueMinCount;
+  if (!Object.keys(s.gold).length) return null;
+  const rare = goldValueCounts(s).filter(c => c.count < min);
+  if (!rare.length) return null;
+  const names = rare.slice(0, 3).map(r => r.value).join(', ') + (rare.length > 3 ? ` and ${rare.length - 3} more` : '');
   return {
-    train,
-    test: {total: test.length, withGold, withAnswer, toLabel, costUsd: testCostUsd},
-    per1000: train.per1000,
-    report: train.report,
-    /** Cost and minutes for the train set plus, if `labelTest`, the test examples with no label. */
-    total(labelTest: boolean) {
-      const n = train.count - train.reused + (labelTest ? toLabel.length : 0);
-      return {costUsd: train.costUsd + (labelTest ? testCostUsd : 0), minutes: n ? minutesFor(n) : 0, count: n};
-    },
+    template: 'T1',
+    title: 'Balance rare label values',
+    text: `${rare.length} ${rare.length === 1 ? 'value' : 'values'} (${names}) ${rare.length === 1 ? 'has' : 'have'} fewer than ${min} labeled examples, which can distort Macro-F1.`,
+    actions: ['add_examples'],
+    versionId: null,
   };
 }
 
-/** Per chosen model: its best passing version (else its best scored, else the newest version). */
-export function outputCandidates(state: ProjectState) {
-  return (state.setup?.models ?? []).map(m => {
-    const mine = state.reports.filter(r => r.endpoint === m.endpoint && !r.archivedNow);
-    const passing = mine.filter(r => r.passed).sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1)[0];
-    const best = [...mine].sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1)[0];
-    const version = state.versions.find(v => v.id === (passing ?? best)?.promptVersionId) ?? state.versions[0];
-    return {endpoint: m.endpoint, version, passing: passing ?? null, best: best ?? null};
-  });
-}
-
-/** The version and model the outputs would use now: the first passing candidate, else the first model's. */
-export function defaultOutputPick(state: ProjectState): {endpoint: EndpointId; version: PromptVersion} | null {
-  const cands = outputCandidates(state).filter(c => c.version);
-  const c = cands.find(x => x.passing) ?? cands[0];
-  return c ? {endpoint: c.endpoint, version: c.version!} : null;
-}
-
-export interface Advice {
-  kind: 'make_training_set' | 'label_gold' | 'wait' | 'keep_improving' | 'score_first' | 'no_eval';
-  title: string;
-  reasons: string[];
-  versionId: string | null;
-  endpoint: EndpointId | null;
+export interface SuggestionInput {
+  /** The version selected in the list. */
+  selectedId?: string | null;
+  /** Counts from Gold Labels' Mismatches tab, when read. */
+  mismatches?: {open: number; wrongEverywhere: number; reviewedAll: number} | null;
 }
 
 /**
- * The next step is chosen by code from the reports; the evaluation agent only explains it.
- * Prefers the cheaper model when both pass.
+ * The Prompt Tuning page's AI Suggestion: T2 until scores can exist, T5 on a version the dry run
+ * dropped, T6 once a version passes, T3 when the model's answers differ from gold labels (right
+ * after the first score, or after a run that ended without a pass), else T4. Null: nothing to say.
  */
-export function recommend(s: ProjectState, optimiserRunning: EndpointId | null): Advice {
+export function aiSuggestion(s: ProjectState, x: SuggestionInput = {}): AiSuggestion | null {
   const t = s.setup?.thresholds;
-  const latest = s.versions[0];
-  if (!latest) return {kind: 'score_first', title: 'Create the first prompt version', reasons: [], versionId: null, endpoint: null};
-  if (!t)
-    return {
-      kind: 'no_eval',
-      title: `Make the training and test sets with ${versionLabel(latest)}`,
-      reasons: ['Evaluation is off, so versions are not scored. The training set will be marked Not evaluated.'],
-      versionId: latest.id,
-      endpoint: s.setup!.models[0]?.endpoint ?? null,
-    };
-  const evalSize = s.snapshot?.split?.eval ?? 0;
-  if (s.facts.goldEvalDone < evalSize)
-    return {
-      kind: 'label_gold',
-      title: 'Label the eval set to start scoring',
-      reasons: [`${s.facts.goldEvalDone} of ${evalSize} eval examples have gold labels. Scores and the optimiser start when all are labeled.`],
-      versionId: null,
-      endpoint: null,
-    };
-  const current = s.reports.filter(r => !r.archivedNow);
-  const passing = current.filter(r => r.passed);
-  const name = (id: string) => versionLabel(s.versions.find(v => v.id === id)!);
-  if (passing.length) {
-    // The best score wins, as on Training Set (review finding 11); cost only breaks a tie.
-    const pick = [...passing].sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1 || a.metrics.costPer1000 - b.metrics.costPer1000)[0];
-    const m = pick.metrics;
-    const reasons = [
-      `All ${m.fields.length} fields are at ${t.macroF1.toFixed(2)} or higher${s.setup!.models.length > 1 ? ` on Model ${pick.endpoint}` : ''}${t.valueF1 != null ? `, and every value is above ${t.valueF1.toFixed(2)}` : ''}.`,
-    ];
-    const other = s.setup!.models.find(x => x.endpoint !== pick.endpoint);
-    if (other) {
-      const best = current.filter(r => r.endpoint === other.endpoint).sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1)[0];
-      if (best && !best.passed) reasons.push(`Model ${other.endpoint} is not there yet: its best${whyBelow(best.metrics, t, evalSize)}`);
+  if (!s.versions.length || !t) return null;
+  const label = (id: string | null | undefined) => {
+    const v = id ? s.versions.find(x2 => x2.id === id) : undefined;
+    return v ? versionLabel(v) : '';
+  };
+  const total = s.facts.examples;
+  const best = bestReport(s);
+  const passing = bestReport(s, true);
+
+  // T5: a version the Optimiser dropped after its dry run.
+  const sel = x.selectedId ? s.versions.find(v => v.id === x.selectedId) : undefined;
+  if (sel) {
+    for (const run of s.optimisation) {
+      const round = run.history.find(h => h.versionId === sel.id && h.outcome === 'dropped' && h.dryRun);
+      if (!round?.dryRun) continue;
+      const d = round.dryRun;
+      const to = best?.promptVersionId ?? d.parentId;
+      return {
+        template: 'T5',
+        title: `Switch back to ${label(to)}`,
+        text: `${versionLabel(sel)} passed ${d.passed}/${d.examples} dry-run examples vs ${label(d.parentId)}'s ${d.parentPassed}/${d.examples}. Continue from ${label(to)} instead.`,
+        actions: ['switch'],
+        versionId: to,
+      };
     }
+  }
+
+  // T2: not enough gold labels for any score.
+  if (!best && s.facts.goldEvalDone < total) {
     return {
-      kind: 'make_training_set',
-      title: `Make the training and test sets with ${name(pick.promptVersionId)}${s.setup!.models.length > 1 ? ` on Model ${pick.endpoint}` : ''}`,
-      reasons,
-      versionId: pick.promptVersionId,
-      endpoint: pick.endpoint,
+      template: 'T2',
+      title: 'Finish labeling the eval set',
+      text: `${s.facts.goldEvalDone} of ${total} eval examples are labeled. Scores are worked out on the labeled examples.`,
+      actions: ['go_gold'],
+      versionId: null,
     };
   }
-  if (optimiserRunning)
+  if (!best) return null;
+
+  if (passing) {
     return {
-      kind: 'wait',
-      title: 'The Optimiser is improving the prompt',
-      reasons: ['No version passes yet. Each change it tries appears in the versions list.'],
-      versionId: null,
-      endpoint: optimiserRunning,
+      template: 'T6',
+      title: `Use ${label(passing.promptVersionId)} as your final prompt`,
+      text: `All fields meet your thresholds (lowest field Macro-F1 ${passing.metrics.lowestField.macroF1.toFixed(2)}).`,
+      actions: ['improve', 'copy_prompt', 'finish'],
+      versionId: passing.promptVersionId,
     };
-  const best = [...current].sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1)[0];
-  if (!best) return {kind: 'score_first', title: 'Score a version on the eval set', reasons: ['Labeling runs on the eval set, then scores appear here.'], versionId: latest.id, endpoint: null};
+  }
+
+  const m = x.mismatches;
+  const lastRun = s.optimisation[0];
+  const firstScore = !!m && !lastRun && m.reviewedAll === 0 && m.open > 0;
+  const afterRun = !!m && lastRun?.state === 'done' && lastRun.stopReason !== 'passes' && m.wrongEverywhere > 0;
+  if (m && (firstScore || afterRun)) {
+    const n = firstScore ? m.open : m.wrongEverywhere;
+    return {
+      template: 'T3',
+      title: `Review ${n} label ${n === 1 ? 'mismatch' : 'mismatches'}`,
+      text: firstScore ? `The model's answers differ from ${n} of your gold labels. Check them first, so the Optimiser learns from the right labels.` : `${n} ${n === 1 ? 'example was' : 'examples were'} wrong in every version. Check your gold labels for them.`,
+      actions: ['auto_optimise', 'review_labels'],
+      versionId: best.promptVersionId,
+    };
+  }
+
   const mu = best.metrics.mixUps[0];
-  // The card's title names what holds the best version back; its one line names the top mix-up.
+  const confusion = !mu ? '' : mu.kind === 'confused' ? `; top confusion is ${mu.gold} -> ${mu.predicted}` : mu.kind === 'extra' ? `; ${mu.predicted} is often added when it does not apply` : `; ${mu.gold} is often missed`;
+  const lw = best.metrics.lowestField;
+  // The lowest field can be at the bar while another check fails: name that check then.
+  const failing = judge(best.metrics, t, total).checks.find(c => !c.met);
+  const why = lw.macroF1 < t.macroF1 || !failing ? `Current score is ${lw.macroF1.toFixed(2)} (target ${t.macroF1.toFixed(2)})` : `${failing.label} is ${failing.actual} (needs ${failing.need})`;
   return {
-    kind: 'keep_improving',
-    title: `${best.metrics.lowestField.field} holds ${name(best.promptVersionId)} back`,
-    reasons: [
-      mu
-        ? mu.kind === 'confused'
-          ? `${mu.gold} is often read as ${mu.predicted}`
-          : mu.kind === 'extra'
-            ? `${mu.predicted} is often added when it does not apply`
-            : `${mu.gold} is often missed`
-        : `Best so far is ${name(best.promptVersionId)}${whyBelow(best.metrics, t, evalSize)}`,
-      `Best so far is ${name(best.promptVersionId)}${whyBelow(best.metrics, t, evalSize)}`,
-    ],
+    template: 'T4',
+    title: `Improve ${label(best.promptVersionId)} to pass ${lw.field}`,
+    text: `${why}${confusion}.`,
+    actions: ['improve', 'auto_optimise'],
     versionId: best.promptVersionId,
-    endpoint: best.endpoint,
   };
 }
 
 /**
  * Scores are being rebuilt (acceptance R5-4, R5-5): a gold edit changed the evaluation context, so
  * a version that had a report has none for today's gold labels yet. The rebuild reads saved
- * answers only. False while some eval example has no gold label (nothing can be scored then), and
+ * answers only. False while no eval example has a gold label (nothing can be scored then), and
  * for a version whose saved answers do not cover today's eval set (`cannotBuild`: the bff's
  * record of "versionId|endpoint|contextId" it tried).
  */
 export function scoresUpdating(s: Omit<ProjectState, 'scoresUpdating'>, cannotBuild: ReadonlySet<string> = new Set()): boolean {
   const evalEx = s.examples.filter(e => e.split === 'eval');
-  if (!s.setup?.schema || !evalEx.length || evalEx.some(e => !s.gold[e.id])) return false;
+  if (!s.setup?.schema || !evalEx.length || !evalEx.some(e => !!s.gold[e.id])) return false;
   const current = new Set(s.reports.filter(r => !r.archivedNow).map(r => `${r.promptVersionId}|${r.endpoint}`));
   return s.reports.some(
     r =>

@@ -8,10 +8,10 @@ import type {
   ChatAttachment,
   ChatMessage,
   PageContext,
-  Schema,
   StartRequest,
+  StructuredPrompt,
 } from '@tsp/contracts';
-import {agentName, answersForHelpers, exampleBrief, fieldsRight, newId, promptKeys, settingsHash, versionLabel, visibleToAgents, wrongExamples, toMap} from '@tsp/domain';
+import {agentName, answersForHelpers, fieldsRight, newId, promptKeys, readStructured, rewordOnly, settingsHash, structuredEquals, tidyStructured, versionLabel, visibleToAgents, wrongExamples, toMap} from '@tsp/domain';
 import {loadProjectState} from './projects.ts';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
@@ -75,15 +75,13 @@ async function loadWorkspaceSnapshot(
   const {catalog, examples} = getApp();
   const project = await catalog.get('projects', projectId);
   const setup = project?.setupVersionId ? await catalog.get('setup_versions', project.setupVersionId) : null;
-  const openSchemas = await openProposals(projectId, 'schema');
   const history = await chatHistory(projectId);
+  const [newest] = await catalog.find('prompt_versions', {projectId}, 'createdAt desc');
 
-  const task = (typeof page.context.task === 'string' && page.context.task) || setup?.task || '';
-  const schema =
-    (page.context.schema as Schema | null | undefined) ??
-    (openSchemas[0]?.payload as Schema | undefined) ??
-    setup?.schema ??
-    null;
+  // The prompt the user is looking at: the page's unsaved draft, else an open draft, else the newest version.
+  const open = (await openProposals(projectId))[0];
+  const prompt = readStructured(page.context.prompt) ?? open?.payload.structured ?? newest?.structured ?? null;
+  const task = prompt?.taskSummary || setup?.task || '';
 
   let attachedExamples = undefined;
   if (attachments?.length) {
@@ -103,13 +101,13 @@ async function loadWorkspaceSnapshot(
   // The page's unsaved edits go to the agent as the page's `context`; the view holds saved data.
   // What the page holds that isn't saved (the editor's draft template, ticked features, images) goes
   // into the view's `unsaved` block too, so every helper reads the same workspace (R3-3).
-  const {schema: _s, task: _t, ...unsaved} = (page.context ?? {}) as Record<string, unknown>;
+  const {...unsaved} = (page.context ?? {}) as Record<string, unknown>;
   const pageView = await getPageView(projectId, page.where ?? {page: 'projects', params: {}}, unsaved);
 
   return {
     projectId,
     task,
-    schema,
+    prompt,
     pageView,
     history: history.map(({role, agent, text, page: p, createdAt}) => ({role, agent, text, page: p, createdAt})),
     attachedExamples,
@@ -196,22 +194,26 @@ export async function sendUserMessage(
     }
 
     if (turnOut.proposal) {
-      const previousOpen = await openProposals(projectId, turnOut.proposal.kind);
-      for (const prev of previousOpen) {
-        await catalog.patch('agent_proposals', prev.id, {state: 'discarded'});
-      }
+      // A draft that changes nothing on the page is a plain answer, not a draft.
+      const base = workspace.prompt;
+      const structured = tidyStructured(turnOut.proposal.payload.structured);
+      if (base && structuredEquals(base, structured) && !turnOut.proposal.payload.unmapped.length) return null;
+      for (const prev of await openProposals(projectId)) await catalog.patch('agent_proposals', prev.id, {state: 'discarded'});
+      const [newest] = await catalog.find('prompt_versions', {projectId}, 'createdAt desc');
+      const onEdit = page.where?.page === 'prompt_edit';
+      const baseVersionId = onEdit ? (page.where?.params.v ?? newest?.id ?? null) : (newest?.id ?? null);
       const proposal: AgentProposal = {
         id: newId('ap'),
         projectId,
         agent: turnOut.proposal.agent,
-        kind: turnOut.proposal.kind,
-        payload: turnOut.proposal.payload,
+        kind: 'prompt',
+        payload: {...turnOut.proposal.payload, structured, baseVersionId},
         brief: turnOut.proposal.brief,
         state: 'open',
         createdAt: now(),
       };
       await catalog.insert('agent_proposals', proposal);
-      await postEvent(projectId, 'draft', proposal.agent, proposal.kind === 'schema' ? 'put a draft on Schema settings' : `put a draft on ${page.where?.page === 'prompt' && !page.label.startsWith('First') ? 'Edit prompt' : pageName(page)}`, draftLink(proposal.kind, page));
+      await postEvent(projectId, 'draft', proposal.agent, `put a draft on ${newest ? 'Edit prompt' : 'Prompt Design'}`, draftLink(page, newest?.id ?? null, baseVersionId));
       emitChange();
       return proposal;
     }
@@ -240,43 +242,40 @@ function recordTurn(out: AgentTurnOutput, entry: string, started: number) {
     t.event('agent_tool_called', {agent: c.agent, tool: c.name, ok: c.ok, ms: c.ms});
   }
   if (out.proposal) {
-    t.counter('tsp_agent_proposals_total', {agent: out.proposal.agent, kind: out.proposal.kind, outcome: 'shown'});
-    if (out.proposal.kind === 'prompt') t.event('prompt_proposal_shown', {agent: out.proposal.agent});
-    else {
-      const s = out.proposal.payload as {fields?: {values?: unknown[]}[]};
-      t.event('schema_proposal_shown', {agent: out.proposal.agent, fields: s.fields?.length ?? 0, values: (s.fields ?? []).reduce((n, f) => n + (f.values?.length ?? 0), 0), revision: 0});
-    }
+    t.counter('tsp_agent_proposals_total', {agent: out.proposal.agent, kind: 'prompt', outcome: 'shown'});
+    t.event('prompt_proposal_shown', {agent: out.proposal.agent, unmapped: out.proposal.payload.unmapped.length});
   }
   t.event('agent_replied', {agent: last, seconds: (Date.now() - started) / 1000, handoff_to: handoff?.to ?? null, tool_calls: out.toolCalls.length, proposal_kind: out.proposal?.kind ?? null});
 }
 
-/** Where a draft lands: the schema on Setup, a prompt in the editor (or the first prompt). */
-function draftLink(kind: AgentProposal['kind'], page: PageContext) {
-  if (kind === 'schema') return {path: '/setup'};
-  if (page.where?.page === 'prompt_edit') return {path: '/prompt/edit', params: page.where.params};
-  return page.label.startsWith('First') ? {path: '/prompt'} : {path: '/prompt/edit'};
+/** Where a draft lands: Prompt Design before the first version, the editor after. */
+function draftLink(page: PageContext, newestId: string | null, baseVersionId: string | null) {
+  if (!newestId) return {path: '/prompt-design'};
+  return {path: '/prompt/edit', params: {v: baseVersionId ?? newestId}};
 }
 
-export async function openProposals(projectId: string, kind: AgentProposal['kind']): Promise<AgentProposal[]> {
-  return getApp().catalog.find('agent_proposals', {projectId, kind, state: 'open'}, 'createdAt desc');
+export async function openProposals(projectId: string): Promise<AgentProposal[]> {
+  return getApp().catalog.find('agent_proposals', {projectId, state: 'open'}, 'createdAt desc');
 }
 
-/** Open and approved proposals, oldest first: Ask AI shows each as a card (an approved one as one line). */
-export async function proposals(projectId: string, kind: AgentProposal['kind']): Promise<AgentProposal[]> {
-  const all = await getApp().catalog.find('agent_proposals', {projectId, kind}, 'createdAt desc');
+/** Open and approved proposals, oldest first: Ask AI shows each as a one-line card. */
+export async function proposals(projectId: string): Promise<AgentProposal[]> {
+  const all = await getApp().catalog.find('agent_proposals', {projectId}, 'createdAt desc');
   return all.filter(p => p.state !== 'discarded').reverse();
 }
 
+/**
+ * A draft is "approved" when the page takes it in (the user's own act there is Approve or Save),
+ * and "discarded" by Discard. Approval is never a card in the chat (spec 1.0.0, 6.2).
+ */
 export async function closeProposal(p: AgentProposal, state: 'approved' | 'discarded') {
   // Closing twice (two checks racing on the page) changes nothing and is not counted twice.
   const fresh = await getApp().catalog.get('agent_proposals', p.id);
   if (fresh && fresh.state !== 'open') return;
   await getApp().catalog.patch('agent_proposals', p.id, {state});
-  // A prompt draft is "approved" when the editor takes it in; the user's own act there is Save.
-  if (p.kind === 'schema') await postEvent(p.projectId, state, 'user', `${state} the schema`, {path: '/setup'});
-  tm().counter('tsp_agent_proposals_total', {agent: p.agent, kind: p.kind, outcome: state});
-  if (p.kind === 'schema' && state === 'discarded') tm().event('schema_discarded', {revision: 0});
-  if (p.kind === 'prompt') tm().event(state === 'approved' ? 'prompt_proposal_approved' : 'prompt_proposal_discarded', state === 'approved' ? {agent: p.agent, edited_before_approve: false} : {agent: p.agent});
+  if (state === 'discarded') await postEvent(p.projectId, 'discarded', 'user', 'discarded the draft');
+  tm().counter('tsp_agent_proposals_total', {agent: p.agent, kind: 'prompt', outcome: state});
+  tm().event(state === 'approved' ? 'prompt_proposal_approved' : 'prompt_proposal_discarded', state === 'approved' ? {agent: p.agent, edited_before_approve: false} : {agent: p.agent});
   emitChange();
 }
 
@@ -285,27 +284,6 @@ export async function closeProposal(p: AgentProposal, state: 'approved' | 'disca
  * with a reason. The draft goes into the editor (an open prompt proposal) with the changes
  * marked; nothing is labeled until the user saves it.
  */
-/** How many examples the label check reads. */
-export const CHECK_SAMPLE = 20;
-
-/**
- * Dataset's "Check labels" (review finding 10): the Labels helper reads a random sample of the
- * examples against the labels, answers in Ask AI and may put a draft on Schema settings. The
- * held-out half never reaches it.
- */
-export async function checkLabels(projectId: string, page: PageContext): Promise<AgentProposal | null> {
-  const state = await loadProjectState(projectId);
-  if (!state?.setup?.schema) throw new Error('Set the labels first.');
-  const pool = state.examples.filter(visibleToAgents);
-  const sample = [...pool].sort(() => Math.random() - 0.5).slice(0, CHECK_SAMPLE);
-  const examples = sample.map(e => {
-    const gold = state.gold[e.id]?.answer;
-    const {gold: _g, predicted: _p, ...b} = exampleBrief(e, Object.keys(e.features), gold ?? {}, null);
-    return gold ? {...b, gold} : b;
-  });
-  return sendUserMessage(projectId, `Check the labels against ${sample.length} examples of my data`, {...page, agent: 'schema_agent', intent: 'check_schema', context: {...page.context, examples}}, undefined, true);
-}
-
 export async function improveWithAi(projectId: string, versionId: string): Promise<void> {
   const {catalog, agents, gateway, labeling} = getApp();
   const state = await loadProjectState(projectId);
@@ -331,18 +309,20 @@ export async function improveWithAi(projectId: string, versionId: string): Promi
   try {
     const m = await scoreOnOptimiserHalf(setup, v, report.endpoint, state.examples, state.gold);
     const out = await agents.draftImprovement(
-      {version: versionLabel(v), template: v.template, features: v.features, schema, mixUps: m.mixUps.slice(0, 8), lowestField: m.lowestField, lowestValue: m.lowestValue, mistakes, examples},
+      {version: versionLabel(v), prompt: v.structured, mixUps: m.mixUps.slice(0, 8), lowestField: m.lowestField, lowestValue: m.lowestValue, mistakes, examples},
       gateway.agentModel(),
       agentTools(projectId),
     );
-    for (const prev of await openProposals(projectId, 'prompt')) await catalog.patch('agent_proposals', prev.id, {state: 'discarded'});
+    for (const prev of await openProposals(projectId)) await catalog.patch('agent_proposals', prev.id, {state: 'discarded'});
+    // Improve with AI rewords; the label fields and values stay as they are.
+    const structured: StructuredPrompt = tidyStructured(rewordOnly(v.structured, out.prompt));
     const change = out.changes.map(c => c.text).join('; ') || 'Improved with AI';
     const proposal: AgentProposal = {
       id: newId('ap'),
       projectId,
       agent: 'prompt_agent',
       kind: 'prompt',
-      payload: {template: out.template, features: out.features ?? v.features, change, changes: out.changes, baseVersionId: v.id},
+      payload: {structured, change, changes: out.changes, baseVersionId: v.id, unmapped: []},
       brief: `Improve ${versionLabel(v)}`,
       state: 'open',
       createdAt: now(),
@@ -354,7 +334,7 @@ export async function improveWithAi(projectId: string, versionId: string): Promi
     await post(projectId, {role: 'agent', agent: 'prompt_agent', text, page: 'Edit prompt'});
     await postEvent(projectId, 'draft', 'prompt_agent', 'put a draft on Edit prompt', {path: '/prompt/edit', params: {v: v.id}});
     tm().counter('tsp_agent_proposals_total', {agent: 'prompt_agent', kind: 'prompt', outcome: 'shown'});
-    tm().event('prompt_proposal_shown', {agent: 'prompt_agent'});
+    tm().event('prompt_proposal_shown', {agent: 'prompt_agent', unmapped: 0});
     outcome = 'ok';
   } finally {
     busyProjects.delete(projectId);

@@ -53,7 +53,7 @@ test('images sit where their placeholders were, and captions stay out of the tex
 test('pages are found from the URL path, with or without a base path', () => {
   assert.equal(pageFromPath('/gold/'), 'gold');
   assert.equal(pageFromPath('/language-model-training-platform/prompt/edit/'), 'prompt_edit');
-  assert.equal(pageFromPath('/training-set.html'), 'training');
+  assert.equal(pageFromPath('/prompt-design.html'), 'prompt_design');
   assert.equal(pageFromPath('/'), 'projects');
 });
 

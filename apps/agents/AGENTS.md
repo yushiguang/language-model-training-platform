@@ -21,21 +21,19 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
      sends `{"tool_result": {...}}` back as the next user message. At most `MAX_TOOL_CALLS` (4)
      calls per turn; a tool not on the preset's list is refused; results are cut at 12,000
      characters. Changes are still proposals in the answer.
-   - **Start tools** (`START_TOOLS`: `try_template`, `score_version`, `start_optimiser`) spend
+   - **Start tools** (`START_TOOLS`: `try_prompt`, `score_version`, `start_optimiser`) spend
      money and are marked PAID in the prompt. The host runs them at once (no cost limit, no
      approval); the user stops them from the page.
    - The output lists the model calls and the answers that weren't JSON, for metrics.
 2. **Specialist agent presets (`src/presets.ts`)**:
    - `front_desk`: Answers questions about the current page and hands off to specialists.
-   - `schema_agent`: Drafts and revises the labeling policy and label fields (`propose_schema`,
-     `revise_schema`).
-   - `prompt_agent`: Drafts, revises, and explains prompt templates using `{{Key}}` placeholders
-     from `@tsp/domain`.
+   - `prompt_agent`: Drafts, imports, revises and explains the structured prompt (fields, values,
+     definitions, rules, features). It returns the whole `StructuredPrompt`, never compiled text.
    - `evaluation_agent`: Explains evaluation reports, thresholds, and mix-ups in plain language.
    - `optimiser`: Proposes targeted single-rule improvements during the GEPA-style optimiser loop.
 3. **Validation**: a handoff goes only to a known specialist with a known intent; anything else
-   is ignored and the front desk answers itself. Validating and repairing schemas and templates
-   before they are returned (with `checkTemplate` from `@tsp/domain`) is planned.
+   is ignored and the front desk answers itself. A returned prompt is read with `readStructured`; Improve with AI and the
+   Optimiser are held to wording-only changes with `rewordOnly` (both from `@tsp/domain`).
 
 ## Strict Boundary Rules
 

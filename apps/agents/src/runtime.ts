@@ -15,25 +15,24 @@ import type {
   DraftImprovementOutput,
   AgentModel,
   AgentPreset,
-  FeatureSelection,
-  Schema,
+  StructuredPrompt,
 } from '@tsp/contracts';
-import {FEATURES, systemConfig} from '@tsp/domain';
+import {FEATURES, readStructured, rewordOnly, structuredEquals, systemConfig} from '@tsp/domain';
 import {agentName, presetModel, PRESETS, START_TOOLS, systemPrompt, TOOL_SPECS} from './presets.ts';
 
 
 /** Handoffs go only to these specialists; anything else is ignored (no handoff). */
-const HANDOFF_TARGETS: AgentPreset[] = ['schema_agent', 'prompt_agent', 'evaluation_agent'];
+const HANDOFF_TARGETS: AgentPreset[] = ['prompt_agent', 'evaluation_agent'];
 
 interface RawAgentReply {
   tool?: {name: AgentToolName; args?: Record<string, unknown>};
   reply?: string;
   handoff?: {to: AgentPreset; intent: string};
-  schema?: Schema;
-  fields?: Schema['fields'];
-  template?: string;
-  features?: FeatureSelection;
+  /** The whole structured prompt, when the helper wrote or changed it. */
+  prompt?: unknown;
   change?: string;
+  /** Passages of an imported prompt that fit no structured part. */
+  unmapped?: unknown;
   /** One short question when the request is unclear (R3-10): the turn then proposes nothing. */
   question?: string;
 }
@@ -49,21 +48,13 @@ function parseJsonObject<T>(raw: string, fallback: T): T {
   }
 }
 
-function extractSchema(out: RawAgentReply): Schema | null {
-  if (out.schema && Array.isArray(out.schema.fields)) return out.schema;
-  if (Array.isArray(out.fields)) {
-    return {fields: out.fields};
-  }
-  return null;
-}
-
 function buildAgentContext(input: AgentTurnInput, targetAgent: AgentPreset): Record<string, unknown> {
   const {page, workspace, attachments} = input;
   const ctx: Record<string, unknown> = {
     ...page.context,
     pageHint: page.hint,
     task: page.context.task ?? workspace.task,
-    schema: page.context.schema ?? workspace.schema,
+    prompt: workspace.prompt,
     pageView: workspace.pageView,
     recentHistory: workspace.history.slice(-systemConfig().agent.recentHistoryCount),
   };
@@ -112,13 +103,13 @@ function workingLine(name: AgentToolName, args: Record<string, unknown>): string
       return 'Reading the gold labels…';
     case 'get_predictions':
       return `Reading the ${v ? `${v} ` : ''}answers…`;
-    case 'check_template':
+    case 'check_prompt':
       return 'Checking the prompt…';
     case 'read_feature_info':
       return 'Reading the feature descriptions…';
     case 'read_doc':
       return 'Reading the linked document…';
-    case 'try_template':
+    case 'try_prompt':
       return 'Trying the prompt on a few examples…';
     case 'score_version':
       return `Starting scoring${v ? ` ${v}` : ''}…`;
@@ -290,28 +281,16 @@ export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?
   }
 
   // A question, or an answer that leaves the prompt as it is, is a plain answer: no draft (R3-10).
-  const same = (t: string | undefined) => typeof t === 'string' && t.trim() === String(input.page.context.template ?? '').trim();
-  const resolvedSchema = question ? null : extractSchema(out);
   let proposal: AgentProposalDraft | null = null;
-  if (question) {
-    proposal = null;
-  } else if (resolvedSchema) {
-    proposal = {
-      kind: 'schema',
-      agent,
-      brief: input.userText,
-      payload: resolvedSchema,
-    };
-  } else if (out.template && !same(out.template)) {
+  const base = input.workspace.prompt;
+  const structured = question ? null : readStructured(out.prompt, base ?? undefined);
+  const unmapped = Array.isArray(out.unmapped) ? out.unmapped.filter((x): x is string => typeof x === 'string' && !!x.trim()).map(x => x.trim()) : [];
+  if (structured && (!base || !structuredEquals(base, structured) || unmapped.length)) {
     proposal = {
       kind: 'prompt',
       agent,
       brief: input.userText,
-      payload: {
-        template: out.template,
-        features: out.features,
-        change: out.change,
-      },
+      payload: {structured, ...(typeof out.change === 'string' && out.change.trim() ? {change: out.change.trim()} : {}), unmapped},
     };
   }
 
@@ -377,9 +356,7 @@ export async function reflectPrompt(input: OptimiserReflectInput, llm: AgentMode
     'optimiser',
     mode === 'merge' ? 'merge' : 'reflect',
     {
-      template: input.template,
-      features: input.features,
-      schema: input.schema,
+      prompt: input.prompt,
       tried: input.triedChanges,
       mixUps: input.mixUps.slice(0, 6),
       lowestField: input.lowestField,
@@ -390,18 +367,23 @@ export async function reflectPrompt(input: OptimiserReflectInput, llm: AgentMode
     tools,
     input.signal,
   );
-  const out = parseJsonObject<OptimiserReflectOutput>(raw, {template: input.template, change: ''});
-  return {template: typeof out.template === 'string' ? out.template : input.template, change: typeof out.change === 'string' ? out.change : '', ...(out.features ? {features: out.features} : {})};
+  const out = parseJsonObject<{prompt?: unknown; change?: unknown}>(raw, {});
+  // Wording only: the fields and value names stay the parent's, whatever the model wrote.
+  return {prompt: reworded(input.prompt, out.prompt), change: typeof out.change === 'string' ? out.change : ''};
+}
+
+/** A model's rewording laid over the prompt it started from (fields and value names kept). */
+function reworded(base: StructuredPrompt, answer: unknown): StructuredPrompt {
+  return answer && typeof answer === 'object' ? rewordOnly(base, answer as Partial<StructuredPrompt>) : base;
 }
 
 /** Improve with AI: the Prompt helper's draft of a version, with every change and its reason. */
 export async function draftImprovement(input: DraftImprovementInput, llm: AgentModel, tools?: AgentToolHost): Promise<DraftImprovementOutput> {
   const raw = await withFeatureInfo(llm, 'prompt_agent', 'improve', {...input, examples: (input.examples ?? []).slice(0, 8)}, tools);
-  const out = parseJsonObject<Partial<DraftImprovementOutput>>(raw, {});
+  const out = parseJsonObject<{prompt?: unknown; changes?: {text: string; reason?: string}[]; reply?: unknown}>(raw, {});
   const changes = Array.isArray(out.changes) ? out.changes.filter(c => c && typeof c.text === 'string').map(c => ({text: c.text, reason: typeof c.reason === 'string' ? c.reason : ''})) : [];
   return {
-    template: typeof out.template === 'string' && out.template.trim() ? out.template : input.template,
-    ...(out.features ? {features: out.features} : {}),
+    prompt: reworded(input.prompt, out.prompt),
     changes,
     reply: typeof out.reply === 'string' ? out.reply : '',
   };

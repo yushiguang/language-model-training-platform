@@ -40,8 +40,8 @@ reasoning is in [design-principles.md](design-principles.md).
 
 | Version | Scope | Status |
 | --- | --- | --- |
-| 0.x (the MVP line) | Training-set production in one browser tab, on stand-in services or the internal platform's adapters. Workflow: Setup, Dataset, Gold Labels, Prompt Engineering, Training Set | Built; described by [../architecture.md](../architecture.md) |
-| 1.0.0 | Prompt Tuning project: Prompt Design, Eval Dataset, Gold Labels, Prompt Tuning. Structured prompts, dataset governance, service contracts ready for RPC | Specified in [../specs/](../specs/); not built yet |
+| 0.x (the MVP line) | Training-set production in one browser tab, on stand-in services or the internal platform's adapters. Workflow: Setup, Dataset, Gold Labels, Prompt Engineering, Training Set | Built; replaced by 1.0.0 |
+| 1.0.0 | Prompt Tuning project: Prompt Design, Eval Dataset, Gold Labels, Prompt Tuning. Structured prompts, dataset governance, service contracts ready for RPC | Specified in [../specs/](../specs/). Phases 1 and 2 of 4 are built (contracts, structured prompts and the four steps) and described by [../architecture.md](../architecture.md); dataset governance, comments and motion are not built yet |
 | Later | Batch Labeling project (large-scale labeling with a tuned prompt), then student training, evaluation, release and monitoring | Contracts for batch labeling are designed in 1.0.0; the rest is not designed here |
 
 ### Why 1.0.0 changes the workflow
@@ -84,7 +84,7 @@ The UI uses plain words; design docs may use the precise ones.
 | --- | --- |
 | Optimiser, Auto Optimise | GEPA (reflective prompt optimisation) |
 | Score | Macro-F1 of a field; the big number is the lowest field's |
-| Helper (Assistant, Labels helper, Prompt helper, Scores helper) | Agent preset |
+| Helper (Assistant, Prompt helper, Scores helper) | Agent preset |
 | Gold label | Human ground-truth label |
 | Dry run | GEPA feedback minibatch |
 | Labeling model | Teacher model |

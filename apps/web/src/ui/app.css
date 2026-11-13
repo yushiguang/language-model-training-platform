@@ -85,3 +85,37 @@ button.vrow { width: 100%; border: 0; background: none; font: inherit; color: in
 /* R4-3: a dialog with fields (Auto Optimise) spaces them like the canvas board U-J-Optimise-Dialog. */
 .dlg.form { gap: 20px; }
 .dlg.form .dlg-acts { padding-top: 4px; }
+
+/* 1.0.0 screens (no canvas boards yet: docs/ui-gaps.md). */
+/* The Approve button asks for attention while a helper's draft waits (spec 6.2). */
+.btn-cue { animation: btn-cue 1.6s ease-out infinite; }
+@keyframes btn-cue { 0% { box-shadow: 0 0 0 0 rgb(0 0 0 / 28%); } 70%, 100% { box-shadow: 0 0 0 10px rgb(0 0 0 / 0%); } }
+@media (prefers-reduced-motion: reduce) { .btn-cue { animation: none; box-shadow: 0 0 0 3px rgb(0 0 0 / 14%); } }
+/* Structured prompt editor (spec 3.3): boxes grow with their text, and nothing leaves its card. */
+.sp-fields { grid-template-columns: 280px minmax(0, 1fr); }
+.sp-field { min-width: 0; max-width: 100%; overflow: hidden; }
+.sp-field-h { gap: 12px; flex-wrap: wrap; min-width: 0; }
+.sp-values .tbl td { height: auto; vertical-align: top; padding: 8px 12px; white-space: normal; }
+textarea.grow-box { display: block; height: auto; min-height: 32px; padding: 5px 12px; line-height: 20px; resize: none; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+textarea.input.grow-box:not(.sm) { min-height: 36px; padding: 7px 12px; }
+.sp-feats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; }
+.sp-marks { font-size: 13px; line-height: 20px; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.sp-marks ins { text-decoration: none; background: #e6f4ea; border-radius: 4px; box-shadow: 0 0 0 2px #e6f4ea; }
+.sp-marks ins.why { border-bottom: 1px dashed var(--text-3); }
+.sp-marks del { color: #b42318; background: #fdecec; border-radius: 4px; }
+.full-prompt { margin: 0; max-height: 56vh; overflow: auto; padding: 16px; border: 1px solid var(--border); border-radius: var(--r-el); background: var(--bg-muted); font-family: var(--mono); font-size: 13px; line-height: 22px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.unmapped { margin: 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-el); background: var(--bg-muted); font-family: var(--mono); font-size: 13px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Project Settings dialog (spec 2.3): each check's meaning is a plain line under its name. */
+.set-grid { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 24px; align-items: start; }
+.set-sub { display: block; font-size: 12px; line-height: 16px; color: var(--text-3); font-weight: 400; white-space: normal; }
+.set-checks .tbl td { height: auto; padding-top: 8px; padding-bottom: 8px; }
+.opt.tall { height: auto; padding: 10px 16px; align-items: flex-start; }
+.opt.tall .radio { margin-top: 2px; flex: none; }
+.dlg h3 { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; }
+.topbar-end .btn { flex: none; }
+/* Destructive actions (Delete project). */
+.btn-ghost.danger { color: #b42318; }
+.btn-ghost.danger:hover { background: #fdecec; }
+.btn-primary.danger { background: #b42318; }
+.btn-primary.danger:hover { background: #912018; }
+.btn-primary.danger:disabled { background: var(--bg-muted); }

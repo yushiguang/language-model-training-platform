@@ -1,8 +1,9 @@
 # Language model training platform
 
 A platform where PMs and operations staff produce task models (teacher-to-student distillation).
-The MVP covers training set production: a fixed-workflow website with specialist agents built into
-each step (Setup, Dataset, Gold Labels, Prompt Engineering, Training Set).
+Version 1.0.0 covers prompt tuning: a fixed-workflow website with helpers built into each step
+(Prompt Design, Eval Dataset, Gold Labels, Prompt Tuning). The result is a labeling prompt that
+passes the project's checks.
 
 ```bash
 npm ci

@@ -6,8 +6,7 @@ import * as evaluation from './services/evaluation.ts';
 import * as mismatch from './services/mismatches.ts';
 import * as projects from './services/projects.ts';
 import * as prompts from './services/prompts.ts';
-import * as setup from './services/setup.ts';
-import * as training from './services/training.ts';
+import * as settings from './services/settings.ts';
 import * as work from './services/work.ts';
 
 /**
@@ -58,41 +57,39 @@ export function createBffApi(): BffContract {
     getProject: projects.getProject,
     loadProjectState: projects.loadProjectState,
     approveNode: projects.approveNode,
+    deleteProject: r => projects.deleteProject(r.projectId),
     async tick({projectId}) {
       const state = await projects.loadProjectState(projectId);
       if (state) await work.tick(state);
     },
 
-    saveSetup: setup.saveSetup,
+    saveSettings: ({projectId, ...s}) => settings.saveSettings(projectId, s),
 
     getSamplePoolSize: dataset.getSamplePoolSize,
     exampleMedia: dataset.exampleMedia,
     startSampleDataset: dataset.startSampleDataset,
     stopSampleDataset: async projectId => dataset.stopSampleDataset(projectId),
     uploadDatasetText: dataset.uploadDatasetText,
-    applySplit: dataset.applySplit,
     saveGold: dataset.saveGold,
     async uploadGold({projectId, lines}) {
       const state = await stateOf(projectId);
-      if (!state.setup?.schema) throw new Error('Approve the labels first.');
+      if (!state.setup?.schema) throw new Error('Approve the prompt on Prompt Design first.');
       return dataset.uploadGold(projectId, state.setup.schema, state.setup.schemaVersion, state.examples, lines);
     },
     async importBundledGold(projectId) {
       const state = await stateOf(projectId);
-      if (!state.setup?.schema) throw new Error('Approve the labels first.');
+      if (!state.setup?.schema) throw new Error('Approve the prompt on Prompt Design first.');
       return dataset.importBundledGold(projectId, state.setup.schema, state.setup.schemaVersion, state.examples);
     },
-    checkLabels: agents.checkLabels,
     mismatches: mismatch.mismatches,
     reviewGold: r => mismatch.reviewGold(r.projectId, r.exampleId, r.promptVersionId, r.outcome, r.answer, r.note),
     rebuildReports: mismatch.rebuildReports,
 
     createVersion: r =>
       idempotent('createVersion', r.idempotencyKey, async () => {
-        const state = await stateOf(r.projectId);
-        if (!state.setup?.schema) throw new Error('Approve the labels first.');
+        await stateOf(r.projectId);
         const parent = r.parentId ? await versionOf(r.projectId, r.parentId) : null;
-        return prompts.createVersion(r.projectId, {template: r.template, features: r.features, images: r.images, parent, madeBy: r.madeBy, change: r.change, kind: r.kind, schema: state.setup.schema, schemaVersion: state.setup.schemaVersion});
+        return prompts.createVersion(r.projectId, {structured: r.structured, parent, madeBy: r.madeBy, change: r.change, kind: r.kind});
       }),
     scoreVersion: r => idempotent('scoreVersion', r.idempotencyKey, async () => work.scoreVersion(r.projectId, await versionOf(r.projectId, r.promptVersionId), r.endpoint)),
     stopRun: async runId => evaluation.stopRun(runId),
@@ -102,20 +99,6 @@ export function createBffApi(): BffContract {
     improveWithAi: agents.improveWithAi,
     featureInfo: prompts.featureInfo,
     predictionsFor: async (promptVersionId, endpoint, settings) => Object.fromEntries(await evaluation.predictionsFor(promptVersionId, endpoint, settings)),
-
-    labelTestSet: r => idempotent('labelTestSet', r.idempotencyKey, async () => training.labelTestSet(r.projectId, await versionOf(r.projectId, r.promptVersionId), r.endpoint, r.estimateUsd)),
-    startTrainingSet: r =>
-      idempotent('startTrainingSet', r.idempotencyKey, async () => {
-        const state = await stateOf(r.projectId);
-        const version = await versionOf(r.projectId, r.promptVersionId);
-        const existing = r.resumeTrainingSetId ? state.trainingSets.find(t => t.id === r.resumeTrainingSetId) : undefined;
-        if (r.resumeTrainingSetId && !existing) throw new Error('This training set does not exist.');
-        // The report recorded with a new run: the version's current score, when it passes.
-        const report = existing ? null : (state.reports.find(x => x.promptVersionId === version.id && x.endpoint === r.endpoint && !x.archivedNow && x.passed) ?? null);
-        return training.startTrainingSet(r.projectId, version, r.endpoint, report, r.estimateUsd, {labelTest: !!r.labelTest, existing});
-      }),
-    stopTrainingSet: training.stopTrainingSet,
-    trainingRows: training.trainingRows,
 
     chatHistory: agents.chatHistory,
     getAgentLive: async projectId => agents.agentLive(projectId),

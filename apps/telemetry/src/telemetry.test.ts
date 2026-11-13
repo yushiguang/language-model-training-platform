@@ -50,7 +50,7 @@ test('events carry the envelope, keep the newest when the buffer is full, and fl
 
 test('a failing sink never throws to the caller', async () => {
   const t = createTelemetry({sink: {pushEvents: async () => Promise.reject(new Error('down')), pushMetrics: async () => {}}, flushMs: 0});
-  t.event('compare_opened', {});
+  t.event('full_prompt_opened', {});
   await t.flush();
 });
 
@@ -105,12 +105,12 @@ test('a flush asked for during a flush also sends what was buffered meanwhile', 
     },
     flushMs: 0,
   });
-  t.event('compare_opened', {});
+  t.event('full_prompt_opened', {});
   const first = t.flush();
   t.event('assistant_opened', {});
   const second = t.flush();
   release();
   await second;
   await first;
-  assert.deepEqual(pushed, ['compare_opened', 'assistant_opened']);
+  assert.deepEqual(pushed, ['full_prompt_opened', 'assistant_opened']);
 });

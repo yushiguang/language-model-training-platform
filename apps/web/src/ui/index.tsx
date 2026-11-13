@@ -17,6 +17,27 @@ export function UiProvider({children}: {children: ReactNode}) {
 // ---------- icons (Lucide outline paths, the same set the canvas uses) ----------
 const PATHS: Record<string, ReactNode> = {
   check: <path d="M20 6 9 17l-5-5" />,
+  settings: (
+    <>
+      <path d="M20 7h-9" />
+      <path d="M14 17H5" />
+      <circle cx="17" cy="17" r="3" />
+      <circle cx="7" cy="7" r="3" />
+    </>
+  ),
+  trash: (
+    <>
+      <path d="M3 6h18" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </>
+  ),
+  copy: (
+    <>
+      <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+    </>
+  ),
   x: (
     <>
       <path d="M18 6 6 18" />
@@ -771,7 +792,7 @@ export const dateTime = (iso: string) => {
  * A dialog that asks one question (design: U-F-Optimise-Confirm): a title, one line, and its
  * buttons; the last button is the main one and gets the focus. Escape or a click outside closes it.
  */
-export function Dialog({title, text, actions, onClose, children}: {title: string; text?: string; actions: ReactNode; onClose: () => void; children?: ReactNode}) {
+export function Dialog({title, text, actions, onClose, children, width}: {title: string; text?: string; actions: ReactNode; onClose: () => void; children?: ReactNode; width?: number}) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
@@ -786,7 +807,7 @@ export function Dialog({title, text, actions, onClose, children}: {title: string
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return createPortal(
     <div className="k dlg-scrim" onMouseDown={e => e.target === e.currentTarget && onClose()}>
-      <div ref={box} role="dialog" aria-modal="true" aria-labelledby="dlg-t" className={children ? 'dlg form' : 'dlg'}>
+      <div ref={box} role="dialog" aria-modal="true" aria-labelledby="dlg-t" className={children ? 'dlg form' : 'dlg'} style={width ? {width} : undefined}>
         <h2 id="dlg-t" className="card-t">
           {title}
         </h2>

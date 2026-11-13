@@ -20,10 +20,8 @@ import type {
   PromptVersion,
   RuntimeInfo,
   Schema,
-  SetupPatch,
   SetupVersion,
-  TrainingRow,
-  TrainingSet,
+  StructuredPrompt,
 } from '@tsp/contracts';
 import type {BffClient} from './client';
 import {inProcessClient} from './in-process';
@@ -43,17 +41,16 @@ export const {
   loadProjectState,
   approveNode,
   tick,
-  saveSetup,
+  deleteProject,
+  saveSettings,
   getSamplePoolSize,
   exampleMedia,
   startSampleDataset,
   stopSampleDataset,
   uploadDatasetText,
-  applySplit,
   saveGold,
   uploadGold,
   importBundledGold,
-  checkLabels,
   mismatches,
   reviewGold,
   rebuildReports,
@@ -66,10 +63,6 @@ export const {
   improveWithAi,
   featureInfo,
   predictionsFor,
-  labelTestSet,
-  startTrainingSet,
-  stopTrainingSet,
-  trainingRows,
   chatHistory,
   getAgentLive,
   getAnsweringAgent,
@@ -90,7 +83,7 @@ export const {
   track,
 } = client;
 
-export type {BffClient, NewVersion, PageContext, ProjectState, RuntimeInfo, SetupPatch};
+export type {BffClient, NewVersion, PageContext, ProjectState, RuntimeInfo, StructuredPrompt};
 export type {
   AgentLive,
   AgentProposal,
@@ -110,6 +103,4 @@ export type {
   PromptVersion,
   Schema,
   SetupVersion,
-  TrainingRow,
-  TrainingSet,
 };

@@ -1,43 +1,4 @@
-import type {FeatureSelection, MixUp, Schema} from '@tsp/contracts';
-
-/** The default first prompt, built from the schema (the prompt agent can start from it too). */
-export function draftTemplate(schema: Schema, task: string): {template: string; features: FeatureSelection} {
-  const fields = schema.fields
-    .map((f, i) => {
-      const how = f.kind === 'single' ? 'pick exactly one' : `pick ${f.min ?? 1} to ${f.max ?? f.values.length}`;
-      return [`### ${i + 1}. ${f.name} (${how})`, ...f.values.map(v => `- ${v.name}: ${v.definition}`)].join('\n');
-    })
-    .join('\n\n');
-  const output = schema.fields
-    .map(f => `"${f.name}": ${f.kind === 'single' ? `"${f.values.map(v => v.name).join(' | ')}"` : `["${f.values.map(v => v.name).join('" | "')}"]`}`)
-    .join(', ');
-  const template = `You are a content analyst for a short-video platform. ${task ? task.trim().replace(/\.?$/, '.') : 'Read the post and tag it.'}
-
-## Input
-Title: {{Title}}
-Description: {{Description}}
-On-screen text: {{OCR_Text}}
-Speech: {{ASR}}
-Frames: {{Frame}}
-Images: {{Images}}
-Creator: {{Creator_Nick_Name}} · {{Creator_Bio}}
-Country and language: {{Country_Code}} · {{Language}}
-
-## Fields
-${fields}
-
-## Output
-Return JSON only:
-{"summary": "...", "reasoning": "...", ${output}}`;
-  return {
-    template,
-    features: {
-      video: ['Description', 'OCR_Text', 'Frame', 'ASR', 'Creator_Nick_Name', 'Creator_Bio'],
-      photo_text: ['Title', 'Description', 'OCR_Text', 'Images', 'ASR', 'Creator_Nick_Name', 'Creator_Bio'],
-      metadata: ['Country_Code', 'Language'],
-    },
-  };
-}
+import type {MixUp, Schema, StructuredPrompt} from '@tsp/contracts';
 
 /** A rule aimed at one mix-up, for the stand-in optimiser. A real optimiser writes its own. */
 export function ruleFor(m: MixUp, schema: Schema): string {
@@ -48,16 +9,14 @@ export function ruleFor(m: MixUp, schema: Schema): string {
   return `Always include ${m.gold} when the post fits it (${def(m.gold) || m.gold}).`;
 }
 
-/** Inserts a rule line at the end of a field's section. */
-export function insertRule(template: string, fieldName: string, rule: string): string {
-  const lines = template.split('\n');
-  const start = lines.findIndex(l => new RegExp(`^###\\s*\\d+\\.\\s*${fieldName}\\b`).test(l));
-  if (start === -1) return template.replace('## Output', `${rule}\n\n## Output`);
-  let end = start + 1;
-  while (end < lines.length && !/^##/.test(lines[end]) && lines[end].trim() !== '') end++;
-  lines.splice(end, 0, `  ${rule}`);
-  return lines.join('\n');
+/** Adds a rule to a field's note (its tie-break rules), one rule per line; unknown field: the general rules. */
+export function addFieldRule(p: StructuredPrompt, fieldName: string, rule: string): StructuredPrompt {
+  if (!p.fields.some(f => f.name === fieldName)) return {...p, generalRules: [p.generalRules.trim(), rule].filter(Boolean).join('\n')};
+  return {...p, fields: p.fields.map(f => (f.name === fieldName ? {...f, note: [f.note?.trim(), rule].filter(Boolean).join('\n')} : f))};
 }
+
+/** True when the prompt already says this rule somewhere. */
+export const hasRule = (p: StructuredPrompt, rule: string) => p.generalRules.includes(rule) || p.fields.some(f => (f.note ?? '').includes(rule));
 
 export const SAMPLE_SCHEMA: Schema = {
   fields: [
@@ -102,4 +61,17 @@ export const SAMPLE_SCHEMA: Schema = {
       ],
     },
   ],
+};
+
+/** The stand-in helper's first draft: the sample labels with a task line and the usual features. */
+export const SAMPLE_STRUCTURED: StructuredPrompt = {
+  taskSummary: 'You are a content analyst for a short-video platform. Read the post and tag it.',
+  features: {
+    video: ['Description', 'OCR_Text', 'ASR', 'Creator_Nick_Name', 'Creator_Bio'],
+    photo_text: ['Title', 'Description', 'OCR_Text', 'ASR', 'Creator_Nick_Name', 'Creator_Bio'],
+    metadata: ['Country_Code', 'Language'],
+  },
+  fields: SAMPLE_SCHEMA.fields.map(f => ({...f, values: f.values.map(v => ({...v}))})),
+  generalRules: '',
+  images: [],
 };

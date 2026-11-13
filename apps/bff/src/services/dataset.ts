@@ -34,11 +34,15 @@ async function saveSnapshot(projectId: string, raws: RawExample[], source: Datas
       video: raws.filter(r => r.type === 'video').length,
       photoText: raws.filter(r => r.type === 'photo_text').length,
     },
-    split: null,
+    // Every valid example of a Prompt Tuning project is in the eval dataset (spec 1.0.0, 2.1).
+    split: {eval: raws.length, test: 0, train: 0},
   };
+  // Halves: the order is fixed by a hash of the ids, so the same dataset always halves the same
+  // way. One half is for the Optimiser and the helpers to learn from; scores use the other.
+  const order = new Map([...raws].sort((a, b) => hashString(a.externalId).localeCompare(hashString(b.externalId))).map((r, i) => [r.externalId, i]));
   await catalog.insertMany(
     'examples',
-    raws.map((r): Example => ({id: newId('ex'), snapshotId: snap.id, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: null, optimiserHalf: false})),
+    raws.map((r): Example => ({id: newId('ex'), snapshotId: snap.id, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: 'eval', optimiserHalf: order.get(r.externalId)! % 2 === 0})),
   );
   // The snapshot is saved after its examples, so a half-saved upload is never picked up.
   await catalog.insert('dataset_snapshots', snap);
@@ -190,22 +194,6 @@ async function loadFeatures(projectId: string, fileName: string, ids: string[]):
   }
 }
 
-/** Order is fixed by a hash of the ids, so the same snapshot always splits the same way. */
-export async function applySplit(projectId: string, snapshotId: string, evalSize: number, testSize: number): Promise<void> {
-  const {catalog} = getApp();
-  const examples = await catalog.find('examples', {snapshotId});
-  const ordered = [...examples].sort((a, b) => hashString(a.externalId).localeCompare(hashString(b.externalId)));
-  const patches = ordered.map((ex, i) => {
-    const split = i < evalSize ? ('eval' as const) : i < evalSize + testSize ? ('test' as const) : ('train' as const);
-    return {id: ex.id, patch: {split, optimiserHalf: split === 'eval' && i % 2 === 0}};
-  });
-  await catalog.patchMany('examples', patches);
-  await catalog.patch('dataset_snapshots', snapshotId, {split: {eval: evalSize, test: testSize, train: examples.length - evalSize - testSize}});
-  tm().event('split_applied', {eval: evalSize, test: testSize, train: examples.length - evalSize - testSize, used_recommended: false});
-  emitChange();
-  void projectId;
-}
-
 export async function saveGold(projectId: string, exampleId: string, schemaVersion: number, answer: Answer, revealed: boolean, source: GoldLabel['source'] = 'labeled'): Promise<GoldLabel> {
   const {catalog, user} = getApp();
   const g: GoldLabel = {id: newId('gl'), projectId, exampleId, schemaVersion, answer, source, revealed, createdAt: now(), createdBy: (await user()).name};
@@ -232,8 +220,8 @@ export async function uploadGold(
   for (const l of lines) {
     const ex = byExt.get(l.externalId);
     const ok = ex && schema.fields.every(f => (l.answer[f.name] ?? []).every(v => f.values.some(x => x.name === v)) && (l.answer[f.name] ?? []).length > 0);
-    if (!ex || !ok || ex.split === 'train') {
-      if (ex?.split !== 'train') skipped++;
+    if (!ex || !ok) {
+      skipped++;
       continue;
     }
     await saveGold(projectId, ex.id, schemaVersion, l.answer, false, 'uploaded');

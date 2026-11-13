@@ -415,5 +415,21 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       const order = new Map(input.examples.map((e, i) => [e.id, i]));
       return out.sort((a, b) => order.get(a.exampleId)! - order.get(b.exampleId)!);
     },
+
+    /** Deleting a project: its running tasks stop, then its tasks and their saved answers go. */
+    async deleteProject(projectId: string) {
+      const tasks = await repo.find<LabelingTask>(TASKS, {projectId});
+      for (const t of tasks) active.get(t.id)?.abort();
+      const seen = new Set<string>();
+      for (const t of tasks) {
+        const key = `${t.promptVersionId}|${t.endpoint}|${t.settingsHash}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          for (const p of await repo.find<Prediction>(PREDICTIONS, {promptVersionId: t.promptVersionId, endpoint: t.endpoint, settingsHash: t.settingsHash})) await repo.delete(PREDICTIONS, p.id);
+        }
+        await repo.delete(TASKS, t.id);
+      }
+      emit();
+    },
   };
 }
