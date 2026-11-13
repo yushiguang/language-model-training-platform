@@ -18,6 +18,10 @@ changing, because apps only talk through the contracts in `@tsp/contracts`.
   `next.config.mjs` points somewhere else. Apps never import each other.
 - **A contract change is its own change.** Changing a type in `packages/contracts` affects the
   internal adapters too: say so in the PR title and description (see the handover guide).
+- **Name branches for what they do.** Use `<type>/<short-kebab-topic>`, where `<type>` is one of
+  `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, or `release` (for example
+  `feat/v1-dataset-governance`, `fix/min-eval-judge`, `release/v1.0.0`). Never push opaque
+  session-id branches such as `claude/project-thread-*`.
 - **No content in telemetry.** Metrics and events carry counts, ids, enums and durations only
   (`packages/contracts/src/telemetry.ts`); never prompt or chat text, features, names or emails.
   The telemetry app enforces it: label values and event props are allowlisted there.

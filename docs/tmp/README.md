@@ -15,4 +15,5 @@ Rules:
 
 | File | What it is |
 | --- | --- |
+| [2026-11-13-review-v1-phases-1-2.md](2026-11-13-review-v1-phases-1-2.md) | Code review of 1.0.0 phases 1 & 2 (`44f11c5`), to address alongside phases 3 & 4 |
 | [2026-11-ui-gaps-history.md](2026-11-ui-gaps-history.md) | Closed UI gap items from 2026-11-06 to 2026-11-12, cut from `docs/ui-gaps.md` |
