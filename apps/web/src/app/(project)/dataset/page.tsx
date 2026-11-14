@@ -2,12 +2,13 @@
 
 import {useGo} from '@/components/nav';
 import {useEffect, useRef, useState} from 'react';
-import type {PageContext} from '@tsp/contracts';
-import {gate} from '@tsp/domain';
-import {Frame, ProjectPage, useOpenAskAi} from '@/components/Shell';
+import type {PageContext, Schema} from '@tsp/contracts';
+import {gate, labelBalance, systemConfig} from '@tsp/domain';
+import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
-import {applySplit, approveNode, checkLabels, getSamplePoolSize, startSampleDataset, stopSampleDataset, uploadDatasetFile, type ProjectState} from '@/backend-api';
-import {Badge, Button, Card, CenterProgress, dateTime, Empty, Field, LinkChip, Metric, Metrics, num, PageHead, reportActionError, Suggestion} from '@/ui';
+import {appendDatasetFile, appendSample, approveNode, getSamplePoolSize, pruneDataset, restoreExamples, startSampleDataset, stopSampleDataset, uploadDatasetFile, type ProjectState, type RemovalReason} from '@/backend-api';
+import {Badge, Banner, Button, Card, CenterProgress, Code, dateTime, Dialog, Empty, Field, Hov, LinkChip, Metric, Metrics, num, One, PageHead, Table} from '@/ui';
+import {t, tm} from '@/i18n';
 
 export default function DatasetPage() {
   return (
@@ -17,21 +18,17 @@ export default function DatasetPage() {
   );
 }
 
-const PAGE: PageContext = {label: 'Dataset', agent: 'front_desk', intent: 'answer', hint: 'Ask how big the eval and test sets should be.', context: {}};
+const PAGE: PageContext = {label: 'Eval Dataset', agent: 'front_desk', intent: 'answer', hint: 'Ask how many examples the eval dataset needs.', context: {}};
 
 function Dataset({state}: {state: ProjectState}) {
   const snap = state.snapshot;
   const task = state.samplingTask?.state === 'running' ? state.samplingTask : null;
-  // Split sizes save a moment after typing; Next saves any change still waiting first, and is off
-  // while the sizes are invalid, so the step never moves on with old numbers.
-  const flush = useRef<() => Promise<void>>(async () => undefined);
-  const [splitOk, setSplitOk] = useState(true);
-  const head = <PageHead title="Dataset" actions={snap && !task ? <NextButton state={state} flush={flush} splitOk={splitOk} /> : undefined} />;
+  const head = <PageHead title={t('Eval Dataset')} actions={snap && !task ? <NextButton state={state} /> : undefined} />;
   if (task)
     return (
       <Frame head={head}>
         <CenterProgress
-          title={task.kind === 'upload' ? `Loading features for ${num(task.total)} items` : `Sampling ${num(task.total)} examples`}
+          title={task.kind === 'upload' ? t('Loading features for {n} items', {n: num(task.total)}) : t('Sampling {n} examples', {n: num(task.total)})}
           chip={task.kind === 'upload' && task.fileName ? <LinkChip text={task.fileName} /> : undefined}
           done={task.fetched}
           total={task.total}
@@ -48,25 +45,8 @@ function Dataset({state}: {state: ProjectState}) {
     );
   return (
     <Frame head={head}>
-      <Ready state={state} flush={flush} onValid={setSplitOk} />
-      {state.setup?.schema && <CheckLabels state={state} />}
+      <Ready state={state} />
     </Frame>
-  );
-}
-
-/** Review finding 10: the Labels helper reads a sample of the data against the labels, in Ask AI. */
-function CheckLabels({state}: {state: ProjectState}) {
-  const openAskAi = useOpenAskAi();
-  const check = () => {
-    openAskAi();
-    checkLabels(state.project.id, {...PAGE, where: {page: 'dataset', params: {}}}).catch(e => reportActionError(`Check labels failed: ${(e as Error).message}`, check));
-  };
-  return (
-    <div style={{paddingTop: 16}}>
-      <section className="card ai" aria-label="AI Suggestion">
-        <Suggestion title="Check the labels against your data" text="The Labels helper reads 20 examples and says which values never show up and which examples fit no value" actions={<Button label="Check labels" onClick={check} />} />
-      </section>
-    </div>
   );
 }
 
@@ -85,134 +65,282 @@ function Start({state}: {state: ProjectState}) {
     if (file.current) file.current.value = '';
   };
   return (
-    <Empty title="No examples yet" text="Upload a file of item IDs, or let the platform pick examples at random.">
+    <Empty title={t('No examples yet')} text={t('Every example here is used to score your prompt. Upload a file of item IDs, or let the platform pick examples at random.')}>
       <div className="row" style={{gap: 12}}>
-        <Button label="Upload dataset" icon="upload" onClick={() => file.current?.click()} />
-        <input ref={file} type="file" className="sr-only" accept=".txt,.csv,.jsonl,.json" aria-label="Upload dataset" onChange={e => e.target.files?.[0] && void upload(e.target.files[0])} />
-        <span className="t-3">or</span>
-        <input className="input sm" style={{width: 80, textAlign: 'center', padding: '0 8px'}} aria-label="Example count" value={n} onChange={e => setN(e.target.value.replace(/\D/g, ''))} />
-        <Button label="Auto sampling" kind="primary" icon="shuffle" disabled={!(parseInt(n) > 0)} onClick={() => void startSampleDataset(state.project.id, parseInt(n))} />
+        <Button label={t('Upload dataset')} icon="upload" onClick={() => file.current?.click()} />
+        <input ref={file} type="file" className="sr-only" accept=".txt,.csv,.jsonl,.json" aria-label={t('Upload dataset')} onChange={e => e.target.files?.[0] && void upload(e.target.files[0])} />
+        <span className="t-3">{t('or')}</span>
+        <input className="input sm" style={{width: 80, textAlign: 'center', padding: '0 8px'}} aria-label={t('Example count')} value={n} onChange={e => setN(e.target.value.replace(/\D/g, ''))} />
+        <Button label={t('Auto sampling')} kind="primary" icon="shuffle" disabled={!(parseInt(n) > 0)} onClick={() => startSampleDataset(state.project.id, parseInt(n))} />
       </div>
       {err && (
         <p className="t-err" style={{marginTop: 12, marginBottom: 0}}>
-          {err}
+          {t(err)}
         </p>
       )}
     </Empty>
   );
 }
 
-function recommended(total: number, minEval: number | null) {
-  const evalSize = minEval == null ? 0 : Math.min(total - 2, Math.max(minEval, Math.round(total * 0.35)));
-  const test = Math.max(1, Math.round(total * 0.1));
-  return {evalSize, test};
-}
-
-function NextButton({state, flush, splitOk}: {state: ProjectState; flush: {current: () => Promise<void>}; splitOk: boolean}) {
+function NextButton({state}: {state: ProjectState}) {
   const go = useGo();
   const {href} = useProject();
-  const evalOn = !!state.setup?.thresholds;
   const g = gate('dataset', state.facts);
   return (
     <Button
-      label={evalOn ? 'Next: Gold Labels' : 'Next: Prompt Engineering'}
+      label={t('Next: Gold Labels')}
       kind="primary"
-      disabled={!g.ready || !splitOk}
-      title={!splitOk ? 'Fix the split sizes first' : g.ready ? undefined : (g.reason ?? undefined)}
+      disabled={!g.ready}
+      title={g.msg ? tm(g.msg) : undefined}
       onClick={async () => {
-        await flush.current();
         await approveNode(state.project.id, 'dataset');
-        await go(href(evalOn ? '/gold' : '/prompt'));
+        await go(href('/gold'));
       }}
     />
   );
 }
 
-function Ready({state, flush, onValid}: {state: ProjectState; flush: {current: () => Promise<void>}; onValid: (ok: boolean) => void}) {
+/**
+ * The eval dataset (spec 1.0.0, 4.3 and 4.4): every example is used for evaluation. Examples can
+ * be added at any time (existing ones keep their half and gold label), removed with a trail and
+ * put back, and the label balance shows values with too few gold labels to score fairly.
+ */
+function Ready({state}: {state: ProjectState}) {
   const snap = state.snapshot!;
-  const t = state.setup?.thresholds ?? null;
-  const evalOn = !!t;
-  const total = snap.counts.valid;
-  const rec = recommended(total, t?.minEval ?? null);
-  const [evalSize, setEval] = useState(String(snap.split?.eval ?? rec.evalSize));
-  const [test, setTest] = useState(String(snap.split?.test ?? rec.test));
-  const locked = state.gold.size > 0;
-  const e = evalOn ? parseInt(evalSize) || 0 : 0;
-  const te = parseInt(test) || 0;
-  const train = Math.max(0, total - e - te);
-  const err = e + te >= total ? 'Leave some examples for train' : evalOn && e < t!.minEval ? `The eval set needs at least ${t!.minEval} examples` : null;
-
-  // Sizes save as they are typed (no Apply button).
-  const unsaved = !locked && !err && !(snap.split && snap.split.eval === e && snap.split.test === te);
-  useEffect(() => {
-    if (!unsaved) return;
-    const id = setTimeout(() => void applySplit(state.project.id, snap.id, e, te), 400);
-    return () => clearTimeout(id);
-  }, [e, te, locked, err]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => onValid(locked || !err), [locked, err]); // eslint-disable-line react-hooks/exhaustive-deps
-  flush.current = async () => {
-    if (unsaved) await applySplit(state.project.id, snap.id, e, te);
-  };
-
-  const lockTip = locked ? 'The split is fixed because gold labels exist for it' : undefined;
+  const {minEvalRecommended} = systemConfig().dataset;
+  const evalEx = state.examples.filter(e => e.split === 'eval');
+  const labeled = evalEx.filter(e => !!state.gold[e.id]).length;
+  const pending = evalEx.length - labeled;
+  const few = evalEx.length < minEvalRecommended;
+  const schema = state.setup?.schema ?? null;
   return (
-    <div className="grid-split" style={{gridTemplateColumns: '1fr 1fr', alignItems: 'stretch'}}>
-      <Card title="Examples">
+    <div className="col" style={{gap: 16, width: 706}}>
+      {few && <Banner text={t('Fewer than {n} examples: scores will be rough until you add more examples.', {n: minEvalRecommended})} style={{margin: 0}} />}
+      <Card title={t('Examples')} actions={<AddExamples state={state} />}>
         <Metrics>
-          <Metric label="Examples" value={num(snap.counts.rows)} />
-          <Metric label="Valid" value={num(snap.counts.valid)} />
-          <Metric label="Invalid" value={num(snap.counts.invalid)} />
+          <Metric label={t('Examples')} value={num(evalEx.length)} />
+          <Metric label={t('Gold-labeled')} value={num(labeled)} />
+          <Metric label={<Hov text={t('Waiting for gold labels')} tip={t('Scores leave these out until they have a gold label.')} />} value={num(pending)} />
+          <Metric label={t('Removed')} value={num(state.removals.length)} />
         </Metrics>
         <div className="row" style={{gap: 12, paddingTop: 8}}>
-          <Badge text={snap.source === 'sample' ? 'Sampled' : 'Uploaded'} icon={false} />
+          <Badge text={snap.source === 'sample' ? t('Sampled') : t('Uploaded')} icon={false} />
           <span className="t-3 one" style={{fontSize: 13}} title={snap.source === 'upload' ? snap.sourceName : undefined}>
-            {dateTime(snap.createdAt)} · {num(snap.counts.video)} videos · {num(snap.counts.photoText)} photo and text
+            {t('{date} · {videos} videos · {photos} photo and text', {date: dateTime(snap.createdAt), videos: num(evalEx.filter(e => e.type === 'video').length), photos: num(evalEx.filter(e => e.type !== 'video').length)})}
           </span>
+          {labeled > 0 && pending > 0 && <PruneUnlabeled state={state} pending={pending} />}
         </div>
       </Card>
-      <Card title="Split" className="form">
-        <div className="row" style={{gap: 16, alignItems: 'flex-end'}}>
-          {evalOn && (
-            <Field label="Eval size" width={160}>
-              <input className="input" value={evalSize} disabled={locked} title={lockTip} onChange={x => setEval(x.target.value.replace(/\D/g, ''))} />
-            </Field>
-          )}
-          <Field label="Test size" width={160}>
-            <input className="input" value={test} disabled={locked} title={lockTip} onChange={x => setTest(x.target.value.replace(/\D/g, ''))} />
-          </Field>
-          <Field label="Train size" width={160}>
-            <span className="input" style={{display: 'flex', alignItems: 'center', background: 'var(--bg-muted)', borderColor: 'transparent'}}>
-              {num(train)}
-            </span>
-          </Field>
-        </div>
-        {err && (
-          <span className="t-err" style={{fontSize: 13}}>
-            {err}
-          </span>
-        )}
-        <div className="split" style={{marginTop: 16}}>
-          {evalOn && <i style={{flex: Math.max(e, 0), background: '#1b1b1b'}} />}
-          <i style={{flex: Math.max(te, 0), background: '#6a6a6a'}} />
-          <i style={{flex: Math.max(train, 0), background: '#d4d4d4'}} />
-        </div>
-        <div className="legend">
-          {evalOn && (
-            <span>
-              <i style={{background: '#1b1b1b'}} />
-              Eval <b>{num(e)}</b>
-            </span>
-          )}
-          <span>
-            <i style={{background: '#6a6a6a'}} />
-            Test <b>{num(te)}</b>
-          </span>
-          <span>
-            <i style={{background: '#d4d4d4'}} />
-            Train <b>{num(train)}</b>
-          </span>
-        </div>
-      </Card>
+      {schema && labeled > 0 && <BalanceCard state={state} schema={schema} />}
+      {state.removals.length > 0 && <RemovedCard state={state} />}
     </div>
+  );
+}
+
+/** Add examples: a file of item IDs, or more sampled ones; ids already there are skipped. */
+function AddExamples({state}: {state: ProjectState}) {
+  const [n, setN] = useState('');
+  const [note, setNote] = useState<{text: string; err?: boolean} | null>(null);
+  const file = useRef<HTMLInputElement>(null);
+  const total = state.examples.length + state.removals.length;
+  useEffect(() => {
+    // The default goes straight into the box: up to 20 more, as many as are left.
+    getSamplePoolSize().then(a => setN(cur => cur || String(Math.max(0, Math.min(20, a - total)))));
+  }, [total]);
+  const upload = async (f: File) => {
+    setNote(null);
+    const res = await appendDatasetFile(state.project.id, f);
+    if (res.error) setNote({text: t(res.error), err: true});
+    else if (res.added != null) setNote({text: res.duplicates ? t('Added {n}; {dup} already in the dataset were skipped.', {n: num(res.added), dup: num(res.duplicates)}) : t('Added {n}.', {n: num(res.added)})});
+    if (file.current) file.current.value = '';
+  };
+  return (
+    <div className="col" style={{gap: 4, alignItems: 'flex-end'}}>
+      <div className="row" style={{gap: 8}}>
+        <Button label={t('Add from file')} size="sm" icon="upload" onClick={() => file.current?.click()} />
+        <input ref={file} type="file" className="sr-only" accept=".txt,.csv,.jsonl,.json" aria-label={t('Add from file')} onChange={e => e.target.files?.[0] && void upload(e.target.files[0])} />
+        <input className="input sm" style={{width: 56, textAlign: 'center', padding: '0 8px'}} aria-label={t('Examples to add')} value={n} onChange={e => setN(e.target.value.replace(/\D/g, ''))} />
+        <Button label={t('Add sampled')} size="sm" icon="shuffle" disabled={!(parseInt(n) > 0)} onClick={() => appendSample({projectId: state.project.id, count: parseInt(n)})} />
+      </div>
+      {note && (
+        <span className={note.err ? 't-err' : 't-3'} style={{fontSize: 12}} role="status">
+          {note.text}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Removes unlabeled examples down to a number to keep, evenly from both halves (spec 4.3). */
+function PruneUnlabeled({state, pending}: {state: ProjectState; pending: number}) {
+  const [open, setOpen] = useState(false);
+  const [keep, setKeep] = useState('0');
+  return (
+    <>
+      <span style={{marginLeft: 'auto'}}>
+        <Button label={t('Remove unlabeled')} size="sm" kind="ghost" onClick={() => setOpen(true)} />
+      </span>
+      {open && (
+        <Dialog
+          title={t('Remove unlabeled examples')}
+          text={t('{n} examples have no gold label. Removed examples can be put back from the Removed list.', {n: num(pending)})}
+          onClose={() => setOpen(false)}
+          actions={
+            <>
+              <Button label={t('Cancel')} onClick={() => setOpen(false)} />
+              <Button
+                label={t('Remove')}
+                kind="primary"
+                onClick={async () => {
+                  await pruneDataset({projectId: state.project.id, mode: 'unlabeled', keep: Math.max(0, parseInt(keep) || 0)});
+                  setOpen(false);
+                }}
+              />
+            </>
+          }
+        >
+          <Field label={t('Unlabeled examples to keep')} width={200}>
+            <input className="input" aria-label={t('Unlabeled examples to keep')} value={keep} onChange={e => setKeep(e.target.value.replace(/\D/g, ''))} />
+          </Field>
+        </Dialog>
+      )}
+    </>
+  );
+}
+
+/**
+ * Label balance and coverage (spec 4.3): gold labels per value. A rare value (fewer than 4, or
+ * fewer than 2 in a half) is yellow, one with none is red; a dominant value can be downsampled.
+ */
+function BalanceCard({state, schema}: {state: ProjectState; schema: Schema}) {
+  const c = systemConfig().dataset;
+  const b = labelBalance(schema, state.examples.filter(e => e.split === 'eval'), state.gold);
+  const [down, setDown] = useState<{field: string; value: string; count: number} | null>(null);
+  const [keep, setKeep] = useState('');
+  const rare = b.fields.flatMap(f => f.values.filter(v => v.rare));
+  const legend = (
+    <div className="row" style={{gap: 16, fontSize: 12}}>
+      <span className="row" style={{gap: 6}}>
+        <i style={{width: 8, height: 8, borderRadius: '50%', background: '#e0a800'}} />
+        <span className="t-3">
+          <Hov text={t('Rare')} tip={t('Fewer than {n} gold labels, or fewer than {half} in either half of the eval set. One miss moves its score a lot.', {n: c.rareValueMinCount, half: c.rareValuePerHalfMin})} />
+        </span>
+      </span>
+      <span className="row" style={{gap: 6}}>
+        <i style={{width: 8, height: 8, borderRadius: '50%', background: 'var(--err)'}} />
+        <span className="t-3">{t('None')}</span>
+      </span>
+    </div>
+  );
+  return (
+    <Card title={t('Label balance')} actions={legend}>
+      <div className="col" style={{gap: 24}}>
+        {b.fields.map((f, i) => {
+          const mx = Math.max(1, ...f.values.map(x => x.count));
+          return (
+            <div key={f.field} className="col" style={{gap: 24}}>
+              {i > 0 && <div style={{height: 1, background: 'var(--border)'}} />}
+              <div className="col" style={{gap: 8, alignItems: 'flex-start'}}>
+                <span>
+                  <Code>{f.field}</Code>
+                </span>
+                <div className="col" style={{gap: 4, alignSelf: 'stretch'}}>
+                  {[...f.values]
+                    .sort((x, y) => y.count - x.count)
+                    .map(x => {
+                      const tone = x.count === 0 ? 'err' : x.rare ? 'warn' : '';
+                      const col = tone === 'err' ? 'var(--err)' : tone === 'warn' ? 'var(--warn)' : 'var(--text)';
+                      const bold = tone ? 600 : undefined;
+                      return (
+                        <div key={x.value} className="bal-row">
+                          <span className="one" title={x.value} style={{color: col, fontWeight: bold}}>
+                            {x.value}
+                          </span>
+                          <span className="bal-bar">
+                            <span style={{width: `${Math.round((x.count / mx) * 100)}%`, background: tone === 'warn' ? '#e0a800' : '#1b1b1b'}} />
+                          </span>
+                          <span style={{textAlign: 'right', color: tone ? col : 'var(--text-2)', fontWeight: bold}}>
+                            <Hov text={num(x.count)} tip={t('{a} in the half the Optimiser learns from, {b} in the half scores use', {a: num(x.optimiser), b: num(x.heldOut)})} />
+                          </span>
+                          <span style={{textAlign: 'right'}}>
+                            {x.dominant && (
+                              <Button
+                                label={t('Downsample')}
+                                size="sm"
+                                kind="ghost"
+                                title={t('Over {pct}% of the gold labels are {value}', {pct: Math.round(c.dominantValueShareWarn * 100), value: x.value})}
+                                onClick={() => {
+                                  setKeep(String(Math.max(c.rareValueMinCount, Math.round(x.count / 2))));
+                                  setDown({field: f.field, value: x.value, count: x.count});
+                                }}
+                              />
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+        {rare.length > 0 && (
+          <p className="t-3" style={{margin: 0, fontSize: 13}}>
+            {rare.length === 1 ? t('1 value has too few gold labels to score fairly. Add examples that show it, then label them on Gold Labels.') : t('{n} values have too few gold labels to score fairly. Add examples that show them, then label them on Gold Labels.', {n: rare.length})}
+          </p>
+        )}
+      </div>
+      {down && (
+        <Dialog
+          title={t('Downsample {value}', {value: down.value})}
+          text={t('{n} examples have {value} as their gold label. Examples are removed at random, evenly from both halves, and can be put back from the Removed list.', {n: num(down.count), value: down.value})}
+          onClose={() => setDown(null)}
+          actions={
+            <>
+              <Button label={t('Cancel')} onClick={() => setDown(null)} />
+              <Button
+                label={t('Remove')}
+                kind="primary"
+                disabled={!(parseInt(keep) >= 0 && parseInt(keep) < down.count)}
+                onClick={async () => {
+                  await pruneDataset({projectId: state.project.id, mode: 'downsample', field: down.field, value: down.value, keep: parseInt(keep)});
+                  setDown(null);
+                }}
+              />
+            </>
+          }
+        >
+          <Field label={t('{value} examples to keep', {value: down.value})} width={200}>
+            <input className="input" aria-label={t('Examples to keep')} value={keep} onChange={e => setKeep(e.target.value.replace(/\D/g, ''))} />
+          </Field>
+        </Dialog>
+      )}
+    </Card>
+  );
+}
+
+const REASON: Record<RemovalReason, string> = {broken: 'Broken', out_of_scope: 'Out of scope', downsample: 'Downsampled', excess_unlabeled: 'Unlabeled extra'};
+
+/** Removed (N): every removal with why, who and when, and Restore (spec 4.4). */
+function RemovedCard({state}: {state: ProjectState}) {
+  const ids = state.removals.map(r => r.id);
+  return (
+    <Card title={t('Removed ({n})', {n: state.removals.length})} actions={<Button label={t('Restore all')} size="sm" onClick={() => restoreExamples({projectId: state.project.id, removalIds: ids})} />}>
+      <Table
+        cols={[{label: t('Item ID')}, {label: t('Why')}, {label: t('Gold label')}, {label: t('Removed')}, {label: '', kind: 'act'}]}
+        widths={[130, 140, 'auto', 150, 96]}
+        actWidth={96}
+        rows={state.removals.map(r => ({
+          key: r.id,
+          cells: [
+            <One key="id" text={r.externalId} />,
+            t(REASON[r.reason]),
+            <One key="g" text={r.gold ? Object.values(r.gold).flat().join(', ') : t('None')} className={r.gold ? undefined : 't-3'} />,
+            <span key="at" className="t-3"><Hov text={dateTime(r.removedAt)} tip={t('Removed by {name}', {name: r.removedBy})} /></span>,
+            <Button key="r" label={t('Restore')} size="sm" kind="ghost" onClick={() => restoreExamples({projectId: state.project.id, removalIds: [r.id]})} />,
+          ],
+        }))}
+      />
+    </Card>
   );
 }

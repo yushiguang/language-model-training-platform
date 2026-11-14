@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {PromptVersion} from '@tsp/contracts';
 import {localDocRuntime} from '@tsp/platform';
-import {createCatalog} from './catalog.ts';
+import {LABEL_VALUES} from '@tsp/contracts';
+import {catalogKinds, createCatalog} from './catalog.ts';
 
-const base = {projectId: 'pr_1', template: 't', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user' as const, change: '', schemaVersion: 1};
+const base = {projectId: 'pr_1', structured: {taskSummary: '', features: {video: [], photo_text: [], metadata: []}, fields: [], generalRules: '', images: []}, template: 't', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user' as const, change: '', schemaVersion: 1};
 
 test('catalog numbers prompt versions from what is stored: minors under the parent, majors after the highest', async () => {
   const c = createCatalog(localDocRuntime('cat-1'));
@@ -26,10 +27,10 @@ test('catalog patch changes only the given fields; findByIds returns the asked r
   const c = createCatalog(localDocRuntime('cat-2'));
   await c.insert('projects', {id: 'pr_1', name: 'P', createdAt: '', createdBy: 'me', setupVersionId: null, snapshotId: null, approvedNodes: []});
   await c.patch('projects', 'pr_1', {snapshotId: 'ds_1'});
-  await c.patch('projects', 'pr_1', {approvedNodes: ['setup']});
+  await c.patch('projects', 'pr_1', {approvedNodes: ['prompt_design']});
   const p = await c.get('projects', 'pr_1');
   assert.equal(p?.snapshotId, 'ds_1');
-  assert.deepEqual(p?.approvedNodes, ['setup']);
+  assert.deepEqual(p?.approvedNodes, ['prompt_design']);
 
   await c.insertMany(
     'examples',
@@ -37,4 +38,9 @@ test('catalog patch changes only the given fields; findByIds returns the asked r
   );
   const got = await c.findByIds('examples', ['ex_3', 'ex_35', 'missing']);
   assert.deepEqual(got.map(e => e.id).sort(), ['ex_3', 'ex_35']);
+});
+
+test('every catalog kind is a declared telemetry collection, so no metric falls back to "other"', () => {
+  const missing = catalogKinds().filter(k => !LABEL_VALUES.collection.includes(k));
+  assert.deepEqual(missing, []);
 });

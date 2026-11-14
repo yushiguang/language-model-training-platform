@@ -12,15 +12,15 @@ const state = (over: Partial<ProjectState> = {}): ProjectState =>
     examples: [
       {id: 'ex_1', split: 'eval', features: {Title: 'a'}, type: 'video'},
       {id: 'ex_2', split: 'eval', features: {Title: 'b'}, type: 'video'},
+      {id: 'ex_3', split: 'eval', features: {Title: 'c'}, type: 'video'},
+      {id: 'ex_4', split: 'eval', features: {Title: 'd'}, type: 'video'},
     ],
-    gold: new Map(),
+    gold: {},
     versions: [version],
     reports: [],
     runs: [],
-    testRuns: [],
     optimisation: [],
-    trainingSets: [],
-    facts: {goldEvalDone: 0},
+    facts: {examples: 4, goldEvalDone: 4, goldHalves: {optimiser: 2, heldOut: 2}, settingsConfirmed: true},
     endpoints: [{id: 'A', priceIn: 1, priceOut: 4}],
     ...over,
   }) as unknown as ProjectState;
@@ -31,7 +31,7 @@ test('a new version is due for scoring on each chosen model', () => {
   assert.ok(due[0].estimateUsd > 0);
 });
 
-test('automatic spend counts runs started by code and try_template spend, not runs the user clicked', () => {
+test('automatic spend counts runs started by code and try_prompt spend, not runs the user clicked', () => {
   const clicked = state({runs: [{id: 'lt_1', promptVersionId: 'pv_0', endpoint: 'A', state: 'done', done: 2, total: 2, costUsd: 9, autoCostUsd: 0}] as ProjectState['runs']});
   assert.equal(autoSpendUsd(clicked), 0);
   const resumed = state({runs: [{id: 'lt_1', promptVersionId: 'pv_0', endpoint: 'A', state: 'done', done: 2, total: 2, costUsd: 9, autoCostUsd: 4.5}] as ProjectState['runs']});
@@ -40,35 +40,22 @@ test('automatic spend counts runs started by code and try_template spend, not ru
 });
 
 test('a paused scoring run is due to resume, and costs only what is left', () => {
-  const s = state({runs: [{id: 'lt_1', promptVersionId: 'pv_1', endpoint: 'A', state: 'paused', done: 1, total: 2, costUsd: 0}] as ProjectState['runs']});
+  const s = state({runs: [{id: 'lt_1', promptVersionId: 'pv_1', endpoint: 'A', state: 'paused', done: 2, total: 4, costUsd: 0}] as ProjectState['runs']});
   const due = dueStarts(s);
   assert.deepEqual(due.map(d => d.what), ['resume']);
   assert.ok(Math.abs(due[0].estimateUsd * 2 - dueStarts(state())[0].estimateUsd) < 1e-9);
 });
 
-test('final run plan: test examples with gold or an answer are never labeled again', async () => {
-  const {finalRunPlan} = await import('./workflow.ts');
-  const s = state({
-    examples: [
-      {id: 't1', split: 'test', features: {Title: 'a'}, type: 'video'},
-      {id: 't2', split: 'test', features: {Title: 'b'}, type: 'video'},
-      {id: 't3', split: 'test', features: {Title: 'c'}, type: 'video'},
-      {id: 'r1', split: 'train', features: {Title: 'd'}, type: 'video'},
-    ] as unknown as ProjectState['examples'],
-    gold: new Map([['t1', {answer: {}}]]) as unknown as ProjectState['gold'],
-  });
-  const p = finalRunPlan(s, version, 'A', new Set(['t1', 't2']));
-  assert.deepEqual(p.test.withGold, ['t1']);
-  assert.deepEqual(p.test.withAnswer, ['t2']);
-  assert.deepEqual(p.test.toLabel, ['t3']);
-  assert.equal(p.total(false).count, 1);
-  assert.equal(p.total(true).count, 2);
-  assert.ok(p.total(true).costUsd > p.total(false).costUsd);
+test('nothing starts by itself before settings are confirmed and enough gold labels exist (spec 2.5)', () => {
+  const facts = state().facts;
+  assert.deepEqual(dueStarts(state({facts: {...facts, settingsConfirmed: false}})), []);
+  assert.deepEqual(dueStarts(state({facts: {...facts, goldEvalDone: 1, goldHalves: {optimiser: 1, heldOut: 0}}})), []);
+  assert.deepEqual(dueStarts(state({facts: {...facts, goldHalves: {optimiser: 3, heldOut: 1}}})), []);
+  assert.equal(dueStarts(state()).length, 1);
 });
 
 test('the Optimiser is never due by itself, and its labeling waits for Retry', () => {
   const scored = state({
-    facts: {goldEvalDone: 2} as ProjectState['facts'],
     setup: {schema: {fields: []}, models: [{endpoint: 'A', maxOutputTokens: 512, temperature: 0}], thresholds: {macroF1: 0.8}} as unknown as ProjectState['setup'],
     runs: [{id: 'lt_1', promptVersionId: 'pv_1', endpoint: 'A', state: 'done', done: 2, total: 2, costUsd: 0}] as ProjectState['runs'],
   });

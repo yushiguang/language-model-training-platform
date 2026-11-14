@@ -1,11 +1,10 @@
 'use client';
+import {systemConfig} from '@tsp/domain';
 
 import {useSearchParams} from 'next/navigation';
 import {createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode} from 'react';
 import {loadProjectState, subscribeChanges, tick, type ProjectState} from '@/backend-api';
 
-/** How often the workflow manager checks the open project even when nothing changed. */
-const SWEEP_MS = 60_000;
 
 interface Ctx {
   projectId: string;
@@ -48,7 +47,7 @@ export function ProjectProvider({children}: {children: ReactNode}) {
       // The workflow manager (2026-11-11): every change event, and the sweep below, runs one
       // check of what should be running (`tick`, built on `dueStarts`). Starts are keyed, so
       // running it often is safe. Every auto task also has a button to start it by hand.
-      if (s) void tick(s);
+      if (s) void tick({projectId});
       setError(s ? null : 'This project does not exist.');
     } catch (e) {
       setError((e as Error).message);
@@ -62,7 +61,7 @@ export function ProjectProvider({children}: {children: ReactNode}) {
     void refresh();
     const off = subscribeChanges(() => {
       if (pending.current) clearTimeout(pending.current);
-      pending.current = setTimeout(() => void refresh(), 120);
+      pending.current = setTimeout(() => void refresh(), systemConfig().ui.changeDebounceMs);
     });
     const onFocus = () => void refresh();
     window.addEventListener('focus', onFocus);
@@ -74,17 +73,17 @@ export function ProjectProvider({children}: {children: ReactNode}) {
 
   // While anything runs, read again every few seconds: a run in another tab, or one whose tab
   // closed, changes state without an event in this tab.
-  const running = !!state && (state.runs.some(r => r.state === 'running') || state.trainingSets.some(t => t.state === 'running') || state.optimisation.some(o => o.state === 'running'));
+  const running = !!state && (state.runs.some(r => r.state === 'running') || state.optimisation.some(o => o.state === 'running'));
   useEffect(() => {
     if (!running) return;
-    const id = setInterval(() => void refresh(), 5000);
+    const id = setInterval(() => void refresh(), systemConfig().ui.activePollMs);
     return () => clearInterval(id);
   }, [running, refresh]);
 
   // The sweep: a change this tab never heard of (another tab, a closed page) is still picked up.
   useEffect(() => {
     if (!projectId) return;
-    const id = setInterval(() => void refresh(), SWEEP_MS);
+    const id = setInterval(() => void refresh(), systemConfig().ui.sweepMs);
     return () => clearInterval(id);
   }, [projectId, refresh]);
 

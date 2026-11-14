@@ -3,6 +3,44 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-14 (1.1.0: creator, languages, problem reports)
+
+- **The Projects list shows who created each project**, nothing more until tenants arrive; the id is stored too, for ownership checks later.
+- **Rename lives in Project Settings**, as a Name field, not on the top island.
+- **English and Chinese now; more languages later**, as new catalog files. The switch sits in a menu under the avatar.
+- **Reporting a problem is a tool every helper has**, not a separate helper, because users get stuck on any page. The site defines the ticket submission interface; the internal platform files the ticket and the user gets its id. There is no reports page.
+- **A report needs the user's yes**, enforced in code: a draft first, a send only after the user writes again. The prompt goes along only when the user agrees; examples and gold labels never do.
+
+## 2026-11-14 (building 1.0.0 phases 3 and 4)
+
+- **Unlabeled examples never make a score stale.** Scores rest on gold-labeled eval examples only; an added example waits for its gold label and is counted next to the score.
+- **The halves are fixed at the first helper read**, not at the first score: until then they are rebalanced by gold label when Gold Labels is left.
+- **Removing is a soft delete with a trail**, restorable, and the score line says how many gold-labeled examples were removed before it.
+- **The "Why" on Mismatches is a comment.** Comments are append-only and reach the helpers for the readable half only.
+- **Gold Labels saves only on Save**, on both tabs; "Use the model's answer" is gone.
+- **Motion lives in code only** until the canvas has a way to show it.
+
+## 2026-11-13 (building 1.0.0 phase 2)
+
+- **The structured prompt is the only thing edited**; the text sent to the model is compiled from it and shown read-only.
+- **Only a changed field or value starts a new schema version.** New wording keeps gold labels and scores valid.
+- **The Optimiser and Improve with AI change wording only.** Fields and values are changed by people, on Prompt Design or in the editor.
+- **Project Settings are confirmed once, before the first paid run**; nothing paid starts before that.
+- **No Approve card in the chat.** A draft is approved on its page.
+- **Existing 0.x projects are not migrated** (assumed test data, to be discarded).
+- **The UI canvas was updated from the built site** (59 boards): the 1.0.0 screens are boards made from the pages' own markup.
+
+## 2026-11-12 (review of the 1.0.0 spec)
+
+- **No pass verdict under 20 scored examples.** The score shows as a rough reading and Finish stays closed.
+- **Appending examples never freezes scoring.** Versions are scored on gold-labeled examples; new ones are pending; changed scores are stale until Rebuild scores.
+- **Every example removal is recorded and restorable**, and the removed count shows next to the score.
+- **The held-out half is not a test set.** Confirm a pass stays; an untouched test set comes with the batch labeling project.
+- **Prompt import lists what it could not carry over.**
+- **1.0.0 ships in four phases**, the first a contract and service refactor with no behaviour change.
+- **A task that just finished is never marked as left behind** (found by the browser check during phase 1): the check that pauses tasks of closed pages reads the task again before it writes.
+- **Three 0.x UI rules change in 1.0.0:** Enter sends in Ask AI (Shift+Enter adds a line, input-method safe); user-written content wraps; the Project Settings default panel shows explanations as subtitles.
+
 ## 2026-11-11
 
 - **Gold Labels is an ordinary step** (acceptance R5-8): not optional or "recommended", and no

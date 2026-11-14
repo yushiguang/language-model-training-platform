@@ -1,21 +1,12 @@
-import type {EndpointConfig, ModelTier, Platform} from '@tsp/contracts';
+import type {EndpointConfig, Platform} from '@tsp/contracts';
+import {systemConfig} from '@tsp/domain';
 
 /**
- * Assumed limits per model, used until an endpoint is registered with its real QPM/TPM.
- * Values are deliberately conservative; the limiter also backs off on its own after a 429.
- * `maxConcurrency` is our own cap on calls in flight, not a platform limit.
+ * Assumed limits per model, used until an endpoint is registered with its real QPM/TPM
+ * (`SystemConfig.gateway.assumedLimits`). Values are deliberately conservative; the limiter also
+ * backs off on its own after a 429. A model with no entry gets the most conservative tier.
  */
-export const ASSUMED_LIMITS: Record<string, {tier: ModelTier; qpm: number; tpm: number; maxConcurrency: number}> = {
-  'gpt-5.4': {tier: 'fast', qpm: 240, tpm: 800_000, maxConcurrency: 24},
-  'gpt-5.6-luna': {tier: 'balanced', qpm: 120, tpm: 500_000, maxConcurrency: 16},
-  'gpt-5.6-terra': {tier: 'reasoning', qpm: 60, tpm: 300_000, maxConcurrency: 8},
-  'gpt-5.5': {tier: 'balanced', qpm: 0, tpm: 0, maxConcurrency: 0},
-};
-
-/** Fallback for a model we have no entry for: the most conservative tier. */
-const UNKNOWN_MODEL = {tier: 'reasoning' as ModelTier, qpm: 60, tpm: 300_000, maxConcurrency: 8};
-
-const limitsFor = (model: string) => ASSUMED_LIMITS[model] ?? UNKNOWN_MODEL;
+const limitsFor = (model: string) => systemConfig().gateway.assumedLimits[model] ?? systemConfig().gateway.unknownModelLimits;
 
 /**
  * Builds the endpoint registry: registered endpoints from the platform first, then one assumed

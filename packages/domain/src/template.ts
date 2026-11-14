@@ -1,5 +1,5 @@
 import {ALL_KEYS, FEATURES, ITEM_ROWS, featureDef, isImageKey, labelOf} from './catalogue.ts';
-import type {Example, ExampleType, FeatureSelection, PromptImage, Schema} from '@tsp/contracts';
+import type {Example, ExampleType, FeatureSelection, FeatureValue, PromptImage, Schema} from '@tsp/contracts';
 
 /**
  * Prompt templates (tech doc §3, "Prompt templates and feature loading").
@@ -257,14 +257,14 @@ export function renderPrompt(template: string, example: Pick<Example, 'type' | '
     const key = m[1];
     const value = example.features[key];
     if (isImageKey(key)) {
-      const urls = (Array.isArray(value) ? value : value ? [value] : []).filter(Boolean);
+      const urls = featureItems(value);
       if (!urls.length) buf += 'none';
       else {
         flush();
         urls.forEach((url, i) => parts.push({type: 'image', url, caption: `${labelOf(key)} ${i + 1} of ${urls.length} · from the example`, source: 'example', key}));
       }
     } else {
-      const s = Array.isArray(value) ? value.join(', ') : (value ?? '');
+      const s = featureText(value);
       buf += s.trim() ? s : 'none';
     }
   }
@@ -412,4 +412,34 @@ export function withReasons(segs: MarkSeg[], changes: {text: string; reason: str
 
 export function diffSummary(d: DiffLine[]): {added: number; removed: number} {
   return {added: d.filter(l => l.kind === 'add').length, removed: d.filter(l => l.kind === 'del').length};
+}
+
+/**
+ * A feature value as one line of text: the text, or the list joined with commas. Tolerates the
+ * `string | string[]` shape stored before 1.0.0 (spec 7.1), so old records still read.
+ */
+export function featureText(v: FeatureValue | string | string[] | undefined | null): string {
+  if (v == null) return '';
+  if (typeof v === 'string') return v;
+  if (Array.isArray(v)) return v.join(', ');
+  return v.items ? v.items.join(', ') : (v.text ?? '');
+}
+
+/** A feature value as a list (image URLs): the items, or the text as one item when it is not empty. */
+export function featureItems(v: FeatureValue | string | string[] | undefined | null): string[] {
+  if (v == null) return [];
+  if (typeof v === 'string') return v.trim() ? [v] : [];
+  if (Array.isArray(v)) return v.filter(Boolean);
+  return v.items ? v.items.filter(Boolean) : v.text?.trim() ? [v.text] : [];
+}
+
+/** Features from a file or an older record (`string | string[]` per key) as `FeatureValue`s. */
+export function toFeatures(raw: Record<string, unknown> | undefined | null): Record<string, FeatureValue> {
+  const out: Record<string, FeatureValue> = {};
+  for (const [k, v] of Object.entries(raw ?? {})) {
+    if (Array.isArray(v)) out[k] = {items: v.map(String)};
+    else if (v && typeof v === 'object') out[k] = v as FeatureValue;
+    else out[k] = {text: v == null ? '' : String(v)};
+  }
+  return out;
 }

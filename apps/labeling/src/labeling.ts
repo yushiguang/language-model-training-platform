@@ -18,7 +18,7 @@ import {
   type TelemetryPort,
   type TryTemplateRow,
 } from '@tsp/contracts';
-import {hashString, parseOutput, REASON_LINE, renderPrompt, settingsHash, type Part} from '@tsp/domain';
+import {hashString, parseOutput, REASON_LINE, renderPrompt, settingsHash, type Part, systemConfig} from '@tsp/domain';
 import {DocRepo, newId} from '@tsp/platform';
 import {browserLocks, type TaskLocks} from './locks.ts';
 
@@ -34,16 +34,6 @@ export interface LabelingDeps {
   telemetry?: TelemetryPort;
 }
 
-/** Examples labeled at once by default. */
-export const DEFAULT_PARALLEL = 4;
-/** The task pauses with "needs attention" when more than this share of examples failed. */
-export const MAX_FAILED_SHARE = 0.05;
-/** ...or when this many examples in a row failed. */
-export const MAX_FAILED_IN_A_ROW = 20;
-/** The task pauses when cost passes this multiple of the accepted estimate. */
-export const BUDGET_MARGIN = 1.2;
-/** How often a runner re-reads its task to see a Stop pressed in another tab. */
-const STOP_CHECK_MS = 2000;
 
 const TASKS = 'labeling_tasks';
 const PREDICTIONS = 'predictions';
@@ -105,9 +95,9 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     return out;
   }
 
-  async function predictions(promptVersionId: string, endpoint: EndpointId, hash: string): Promise<Map<string, Prediction>> {
-    const out = new Map<string, Prediction>();
-    for (const [id, ps] of await allPredictions(promptVersionId, endpoint, hash)) out.set(id, ps.find(p => p.answer) ?? ps[0]);
+  async function predictions(promptVersionId: string, endpoint: EndpointId, hash: string): Promise<Record<string, Prediction>> {
+    const out: Record<string, Prediction> = {};
+    for (const [id, ps] of await allPredictions(promptVersionId, endpoint, hash)) out[id] = ps.find(p => p.answer) ?? ps[0];
     return out;
   }
 
@@ -166,10 +156,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       costUsd: mine.reduce((n, p) => n + p.costUsd, 0),
       tokens: mine.reduce((n, p) => n + (p.tokens ?? 0), 0),
     };
-    // The user chose to continue after a budget pause: the budget grows by the share still to label.
-    let budgetUsd = task.budgetUsd;
-    if (opts.extendBudget && budgetUsd != null && task.stopReason === 'budget') budgetUsd = counts.costUsd + (budgetUsd * pending.length) / Math.max(1, task.total);
-    await repo.patch<LabelingTask>(TASKS, taskId, {...counts, failedExampleIds: [...failedSet], budgetUsd, ...(task.relabelInvalid ? {relabelExampleIds: relabelIds} : {}), state: 'running', stopReason: null, error: null, startedAt: task.startedAt ?? now(), finishedAt: null});
+    await repo.patch<LabelingTask>(TASKS, taskId, {...counts, failedExampleIds: [...failedSet], ...(task.relabelInvalid ? {relabelExampleIds: relabelIds} : {}), state: 'running', stopReason: null, error: null, startedAt: task.startedAt ?? now(), finishedAt: null});
     emit();
 
     const examples = new Map((await deps.catalog.findByIds('examples', pending)).map(e => [e.id, e] as [string, Example]));
@@ -180,14 +167,9 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     let inARow = 0;
     let lastError: string | null = null;
     let next = 0;
-    /** This run's own cost, for `opts.budgetUsd`. */
-    let runCostUsd = 0;
-
     // Checked before every example, so a resumed task that is already over a limit makes no call.
     const overLimit = (): LabelingTask['stopReason'] => {
-      if (budgetUsd != null && counts.costUsd > budgetUsd * BUDGET_MARGIN) return 'budget';
-      if (opts.budgetUsd != null && runCostUsd > opts.budgetUsd * BUDGET_MARGIN) return 'budget';
-      if (counts.failed / task.total > MAX_FAILED_SHARE || inARow >= MAX_FAILED_IN_A_ROW) return 'failures';
+      if (counts.failed / task.total > systemConfig().labeling.maxFailedShare || inARow >= systemConfig().labeling.maxFailedInARow) return 'failures';
       return null;
     };
 
@@ -200,7 +182,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           ctrl.abort();
         }
       });
-    }, STOP_CHECK_MS);
+    }, systemConfig().labeling.stopCheckMs);
     (stopTimer as {unref?: () => void}).unref?.();
 
     /**
@@ -265,7 +247,6 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       });
       counts.done++;
       counts.costUsd += pred.costUsd;
-      if (paid) runCostUsd += pred.costUsd;
       tm.counter('tsp_labeling_examples_total', {task_purpose: purpose, result: pred.answer ? 'valid' : pred.filtered ? 'filtered' : 'invalid'});
       if (paid) tm.counter('tsp_labeling_cost_usd_total', {task_purpose: purpose}, pred.costUsd);
       return true;
@@ -313,12 +294,6 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       state = 'stopped';
       stopReason = 'user';
       error = null;
-    } else if (stopReason === 'budget') {
-      state = 'paused';
-      error =
-        budgetUsd != null && counts.costUsd > budgetUsd * BUDGET_MARGIN
-          ? `Paused: the cost passed ${Math.round(BUDGET_MARGIN * 100)}% of the approved estimate.`
-          : `Paused: this automatic start cost more than ${Math.round(BUDGET_MARGIN * 100)}% of its estimate.`;
     } else if (stopReason === 'failures' || counts.failed > 0) {
       state = 'needs_attention';
       stopReason = 'failures';
@@ -332,7 +307,6 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     tm.counter('tsp_labeling_tasks_ended_total', {task_purpose: purpose, state, reason: stopReason ?? 'none'});
     if (state === 'needs_attention') tm.event('run_needs_attention', {task_purpose: purpose, failed: counts.failed, total: task.total});
     tm.histogram('tsp_labeling_task_duration_seconds', (Date.now() - runStarted) / 1000, {task_purpose: purpose});
-    if (state === 'done' && budgetUsd) tm.histogram('tsp_labeling_cost_vs_estimate_ratio', counts.costUsd / budgetUsd, {task_purpose: purpose});
     const pressed = stopPressed.get(taskId);
     if (state === 'stopped' && pressed) tm.histogram('tsp_labeling_stop_latency_seconds', (Date.now() - pressed) / 1000, {task_purpose: purpose});
     stopPressed.delete(taskId);
@@ -360,8 +334,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         failedExampleIds: [],
         costUsd: 0,
         tokens: 0,
-        budgetUsd: input.budgetUsd ?? null,
-        parallel: input.parallel ?? DEFAULT_PARALLEL,
+        parallel: input.parallel ?? systemConfig().labeling.defaultParallel,
         ...(input.relabelInvalid ? {relabelInvalid: true} : {}),
         state: 'queued',
         stopReason: null,
@@ -399,6 +372,13 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       let changed = false;
       for (const t of tasks) {
         if (t.state !== 'running' || (await isRunning(t.id))) continue;
+        // The runner may have finished between the read above and the lock check: read again,
+        // so a task that just ended is never marked as left behind.
+        const fresh = await getTask(t.id);
+        if (fresh && fresh.state !== 'running') {
+          Object.assign(t, fresh);
+          continue;
+        }
         t.state = 'paused';
         t.stopReason = 'closed';
         await repo.patch<LabelingTask>(TASKS, t.id, {state: 'paused', stopReason: 'closed'});
@@ -434,6 +414,22 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       );
       const order = new Map(input.examples.map((e, i) => [e.id, i]));
       return out.sort((a, b) => order.get(a.exampleId)! - order.get(b.exampleId)!);
+    },
+
+    /** Deleting a project: its running tasks stop, then its tasks and their saved answers go. */
+    async deleteProject(projectId: string) {
+      const tasks = await repo.find<LabelingTask>(TASKS, {projectId});
+      for (const t of tasks) active.get(t.id)?.abort();
+      const seen = new Set<string>();
+      for (const t of tasks) {
+        const key = `${t.promptVersionId}|${t.endpoint}|${t.settingsHash}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          for (const p of await repo.find<Prediction>(PREDICTIONS, {promptVersionId: t.promptVersionId, endpoint: t.endpoint, settingsHash: t.settingsHash})) await repo.delete(PREDICTIONS, p.id);
+        }
+        await repo.delete(TASKS, t.id);
+      }
+      emit();
     },
   };
 }

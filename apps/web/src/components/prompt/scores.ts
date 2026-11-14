@@ -8,10 +8,10 @@ export const runsFor = (s: ProjectState, versionId: string) => s.runs.filter(r =
 export const modelName = (s: ProjectState, ep: EndpointId) => s.endpoints.find(e => e.id === ep)?.name ?? ep;
 
 /** A version's score in the list and chart: its best model's lowest field macro-F1; passed on any model. */
-export function versionScore(s: ProjectState, versionId: string): {score: number; passed: boolean} | null {
+export function versionScore(s: ProjectState, versionId: string): {score: number; passed: boolean; rough: boolean} | null {
   const reps = s.setup!.models.map(m => reportFor(s, versionId, m.endpoint)).filter((r): r is Report => !!r);
   if (!reps.length) return null;
-  return {score: Math.max(...reps.map(r => r.metrics.lowestField.macroF1)), passed: reps.some(r => r.passed)};
+  return {score: Math.max(...reps.map(r => r.metrics.lowestField.macroF1)), passed: reps.some(r => r.passed), rough: reps.every(r => r.rough)};
 }
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);

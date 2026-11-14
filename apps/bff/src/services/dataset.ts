@@ -1,6 +1,7 @@
 import type {Answer, DatasetSnapshot, Example, ExampleMedia, GoldLabel, RawExample, SamplingTask, Schema} from '@tsp/contracts';
-import {hashString, newId} from '@tsp/domain';
+import {hashString, newId, toFeatures} from '@tsp/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
+import {appendExamples} from './governance.ts';
 
 const activeSampling = new Map<string, {task: SamplingTask; ctrl: AbortController}>();
 
@@ -34,11 +35,15 @@ async function saveSnapshot(projectId: string, raws: RawExample[], source: Datas
       video: raws.filter(r => r.type === 'video').length,
       photoText: raws.filter(r => r.type === 'photo_text').length,
     },
-    split: null,
+    // Every valid example of a Prompt Tuning project is in the eval dataset (spec 1.0.0, 2.1).
+    split: {eval: raws.length, test: 0, train: 0},
   };
+  // Halves: the order is fixed by a hash of the ids, so the same dataset always halves the same
+  // way. One half is for the Optimiser and the helpers to learn from; scores use the other.
+  const order = new Map([...raws].sort((a, b) => hashString(a.externalId).localeCompare(hashString(b.externalId))).map((r, i) => [r.externalId, i]));
   await catalog.insertMany(
     'examples',
-    raws.map((r): Example => ({id: newId('ex'), snapshotId: snap.id, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: null, optimiserHalf: false})),
+    raws.map((r): Example => ({id: newId('ex'), snapshotId: snap.id, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: 'eval', optimiserHalf: order.get(r.externalId)! % 2 === 0})),
   );
   // The snapshot is saved after its examples, so a half-saved upload is never picked up.
   await catalog.insert('dataset_snapshots', snap);
@@ -49,47 +54,50 @@ async function saveSnapshot(projectId: string, raws: RawExample[], source: Datas
 }
 
 /**
- * Starts a stateful sampling task inside the backend. Progress is pushed via state updates
- * rather than a client callback so the contract stays serialisable over HTTP.
+ * Adds `n` sampled examples to the eval dataset (spec 1.0.0, 4.3), none of them already in it
+ * (removed ones count as in it). Returns how many were added; 0 when stopped.
  */
-export async function startSampleDataset(projectId: string, n: number): Promise<DatasetSnapshot | null> {
+export async function appendSample(projectId: string, n: number): Promise<number> {
+  const {catalog} = getApp();
+  const project = await catalog.get('projects', projectId);
+  const known = project?.snapshotId ? new Set((await catalog.find('examples', {snapshotId: project.snapshotId})).map(e => e.externalId)) : new Set<string>();
+  const raws = await sampleTask(projectId, n, known.size);
+  if (!raws) return 0;
+  const fresh = raws.filter(r => !known.has(r.externalId)).slice(0, n);
+  return (await appendExamples(projectId, fresh, 'sample')).added;
+}
+
+/** The sampling task with its progress and Stop; `extra` more are asked for so repeats can be dropped. */
+async function sampleTask(projectId: string, n: number, extra = 0): Promise<RawExample[] | null> {
   stopSampleDataset(projectId);
   const ctrl = new AbortController();
-  const task: SamplingTask = {
-    id: newId('sm'),
-    projectId,
-    total: n,
-    fetched: 0,
-    startedAt: now(),
-    state: 'running',
-    error: null,
-  };
+  const task: SamplingTask = {id: newId('sm'), projectId, total: n, fetched: 0, startedAt: now(), state: 'running', error: null};
   activeSampling.set(projectId, {task, ctrl});
   tm().event('sample_started', {requested: n});
   const sampleStarted = Date.now();
   const ended = (outcome: 'done' | 'stopped' | 'failed') => tm().event('sample_finished', {fetched: task.fetched, seconds: Math.round((Date.now() - sampleStarted) / 1000), outcome});
   emitChange();
   try {
-    const raws = await getApp().examples.sample(
-      n,
-      fetched => {
-        task.fetched = fetched;
-        emitChange();
-      },
-      ctrl.signal,
-    );
-    const snap = await saveSnapshot(projectId, raws, 'sample', 'Sampled from the platform');
-    activeSampling.delete(projectId);
+    const raws = await getApp().examples.sample(n + extra, fetched => ((task.fetched = Math.min(n, fetched)), emitChange()), ctrl.signal);
     ended('done');
-    emitChange();
-    return snap;
+    return raws;
   } catch (e) {
-    activeSampling.delete(projectId);
-    emitChange();
     ended((e as Error).name === 'AbortError' ? 'stopped' : 'failed');
     if ((e as Error).name === 'AbortError') return null;
     throw e;
+  } finally {
+    if (activeSampling.get(projectId)?.task === task) activeSampling.delete(projectId);
+    emitChange();
   }
+}
+
+/**
+ * Starts a stateful sampling task inside the backend. Progress is pushed via state updates
+ * rather than a client callback so the contract stays serialisable over HTTP.
+ */
+export async function startSampleDataset(projectId: string, n: number): Promise<DatasetSnapshot | null> {
+  const raws = await sampleTask(projectId, n);
+  return raws ? saveSnapshot(projectId, raws, 'sample', 'Sampled from the platform') : null;
 }
 
 export async function getSamplePoolSize(): Promise<number> {
@@ -113,9 +121,9 @@ export function hasBundledGold(): boolean {
  * header such as item_id is skipped), or JSONL of ids or full examples. The system then loads each
  * item's features, which the Dataset page shows as "Loading features for N items".
  */
-export async function uploadDatasetText(projectId: string, name: string, text: string): Promise<{snapshot?: DatasetSnapshot; error?: string}> {
+export async function uploadDatasetText(projectId: string, name: string, text: string, append = false): Promise<{snapshot?: DatasetSnapshot; error?: string; added?: number; duplicates?: number}> {
   if (!/\.(csv|txt|jsonl|json)$/i.test(name)) {
-    return {error: `"${name}" can't be used. Upload a text or CSV file of item IDs.`};
+    return {error: "This file can't be used. Upload a text or CSV file of item IDs."};
   }
   const raws: RawExample[] = [];
   const ids: string[] = [];
@@ -146,7 +154,7 @@ export async function uploadDatasetText(projectId: string, name: string, text: s
     for (const line of text.split(/\r?\n/).filter(l => l.trim())) {
       try {
         const o = JSON.parse(line);
-        if (o.features && o.type) raws.push({externalId: String(o.externalId ?? o.id ?? o.video_id), type: o.type, title: o.title ?? '', features: o.features});
+        if (o.features && o.type) raws.push({externalId: String(o.externalId ?? o.id ?? o.video_id), type: o.type, title: o.title ?? '', features: toFeatures(o.features)});
         else if (o.video_id ?? o.id) ids.push(String(o.video_id ?? o.id));
         else invalid++;
       } catch {
@@ -165,6 +173,8 @@ export async function uploadDatasetText(projectId: string, name: string, text: s
     return {error: 'No usable rows in this file.'};
   }
   tm().event('dataset_uploaded', {rows: raws.length + invalid, valid: raws.length, invalid, video: raws.filter(r => r.type === 'video').length, photo_text: raws.filter(r => r.type !== 'video').length});
+  // Adding to an eval dataset there (spec 1.0.0, 4.3) keeps every example, half and gold label.
+  if (append) return appendExamples(projectId, raws, 'upload', invalid);
   return {snapshot: await saveSnapshot(projectId, raws, 'upload', name, invalid)};
 }
 
@@ -188,22 +198,6 @@ async function loadFeatures(projectId: string, fileName: string, ids: string[]):
     if (activeSampling.get(projectId)?.task === task) activeSampling.delete(projectId);
     emitChange();
   }
-}
-
-/** Order is fixed by a hash of the ids, so the same snapshot always splits the same way. */
-export async function applySplit(projectId: string, snapshotId: string, evalSize: number, testSize: number): Promise<void> {
-  const {catalog} = getApp();
-  const examples = await catalog.find('examples', {snapshotId});
-  const ordered = [...examples].sort((a, b) => hashString(a.externalId).localeCompare(hashString(b.externalId)));
-  const patches = ordered.map((ex, i) => {
-    const split = i < evalSize ? ('eval' as const) : i < evalSize + testSize ? ('test' as const) : ('train' as const);
-    return {id: ex.id, patch: {split, optimiserHalf: split === 'eval' && i % 2 === 0}};
-  });
-  await catalog.patchMany('examples', patches);
-  await catalog.patch('dataset_snapshots', snapshotId, {split: {eval: evalSize, test: testSize, train: examples.length - evalSize - testSize}});
-  tm().event('split_applied', {eval: evalSize, test: testSize, train: examples.length - evalSize - testSize, used_recommended: false});
-  emitChange();
-  void projectId;
 }
 
 export async function saveGold(projectId: string, exampleId: string, schemaVersion: number, answer: Answer, revealed: boolean, source: GoldLabel['source'] = 'labeled'): Promise<GoldLabel> {
@@ -232,8 +226,8 @@ export async function uploadGold(
   for (const l of lines) {
     const ex = byExt.get(l.externalId);
     const ok = ex && schema.fields.every(f => (l.answer[f.name] ?? []).every(v => f.values.some(x => x.name === v)) && (l.answer[f.name] ?? []).length > 0);
-    if (!ex || !ok || ex.split === 'train') {
-      if (ex?.split !== 'train') skipped++;
+    if (!ex || !ok) {
+      skipped++;
       continue;
     }
     await saveGold(projectId, ex.id, schemaVersion, l.answer, false, 'uploaded');

@@ -8,7 +8,7 @@ export type FeatureGroup = ExampleType | 'metadata';
 export type FieldKind = 'single' | 'multi';
 export type Split = 'eval' | 'test' | 'train';
 export type EndpointId = 'A' | 'B';
-export type Actor = 'user' | 'prompt_agent' | 'optimiser' | 'schema_agent' | 'system';
+export type Actor = 'user' | 'prompt_agent' | 'optimiser' | 'system';
 
 export interface LabelValue {
   name: string;
@@ -32,6 +32,43 @@ export interface Schema {
   fields: LabelField[];
 }
 
+/**
+ * What an answer may hold (1.0.0): the field names, their kind and bounds, and the value names in
+ * order. No wording. `schemaVersion` bumps only when this changes, so refining a definition never
+ * touches gold labels or scores.
+ */
+export interface LabelSignatureField {
+  name: string;
+  kind: FieldKind;
+  min?: number;
+  max?: number;
+  values: string[];
+}
+
+export interface LabelSignature {
+  fields: LabelSignatureField[];
+}
+
+/** One field of a structured prompt: the signature's field with the wording the model reads. */
+export interface StructuredFieldPrompt extends LabelField {
+  /** Optional tie-break note for the field as a whole. */
+  note?: string;
+}
+
+/**
+ * A prompt as the user edits it (1.0.0): parts, not free text. `compilePrompt` in `@tsp/domain`
+ * turns it into the text the model reads, the same way every time. Stored on every version.
+ */
+export interface StructuredPrompt {
+  /** One or two sentences: what is being classified and why. */
+  taskSummary: string;
+  features: FeatureSelection;
+  fields: StructuredFieldPrompt[];
+  /** Rules across fields, and what to do when the evidence is thin. */
+  generalRules: string;
+  images: PromptImage[];
+}
+
 /** One answer: field name -> chosen values (one value for single-select fields). */
 export type Answer = Record<string, string[]>;
 
@@ -48,6 +85,12 @@ export interface Thresholds {
   invalidRate: number | null;
   accuracy: number | null;
   minEval: number;
+}
+
+/** Project Settings: the pass rule and the labeling model. Not a workflow step. */
+export interface ProjectSettings {
+  thresholds: Thresholds;
+  model: ModelSettings;
 }
 
 export interface ModelSettings {
@@ -78,17 +121,49 @@ export interface SetupVersion {
   createdBy: string;
 }
 
-export type NodeId = 'setup' | 'dataset' | 'gold' | 'prompt' | 'training';
+/** The four steps of a Prompt Tuning project. */
+export type NodeId = 'prompt_design' | 'dataset' | 'gold' | 'prompt';
+
+/**
+ * `prompt_tuning`: the 4-step project built in 1.0.0. `batch_labeling`: large-scale labeling with
+ * a tuned prompt (contracts only in 1.0.0; no pages yet).
+ */
+export type ProjectKind = 'prompt_tuning' | 'batch_labeling';
 
 export interface Project {
   id: string;
   name: string;
   createdAt: string;
+  /** The creator's display name, as the Projects list shows it. */
   createdBy: string;
+  /** The creator's user id (spec 1.1.0, 1.1): for ownership checks once tenants exist. */
+  createdById?: string;
+  /** Missing on records made before 1.0.0: `prompt_tuning`. */
+  kind?: ProjectKind;
+  /** Batch labeling only: the Prompt Tuning project and version it labels with. */
+  sourceProjectId?: string | null;
+  sourcePromptVersionId?: string | null;
+  /** The user has seen and saved Project Settings (asked once, before the first paid run). */
+  settingsConfirmed?: boolean;
+  /**
+   * A helper or the Optimiser has read examples of this project (spec 1.0.0, 4.2). From then on no
+   * example's half ever changes; before it, halves may be balanced again by gold label.
+   */
+  holdoutLocked?: boolean;
   setupVersionId: string | null;
   snapshotId: string | null;
   /** Nodes whose Next step was pressed. Code moves the workflow, never the agent. */
   approvedNodes: NodeId[];
+}
+
+/**
+ * One feature of an example (spec 1.0.0, 7.1): plain text, or a list (image URLs, hashtags).
+ * An explicit struct instead of a `string | string[]` union, so it maps to an IDL. Read it with
+ * `featureText` / `featureItems` from `@tsp/domain`.
+ */
+export interface FeatureValue {
+  text?: string;
+  items?: string[];
 }
 
 export interface Example {
@@ -97,11 +172,53 @@ export interface Example {
   externalId: string;
   type: ExampleType;
   title: string;
-  /** Placeholder key -> value. Image features hold URLs. */
-  features: Record<string, string | string[]>;
+  /** Placeholder key -> value. Image features hold URLs in `items`. */
+  features: Record<string, FeatureValue>;
   split: Split | null;
   /** Eval examples only: true = the optimiser may learn from it; false = held out for scoring. */
   optimiserHalf: boolean;
+  /** Removed from the eval dataset (soft delete, spec 1.0.0, 4.4): its `DatasetRemoval` says why; restorable. */
+  removed?: boolean;
+}
+
+/** Why an example left the eval dataset (spec 1.0.0, 4.4). */
+export type RemovalReason = 'broken' | 'out_of_scope' | 'downsample' | 'excess_unlabeled';
+
+/**
+ * The trail of one removal from the eval dataset (spec 1.0.0, 4.4): what was removed, from which
+ * half, its gold label at the time, and why. A score built after it shows how many gold-labeled
+ * examples were removed, so a score raised by deleting hard examples is visible as such.
+ */
+export interface DatasetRemoval {
+  id: string;
+  projectId: string;
+  exampleId: string;
+  externalId: string;
+  half: 'optimiser' | 'held_out';
+  /** The gold label when it was removed; null when it had none. */
+  gold: Answer | null;
+  reason: RemovalReason;
+  removedBy: string;
+  removedAt: string;
+  /** Set when the example was put back. */
+  restoredAt: string | null;
+}
+
+/**
+ * A person's comment on an example (spec 1.0.0, 5.4), append-only, from Gold Labels or Mismatches.
+ * Comments on optimiser-half examples reach the Optimiser and the Prompt helper; comments on the
+ * held-out half never reach a helper.
+ */
+export interface LabelComment {
+  id: string;
+  projectId: string;
+  exampleId: string;
+  authorId: string;
+  authorName: string;
+  text: string;
+  /** The version compared when it was written on Mismatches; null on the eval set. */
+  promptVersionId: string | null;
+  createdAt: string;
 }
 
 export interface DatasetSnapshot {
@@ -177,6 +294,9 @@ export interface PromptVersion {
   projectId: string;
   major: number;
   minor: number;
+  /** The prompt's parts as the user edits them. `template` is always `compilePrompt` of it. */
+  structured: StructuredPrompt;
+  /** The compiled text the model reads (with {{placeholders}}). */
   template: string;
   features: FeatureSelection;
   images: PromptImage[];
@@ -241,8 +361,6 @@ export interface LabelingRun {
   purpose?: 'eval' | 'optimiser' | 'test';
   /** What runs started by code spent on it (metrics and the audit; there is no cap). */
   autoCostUsd?: number;
-  /** Paused for its budget. The MVP sets no budgets, so this stays false; kept for the labeling app's budget support. */
-  overBudget?: boolean;
 }
 
 export interface ValueMetrics {
@@ -382,64 +500,6 @@ export interface OptimisationRun {
   finishedAt: string | null;
   /** Started by an agent's start tool, after the user asked in Ask AI; shown as an action line. */
   auto?: boolean;
-  /** The training and test sets this run started after a version passed. */
-  trainingSetId?: string | null;
-}
-
-export interface TrainingSet {
-  id: string;
-  projectId: string;
-  promptVersionId: string;
-  endpoint: EndpointId;
-  snapshotId: string;
-  evaluated: boolean;
-  reportId: string | null;
-  /** The labeling task that produces this training set's predictions. */
-  taskId: string;
-  /** Setup version whose schema the answers are checked against. */
-  setupVersionId: string;
-  state: JobState;
-  /** Examples the run labels: every train example, plus the test examples with no label when `labelTest`. */
-  total: number;
-  /** Train and test examples in the snapshot (missing on records made before the test set was added: all train). */
-  trainTotal?: number;
-  testTotal?: number;
-  /** The user's choice in the confirm: label test examples that have neither a gold label nor an answer. */
-  labelTest?: boolean;
-  /** Test examples by where their label comes from, when the run started. */
-  testWithGold?: number;
-  testWithAnswers?: number;
-  testToLabel?: number;
-  done: number;
-  labeled: number;
-  invalid: number;
-  /** Examples whose model call failed after all retries ("Retry failed" re-runs them). */
-  failed: number;
-  costUsd: number;
-  /** Tokens used by the run's answers (Training Set: "Total tokens"). */
-  tokens?: number;
-  estimateUsd: number;
-  error: string | null;
-  startedAt: string;
-  finishedAt: string | null;
-}
-
-/**
- * One row of the output. Train rows: the model's label. Test rows: the gold label when someone
- * gave one, else the chosen version's answer; `labelSource` says which (null = no label yet).
- */
-export interface TrainingRow {
-  trainingSetId: string;
-  exampleId: string;
-  split: 'train' | 'test';
-  /** The row's label: for test rows, gold if given, else the model's answer. */
-  answer: Answer | null;
-  labelSource: 'gold' | 'model' | null;
-  /** The model's answer, when there is one (also shown next to gold on test rows). */
-  model: Answer | null;
-  invalidReason: string | null;
-  /** Test rows only: the gold label for the current schema, when someone gave one. */
-  gold: Answer | null;
 }
 
 export interface GateApproval {
@@ -451,7 +511,7 @@ export interface GateApproval {
   createdBy: string;
 }
 
-export type AgentPreset = 'front_desk' | 'schema_agent' | 'prompt_agent' | 'evaluation_agent';
+export type AgentPreset = 'front_desk' | 'prompt_agent' | 'evaluation_agent';
 
 export interface ChatAttachment {
   name: string;
@@ -466,7 +526,7 @@ export interface ChatAttachment {
  * on a page, the user approved or discarded it, paid work started (by a helper, or automatically
  * by the workflow), the user stopped work, or the page's own helper answers again.
  */
-export type ChatEvent = 'join' | 'draft' | 'approved' | 'discarded' | 'start' | 'auto' | 'stop' | 'page';
+export type ChatEvent = 'join' | 'draft' | 'approved' | 'discarded' | 'start' | 'auto' | 'stop' | 'page' | 'report';
 
 /** Where an action line leads: a step page and its query (the page adds the project). */
 export interface ChatLink {
@@ -479,6 +539,8 @@ export interface AgentLive {
   agent: AgentPreset;
   /** A plain line such as "Reading the v4 report…"; null once the reply streams. */
   working: string | null;
+  /** The working line as a catalog key and params, so the page can show it in the user's language (1.1.0). */
+  msg?: Msg | null;
   /** The reply streamed so far. */
   reply: string | null;
 }
@@ -488,7 +550,10 @@ export interface ChatMessage {
   projectId: string;
   role: 'user' | 'agent' | 'event';
   agent: AgentPreset | null;
+  /** In English. A line the site wrote also carries `msg`, so it can be shown in any language. */
   text: string;
+  /** Action lines: the line as a catalog key and params (spec 1.1.0, 2.3). */
+  msg?: Msg;
   /** Action lines only: what happened, for the line's icon. */
   event?: ChatEvent;
   /** Action lines only: the page where it happened; the whole line links there. */
@@ -501,12 +566,28 @@ export interface ChatMessage {
   createdAt: string;
 }
 
+/**
+ * A helper's draft of a structured prompt, waiting on the page for the user's Approve or Save.
+ * `unmapped`: passages of a pasted prompt the helper could not place in any part ("Not carried
+ * over"); an import never drops text silently.
+ */
+export interface StructuredPromptProposal {
+  structured: StructuredPrompt;
+  /** One line for the version's change note. */
+  change?: string;
+  /** Improve with AI: each change with its reason, shown on the marks in the editor. */
+  changes?: {text: string; reason: string}[];
+  /** The version the draft was written from; null or missing: the first prompt. */
+  baseVersionId?: string | null;
+  unmapped: string[];
+}
+
 export interface AgentProposal {
   id: string;
   projectId: string;
   agent: AgentPreset;
-  kind: 'schema' | 'prompt';
-  payload: unknown;
+  kind: 'prompt';
+  payload: StructuredPromptProposal;
   brief: string;
   state: 'open' | 'approved' | 'discarded';
   createdAt: string;
@@ -522,19 +603,6 @@ export interface StartRequest {
   refs: Record<string, string | string[]>;
   userRequest: string;
   note: string;
-  createdAt: string;
-}
-
-export interface Recommendation {
-  id: string;
-  projectId: string;
-  kind: 'make_training_set' | 'keep_improving' | 'label_gold' | 'rework_from_version' | 'wait';
-  title: string;
-  reasons: string[];
-  promptVersionId: string | null;
-  endpoint: EndpointId | null;
-  evidence: {label: string; href: string}[];
-  response: 'accepted' | 'dismissed' | null;
   createdAt: string;
 }
 
@@ -569,7 +637,7 @@ export interface PageContext {
 }
 
 /** The pages an agent can see. */
-export type PageId = 'projects' | 'setup' | 'dataset' | 'gold' | 'prompt' | 'prompt_edit' | 'compare' | 'report' | 'training';
+export type PageId = 'projects' | 'prompt_design' | 'dataset' | 'gold' | 'prompt' | 'prompt_edit';
 
 export interface PageLocation {
   page: PageId;
@@ -611,12 +679,16 @@ export interface SamplingTask {
 export interface WorkflowFacts {
   setup: SetupVersion | null;
   snapshot: DatasetSnapshot | null;
+  /** Valid examples in the eval dataset. */
+  examples: number;
   goldEvalDone: number;
-  goldTestDone: number;
+  /** Gold-labeled examples per half: scoring needs 2 in each. */
+  goldHalves: {optimiser: number; heldOut: number};
   versions: number;
   /** Versions with a report that passes the current thresholds, per model. */
   passing: {promptVersionId: string; endpoint: EndpointId}[];
-  trainingSet: TrainingSet | null;
+  /** Project Settings were seen and saved: no paid run starts by itself before that. */
+  settingsConfirmed: boolean;
   approved: NodeId[];
 }
 
@@ -626,16 +698,14 @@ export interface ProjectState {
   setup: SetupVersion | null;
   snapshot: DatasetSnapshot | null;
   examples: Example[];
-  gold: Map<string, GoldLabel>;
-  staleGold: Map<string, GoldLabel>;
+  gold: Record<string, GoldLabel>;
+  staleGold: Record<string, GoldLabel>;
   versions: PromptVersion[];
-  reports: (EvalReport & {passed: boolean; archivedNow: boolean})[];
+  /** `rough`: fewer gold-labeled eval examples than `thresholds.minEval`, so no pass verdict (spec 1.0.0, 4.2). */
+  reports: (EvalReport & {passed: boolean; rough: boolean; archivedNow: boolean})[];
   /** Eval and optimiser labeling (started by code). */
   runs: LabelingRun[];
-  /** "Get model answers" runs on the test set (started by the user), newest first. */
-  testRuns: LabelingRun[];
   optimisation: OptimisationRun[];
-  trainingSets: TrainingSet[];
   facts: WorkflowFacts;
   contextId: string;
   /** A gold edit archived some reports and they are being rebuilt from saved answers (acceptance R5-4, R5-5). */
@@ -644,10 +714,51 @@ export interface ProjectState {
   endpoints: EndpointInfo[];
   /** Active or recently finished sampling task, if any. */
   samplingTask: SamplingTask | null;
+  /** Removals that still stand (not restored), newest first; the removed examples are not in `examples`. */
+  removals: DatasetRemoval[];
+  /** People's comments by example id, oldest first. */
+  comments: Record<string, LabelComment[]>;
   /**
-   * Automatic spend that left no labeling task: the prompt agent's try_template runs started
+   * Automatic spend that left no labeling task: the prompt agent's try_prompt runs started
    * within the caps (from `auto_spend` audit records).
    */
   otherAutoSpendUsd?: number;
 }
 
+
+/** A language the site is shown in (spec 1.1.0, 2). English is the source language. */
+export type Locale = 'en' | 'zh';
+
+/**
+ * A text the services make, as a catalog key and its params: the English text with `{name}`
+ * placeholders. Clients translate it. A param may itself be a `Msg` (translated in turn); a string
+ * param named `who`, `page`, `step`, `helper` or `term` is a word of the site and is translated too.
+ */
+export interface Msg {
+  key: string;
+  params?: Record<string, string | number | Msg>;
+}
+
+/**
+ * What the browser saw just before a problem (spec 1.1.0, 3.2). Collected by the web client in a
+ * rolling record and sent with each Ask AI message; the bff keeps it for that turn only. No text
+ * the user typed, no features, no labels.
+ */
+export interface ClientDiagnostics {
+  /** Path and query of the page (ids only). */
+  url: string;
+  userAgent: string;
+  /** Width x height in CSS pixels. */
+  viewport: string;
+  screen: string;
+  timeZone: string;
+  /** The browser's language setting. */
+  language: string;
+  at: string;
+  /** The last pages visited, oldest first. */
+  pages: {at: string; path: string}[];
+  /** The last backend calls that failed: method, the client's call id and the error message. */
+  failedCalls: {at: string; method: string; callId: string; message: string}[];
+  /** The last script errors and unhandled rejections (message cut short). */
+  errors: {at: string; message: string; source?: string}[];
+}

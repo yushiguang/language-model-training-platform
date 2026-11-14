@@ -13,17 +13,23 @@ const ID_PREFIX: Record<CatalogKind, string> = {
   prompt_versions: 'pv',
   eval_reports: 'er',
   optimisation_runs: 'op',
-  training_sets: 'ts',
   gate_approvals: 'ga',
   chat_messages: 'cm',
   agent_proposals: 'ap',
   start_requests: 'sr',
-  recommendations: 'rc',
   audit_log: 'au',
+  dataset_removals: 'rm',
+  label_comments: 'lc',
 };
+
+/** Every kind whose records carry their project's id (all but projects and examples). */
+const OWNED: CatalogKind[] = ['dataset_snapshots', 'setup_versions', 'gold_labels', 'dataset_removals', 'label_comments', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'audit_log'];
 
 /** New record id for a kind, for callers that build the record before inserting it. */
 export const catalogId = (kind: CatalogKind) => newId(ID_PREFIX[kind]);
+
+/** Every catalog kind (the telemetry allowlist must name each one). */
+export const catalogKinds = () => Object.keys(ID_PREFIX) as CatalogKind[];
 
 /**
  * The catalog: platform CRUD over the document store.
@@ -83,11 +89,23 @@ export function createCatalog(db: DocRuntime, opts: {telemetry?: TelemetryPort} 
     async audit(projectId, actor, action, data = {}) {
       await repo.insert('audit_log', {id: catalogId('audit_log'), projectId, actor, action, data, createdAt: now()});
     },
+
+    /**
+     * Removes a project and everything it owns. Examples belong to dataset snapshots, so they go
+     * first; the project record goes last, so a delete cut short can be run again.
+     */
+    async deleteProject(projectId) {
+      const snapshots = await repo.find<{id: string}>('dataset_snapshots', {projectId});
+      for (const snap of snapshots) for (const ex of await repo.find<{id: string}>('examples', {snapshotId: snap.id})) await repo.delete('examples', ex.id);
+      for (const kind of OWNED) for (const rec of await repo.find<{id: string}>(kind, {projectId})) await repo.delete(kind, rec.id);
+      await repo.delete('projects', projectId);
+      await repo.insert('audit_log', {id: catalogId('audit_log'), projectId: null, actor: 'system', action: 'project.delete', data: {projectId}, createdAt: now()});
+    },
   };
   return instrument(contract, opts.telemetry ?? NO_TELEMETRY);
 }
 
-const KIND_OF: Partial<Record<keyof CatalogContract, CatalogKind>> = {createPromptVersion: 'prompt_versions', createSetupVersion: 'setup_versions', audit: 'audit_log'};
+const KIND_OF: Partial<Record<keyof CatalogContract, CatalogKind>> = {createPromptVersion: 'prompt_versions', createSetupVersion: 'setup_versions', audit: 'audit_log', deleteProject: 'projects'};
 
 /** Counts and times every catalog operation (`tsp_catalog_*`), without changing what it does. */
 function instrument(c: CatalogContract, tm: TelemetryPort): CatalogContract {

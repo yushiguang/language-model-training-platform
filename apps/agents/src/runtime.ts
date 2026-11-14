@@ -1,6 +1,7 @@
 import type {
   AgentToolHost,
   AgentToolName,
+  Msg,
   ModelMessage,
   ContentPart,
   ExampleBrief,
@@ -15,29 +16,24 @@ import type {
   DraftImprovementOutput,
   AgentModel,
   AgentPreset,
-  FeatureSelection,
-  Schema,
+  StructuredPrompt,
 } from '@tsp/contracts';
-import {FEATURES} from '@tsp/domain';
-import {agentName, presetModel, PRESETS, START_TOOLS, systemPrompt, TOOL_SPECS} from './presets.ts';
+import {FEATURES, msg, msgText, readStructured, rewordOnly, structuredEquals, systemConfig} from '@tsp/domain';
+import {agentName, languageLine, presetModel, PRESETS, START_TOOLS, systemPrompt, TOOL_SPECS} from './presets.ts';
 
-/** Read-tool calls allowed in one turn, across the agents in it. */
-export const MAX_TOOL_CALLS = 4;
-/** A tool result longer than this is cut, so one call can't fill the context. */
-const MAX_RESULT_CHARS = 12_000;
 
 /** Handoffs go only to these specialists; anything else is ignored (no handoff). */
-const HANDOFF_TARGETS: AgentPreset[] = ['schema_agent', 'prompt_agent', 'evaluation_agent'];
+const HANDOFF_TARGETS: AgentPreset[] = ['prompt_agent', 'evaluation_agent'];
 
 interface RawAgentReply {
   tool?: {name: AgentToolName; args?: Record<string, unknown>};
   reply?: string;
   handoff?: {to: AgentPreset; intent: string};
-  schema?: Schema;
-  fields?: Schema['fields'];
-  template?: string;
-  features?: FeatureSelection;
+  /** The whole structured prompt, when the helper wrote or changed it. */
+  prompt?: unknown;
   change?: string;
+  /** Passages of an imported prompt that fit no structured part. */
+  unmapped?: unknown;
   /** One short question when the request is unclear (R3-10): the turn then proposes nothing. */
   question?: string;
 }
@@ -53,23 +49,15 @@ function parseJsonObject<T>(raw: string, fallback: T): T {
   }
 }
 
-function extractSchema(out: RawAgentReply): Schema | null {
-  if (out.schema && Array.isArray(out.schema.fields)) return out.schema;
-  if (Array.isArray(out.fields)) {
-    return {fields: out.fields};
-  }
-  return null;
-}
-
 function buildAgentContext(input: AgentTurnInput, targetAgent: AgentPreset): Record<string, unknown> {
   const {page, workspace, attachments} = input;
   const ctx: Record<string, unknown> = {
     ...page.context,
     pageHint: page.hint,
     task: page.context.task ?? workspace.task,
-    schema: page.context.schema ?? workspace.schema,
+    prompt: workspace.prompt,
     pageView: workspace.pageView,
-    recentHistory: workspace.history.slice(-8),
+    recentHistory: workspace.history.slice(-systemConfig().agent.recentHistoryCount),
   };
 
   if (targetAgent === 'prompt_agent') {
@@ -98,36 +86,48 @@ interface TurnTools {
   progress?: AgentTurnProgress;
 }
 
-/** What the live line in Ask AI says while a tool runs (plain words, the page's terms). */
-function workingLine(name: AgentToolName, args: Record<string, unknown>): string {
+/** What the live line in Ask AI says while a tool runs (plain words, the page's terms; a catalog key). */
+function workingLine(name: AgentToolName, args: Record<string, unknown>): Msg {
   const v = typeof args.version === 'string' && args.version ? args.version : null;
   switch (name) {
     case 'get_page_view':
-      return 'Reading another page…';
+      return msg('Reading another page…');
     case 'list_versions':
-      return 'Reading the prompt versions…';
+      return msg('Reading the prompt versions…');
     case 'get_version':
-      return `Reading ${v ?? 'the version'}…`;
+      return v ? msg('Reading {version}…', {version: v}) : msg('Reading the version…');
     case 'get_report':
-      return `Reading the ${v ? `${v} ` : ''}report…`;
+      return v ? msg('Reading the {version} report…', {version: v}) : msg('Reading the report…');
     case 'get_examples':
-      return 'Reading examples…';
+      return msg('Reading examples…');
     case 'get_gold_labels':
-      return 'Reading the gold labels…';
+      return msg('Reading the gold labels…');
     case 'get_predictions':
-      return `Reading the ${v ? `${v} ` : ''}answers…`;
-    case 'check_template':
-      return 'Checking the prompt…';
+      return v ? msg('Reading the {version} answers…', {version: v}) : msg('Reading the answers…');
+    case 'check_prompt':
+      return msg('Checking the prompt…');
     case 'read_feature_info':
-      return 'Reading the feature descriptions…';
+      return msg('Reading the feature descriptions…');
     case 'read_doc':
-      return 'Reading the linked document…';
-    case 'try_template':
-      return 'Trying the prompt on a few examples…';
+      return msg('Reading the linked document…');
+    case 'get_project_summary':
+      return msg('Reading the project…');
+    case 'get_dataset_stats':
+      return msg('Reading the label balance…');
+    case 'search_examples':
+      return msg('Searching examples…');
+    case 'compare_versions':
+      return msg('Comparing versions…');
+    case 'get_mismatch_summary':
+      return msg('Counting mismatches…');
+    case 'try_prompt':
+      return msg('Trying the prompt on a few examples…');
     case 'score_version':
-      return `Starting scoring${v ? ` ${v}` : ''}…`;
+      return v ? msg('Starting scoring {version}…', {version: v}) : msg('Starting scoring…');
     case 'start_optimiser':
-      return 'Starting the optimiser…';
+      return msg('Starting the optimiser…');
+    case 'report_problem':
+      return msg(args.send === true ? 'Sending the problem report…' : 'Drafting a problem report…');
   }
 }
 
@@ -187,8 +187,10 @@ function toolBlurb(to: AgentPreset, host?: AgentToolHost): string {
   const list = names.map(n => `- ${n} ${TOOL_SPECS[n].args}: ${TOOL_SPECS[n].returns}`).join('\n');
   const paid = names.some(n => START_TOOLS.includes(n))
     ? ' Tools marked PAID spend money and start at once (the user can stop them from the page): use them only when the user asks for that work or clearly agrees.'
-    : ' Tools only read.';
-  return `\nIf the page view doesn't have what you need, use a tool: answer {"tool": {"name": string, "args": object}} instead, and the result comes back as the next message.${paid} At most ${MAX_TOOL_CALLS} calls per turn. Your tools:\n${list}`;
+    : names.includes('report_problem')
+      ? ' Tools only read, except report_problem, which files a report once the user has agreed.'
+      : ' Tools only read.';
+  return `\nIf the page view doesn't have what you need, use a tool: answer {"tool": {"name": string, "args": object}} instead, and the result comes back as the next message.${paid} At most ${systemConfig().agent.maxToolCalls} calls per turn. Your tools:\n${list}`;
 }
 
 /** One agent's part of a turn: calls the model, runs the read tools it asks for, until it answers. */
@@ -203,7 +205,7 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
   };
   const shape = PRESETS[to].intents[intent] ?? '{"reply": string}';
   const messages: ModelMessage[] = [
-    {role: 'system', content: `${systemPrompt(to)}\nAnswer shape for "${intent}": ${shape}${toolBlurb(to, tools.host)}`},
+    {role: 'system', content: `${systemPrompt(to)}\nAnswer shape for "${intent}": ${shape}${toolBlurb(to, tools.host)}${languageLine(input.locale)}`},
     // Example images (the label check) go as content parts, like the Optimiser's wrong examples.
     {role: 'user', content: withImages(body)},
   ];
@@ -226,15 +228,16 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
       return {reply: raw.trim() && !/[{}[\]]/.test(raw) ? raw.trim() : "Sorry, my answer came out garbled. Please ask again."};
     }
     if (!out.tool) return out;
-    if (step >= MAX_TOOL_CALLS + 1) return {reply: "I couldn't find what I needed. Could you say a bit more about what you're asking?"};
+    if (step >= systemConfig().agent.maxToolCalls + 1) return {reply: "I couldn't find what I needed. Could you say a bit more about what you're asking?"};
     const name = out.tool.name;
     const args = out.tool.args && typeof out.tool.args === 'object' ? out.tool.args : {};
     let result: unknown;
     if (!tools.host || !PRESETS[to].tools.includes(name)) result = {error: `${name} is not one of your tools.`};
-    else if (tools.used.length >= MAX_TOOL_CALLS) result = {error: 'No more tool calls in this turn. Answer now with what you have.'};
+    else if (tools.used.length >= systemConfig().agent.maxToolCalls) result = {error: 'No more tool calls in this turn. Answer now with what you have.'};
     else {
       const started = Date.now();
-      tools.progress?.({agent: to, working: workingLine(name, args)});
+      const line = workingLine(name, args);
+      tools.progress?.({agent: to, working: msgText(line), msg: line});
       try {
         result = await tools.host.call({agent: to, name, args});
         tools.used.push({agent: to, name, args, ok: true, ms: Date.now() - started});
@@ -244,7 +247,7 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
       }
     }
     let text = JSON.stringify({tool_result: {name, result}});
-    if (text.length > MAX_RESULT_CHARS) text = `${text.slice(0, MAX_RESULT_CHARS)}… (cut)`;
+    if (text.length > systemConfig().agent.maxToolResultChars) text = `${text.slice(0, systemConfig().agent.maxToolResultChars)}… (cut)`;
     messages.push({role: 'assistant', content: raw}, {role: 'user', content: text});
   }
 }
@@ -281,7 +284,7 @@ export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?
     // The handoff line alone tells the user who answers; the "I'll bring in…" reply is not shown.
     agent = out.handoff.to;
     intent = out.handoff.intent;
-    emit({role: 'event', agent: null, event: 'join', text: `${agentName(agent)} joined to answer`});
+    emit({role: 'event', agent: null, event: 'join', text: `${agentName(agent)} joined to answer`, msg: {key: '{who} joined to answer', params: {who: agentName(agent)}}});
     invocations.push({from, to: agent, intent, note: from === 'front_desk' ? 'Handed off by the front desk' : 'Passed on by the helper that stayed'});
     progress?.({agent, working: 'Thinking…'});
     out = await invokePreset(llm, agent, intent, input, tools);
@@ -294,28 +297,16 @@ export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?
   }
 
   // A question, or an answer that leaves the prompt as it is, is a plain answer: no draft (R3-10).
-  const same = (t: string | undefined) => typeof t === 'string' && t.trim() === String(input.page.context.template ?? '').trim();
-  const resolvedSchema = question ? null : extractSchema(out);
   let proposal: AgentProposalDraft | null = null;
-  if (question) {
-    proposal = null;
-  } else if (resolvedSchema) {
-    proposal = {
-      kind: 'schema',
-      agent,
-      brief: input.userText,
-      payload: resolvedSchema,
-    };
-  } else if (out.template && !same(out.template)) {
+  const base = input.workspace.prompt;
+  const structured = question ? null : readStructured(out.prompt, base ?? undefined);
+  const unmapped = Array.isArray(out.unmapped) ? out.unmapped.filter((x): x is string => typeof x === 'string' && !!x.trim()).map(x => x.trim()) : [];
+  if (structured && (!base || !structuredEquals(base, structured) || unmapped.length)) {
     proposal = {
       kind: 'prompt',
       agent,
       brief: input.userText,
-      payload: {
-        template: out.template,
-        features: out.features,
-        change: out.change,
-      },
+      payload: {structured, ...(typeof out.change === 'string' && out.change.trim() ? {change: out.change.trim()} : {}), unmapped},
     };
   }
 
@@ -366,7 +357,7 @@ async function withFeatureInfo(llm: AgentModel, preset: AgentPreset | 'optimiser
         result = {error: (e as Error).message};
       }
     }
-    messages.push({role: 'assistant', content: raw}, {role: 'user', content: JSON.stringify({tool_result: {name: out.tool.name, result}}).slice(0, MAX_RESULT_CHARS)});
+    messages.push({role: 'assistant', content: raw}, {role: 'user', content: JSON.stringify({tool_result: {name: out.tool.name, result}}).slice(0, systemConfig().agent.maxToolResultChars)});
   }
 }
 
@@ -381,9 +372,7 @@ export async function reflectPrompt(input: OptimiserReflectInput, llm: AgentMode
     'optimiser',
     mode === 'merge' ? 'merge' : 'reflect',
     {
-      template: input.template,
-      features: input.features,
-      schema: input.schema,
+      prompt: input.prompt,
       tried: input.triedChanges,
       mixUps: input.mixUps.slice(0, 6),
       lowestField: input.lowestField,
@@ -394,18 +383,23 @@ export async function reflectPrompt(input: OptimiserReflectInput, llm: AgentMode
     tools,
     input.signal,
   );
-  const out = parseJsonObject<OptimiserReflectOutput>(raw, {template: input.template, change: ''});
-  return {template: typeof out.template === 'string' ? out.template : input.template, change: typeof out.change === 'string' ? out.change : '', ...(out.features ? {features: out.features} : {})};
+  const out = parseJsonObject<{prompt?: unknown; change?: unknown}>(raw, {});
+  // Wording only: the fields and value names stay the parent's, whatever the model wrote.
+  return {prompt: reworded(input.prompt, out.prompt), change: typeof out.change === 'string' ? out.change : ''};
+}
+
+/** A model's rewording laid over the prompt it started from (fields and value names kept). */
+function reworded(base: StructuredPrompt, answer: unknown): StructuredPrompt {
+  return answer && typeof answer === 'object' ? rewordOnly(base, answer as Partial<StructuredPrompt>) : base;
 }
 
 /** Improve with AI: the Prompt helper's draft of a version, with every change and its reason. */
 export async function draftImprovement(input: DraftImprovementInput, llm: AgentModel, tools?: AgentToolHost): Promise<DraftImprovementOutput> {
   const raw = await withFeatureInfo(llm, 'prompt_agent', 'improve', {...input, examples: (input.examples ?? []).slice(0, 8)}, tools);
-  const out = parseJsonObject<Partial<DraftImprovementOutput>>(raw, {});
+  const out = parseJsonObject<{prompt?: unknown; changes?: {text: string; reason?: string}[]; reply?: unknown}>(raw, {});
   const changes = Array.isArray(out.changes) ? out.changes.filter(c => c && typeof c.text === 'string').map(c => ({text: c.text, reason: typeof c.reason === 'string' ? c.reason : ''})) : [];
   return {
-    template: typeof out.template === 'string' && out.template.trim() ? out.template : input.template,
-    ...(out.features ? {features: out.features} : {}),
+    prompt: reworded(input.prompt, out.prompt),
     changes,
     reply: typeof out.reply === 'string' ? out.reply : '',
   };

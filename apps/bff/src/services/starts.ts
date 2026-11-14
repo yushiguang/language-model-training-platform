@@ -1,5 +1,5 @@
-import type {AgentPreset, ChatLink, EndpointId, ProjectState} from '@tsp/contracts';
-import {autoSpendUsd, DEFAULT_MAX_ROUNDS, evalEstimate, optimiserEstimate, TRY_TEMPLATE_MAX, versionLabel, visibleToAgents} from '@tsp/domain';
+import type {AgentPreset, ChatLink, EndpointId, Msg, ProjectState} from '@tsp/contracts';
+import {autoSpendUsd, canScore, compilePrompt, readStructured, evalEstimate, optimiserEstimate, versionLabel, visibleToAgents, systemConfig, msg} from '@tsp/domain';
 import {getApp, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {asModel, findVersion, modelName} from './page-views.ts';
@@ -7,18 +7,18 @@ import {loadProjectState} from './projects.ts';
 import {scoreVersion, startOptimiser} from './work.ts';
 
 /**
- * Start-work agent tools: try_template, score_version, start_optimiser. They spend money and
+ * Start-work agent tools: try_prompt, score_version, start_optimiser. They spend money and
  * start at once, like every automatic start: the cost can't be predicted exactly, and every
  * running task has a Stop button.
  */
 
-type StartTool = 'try_template' | 'score_version' | 'start_optimiser';
-export const START_TOOLS: StartTool[] = ['try_template', 'score_version', 'start_optimiser'];
+type StartTool = 'try_prompt' | 'score_version' | 'start_optimiser';
+export const START_TOOLS: StartTool[] = ['try_prompt', 'score_version', 'start_optimiser'];
 export const isStartTool = (name: string): name is StartTool => (START_TOOLS as string[]).includes(name);
 
 interface Planned {
   /** The action line once it starts: "<helper> <line>", e.g. "started scoring v4 on gpt-5.4". */
-  line: string;
+  line: string | Msg;
   link?: ChatLink;
   estimateUsd: number;
   run: () => Promise<unknown>;
@@ -30,23 +30,29 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
   const models = state.setup?.models ?? [];
   const pickModel = (): EndpointId => {
     const m = asModel(args.model, state) ?? models[0]?.endpoint;
-    if (!m || !models.some(x => x.endpoint === m)) throw new Error(`${String(args.model)} is not one of the models chosen in Setup. Chosen: ${models.map(x => modelName(state, x.endpoint)).join(', ')}.`);
+    if (!m || !models.some(x => x.endpoint === m)) throw new Error(`${String(args.model)} is not the project's labeling model. It is ${models.map(x => modelName(state, x.endpoint)).join(', ')}.`);
     return m;
   };
+  // The same guardrails as the page buttons and the auto-start manager (review 2026-11-13).
+  if (!state.facts.settingsConfirmed) throw new Error('Project Settings are not confirmed yet. Ask the user to open Settings at the top of the page and confirm them first; nothing paid starts before that.');
+  if (tool !== 'try_prompt' && !canScore(state.facts)) {
+    const need = systemConfig().dataset.minEvalHard;
+    throw new Error(`Scoring needs at least ${need} gold-labeled eval examples, 2 in each half (${state.facts.goldEvalDone} labeled so far). Ask the user to finish labeling on Gold Labels first.`);
+  }
   switch (tool) {
-    case 'try_template': {
+    case 'try_prompt': {
       if (!state.setup?.schema) throw new Error('The labels are not set up yet.');
       const endpoint = pickModel();
       const base = state.versions[0];
-      // No template given: try the newest version's ("try the current prompt").
-      const template = typeof args.template === 'string' && args.template.trim() ? args.template : (base?.template ?? '');
-      if (!template.trim()) throw new Error('Give the template to try.');
-      const draft = {template, features: (args.features as typeof base.features | undefined) ?? base?.features ?? {video: [], photo_text: [], metadata: []}, images: base?.images ?? []};
-      const n = Math.max(1, Math.min(TRY_TEMPLATE_MAX, typeof args.n === 'number' ? Math.floor(args.n) : 3));
+      // No prompt given: try the newest version's ("try the current prompt").
+      const structured = readStructured(args.prompt, base?.structured) ?? base?.structured;
+      if (!structured) throw new Error('Give the prompt to try.');
+      const draft = {template: compilePrompt(structured), features: structured.features, images: structured.images};
+      const n = Math.max(1, Math.min(systemConfig().agent.tryTemplateMaxExamples, typeof args.n === 'number' ? Math.floor(args.n) : 3));
       const examples = state.examples.filter(e => e.split === 'eval' && visibleToAgents(e)).slice(0, n);
       if (!examples.length) throw new Error('There are no eval examples to try it on.');
       return {
-        line: `tried the prompt on ${examples.length} eval example${examples.length === 1 ? '' : 's'} with ${modelName(state, endpoint)}`,
+        line: examples.length === 1 ? msg('tried the prompt on 1 eval example with {model}', {model: modelName(state, endpoint)}) : msg('tried the prompt on {n} eval examples with {model}', {n: examples.length, model: modelName(state, endpoint)}),
         estimateUsd: evalEstimate(state, draft, endpoint, examples.length),
         run: async () => {
           const settings = models.find(m => m.endpoint === endpoint)!;
@@ -54,10 +60,10 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
           const byId = new Map(examples.map(e => [e.id, e]));
           const costUsd = rows.reduce((a, r) => a + r.costUsd, 0);
           // No task is saved, so the try's spend is recorded here as automatic spend.
-          if (costUsd > 0) await getApp().catalog.audit(projectId, 'system', 'auto_spend', {what: 'try_template', costUsd});
+          if (costUsd > 0) await getApp().catalog.audit(projectId, 'system', 'auto_spend', {what: 'try_prompt', costUsd});
           return {
             model: modelName(state, endpoint),
-            rows: rows.map(r => ({id: byId.get(r.exampleId)?.externalId, title: byId.get(r.exampleId)?.title, model: r.answer, invalid: r.invalidReason, error: r.error, gold: state.gold.get(r.exampleId)?.answer ?? null})),
+            rows: rows.map(r => ({id: byId.get(r.exampleId)?.externalId, title: byId.get(r.exampleId)?.title, model: r.answer, invalid: r.invalidReason, error: r.error, gold: state.gold[r.exampleId]?.answer ?? null})),
             saved: false,
           };
         },
@@ -71,7 +77,7 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
         return {line: '', estimateUsd: 0, run: async () => ({already: `${versionLabel(v)} is already scored or being scored on ${modelName(state, endpoint)}.`})};
       }
       return {
-        line: `started scoring ${versionLabel(v)} on ${modelName(state, endpoint)}`,
+        line: msg('started scoring {version} on {model}', {version: versionLabel(v), model: modelName(state, endpoint)}),
         link: {path: '/prompt'},
         estimateUsd: evalEstimate(state, v, endpoint),
         run: async () => {
@@ -83,9 +89,9 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
     case 'start_optimiser': {
       const endpoint = pickModel();
       if (state.optimisation.some(o => o.state === 'running')) return {line: '', estimateUsd: 0, run: async () => ({already: 'The Optimiser is already running.'})};
-      const rounds = typeof args.rounds === 'number' ? Math.max(1, Math.min(50, Math.round(args.rounds))) : DEFAULT_MAX_ROUNDS;
+      const rounds = typeof args.rounds === 'number' ? Math.max(1, Math.min(systemConfig().optimiser.maxRoundsCap, Math.round(args.rounds))) : systemConfig().optimiser.defaultMaxRounds;
       return {
-        line: `started the Optimiser for up to ${rounds} rounds`,
+        line: msg('started the Optimiser for up to {rounds} rounds', {rounds}),
         link: {path: '/prompt'},
         estimateUsd: optimiserEstimate(state, endpoint, rounds),
         run: async () => {

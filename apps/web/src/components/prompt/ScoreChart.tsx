@@ -1,5 +1,7 @@
 'use client';
 
+import {t} from '@/i18n';
+
 /**
  * Score by version (design: one line, a dashed threshold line labelled at its left end, values
  * printed only for the best, the selected and the latest version, others on hover, and the
@@ -29,7 +31,7 @@ export function ScoreChart({points, threshold, selected, onSelect, H = 200, W = 
   const grid: number[] = [];
   for (let g = lo; g <= 1.0001; g += 0.1) grid.push(Math.round(g * 10) / 10);
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label="Score by version" style={{display: 'block'}}>
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} role="img" aria-label={t('Score by version')} style={{display: 'block'}}>
       {grid.map(g => (
         <g key={g}>
           <path d={`M${x0} ${y(g).toFixed(1)}H${x1}`} stroke="#00000010" />
@@ -40,7 +42,7 @@ export function ScoreChart({points, threshold, selected, onSelect, H = 200, W = 
       ))}
       <path d={`M${x0} ${y(threshold).toFixed(1)}H${x1}`} stroke="#6a6a6a" strokeDasharray="4 4" />
       <text x={x0 + 8} y={y(threshold) - 8} textAnchor="start" fontSize={12} fontWeight={500} fill="#474747" style={FONT}>
-        Threshold {threshold.toFixed(2)}
+        {t('Threshold {n}', {n: threshold.toFixed(2)})}
       </text>
       {si >= 0 && <rect x={xs[si] - 18} y={top - 8} width={36} height={bot - top + 16} rx={8} fill="#0000000a" />}
       {n > 1 && <path d={'M' + points.map((p, i) => `${xs[i].toFixed(1)} ${y(p.score).toFixed(1)}`).join(' L')} fill="none" stroke="#1b1b1b" strokeWidth={2} strokeLinejoin="round" />}

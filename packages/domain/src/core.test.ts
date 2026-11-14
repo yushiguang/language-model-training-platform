@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {applyFix, checkTemplate, diffLines, diffWords, renderPrompt, withReasons} from './template.ts';
+import {applyFix, checkTemplate, diffLines, diffWords, renderPrompt, withReasons, toFeatures} from './template.ts';
 import {pageFromPath} from './pages.ts';
 import {computeMetrics, judge, DEFAULT_THRESHOLDS} from './metrics.ts';
 import {nextVersion, versionLabel} from './versions.ts';
@@ -27,7 +27,7 @@ test('single braces are text, broken double braces are errors', () => {
 
 test('render drops lines not ticked for the example type and fills empty with none', () => {
   const t = 'Title: {{Title}}\nDesc: {{Description}}\nLang: {{Language}}\nFrames: {{Frame}}';
-  const parts = renderPrompt(t, {type: 'video', features: {Description: 'hello', Language: '', Frame: ['f1.jpg', 'f2.jpg']}}, sel);
+  const parts = renderPrompt(t, {type: 'video', features: toFeatures({Description: 'hello', Language: '', Frame: ['f1.jpg', 'f2.jpg']})}, sel);
   const text = parts.filter(p => p.type === 'text').map(p => (p as {text: string}).text).join('');
   assert.ok(!text.includes('Title'));
   assert.ok(text.includes('Desc: hello'));
@@ -37,7 +37,7 @@ test('render drops lines not ticked for the example type and fills empty with no
 
 test('images sit where their placeholders were, and captions stay out of the text', () => {
   const t = 'Desc: {{Description}}\nFrames: {{Frame}}\nLogo: [Image 1]\nEnd';
-  const parts = renderPrompt(t, {type: 'video', features: {Description: 'hi', Title: '', Language: '', Frame: ['f1.jpg', 'f2.jpg']}}, sel, [{url: 'logo.png', name: 'logo.png', size: 1}]);
+  const parts = renderPrompt(t, {type: 'video', features: toFeatures({Description: 'hi', Title: '', Language: '', Frame: ['f1.jpg', 'f2.jpg']})}, sel, [{url: 'logo.png', name: 'logo.png', size: 1}]);
   assert.deepEqual(
     parts.map(p => (p.type === 'text' ? p.text : p.url)),
     ['Desc: hi\nFrames: ', 'f1.jpg', 'f2.jpg', '\nLogo: ', 'logo.png', '\nEnd'],
@@ -51,9 +51,9 @@ test('images sit where their placeholders were, and captions stay out of the tex
 });
 
 test('pages are found from the URL path, with or without a base path', () => {
-  assert.equal(pageFromPath('/report/'), 'report');
+  assert.equal(pageFromPath('/gold/'), 'gold');
   assert.equal(pageFromPath('/language-model-training-platform/prompt/edit/'), 'prompt_edit');
-  assert.equal(pageFromPath('/training-set.html'), 'training');
+  assert.equal(pageFromPath('/prompt-design.html'), 'prompt_design');
   assert.equal(pageFromPath('/'), 'projects');
 });
 
@@ -74,8 +74,12 @@ test('macro-F1 and pass judgement', () => {
   const lenient = {...DEFAULT_THRESHOLDS, macroF1: 0.5};
   const j = judge(m, lenient, 30);
   assert.equal(j.passed, false);
-  assert.deepEqual(j.checks.find(c => c.label === 'Invalid outputs'), {label: 'Invalid outputs', actual: '20%', need: '≤ 1.0%', met: false});
+  assert.deepEqual(j.checks.find(c => c.label === 'Invalid outputs'), {label: 'Invalid outputs', msg: {key: 'Invalid outputs'}, actual: '20%', need: '≤ 1.0%', met: false});
   assert.equal(judge(computeMetrics(schema, items.slice(0, 3)), lenient, 30).passed, true);
+  // Review 2026-11-13: the count is of gold-labeled eval examples; under minEval it is a rough
+  // reading and never passes, however good the score.
+  const few = judge(computeMetrics(schema, items.slice(0, 3)), lenient, 4);
+  assert.deepEqual([few.passed, few.rough], [false, true]);
 });
 
 test('versions: Save makes the next minor, Save as new version the next major, an Optimiser run its reserved major', () => {

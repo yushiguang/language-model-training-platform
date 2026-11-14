@@ -1,7 +1,9 @@
+import {systemConfig} from './config.ts';
 import type {EndpointId, ProjectState, PromptVersion} from '@tsp/contracts';
 import {estimateTokens} from './labels.ts';
 import {renderPrompt} from './template.ts';
 import {costForTokens} from './workflow.ts';
+import {canScore} from './gates.ts';
 
 /**
  * Paid work that starts without a click: scoring a new version, resuming after a closed page,
@@ -10,12 +12,8 @@ import {costForTokens} from './workflow.ts';
  * Stop button. The Optimiser is the exception: only the user starts it (Auto Optimise, decided
  * 2026-11-09), with a number of rounds.
  */
-/** The rounds box next to Auto Optimise is prefilled with this. */
-export const DEFAULT_MAX_ROUNDS = 10;
-/** The prompt agent's try_template labels at most this many eval examples. */
-export const TRY_TEMPLATE_MAX = 5;
 
-export type AutoStartWhat = 'score' | 'resume' | 'optimiser' | 'try_template';
+export type AutoStartWhat = 'score' | 'resume' | 'optimiser' | 'try_prompt';
 
 /** Cost of labeling `n` eval examples (all of them by default) with a version on one model. */
 export function evalEstimate(state: ProjectState, version: Pick<PromptVersion, 'template' | 'features' | 'images'>, endpoint: EndpointId, n?: number): number {
@@ -23,11 +21,11 @@ export function evalEstimate(state: ProjectState, version: Pick<PromptVersion, '
   const sample = evalEx.slice(0, 10);
   if (!sample.length) return 0;
   const avg = sample.map(ex => estimateTokens(renderPrompt(version.template, ex, version.features, version.images))).reduce((a, b) => a + b, 0) / sample.length;
-  return costForTokens(state.endpoints, endpoint, avg, 150) * (n ?? evalEx.length);
+  return costForTokens(state.endpoints, endpoint, avg, systemConfig().gateway.evalOutputTokensEstimate) * (n ?? evalEx.length);
 }
 
 /** At most what one optimiser run costs (for the audit log only): every round labeled on the eval set. */
-export function optimiserEstimate(state: ProjectState, endpoint: EndpointId, rounds = DEFAULT_MAX_ROUNDS): number {
+export function optimiserEstimate(state: ProjectState, endpoint: EndpointId, rounds = systemConfig().optimiser.defaultMaxRounds): number {
   const v = state.versions[0];
   return v ? evalEstimate(state, v, endpoint) * rounds : 0;
 }
@@ -35,7 +33,7 @@ export function optimiserEstimate(state: ProjectState, endpoint: EndpointId, rou
 /**
  * What automatic starts have spent in this project, for the audit log and telemetry: every
  * labeling run started by code (scoring, resumes, optimiser parents and candidates; counted per
- * run, so an automatic resume of a task a user started counts too) plus try_template runs,
+ * run, so an automatic resume of a task a user started counts too) plus try_prompt runs,
  * which leave no task.
  */
 export function autoSpendUsd(state: ProjectState): number {
@@ -54,11 +52,17 @@ export interface DueStart {
 /**
  * Paid work the workflow would start now: scoring the newest version on the project's model, and
  * resuming scoring a closed page left. `tick` starts all of it. The Optimiser never starts here.
+ *
+ * Nothing starts by itself (spec 1.0.0, 2.5) until the eval dataset exists, enough of it has gold
+ * labels to score (`canScore`), and the user has confirmed Project Settings. Prompt Design makes
+ * v1 before any of that, so v1 waits here. A click on Score is the user's own start and is not
+ * held back by this.
  */
 export function dueStarts(state: ProjectState): DueStart[] {
   const out: DueStart[] = [];
   const setup = state.setup;
   if (!setup?.schema) return out;
+  if (!state.facts.settingsConfirmed || !canScore(state.facts)) return out;
   const models = setup.models.map(m => m.endpoint);
 
   for (const r of state.runs) {

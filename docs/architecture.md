@@ -1,17 +1,21 @@
 # Architecture
 
-The MVP produces a labeled training set and a labeled test set for one task: Setup → Dataset →
-Gold Labels → Prompt Engineering → Training Set (the final run labels train and test). It is a fixed-workflow website with agents built into each step.
+Since 1.0.0 a prompt tuning project has four steps: Prompt Design → Eval Dataset → Gold Labels →
+Prompt Tuning. Its output is a prompt that passes the project's checks, copied from the last step.
+The pass rule and the labeling model are Project Settings, not steps. A batch labeling project
+(which produces labeled data with a finished prompt) has its contracts designed and no screens yet.
+It is a fixed-workflow website with agents built into each step.
 Code decides the next step; agents explain and propose, people approve.
 
-## Eight apps, three packages
+## Nine apps, three packages
 
 ```
-apps/web ──► apps/web/src/backend-api (composition root)
+apps/web ──► apps/web/src/backend-api (the BffClient the pages call; in-process.ts is the composition root)
                  │ builds and wires:
                  ├── apps/bff ──────────┬──► catalog      (product records)
                  │   (what pages call)  ├──► labeling     (tasks, predictions) ──► llm-gateway
                  │                      ├──► agents       (presets, runtime)   ──► llm-gateway
+                 │                      ├──► optimiser    (Auto Optimise runs) ──► catalog, labeling, agents
                  │                      └──► llm-gateway  (endpoint list, agent model)
                  ├── telemetry (one port, given to every app above) ──► the platform's sink
                  └── @tsp/platform-impl (stand-ins, or the internal adapters)
@@ -31,9 +35,72 @@ composition root is the only place that knows which implementation sits behind e
 | `labeling` | Collections `labeling_tasks`, `predictions`. Runs tasks | `LabelingContract` (`labeling-api.ts`) |
 | `catalog` | All product collections (`CatalogRecords` in `catalog-api.ts`). Assigns version numbers | `CatalogContract` |
 | `agents` | Agent presets and the turn/handoff logic. Stateless | `AgentRuntimeContract` (`agent-api.ts`) |
-| `bff` | Nothing stored. Workflow, gates, when labeling starts, reports, optimiser loop | `BffContract` (`bff-api.ts`) |
+| `optimiser` | The Auto Optimise loop and the `optimisation_runs` records. Asks the bff (through `OptimiserHost`) to save a version, label examples and build a score | `OptimiserContract` (`optimiser-api.ts`) |
+| `bff` | Nothing stored. Workflow, gates, when labeling starts, reports | `BffContract` (`bff-api.ts`) |
 | `telemetry` | Metrics (Prometheus style, `tsp_*`) and product events; sends them to `Platform.telemetry` | `TelemetryPort` (`telemetry.ts`) |
-| `web` | Pages and components | calls `@/backend-api` |
+| `web` | Pages and components | calls `@/backend-api` (`BffClient`) |
+
+### Contracts are ready for an interface definition language
+
+Since 1.0.0 phase 1 every service contract is written so it maps one to one to an RPC interface
+(spec 1.0.0, section 7):
+
+- Arguments and results are plain JSON: records and arrays, never `Map`, `Set`, `File` or a
+  function. `ProjectState.gold` and a version's saved answers are records by example id.
+- A call passes ids and the user's input, never a record the caller holds. Starts take one
+  request struct (`ScoreVersionRequest`, `CreateVersionRequest`, `StartOptimiserRequest`, ...)
+  with an optional `idempotencyKey`: the same key never starts the same work twice.
+- Live updates are not methods: a client listens on an `EventStreamPort` (in-process the
+  services' bus, over HTTP Server-Sent Events or polling).
+- `apps/bff/src/api.ts` (`createBffApi`) is the bff as its contract. Services behind it still
+  pass records to each other.
+- No callbacks or signals cross a contract (phase 3). The agent runtime is built once with
+  `createAgentRuntime({llm, tools, progress})`: the model, a project's tools and an
+  `AgentProgressPort` for Ask AI's live line are injected, so `runTurn`, `reflectPrompt` and
+  `draftImprovement` take and return plain data. A run's Stop reaches a running change through
+  `cancel(requestId)`.
+- Example features are `FeatureValue {text?, items?}` (text, or a list such as image URLs), read
+  with `featureText` and `featureItems` (`packages/domain/src/template.ts`). Files and older
+  records with plain strings and arrays are read through `toFeatures`.
+
+`apps/web/src/backend-api` has three files: `client.ts` (the `BffClient` interface pages use:
+the contract plus live listeners, file uploads and page telemetry), `in-process.ts` (the default
+client and composition root: every service runs in the page on `@tsp/platform-impl`) and
+`index.ts` (picks the client). A microservice deployment adds an HTTP client and exports it from
+`index.ts`; no page changes.
+
+### One place for every tunable number
+
+`SystemConfig` (`packages/contracts/src/config.ts`) holds every threshold, limit and estimate,
+grouped by area; the defaults are `DEFAULT_SYSTEM_CONFIG` in `packages/domain/src/config.ts`.
+Code reads `systemConfig()` at the time of use. A hosting adapter overrides any value through
+`Platform.config`, merged over the defaults at startup. `Platform` also has optional ports for
+per-tenant configuration, permission checks and a job queue (`RequestContext`,
+`TenantConfigPort`, `AuthorizationPort`, `JobQueuePort`), with single-tenant stand-ins.
+
+## The structured prompt (1.0.0)
+
+A prompt version stores a `StructuredPrompt`: a task summary, the input features, the label fields
+(each with values, one definition per value and tie-break rules) and general rules. This is the
+only thing people and helpers edit. The text sent to the model is compiled from it by
+`compilePrompt` (`packages/domain/src/structured.ts`), which adds the feature placeholders and the
+output format; the same input always gives the same text. "View full prompt" shows that text
+read-only with a Copy button.
+
+- **Label signature.** The field names, their kinds and their value names are the label signature.
+  New wording never changes it; adding, removing or renaming a field or value does. When it
+  changes, the version starts a new schema version: gold labels need a re-check and earlier scores
+  no longer count. The editor says so before the save. The Optimiser and Improve with AI may only
+  reword (`rewordOnly`), so they never change the signature.
+- **Import.** A prompt pasted into Ask AI is sorted into the structured parts. Passages with no
+  place (few-shot examples, an output format) are returned word for word as `unmapped` and listed
+  on the page under "Not carried over", so nothing is dropped silently.
+- **Project Settings.** A new project starts from defaults (`DEFAULT_THRESHOLDS`, the first
+  labeling endpoint). The Settings button opens the dialog at any time, and it opens once by itself
+  before the first paid run (`settingsConfirmed`). `dueStarts` starts nothing until the settings
+  are confirmed and the dataset can be scored (`canScore`: enough examples and gold labels in both
+  halves).
+- **Deleting a project** asks for its exact name, then removes its records in every collection.
 
 ## Model calls: llm-gateway
 
@@ -55,16 +122,8 @@ composition root is the only place that knows which implementation sits behind e
 A labeling task runs one prompt version on one model (with fixed settings) over a list of
 examples and stores one prediction per example. The bff creates tasks for four reasons: scoring a
 new version on the eval set (system), the Optimiser's dry runs, eval-set labeling and the second
-labeling that confirms a pass (system), model answers for the test set, and the final run. All of
+labeling that confirms a pass (system). All of
 them start by themselves (below).
-
-**The final run** labels every train example. A test example's label is its gold label when
-someone gave one, else the chosen version's saved valid answer (an answer that isn't valid JSON
-for the labels is not a label); only test examples with neither are labeled, and only when the
-user ticks that line in the confirm ("Test set: a have a gold label,
-b have an answer from v1.3. Label the other c?"). The results page has a Training set tab and a
-Test set tab, each with counts, rows and JSONL/CSV downloads; test rows say where their label
-came from (gold or model).
 
 **Automatic paid starts.** Every task starts by itself, with no cost limit and no approval
 (decided 2026-11-06: the exact cost of a task can't be predicted, the platform is there to make
@@ -73,12 +132,12 @@ resuming scoring after a closed page, and the agents' start tools. The Optimiser
 exception: it starts only on the user's Auto Optimise (or an agent's start tool after the user asks
 in Ask AI), never from `tick` (decided 2026-11-09). `dueStarts`
 (`packages/domain/src/auto-start.ts`) says what the workflow would start, and `tick` starts all
-of it. Test answers and the final run start from their page's button. Every automatic start
+of it. Every automatic start
 writes an `auto_start` audit record.
 
 Automatic spend is counted per labeling run, not per task: a run started by code adds its cost to
 the task's `autoCostUsd`, so an automatic resume of a task the user started counts too, and so do
-the optimiser's own labeling runs. try_template saves no task, so it writes an `auto_spend` audit
+the optimiser's own labeling runs. try_prompt saves no task, so it writes an `auto_spend` audit
 record with its cost. Automatic spend is recorded for the audit log and telemetry only; it
 limits nothing.
 
@@ -100,134 +159,30 @@ createTask ──► runTask (browser lock "labeling:<task>"; a second tab gets 
 - **Resume.** The MVP runner is the open page (datasets are 50 to 100 examples). Closing the page
   stops the runner; the task stays `running` with no lock held, and the next read reports it as
   `paused` with reason `closed`. Scoring and optimiser tasks resume by themselves on the next page
-  tick; user-started tasks (test answers, the final run) wait for the user's Resume. Retry failed clears the failed list and runs
+  tick. Retry failed clears the failed list and runs
   again.
 - **Other tabs.** Writes are announced to other tabs of the site, and pages re-read every 5 s
   while something runs, so a second tab follows a run and sees it pause.
 - **Later (not in the MVP):** a worker outside the browser, ordered claims with heartbeats so
   several runners can share a task, and shared quota records across runners.
 
-## The Optimiser (Auto Optimise)
+## The Optimiser and the helpers
 
-GEPA, ported to TypeScript (design doc "Prompt optimising in Sprint", 2026-11-09). One run
-improves the prompt on the project's one labeling model, for up to the user's Max rounds
-(default 10). The pure parts are in `packages/domain/src/gepa.ts`; the loop is
-`apps/bff/src/services/optimiser.ts`.
+Both have their own design docs, which hold the design and the as-built detail:
 
-- **Versions.** A run reserves the next major number when it starts; every change it tries is the
-  next minor of that major (v3.1, v3.2…). The editor's Save (the main button) makes the next minor
-  of the version's own major; Save as vN makes the next major, written without ".0"
-  (2026-11-10). The catalog assigns every number.
-- **Change marks.** The editor diffs word by word (`diffWords` in `packages/domain/src/template.ts`)
-  and gives each change a reason with `withReasons`: the helper's change that shares its words, or
-  for an Optimiser version, the round's change line. The marks are drawn under the text box; the
-  editor finds the mark under the pointer with `elementsFromPoint` to show the hover.
-- **Start version.** A run starts from the version selected in the list (the page asks first when
-  a better minor of the same major exists); an agent's start uses the best scored version.
-- **Pool and parent.** The pool is the start version, the run's kept versions, and every other
-  version with a current score on the model (2026-11-11), each scored per example on the optimiser
-  half of the eval set (share of fields right). Round 1 always changes the start version (R5-7).
-  Later parents are drawn from the Pareto front (versions best on at least one example and not
-  dominated), weighted by how many examples each is best on; the round keeps that count
-  (`parentWins`) so the panel can say why. After every 2 kept versions, two front versions that
-  each win examples the other misses are merged instead.
-- **A round.** The agent runtime writes one change from the parent's mix-ups and up to 8 of its
-  wrong examples (`ExampleBrief`: gold, the model's answer, text features cut to about 300
-  characters; optimiser half only, never the held-out half; a merge gets up to 4 examples each
-  version wins). It may tick or untick a feature after reading feature descriptions with
-  `read_feature_info` → the editor's Checks run (a failing or repeated change is dropped,
-  unlabeled) → the change is saved and **dry-run** on half of the optimiser half, at most 20
-  examples, picked at random (review finding 7), up to half of them from the examples that hold
-  the parent's weakest value (in the gold label or the parent's answer) → it goes on only when it
-  gets more fields right than the parent on them, the parent's weakest field counting double
-  (`compareDryRun`, review finding 5), or ties it while being right on different examples (R5-6:
-  `tied`, labeled in full and kept in the pool, but a wasted round; 2 ties in a row end the run) → it is labeled on the whole eval set (the dry run's
-  answers are reused) and scored on the held-out half. `setOptimiserRandom` fixes the random picks
-  in tests.
-- **Confirming a pass** (decided 2026-11-10, review finding 6). A version that passes is not used
-  yet: the held-out half is labeled a second time with the same version and settings (`pass: 2`
-  in `ModelSettings`, so the answers are saved apart from the first labeling) and scored again
-  (`confirmScore`). Only when both pass does the run end and the training and test sets start. A
-  pass the second labeling does not confirm stays a kept version, shows "Not confirmed" in the
-  Optimiser panel (`OptimiserRound.confirm`), and the run goes on.
-- **Ends** when a version passes and the pass is confirmed (the Prompt step is approved and the training and test sets
-  start with it, test examples without gold included), at Max rounds, after 3 wasted rounds in a
-  row, on Stop, or when a step fails 3 times in a row: the run shows Failed with the step and the
-  error, and nothing else starts until the user presses Retry, which goes on from that step. A
-  run whose page closed shows Paused with Resume.
-- **The record.** `OptimisationRun.history` holds every round (parent, change, outcome, dry-run
-  counts, score); versions stay immutable, and the Versions list derives its Optimiser, Dropped
-  and Running tags from it.
+- [design/optimiser.md](design/optimiser.md): Auto Optimise (GEPA ported to TypeScript) and
+  Improve with AI. Pure parts in `packages/domain/src/gepa.ts`, the loop in
+  `apps/optimiser/src/optimiser.ts`.
+- [design/helpers.md](design/helpers.md): the helpers in Ask AI (agent presets, page views, read
+  and start tools, what they may never see). Presets and runtime in `apps/agents`, page views and
+  tools in `apps/bff/src/services/page-views.ts`.
 
-## Agents: the page is the workspace
-
-Agents never read the DOM. When the user sends a message, the assistant panel says where the user
-is (path and URL parameters), and the bff builds that page's **page view** from the same saved data
-the page shows (`apps/bff/src/services/page-views.ts`). The view goes with every turn, together
-with the page's unsaved edits. To see more, an agent calls **read tools** (other pages, versions,
-reports, examples, gold labels, predictions, template checks), like a coding agent reading files in
-a repo: up to 4 calls per turn, each one logged, nothing changed. Changes stay proposals the user
-approves on the page. All presets use the reasoning model. A question gets an answer and never a
-proposal: the answer shapes make "template" and "schema" optional, a reply with "question" (one
-short question when the request is unclear) proposes nothing, and neither does a template equal to
-the one on the page. Improve with AI reads the same wrong examples as the Optimiser.
-
-**Images.** Wrong examples (`ExampleBrief.images`, up to 2 per example from the image features)
-go to the helpers as image content parts after the text, for Improve with AI, the Optimiser and
-the label check. A relative sample URL is not resolved for the model; the stand-in data uses them,
-real items carry absolute URLs.
-
-**Document links.** Helpers read a document link the user pastes with the `read_doc` tool
-(front desk, Labels helper, Prompt helper). The bff reads it through `Platform.documents`
-(`DocumentSource`, `packages/contracts/src/platform-api.ts`); the text is cut at 20,000
-characters. The public build's stand-in (`noDocuments`) opens nothing, so the helper says the
-link can't be opened here and asks for the pasted text. The internal build plugs in the real
-document service (docs/handover/integration.md, "Document links").
-
-**Broken replies.** When a helper's reply is not the JSON its preset asks for, the runtime asks
-once more; on a second miss it shows plain prose as it is, or a short "please ask again" line when
-the reply looks like broken JSON.
-
-**The held-out half stays hidden from every helper** (review finding 3, decided 2026-11-11).
-`visibleToAgents` in `packages/domain/src/gepa.ts` is the one rule, used wherever examples go to a
-helper:
-- the read tools (`get_examples`, `get_gold_labels`, `get_predictions`) leave held-out examples
-  out and say so in a `note`; asking for one by id gives nothing;
-- `get_report` and the report page view give mix-ups as counts only, since reports are scored on
-  the held-out half;
-- `try_template`, the label check, Improve with AI (its mistakes, mix-ups and wrong examples come
-  from `scoreOnOptimiserHalf`) and the Optimiser read the optimiser half only.
-Page views carry scores and counts only. Every preset's instructions (`common` and the
-Optimiser's) say the held-out half is hidden and why, so a helper doesn't ask for it.
-
-**The model's reason** (decided 2026-11-11). `apps/labeling` adds `REASON_LINE`
-(`packages/domain/src/labels.ts`) as the last text part of every labeling prompt and of a try. It
-is not part of the template. `parseOutput` reads the "reason" key into `Prediction.reason` (at most
-300 characters), also when the answer is invalid. `answersForHelpers` gives the Optimiser and
-Improve with AI each wrong example with `reason` and `invalid`, and leaves filtered answers out.
-Exports read `answer` only. Answers saved before this have no reason.
-
-**The Optimiser's pool** (decided 2026-11-11) is the start version, the run's kept versions and
-every other version with a current report on the model, so a parent or a merge side can be a
-version the user wrote or an earlier run made.
-
-**The helpers' instructions** (rewritten 2026-11-11) are the shared rules in `common` plus one
-text per helper in `apps/agents/src/presets.ts`. They say who does what (code runs the workflow,
-helpers explain and propose, the user approves), what good labels and a good labeling prompt look
-like, the Scores helper's six next steps, and what the Optimiser must avoid (rules that fit one
-example, repeating a tried change). No helper judges a gold label. The report view carries
-`scoredOn` and `confirmed` (the Optimiser's second labeling of the held-out half: true, false, or
-null when there was none) for the Scores helper. The texts have not been tried on real models yet.
-
-**The label check** (review finding 10). Dataset's AI Suggestion "Check the labels against your
-data" sends the Labels helper 20 random examples (never the held-out half) with their gold labels
-when they have one (`checkLabels`, intent `check_schema`). It answers in Ask AI, may put a schema
-draft on Schema settings, and keeps answering on Dataset.
+## Scores, gold labels and what starts by itself
 
 **Rebuild scores** (Evelyn, 2026-11-12: by hand only). A gold edit changes the evaluation context,
 so reports are archived and `ProjectState.scoresUpdating` is set ("Scores out of date" on Gold
-Labels and Prompt versions). Nothing rebuilds by itself: gold edits, Setup changes and new code all
-move scores, and sensing each one is fragile. The Rebuild scores button on Prompt versions calls
+Labels and Prompt Tuning). Nothing rebuilds by itself: gold edits, changed settings and new code all
+move scores, and sensing each one is fragile. The Rebuild scores button on Prompt Tuning calls
 `rebuildReports`, which gives every version of the current schema with a finished scoring a fresh
 report from saved answers (nothing labeled); a report it replaces is marked `archived` and hidden.
 `tick` builds only a version's first report. Saved answers on the whole eval set are kept in memory
@@ -237,7 +192,7 @@ per version for the Mismatches list.
 it. The project provider (`apps/web/src/components/ProjectContext.tsx`) runs `tick` on every
 change event and on a 60 s sweep, on every project page. Starts are keyed (`once()` plus the
 labeling app's lock per task), so extra runs are safe. Every auto task also has a button that
-sends the same start (Score/Resume, Optimiser Resume/Retry, training set Resume). In a microservice
+sends the same start (Score/Resume, Optimiser Resume/Retry). In a microservice
 system the same split holds: one workflow service owns `dueStarts`, woken by events and a sweep.
 
 **Mismatches** (review finding 2, decided 2026-11-10). Gold Labels has a Mismatches tab: the eval
@@ -249,17 +204,38 @@ third answer), with an optional "Why"; each decision is an audit record (`gold.r
 version) and the example moves from To review to Reviewed for that version only (acceptance R4-5).
 A review stands until it is reopened (`gold.reopen`, which names the review; a changed label goes
 back to what it was) or the gold label changes. `labelerNotes` gives the standing notes on
-optimiser-half examples to the Optimiser and Improve with AI as `ExampleBrief.labelerNote`. A change saves a new gold label, so the evaluation context changes
+optimiser-half examples to the Optimiser and Improve with AI. Since 1.0.0 the "Why" is a
+`LabelComment` (below), and the helpers get every comment on an optimiser-half example as
+`ExampleBrief.comments`. A change saves a new gold label, so the evaluation context changes
 and reports are rebuilt from saved answers: nothing is labeled again
-(`apps/bff/src/services/mismatches.ts`). Prompt versions' AI Suggestion points to the tab right
+(`apps/bff/src/services/mismatches.ts`). Prompt Tuning' AI Suggestion points to the tab right
 after the first score (before any review or Optimiser run) and when Auto Optimise ends without a
 pass; never while the Optimiser runs or after a pass. Helpers give the counts only, never which
 side is right.
 
-Three **start tools** spend money (`apps/bff/src/services/starts.ts`): `try_template` (prompt
-agent: up to 5 eval examples with an unsaved draft, nothing saved), `score_version` and
-`start_optimiser` (prompt and evaluation agents). They run at once, like every automatic start;
-the user stops them from the page.
+**The eval dataset changes (1.0.0, spec 4).** `apps/bff/src/services/governance.ts`:
+
+- *Halves.* `assignEvalHalves` (`packages/domain/src/dataset.ts`) puts gold-labeled examples in
+  the two halves by their rarest value, so a rare value lands in both. The bff balances the halves
+  when Gold Labels is left (`approveNode('gold')`) and once more just before a helper or the
+  Optimiser first reads examples (`lockHoldout`: the read tools that return examples, `try_prompt`,
+  Improve with AI, Auto Optimise). From then on `Project.holdoutLocked` is set and no example ever
+  changes half; an added example is placed in the half that keeps the two even.
+- *Adding.* Add from file and Add sampled append to the dataset: ids already in it (removed ones
+  too) are skipped, and nothing there changes. The evaluation context counts gold-labeled examples
+  only, so an unlabeled example is *pending*: it is left out of scores, does not make them stale,
+  and is counted on Eval Dataset and next to the score. Its gold label does make scores stale
+  (Rebuild scores).
+- *Removing.* Remove example on Gold Labels, Remove unlabeled and Downsample on Eval Dataset
+  (`pickToPrune`: evenly from both halves) soft-delete examples (`Example.removed`). Each removal
+  writes a `DatasetRemoval` with the half and gold label at the time, why, who and when; Restore
+  puts the example back in its half. The score line names how many gold-labeled examples were
+  removed before the score was worked out.
+- *Comments.* `LabelComment` records (`label_comments`), append-only, from Save on either Gold
+  Labels tab; a comment on Mismatches keeps the version. Helpers read comments on optimiser-half
+  examples only.
+- *Rough reading.* Below `thresholds.minEval` gold-labeled eval examples a score never passes
+  (`judge` returns `rough`); the Finish gate stays closed.
 
 ## Telemetry
 
@@ -267,7 +243,28 @@ One `TelemetryPort` from `apps/telemetry` goes to every app. Metrics are Prometh
 small label sets (model calls, limiter, labeling, catalog, agents, bff calls, gates, automatic
 starts, page views and timings). Product events carry ids, counts and durations,
 never content. The browser pushes both to `Platform.telemetry`; the stand-in keeps events in
-`localStorage`. The audit log stays in the catalog.
+`localStorage`. The audit log stays in the catalog. Conventions and the rules for changing the
+catalogue: [design/telemetry.md](design/telemetry.md).
+
+## Languages (1.1.0)
+
+English is the source language: every UI text is its own key, and `t()` (`apps/web/src/i18n.tsx`)
+looks it up in the chosen catalog (`packages/domain/src/locales/`). Texts the services and the
+domain make (action lines, the AI Suggestion card, the Optimiser's now line, gate and check lines,
+reasons a prompt cannot be saved, a helper's live line) carry a `Msg` with their English text, so
+the page can show them in the user's language while helpers and logs read English. Helpers answer
+in the user's language (`AgentTurnInput.locale` adds one line to their system prompt, with the
+site's own Chinese words). The choice lives in the browser (`tsp-locale`); the static export is
+built in English and switches after the first paint. A test lists every key the source uses and
+fails on any the Chinese catalog lacks.
+
+## Problem reports (1.1.0)
+
+`report_problem` is a tool of every helper (not of the Optimiser). It drafts, shows the user the
+draft, and sends only after the user writes again, which code enforces. The ticket goes to
+`Platform.tickets` with the page, the browser's rolling record (`ClientDiagnostics`, sent with
+each Ask AI message and never stored), the last action lines and, only with consent, the prompt.
+Adapter steps: [handover/integration.md](handover/integration.md#problem-reports).
 
 ## Prompts with images
 
@@ -300,18 +297,21 @@ application `id` to the store's document id.
 | Optimiser: Pareto front, parent, merge pair, dry-run pick and comparison | `packages/domain/src/gepa.ts` |
 | Confirming a pass (second labeling of the held-out half) | `confirmScore` in `apps/bff/src/services/evaluation.ts` |
 | Mismatches between saved answers and gold labels; keep or change | `apps/bff/src/services/mismatches.ts` |
-| The label check on Dataset | `checkLabels` in `apps/bff/src/services/agents.ts` |
-| Optimiser loop: rounds, retries, Failed and Retry, the training set after a pass | `apps/bff/src/services/optimiser.ts` |
+| Halves, label balance and which examples a prune removes | `packages/domain/src/dataset.ts` |
+| Adding, removing, restoring and pruning examples; the holdout lock; comments | `apps/bff/src/services/governance.ts` |
+| Optimiser loop: rounds, retries, Failed and Retry, the end of a run after a confirmed pass | `apps/optimiser/src/optimiser.ts` |
 | Improve with AI (a draft with marked changes, nothing labeled) | `improveWithAi` in `apps/bff/src/services/agents.ts` |
-| Test answers and the final run (train, plus unlabeled test when ticked) as labeling tasks; output rows with their label source | `apps/bff/src/services/training.ts`, `finalRunPlan` in `packages/domain/src/workflow.ts` |
+| The structured prompt: compiling to text, the label signature, wording-only changes | `packages/domain/src/structured.ts` |
+| The fixed AI Suggestion cards on Prompt Tuning (T1 to T6) | `aiSuggestion` in `packages/domain/src/workflow.ts` |
+| Project Settings (pass rule, labeling model) and their confirmation | `apps/bff/src/services/settings.ts` |
 | What starts without a click | `packages/domain/src/auto-start.ts`, `tick` in `apps/bff/src/services/work.ts` |
 | Agent start tools | `apps/bff/src/services/starts.ts` |
 | Metric and event names, labels and props | `packages/contracts/src/telemetry.ts` |
 
 ## Known limits of this version
 
-- `BffContract` still passes some non-JSON values (a `Map` in `ProjectState`, the full state into
-  `tick`) and some client-sent records; a fully serialisable v2 is planned.
+- Services behind `createBffApi` still pass records to each other (only the contracts are plain
+  JSON).
 - Dataset sampling still runs in the page's memory.
 - The Optimiser loop holds a browser lock per project and model, so a second tab cannot run it
   twice; like labeling, it runs only while its page is open.

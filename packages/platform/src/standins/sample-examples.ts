@@ -1,4 +1,5 @@
 import type {ExampleMedia, ExampleSource, MediaSource, RawExample} from '@tsp/contracts';
+import {featureItems, toFeatures} from '@tsp/domain';
 
 interface SampleFile {
   examples: RawExample[];
@@ -14,7 +15,8 @@ const fileUrl = (base: string) => process.env.NEXT_PUBLIC_EXAMPLES_URL || `${bas
 export const loadSampleFile = (base: string) =>
   (cache ??= fetch(fileUrl(base)).then(r => {
     if (!r.ok) throw new Error(`Could not load the examples file (${r.status}).`);
-    return r.json() as Promise<SampleFile>;
+    // The file keeps the plain `string | string[]` shape; examples get `FeatureValue`s (spec 1.0.0, 7.1).
+    return (r.json() as Promise<SampleFile>).then(f => ({...f, examples: f.examples.map(e => ({...e, features: toFeatures(e.features as unknown as Record<string, unknown>)}))}));
   }));
 
 const sleep = (ms: number, signal?: AbortSignal) =>
@@ -61,14 +63,13 @@ export function sampleExamples(base = ''): ExampleSource {
  * features. There is no video. The real media service replaces this (docs/handover/integration.md).
  */
 export function sampleMedia(base = ''): MediaSource {
-  const list = (v: string | string[] | undefined): string[] => (Array.isArray(v) ? v : v ? [v] : []);
   const url = (u: string) => (/^(https?:|data:|\/)/.test(u) ? u : `${base}/${u}`);
   return {
     async media(externalId) {
       const ex = (await loadSampleFile(base)).examples.find(e => e.externalId === externalId);
       if (!ex) return null;
-      const imageUrls = [...list(ex.features.Frame), ...list(ex.features.Images)].map(url);
-      const cover = list(ex.features.Cover)[0];
+      const imageUrls = [...featureItems(ex.features.Frame), ...featureItems(ex.features.Images)].map(url);
+      const cover = featureItems(ex.features.Cover)[0];
       if (!cover && !imageUrls.length) return null;
       const m: ExampleMedia = {kind: ex.type === 'video' ? 'video' : 'images', imageUrls, ...(cover ? {coverUrl: url(cover)} : {})};
       return m;

@@ -17,7 +17,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - The look comes from `src/ui/kit.css`, a copy of the Unified UI canvas styles: keep it identical
   to the canvas and put app-only rules in `src/ui/app.css`. Pages build from the parts in `@/ui`.
   Anything that can't match the canvas goes in `docs/ui-gaps.md`.
-- `src/backend-api/index.ts` is the composition root: the only file that builds the apps and
+- `src/backend-api/in-process.ts` is the composition root (`index.ts` picks the client, `client.ts`
+  is the `BffClient` interface): the only file that builds the apps and
   imports `@tsp/platform-impl`.
 - UI text uses plain words (for example "the optimiser", never the method name).
 - Before pushing, from the repo root: `npm run check && npm run build`; for flow changes also

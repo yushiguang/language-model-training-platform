@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {LabelCallRequest, LabelCallResult, LlmGatewayContract, Schema} from '@tsp/contracts';
 import {createCatalog} from '@tsp/catalog';
+import {toFeatures} from '@tsp/domain';
 import {localDocRuntime} from '@tsp/platform';
 import {createLabeling} from './labeling.ts';
 import {memoryLocks} from './locks.ts';
@@ -12,9 +13,9 @@ async function setup(n: number, prefix: string) {
   const db = localDocRuntime(prefix);
   const catalog = createCatalog(db);
   await catalog.insert('setup_versions', {id: 'sv_1', projectId: 'pr_1', number: 1, schemaVersion: 1, task: '', schema, thresholds: null, models: [], steps: {schema: true, evaluation: true, models: true}, createdAt: '', createdBy: ''});
-  const v = await catalog.createPromptVersion({projectId: 'pr_1', template: 'Label {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
+  const v = await catalog.createPromptVersion({projectId: 'pr_1', structured: {taskSummary: '', features: {video: [], photo_text: [], metadata: []}, fields: [], generalRules: '', images: []}, template: 'Label {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
   const ids = Array.from({length: n}, (_, i) => `ex_${i}`);
-  await catalog.insertMany('examples', ids.map((id, i) => ({id, snapshotId: 'ds_1', externalId: String(i), type: 'video' as const, title: '', features: {Description: `post ${i}`}, split: 'train' as const, optimiserHalf: false})));
+  await catalog.insertMany('examples', ids.map((id, i) => ({id, snapshotId: 'ds_1', externalId: String(i), type: 'video' as const, title: '', features: toFeatures({Description: `post ${i}`}), split: 'train' as const, optimiserHalf: false})));
   return {db, catalog, v, ids};
 }
 
@@ -61,7 +62,7 @@ test('runs examples in parallel (up to 4 at once) and saves one prediction each'
   assert.deepEqual([done?.done, done?.valid, done?.invalid, done?.failed], [30, 30, 0, 0]);
   assert.equal(stats.maxInFlight, 4);
   const preds = await lab.predictions(v.id, 'A', t.settingsHash);
-  assert.equal(preds.size, 30);
+  assert.equal(Object.keys(preds).length, 30);
 });
 
 test('invalid answers are results; a resumed task only labels what is missing', async () => {
@@ -112,16 +113,6 @@ test('stops early when more than 5% of examples fail', async () => {
   assert.ok((r?.failed ?? 0) < 10, `stopped after ${r?.failed} failures`);
 });
 
-test('pauses when cost passes 120% of the budget', async () => {
-  const {db, catalog, v, ids} = await setup(40, 'lab-5');
-  const lab = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": "Vlog"}'), locks: memoryLocks()});
-  const t = await lab.createTask(input(ids, v, {budgetUsd: 0.1}));
-  const r = await lab.runTask(t.id);
-  assert.equal(r?.state, 'paused');
-  assert.equal(r?.stopReason, 'budget');
-  assert.ok((r?.done ?? 0) < 40);
-});
-
 test('one runner per task: a second run returns null; Stop stops it; a closed runner shows as paused', async () => {
   const {db, catalog, v, ids} = await setup(40, 'lab-6');
   const locks = memoryLocks();
@@ -154,7 +145,7 @@ test('tryTemplate labels a few examples with an unsaved template and saves nothi
   assert.ok(rows.every(r => r.answer?.format?.[0] === 'Vlog' && r.costUsd === 0.01));
   assert.equal((await labeling.listTasks('pr_1')).length, 0);
   // Nothing saved under the version that exists either.
-  assert.equal((await labeling.predictions(v.id, 'A', 'any')).size, 0);
+  assert.equal(Object.keys(await labeling.predictions(v.id, 'A', 'any')).length, 0);
 });
 
 test('relabelInvalid: an example whose only answer is invalid is labeled once more, and the valid answer wins', async () => {
@@ -175,7 +166,7 @@ test('relabelInvalid: an example whose only answer is invalid is labeled once mo
   assert.deepEqual([seen.get('0'), seen.get('1'), seen.get('2')], [2, 2, 1], 'only the invalid ones are called again');
   assert.deepEqual([r?.done, r?.valid, r?.invalid], [4, 3, 1]);
   const preds = await lab.predictions(v.id, 'A', again.settingsHash);
-  assert.ok(preds.get(ids[0])?.answer, 'the valid second answer wins');
+  assert.ok(preds[ids[0]]?.answer, 'the valid second answer wins');
   // Running it again labels nothing: each example gets one more try only.
   await lab.runTask(again.id);
   const third = await lab.createTask(input(ids, v, {relabelInvalid: true}));
@@ -245,22 +236,6 @@ test('a Stop from another tab is seen during a long model call, and an old Stop 
   assert.ok(Date.now() - pressed < 2600, `seen after ${Date.now() - pressed} ms`);
 });
 
-test('a resumed task over its budget makes no call; continuing after the pause grows the budget', async () => {
-  const {db, catalog, v, ids} = await setup(20, 'lab-budget-resume');
-  const stats = {inFlight: 0, maxInFlight: 0, calls: 0};
-  const lab = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": "Vlog"}', stats), locks: memoryLocks()});
-  const t = await lab.createTask(input(ids, v, {budgetUsd: 0.15, parallel: 1}));
-  const paused = await lab.runTask(t.id);
-  assert.equal(paused?.stopReason, 'budget');
-  const calls = stats.calls;
-  const again = await lab.runTask(t.id);
-  assert.equal(again?.stopReason, 'budget');
-  assert.equal(stats.calls, calls, 'no new paid call');
-  const go = await lab.runTask(t.id, 'user', {extendBudget: true});
-  assert.equal(go?.state, 'done');
-  assert.ok((go?.budgetUsd ?? 0) > 0.15);
-});
-
 test('an example that failed in one run and was saved by another counts as done, not failed', async () => {
   const {db, catalog, v, ids} = await setup(3, 'lab-failed-saved');
   let broken = true;
@@ -284,15 +259,27 @@ test('an example that failed in one run and was saved by another counts as done,
 
 test('relabelInvalid does not try again an invalid answer the same task saved before a pause', async () => {
   const {db, catalog, v, ids} = await setup(6, 'lab-relabel-own');
-  const stats = {inFlight: 0, maxInFlight: 0, calls: 0};
-  const lab = createLabeling({db, catalog, gateway: fakeGateway(async () => 'not json', stats), locks: memoryLocks()});
-  const t = await lab.createTask(input(ids, v, {relabelInvalid: true, budgetUsd: 0.02, parallel: 1}));
+  let answered = 0;
+  let down = false;
+  const gateway = fakeGateway(async () => {
+    // The model goes down after two answers, so the task pauses with two invalid answers saved.
+    if (down || answered === 2) {
+      down = answered === 2 && !down ? true : down;
+      throw new Error('down');
+    }
+    answered++;
+    return 'not json';
+  });
+  const lab = createLabeling({db, catalog, gateway, locks: memoryLocks()});
+  const t = await lab.createTask(input(ids, v, {relabelInvalid: true, parallel: 1}));
   const paused = await lab.runTask(t.id);
-  assert.equal(paused?.stopReason, 'budget');
+  assert.equal(paused?.state, 'needs_attention');
+  down = false;
+  answered = 3; // past the outage: every later call answers
   let done: Awaited<ReturnType<typeof lab.runTask>> = paused;
-  for (let i = 0; i < 5 && done?.state !== 'done'; i++) done = await lab.runTask(t.id, 'user', {extendBudget: true});
+  for (let i = 0; i < 5 && done?.state !== 'done'; i++) done = await lab.retryFailed(t.id, 'user');
   assert.deepEqual([done?.state, done?.done, done?.invalid], ['done', 6, 6]);
-  assert.equal(stats.calls, 6, 'each example called once: its own invalid answers are results');
+  assert.equal(answered - 1, 6, 'each example answered once: its own invalid answers are results');
 });
 
 test("every labeling prompt ends with the site's reason line, and the model's reason is kept with the answer", async () => {
@@ -309,7 +296,7 @@ test("every labeling prompt ends with the site's reason line, and the model's re
   await lab.runTask(t.id);
   assert.ok(asked.length === 2 && asked.every(a => a.startsWith('Label post') && a.endsWith(REASON_LINE)));
   const preds = await lab.predictions(v.id, 'A', t.settingsHash);
-  assert.equal(preds.get('ex_0')?.reason, 'It shows a day out.');
-  assert.deepEqual(preds.get('ex_0')?.answer, {format: ['Vlog']});
-  assert.equal(preds.get('ex_1')?.reason, undefined);
+  assert.equal(preds['ex_0']?.reason, 'It shows a day out.');
+  assert.deepEqual(preds['ex_0']?.answer, {format: ['Vlog']});
+  assert.equal(preds['ex_1']?.reason, undefined);
 });

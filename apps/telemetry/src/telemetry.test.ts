@@ -37,11 +37,11 @@ test('events carry the envelope, keep the newest when the buffer is full, and fl
   const {s, sink: k} = sink();
   const t = createTelemetry({sink: k, flushMs: 0, maxBuffered: 2, appVersion: 'b1'});
   t.setContext({userId: 'u1', projectId: 'pr_1', page: 'gold'});
-  t.event('gold_skipped', {eval_done: 1, eval_total: 35});
-  t.event('gold_skipped', {eval_done: 2, eval_total: 35});
-  t.event('gold_skipped', {eval_done: 3, eval_total: 35});
+  t.event('page_left', {seconds_visible: 1, seconds_idle: 0});
+  t.event('page_left', {seconds_visible: 2, seconds_idle: 0});
+  t.event('page_left', {seconds_visible: 3, seconds_idle: 0});
   await t.flush();
-  assert.deepEqual(s.events.map(e => (e.props as {eval_done: number}).eval_done), [2, 3]);
+  assert.deepEqual(s.events.map(e => (e.props as {seconds_visible: number}).seconds_visible), [2, 3]);
   assert.equal(s.events[0].project_id, 'pr_1');
   assert.equal(s.events[0].page, 'gold');
   assert.equal(s.events[0].app_version, 'b1');
@@ -50,7 +50,7 @@ test('events carry the envelope, keep the newest when the buffer is full, and fl
 
 test('a failing sink never throws to the caller', async () => {
   const t = createTelemetry({sink: {pushEvents: async () => Promise.reject(new Error('down')), pushMetrics: async () => {}}, flushMs: 0});
-  t.event('compare_opened', {});
+  t.event('full_prompt_opened', {});
   await t.flush();
 });
 
@@ -105,12 +105,12 @@ test('a flush asked for during a flush also sends what was buffered meanwhile', 
     },
     flushMs: 0,
   });
-  t.event('compare_opened', {});
+  t.event('full_prompt_opened', {});
   const first = t.flush();
   t.event('assistant_opened', {});
   const second = t.flush();
   release();
   await second;
   await first;
-  assert.deepEqual(pushed, ['compare_opened', 'assistant_opened']);
+  assert.deepEqual(pushed, ['full_prompt_opened', 'assistant_opened']);
 });

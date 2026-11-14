@@ -2,6 +2,7 @@
 
 import type {Answer, Schema} from '@tsp/contracts';
 import {Card, Code, Hov} from '@/ui';
+import {t} from '@/i18n';
 
 export interface LabelCount {
   field: string;
@@ -24,12 +25,12 @@ export function LabelDistribution({data, min, bare}: {data: LabelCount[]; min?: 
       <span className="row" style={{gap: 6}}>
         <i style={{width: 8, height: 8, borderRadius: '50%', background: '#e0a800'}} />
         <span className="t-3">
-          <Hov text={`Fewer than ${thr}`} tip={`Values with fewer than ${thr} examples may be learned poorly`} />
+          <Hov text={t('Fewer than {n}', {n: thr})} tip={t('Values with fewer than {n} examples may be learned poorly', {n: thr})} />
         </span>
       </span>
       <span className="row" style={{gap: 6}}>
         <i style={{width: 8, height: 8, borderRadius: '50%', background: 'var(--err)'}} />
-        <span className="t-3">None</span>
+        <span className="t-3">{t('None')}</span>
       </span>
     </div>
   );
@@ -72,7 +73,7 @@ export function LabelDistribution({data, min, bare}: {data: LabelCount[]; min?: 
   // bare: only the values, for a card that has its own heading (Prompt versions, no gold labels yet).
   if (bare) return body;
   return (
-    <Card title="Label distribution" actions={legend || undefined}>
+    <Card title={t('Label distribution')} actions={legend || undefined}>
       {body}
     </Card>
   );

@@ -20,7 +20,7 @@ Keep this repo free of internal product names, internal URLs, package scopes, ke
 
 ## Where the swap happens: `@tsp/platform-impl`
 
-Only the composition root (`apps/web/src/backend-api/index.ts`) imports `@tsp/platform-impl`,
+Only the composition root (`apps/web/src/backend-api/in-process.ts`) imports `@tsp/platform-impl`,
 and only its `createPlatform(): Platform`. It resolves to:
 
 - the stand-ins, `packages/platform/src/config.ts`, by default (`tsconfig.base.json` paths and
@@ -43,6 +43,7 @@ The internal module exports `createPlatform()` returning the `Platform` object f
 | `media?: MediaSource` | The player page and still images of one example by item id, for people to look at on Gold Labels (see "Media") | `sampleMedia` (made-up pictures, no player) |
 | `endpoints?: EndpointConfig[]` | Registered endpoints with real limits (next section) | not set: assumed limits |
 | `telemetry?: TelemetrySink` | Takes product events (`pushEvents`, batches of `TelemetryEvent`) and metrics as Prometheus text (`pushMetrics`) and forwards them to the company's telemetry system. Must not throw; slow is fine (the app buffers) | `localTelemetrySink` (`localStorage`); not set: kept in memory only |
+| `tickets?: TicketPort` | Files a problem report and returns its ticket id (see "Problem reports") | `localTickets` (`localStorage`, `tsp-tickets`); not set: helpers say reports cannot be sent |
 | `standIns: string[]` | Names shown in the header while any stand-in is in use; empty in production | all |
 
 ## Endpoints and limits
@@ -65,6 +66,11 @@ replies carry `Retry-After`, and that uploaded image URLs are reachable by the l
 The MVP dataset is a prepared file in the format of `apps/web/public/sample-data/examples.json`.
 Upload it to the file store and build with `NEXT_PUBLIC_EXAMPLES_URL` set to its URL. Real
 examples never go in this repo.
+
+Since 1.0.0 each feature on a `RawExample` is a `FeatureValue` (`packages/contracts/src/types.ts`):
+`{text}` for text features and `{items}` for lists such as image URLs, never a plain string. An
+`ExampleSource` adapter that still returns plain strings can wrap them with `toFeatures` from
+`@tsp/domain`; prompts read features only through `featureText` and `featureItems`.
 
 ## Media
 
@@ -112,6 +118,39 @@ the bff passes it to `Platform.documents` and cuts the text at 20,000 characters
    `null` for a link it can't read (another host, no access, deleted).
 2. Set `documents` on the `Platform` object and drop `'document links'` from `standIns`.
 3. Images in a document are not read in this version; say so in the text if they matter.
+
+## Problem reports
+
+Any helper can call `report_problem` when the user says something is wrong (spec 1.1.0, 3). The
+helper drafts first and shows the user what it would send; code refuses to send until the user
+has written again, so a report never goes without a yes. The bff then builds a
+`TicketSubmission` (`packages/contracts/src/platform-api.ts`) and calls `Platform.tickets.submit`:
+
+- the user's account of it (summary, expected, actual, steps), the reporter, the language and the
+  helper that filed it;
+- where: app version, project, page and its ids, the steps approved, the settings in short;
+- `diagnostics: ClientDiagnostics`: the browser's rolling record (path, browser, viewport, time
+  zone, the last 10 pages, failed backend calls with their call ids, script errors), sent with
+  each Ask AI message and kept for that turn only;
+- the last Ask AI action lines;
+- `content`: the compiled prompt of the version in question, only when the user agreed; never
+  examples or gold labels.
+
+1. Implement `submit(ticket)` in the internal module: file the ticket wherever developers or the
+   developer agent pick work up, and return `{ticketId}` (any short string the user can quote).
+2. Set `tickets` on the `Platform` object and drop `'problem reports'` from `standIns`.
+3. Once the bff runs behind HTTP, send each call's id (`callId()` in
+   `apps/web/src/backend-api/diagnostics.ts`) as the `X-Request-Id` header and log it on the
+   server, so a ticket's failed calls lead straight to the server logs.
+
+## Languages
+
+The site speaks English and Chinese (spec 1.1.0, 2). Texts are looked up by their English words
+in `packages/domain/src/locales/<language>.ts`; texts the services make travel as `Msg`
+(`{key, params}`) next to their English text, and helpers get the user's language as
+`AgentTurnInput.locale`. Nothing here needs an adapter. To add a language, add a catalog file, list
+it in `packages/domain/src/i18n.ts`, and run `npm test` (a test fails on any text the catalog
+lacks).
 
 ## Asking for a contract change
 

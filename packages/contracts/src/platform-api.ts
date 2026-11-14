@@ -1,6 +1,7 @@
 import type {TelemetrySink} from './telemetry.ts';
-import type {EndpointInfo} from './types.ts';
+import type {ClientDiagnostics, EndpointInfo, FeatureValue, Locale, NodeId, PageId} from './types.ts';
 import type {EndpointConfig} from './gateway-api.ts';
+import type {DeepPartial, SystemConfig} from './config.ts';
 
 export type {EndpointInfo};
 
@@ -374,7 +375,7 @@ export interface RawExample {
   externalId: string;
   type: 'video' | 'photo_text';
   title: string;
-  features: Record<string, string | string[]>;
+  features: Record<string, FeatureValue>;
 }
 
 export interface ExampleSource {
@@ -447,6 +448,47 @@ export interface DocumentSource {
   read(url: string): Promise<LinkedDocument | null>;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Enterprise extension ports (spec 1.0.0, section 7.1). All optional: the single-tenant stand-ins
+// in `@tsp/platform` allow everything and run jobs in the page.
+
+/** Who a service call is made for. Carried in request structs once services are split. */
+export interface RequestContext {
+  tenantId?: string;
+  userId?: string;
+  requestId?: string;
+}
+
+/** Per-tenant overrides of the system configuration. */
+export interface TenantConfigPort {
+  configFor(ctx: RequestContext): Promise<DeepPartial<SystemConfig>>;
+}
+
+export interface AuthorizationRequest {
+  /** What is being done, as `service.method` (for example `bff.deleteProject`). */
+  action: string;
+  projectId?: string;
+}
+
+export interface AuthorizationPort {
+  allowed(ctx: RequestContext, request: AuthorizationRequest): Promise<boolean>;
+}
+
+/** A piece of background work handed to the host's job queue instead of running in the page. */
+export interface JobRequest {
+  /** The kind of work, for example `labeling.runTask` or `optimiser.run`. */
+  kind: string;
+  /** Plain JSON arguments (ids, never records). */
+  args: Record<string, string | number | boolean | null>;
+  /** The same key never enqueues the same job twice. */
+  idempotencyKey?: string;
+}
+
+export interface JobQueuePort {
+  enqueue(ctx: RequestContext, job: JobRequest): Promise<{jobId: string}>;
+  cancel(ctx: RequestContext, jobId: string): Promise<void>;
+}
+
 export interface Platform {
   db: DocRuntime;
   models: LabelingModels;
@@ -470,9 +512,66 @@ export interface Platform {
   endpoints?: EndpointConfig[];
   /**
    * Where telemetry goes (metrics are pushed as Prometheus text; events in batches). Optional:
-   * without it nothing leaves the page. See the doc "Telemetry: events and metrics".
+   * without it nothing leaves the page. See docs/design/telemetry.md.
    */
   telemetry?: TelemetrySink;
+  /**
+   * Overrides of the system's tunable numbers, merged over `DEFAULT_SYSTEM_CONFIG` at startup, so
+   * a hosting adapter tunes them without code edits.
+   */
+  config?: DeepPartial<SystemConfig>;
+  /** Per-tenant configuration. Optional: without it every tenant gets `config`. */
+  tenantConfig?: TenantConfigPort;
+  /** Permission checks. Optional: without it every signed-in user may do everything. */
+  authorization?: AuthorizationPort;
+  /** A job queue for background work. Optional: without it work runs in the open page. */
+  jobs?: JobQueuePort;
+  /**
+   * Where problem reports go (spec 1.1.0, 3.3). Optional: without it the helpers say reports
+   * cannot be sent here. See docs/handover/integration.md, "Problem reports".
+   */
+  tickets?: TicketPort;
   /** Shown in the header so nobody mistakes a stand-in for the real service. */
   standIns: string[];
+}
+
+/**
+ * A problem report, filed by a helper after the user agreed (spec 1.1.0, 3). Everything in it is
+ * what the user said, where they were and what the site saw; content only when they agreed.
+ */
+export interface TicketSubmission {
+  /** One line: what went wrong, in the user's words. */
+  summary: string;
+  expected: string;
+  actual: string;
+  /** Steps to reach the problem, from the user's account and the action trail. */
+  steps: string[];
+  reporter: {id: string; name: string};
+  locale: Locale;
+  /** Which helper filed it. */
+  filedBy: string;
+  createdAt: string;
+  where: {
+    appVersion: string;
+    projectId: string | null;
+    projectName: string | null;
+    page: PageId | 'other';
+    /** The page's ids: version (`v`), model (`m`). */
+    params: Record<string, string>;
+    approvedSteps: NodeId[];
+    /** The project's settings in short: pass rule mode and labeling model. */
+    settings: {passRule: string; model: string} | null;
+  };
+  /** The recent Ask AI action lines (what the user and the helpers did), oldest first. */
+  actions: {at: string; text: string}[];
+  /** Null when the client sent none (for example an older client). */
+  diagnostics: ClientDiagnostics | null;
+  /** Only when the user agreed: the prompt the problem is about. */
+  content: {versionLabel: string; prompt: string} | null;
+}
+
+/** Files problem reports in the company's tracker (or hands them to a dev agent). */
+export interface TicketPort {
+  /** Files the ticket and returns the id the user can quote. Throw when it cannot be filed. */
+  submit(ticket: TicketSubmission): Promise<{ticketId: string}>;
 }

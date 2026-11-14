@@ -8,6 +8,8 @@
 import Link, {useLinkStatus} from 'next/link';
 import {createPortal} from 'react-dom';
 import {createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode} from 'react';
+import {systemConfig} from '@tsp/domain';
+import {t} from '@/i18n';
 
 /** Mounted once around the app. The kit needs no theme provider; this only sets the root class. */
 export function UiProvider({children}: {children: ReactNode}) {
@@ -17,6 +19,27 @@ export function UiProvider({children}: {children: ReactNode}) {
 // ---------- icons (Lucide outline paths, the same set the canvas uses) ----------
 const PATHS: Record<string, ReactNode> = {
   check: <path d="M20 6 9 17l-5-5" />,
+  settings: (
+    <>
+      <path d="M20 7h-9" />
+      <path d="M14 17H5" />
+      <circle cx="17" cy="17" r="3" />
+      <circle cx="7" cy="7" r="3" />
+    </>
+  ),
+  trash: (
+    <>
+      <path d="M3 6h18" />
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </>
+  ),
+  copy: (
+    <>
+      <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+      <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+    </>
+  ),
   x: (
     <>
       <path d="M18 6 6 18" />
@@ -169,7 +192,7 @@ export function ActionErrorBanner() {
         action={
           e.retry ? (
             <Button
-              label="Retry"
+              label={t('Retry')}
               kind="white"
               size="sm"
               onClick={() => {
@@ -264,8 +287,12 @@ export function Button({
     if (r instanceof Promise) {
       setBusy(true);
       group?.set(true);
+      // Motion M1: a fast answer still shows the spinner for a moment, so the press registers.
+      const t0 = Date.now();
       try {
         await r;
+        const left = systemConfig().ui.minActionPendingMs - (Date.now() - t0);
+        if (left > 0) await new Promise(res => setTimeout(res, left));
         clearActionError();
       } catch (e) {
         failed(e);
@@ -279,8 +306,9 @@ export function Button({
     console.warn(e);
     // A plain sentence from the backend ("Fix 2 errors in Checks first.") says why; anything else is a connection problem.
     const msg = e instanceof Error ? e.message : '';
-    const why = /^[A-Z][^{}<>\n]{0,160}\.$/.test(msg) ? msg : 'Check your connection and try again.';
-    reportActionError(`Couldn't ${(label ?? ariaLabel ?? 'do that').toLowerCase()}. ${why}`, () => void click());
+    const why = /^[A-Z][^{}<>\n]{0,160}\.$/.test(msg) ? t(msg) : t('Check your connection and try again.');
+    const what = label ?? ariaLabel;
+    reportActionError(what ? t("Couldn't {action}. {why}", {action: what.toLowerCase(), why}) : t("Couldn't do that. {why}", {why}), () => void click());
   };
   return (
     <button type="button" className={cls} disabled={disabled || busy || (!!group?.pending && !busy)} aria-busy={busy || undefined} onClick={() => void click()} title={title} aria-label={ariaLabel}>
@@ -302,8 +330,12 @@ export function Badge({text, tone = 'gray', icon = true}: {text: string; tone?: 
     </span>
   );
 }
-export const Passed = () => <Badge text="Passed" tone="ok" />;
-export const Below = () => <Badge text="Below" tone="err" />;
+export const Passed = () => <Badge text={t('Passed')} tone="ok" />;
+export const Below = () => <Badge text={t('Below')} tone="err" />;
+/** Fewer gold-labeled eval examples than the project's minimum: no pass verdict yet (spec 1.0.0, 4.2). */
+export const Rough = ({need}: {need: number}) => (
+  <Hov text={<Badge text={t('Rough reading')} tone="gray" icon={false} />} tip={t('Fewer than {n} eval examples have a gold label, so this score can move a lot and gives no pass. Label more examples for a firm score', {n: need})} />
+);
 
 // ---------- numbers ----------
 export function Metric({label, value, unit, tone, size = 'md'}: {label?: ReactNode; value: ReactNode; unit?: string; tone?: 'ok' | 'err'; size?: 'md' | 'lg'}) {
@@ -320,7 +352,8 @@ export function Metric({label, value, unit, tone, size = 'md'}: {label?: ReactNo
 export function Metrics({children, vertical}: {children: ReactNode; vertical?: boolean}) {
   return <div className={`metrics${vertical ? ' v' : ''}`}>{children}</div>;
 }
-export const Score = ({v, ok}: {v: number; ok: boolean}) => <b className={`t-${ok ? 'ok' : 'err'}`}>{v.toFixed(2)}</b>;
+/** A score in green (passes) or red (below); `ok` null: a rough reading, with no verdict, so no colour. */
+export const Score = ({v, ok}: {v: number; ok: boolean | null}) => <b className={ok == null ? undefined : `t-${ok ? 'ok' : 'err'}`}>{v.toFixed(2)}</b>;
 export const Code = ({children}: {children: ReactNode}) => <span className="code">{children}</span>;
 
 /** A word with a dashed underline whose detail shows on hover. */
@@ -331,7 +364,7 @@ export const Code = ({children}: {children: ReactNode}) => <span className="code
  * not know get one (decided 2026-11-10).
  */
 /** Where a hover popover goes for an anchor: below unless near the bottom, from the left unless near the right edge. */
-function useTip() {
+export function useTip() {
   const [at, setAt] = useState<{left?: number; right?: number; top?: number; bottom?: number} | null>(null);
   const id = useRef(`tip-${Math.random().toString(36).slice(2, 8)}`).current;
   const show = (el: Element | null) => {
@@ -353,7 +386,7 @@ function useTip() {
   return {at, id, show, hide: () => setAt(null), pop};
 }
 
-export function Hov({text, tip}: {text: string; tip: string}) {
+export function Hov({text, tip}: {text: ReactNode; tip: string}) {
   const ref = useRef<HTMLSpanElement>(null);
   const t = useTip();
   const show = () => t.show(ref.current);
@@ -519,7 +552,7 @@ export function Progress({done, total}: {done: number; total: number}) {
         <span style={{width: `${pct}%`}} />
       </div>
       <small>
-        {num(done)} of {num(total)}
+        {t('{done} of {total}', {done: num(done), total: num(total)})}
       </small>
     </div>
   );
@@ -610,7 +643,7 @@ export function Suggestion({title, text, actions, kicker = true}: {title: string
       {kicker && (
         <span className="agent-k">
           <Icon name="spark" />
-          AI Suggestion
+          {t('AI Suggestion')}
         </span>
       )}
       <div className="agent-main">
@@ -724,18 +757,18 @@ export function PageHead({title, actions, back}: {title: string; actions?: React
 }
 
 /** A task in progress, centred on the page: title, progress, start time, Stop. */
-export function CenterProgress({title, chip, done, total, startedAt, onStop}: {title: string; chip?: ReactNode; done: number; total: number; startedAt: string; onStop?: () => void}) {
+export function CenterProgress({title, chip, done, total, startedAt, onStop}: {title: string; chip?: ReactNode; done: number; total: number; startedAt: string; onStop?: () => void | Promise<unknown>}) {
   return (
     <div className="center-block">
       <h2 style={{fontSize: 17, lineHeight: '24px', fontWeight: 700}}>{title}</h2>
       {chip}
       <Progress done={done} total={total} />
       <span className="t-3" style={{fontSize: 13}}>
-        Started {dateTime(startedAt)}
+        {t('Started {time}', {time: dateTime(startedAt)})}
       </span>
       {onStop && (
         <div style={{marginTop: 8}}>
-          <Button label="Stop" icon="stop" onClick={onStop} />
+          <Button label={t('Stop')} icon="stop" onClick={onStop} />
         </div>
       )}
     </div>
@@ -771,7 +804,7 @@ export const dateTime = (iso: string) => {
  * A dialog that asks one question (design: U-F-Optimise-Confirm): a title, one line, and its
  * buttons; the last button is the main one and gets the focus. Escape or a click outside closes it.
  */
-export function Dialog({title, text, actions, onClose, children}: {title: string; text?: string; actions: ReactNode; onClose: () => void; children?: ReactNode}) {
+export function Dialog({title, text, actions, onClose, children, width}: {title: string; text?: string; actions: ReactNode; onClose: () => void; children?: ReactNode; width?: number}) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
@@ -786,7 +819,7 @@ export function Dialog({title, text, actions, onClose, children}: {title: string
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return createPortal(
     <div className="k dlg-scrim" onMouseDown={e => e.target === e.currentTarget && onClose()}>
-      <div ref={box} role="dialog" aria-modal="true" aria-labelledby="dlg-t" className={children ? 'dlg form' : 'dlg'}>
+      <div ref={box} role="dialog" aria-modal="true" aria-labelledby="dlg-t" className={children ? 'dlg form' : 'dlg'} style={width ? {width} : undefined}>
         <h2 id="dlg-t" className="card-t">
           {title}
         </h2>

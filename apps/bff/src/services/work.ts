@@ -1,11 +1,11 @@
 import type {EndpointId, ProjectState, PromptVersion} from '@tsp/contracts';
-import {autoSpendUsd, DEFAULT_MAX_ROUNDS, dueStarts, versionLabel, type DueStart} from '@tsp/domain';
-import {busy, getApp, once, optimiserLock, tm} from './app.ts';
+import {autoSpendUsd, dueStarts, versionLabel, type DueStart, systemConfig, msg} from '@tsp/domain';
+import {busy, getApp, once, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {buildReport, labelEvalSet} from './evaluation.ts';
 import {modelName} from './page-views.ts';
-import {newRun, optimiserActive, runOptimiser} from './optimiser.ts';
-import {approveNode, loadProjectState} from './projects.ts';
+import {loadProjectState} from './projects.ts';
+import {lockHoldout} from './governance.ts';
 
 /**
  * Background work that runs from the open page. The bff decides when labeling starts (system
@@ -51,7 +51,7 @@ async function autoStart(state: ProjectState, d: DueStart) {
   const v = state.versions.find(x => x.id === d.versionId);
   if (!v) return;
   void once(`auto:${d.key}`, () => scoreVersion(projectId, v, d.endpoint, {auto: true}));
-  await postEvent(projectId, 'auto', 'workflow', `started scoring ${versionLabel(v)} on ${model}`, {path: '/prompt'});
+  await postEvent(projectId, 'auto', 'workflow', msg('started scoring {version} on {model}', {version: versionLabel(v), model}), {path: '/prompt'});
   await catalog.audit(projectId, 'system', 'auto_start', {what: d.what, version: d.versionId, endpoint: d.endpoint, estimateUsd: d.estimateUsd, autoSpendUsd: spent});
   tm().counter('tsp_auto_starts_total', {what: d.what, decision: 'started'});
   tm().event('auto_started', {what: d.what, estimate_usd: d.estimateUsd, project_auto_spend_usd: spent});
@@ -63,20 +63,13 @@ export async function tick(state: ProjectState) {
 
   // An optimiser loop left "running" by a closed page shows as paused. One still running in
   // another tab holds its lock, so it is left alone.
+  const {optimiser} = getApp();
   for (const o of state.optimisation) {
-    if (o.state !== 'running' || optimiserActive(o.id) || busy('optimiser')) continue;
+    if (o.state !== 'running' || !optimiser || (await optimiser.isRunning(o.id))) continue;
     if (await getApp().locks.isHeld(optimiserLock(projectId, o.endpoint))) continue;
-    const fresh = await catalog.get('optimisation_runs', o.id);
-    if (fresh?.state === 'running' && !optimiserActive(o.id)) await catalog.patch('optimisation_runs', o.id, {state: 'paused'});
+    const fresh = await optimiser.getRun(o.id);
+    if (fresh?.state === 'running' && !(await optimiser.isRunning(o.id))) await catalog.patch('optimisation_runs', o.id, {state: 'paused'});
   }
-  // The project is finished once the training set is done and the test set is done too (or there
-  // is no test set): recorded once, like any step approval.
-  const nTest = state.examples.filter(e => e.split === 'test').length;
-  const testDone = nTest === 0 || state.testRuns[0]?.state === 'done';
-  if (state.trainingSets[0]?.state === 'done' && testDone && !state.project.approvedNodes.includes('training')) {
-    void once(`finish:${projectId}`, () => approveNode(projectId, 'training'));
-  }
-
   // A task left running by a closed page shows as paused (listTasks marks it).
   await labeling.listTasks(projectId);
 
@@ -104,30 +97,30 @@ export async function tick(state: ProjectState) {
  * project), from `startVersionId` (the version selected in the list; left out: the best scored
  * version). `auto`: an agent's start tool, after the user asked in Ask AI.
  */
-export async function startOptimiser(projectId: string, maxRounds = DEFAULT_MAX_ROUNDS, startVersionId?: string, opts: {auto?: boolean} = {}): Promise<void> {
+export async function startOptimiser(projectId: string, maxRounds = systemConfig().optimiser.defaultMaxRounds, startVersionId?: string, opts: {auto?: boolean} = {}): Promise<void> {
   const state = await loadProjectState(projectId);
   const endpoint = state?.setup?.models[0]?.endpoint;
-  if (!state || !endpoint) throw new Error('Pick a model in Setup first.');
-  const rounds = Math.max(1, Math.min(50, Math.round(maxRounds) || DEFAULT_MAX_ROUNDS));
-  await once('optimiser', async () => {
-    // The lock covers every tab of this browser: a second tab never runs the same work twice.
-    await getApp().locks.run(optimiserLock(projectId, endpoint), async () => {
-      const open = (await loadProjectState(projectId))?.optimisation.find(o => o.state === 'running' || o.state === 'paused');
-      if (open) return runOptimiser(open, {resumed: true});
-      const run = await newRun(projectId, endpoint, rounds, {...opts, startVersionId});
-      if (!opts.auto) await postEvent(projectId, 'start', 'user', `started the Optimiser for up to ${rounds} rounds`, {path: '/prompt'});
-      return runOptimiser(run);
-    });
-  });
+  if (!state || !endpoint) throw new Error('Pick a labeling model in Project Settings first.');
+  // The Optimiser reads examples: the halves are fixed from here on (spec 1.0.0, 4.2).
+  await lockHoldout(projectId);
+  await optimiserService().startRun({projectId, endpoint, maxRounds, startVersionId, auto: opts.auto});
+}
+
+/** The user's Stop on a run. */
+export function stopOptimiser(runId: string): void {
+  void optimiserService().stopRun(runId);
 }
 
 /** Retry on a Failed run, or Resume on a paused one: goes on from the step it stopped at. */
 export async function retryOptimiser(runId: string): Promise<void> {
-  const run = await getApp().catalog.get('optimisation_runs', runId);
-  if (!run || !['failed', 'paused', 'running'].includes(run.state) || optimiserActive(runId)) return;
-  await once('optimiser', async () => {
-    await getApp().locks.run(optimiserLock(run.projectId, run.endpoint), () => runOptimiser(run, {resumed: true}));
-  });
+  await optimiserService().retryRun(runId);
 }
 
-export const optimiserBusy = () => busy('optimiser');
+function optimiserService() {
+  const {optimiser} = getApp();
+  if (!optimiser) throw new Error('The Optimiser is not available here.');
+  return optimiser;
+}
+
+/** The lock an optimiser run on one model holds for as long as it runs, in any tab (the name `@tsp/optimiser` uses). */
+const optimiserLock = (projectId: string, endpoint: string) => `optimiser:${projectId}:${endpoint}`;
