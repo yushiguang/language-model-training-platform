@@ -82,3 +82,11 @@ test('contract: every response is plain JSON (it survives a round trip unchanged
   const state = (await api.loadProjectState(projectId))!;
   assert.equal(Object.keys(state.gold).length, 4);
 });
+
+test('contract: a failed call is not kept under its idempotency key, so a retry runs again', async () => {
+  const {api, projectId} = await world('api5');
+  const req = {projectId, structured: structured(), parentId: 'pv_missing', madeBy: 'user' as const, change: '', kind: 'minor' as const, idempotencyKey: 'k-fail'};
+  await assert.rejects(api.createVersion(req));
+  const ok = await api.createVersion({...req, parentId: null, kind: 'major'});
+  assert.ok(ok.id);
+});

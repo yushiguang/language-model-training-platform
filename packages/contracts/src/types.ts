@@ -636,7 +636,8 @@ export interface ProjectState {
   gold: Record<string, GoldLabel>;
   staleGold: Record<string, GoldLabel>;
   versions: PromptVersion[];
-  reports: (EvalReport & {passed: boolean; archivedNow: boolean})[];
+  /** `rough`: fewer gold-labeled eval examples than `thresholds.minEval`, so no pass verdict (spec 1.0.0, 4.2). */
+  reports: (EvalReport & {passed: boolean; rough: boolean; archivedNow: boolean})[];
   /** Eval and optimiser labeling (started by code). */
   runs: LabelingRun[];
   optimisation: OptimisationRun[];

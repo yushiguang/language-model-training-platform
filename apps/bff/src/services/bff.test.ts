@@ -154,7 +154,9 @@ test('agent start tools start at once, with no card, and leave an action line', 
 
 test('nothing is scored by itself until Project Settings are confirmed and enough gold labels exist (spec 2.5)', async () => {
   const unconfirmed = await world('b8', {confirmed: false});
-  await unconfirmed.newVersion();
+  const first = await unconfirmed.newVersion();
+  // The helpers' start tools keep the same guardrails (review 2026-11-13).
+  await assert.rejects(agentStart(unconfirmed.projectId, 'prompt_agent', 'score_version', {version: first.id}), /Project Settings are not confirmed/);
   await tick(await unconfirmed.state());
   await new Promise(r => setTimeout(r, 30));
   assert.equal(unconfirmed.calls.n, 0);
@@ -167,7 +169,9 @@ test('nothing is scored by itself until Project Settings are confirmed and enoug
   await until(async () => (await unconfirmed.state()).runs[0]?.state === 'done', 'scoring after the confirmation');
 
   const noGold = await world('b9', {gold: null});
-  await noGold.newVersion();
+  const nv = await noGold.newVersion();
+  await assert.rejects(agentStart(noGold.projectId, 'prompt_agent', 'start_optimiser', {}), /gold-labeled eval examples/);
+  await assert.rejects(agentStart(noGold.projectId, 'prompt_agent', 'score_version', {version: nv.id}), /gold-labeled eval examples/);
   await tick(await noGold.state());
   await new Promise(r => setTimeout(r, 30));
   assert.equal(noGold.calls.n, 0);

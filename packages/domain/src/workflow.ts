@@ -124,6 +124,15 @@ export function aiSuggestion(s: ProjectState, x: SuggestionInput = {}): AiSugges
   }
   if (!best) return null;
 
+  // A rough reading (spec 1.0.0, 4.2): too few gold labels for a pass verdict, so the next step
+  // is more labels, or more examples when the eval set is smaller than the minimum.
+  if (best.rough && !passing) {
+    const need = t.minEval;
+    return total >= need
+      ? {template: 'T2', title: 'Finish labeling the eval set', text: `${s.facts.goldEvalDone} of ${total} eval examples are labeled. Scores stay a rough reading until ${need} are labeled.`, actions: ['go_gold', 'auto_optimise'], versionId: best.promptVersionId}
+      : {template: 'T2', title: 'Add examples to the eval set', text: `The eval set has ${total} examples. Scores stay a rough reading until ${need} examples have a gold label.`, actions: ['add_examples', 'auto_optimise'], versionId: best.promptVersionId};
+  }
+
   if (passing) {
     return {
       template: 'T6',
@@ -153,7 +162,7 @@ export function aiSuggestion(s: ProjectState, x: SuggestionInput = {}): AiSugges
   const confusion = !mu ? '' : mu.kind === 'confused' ? `; top confusion is ${mu.gold} -> ${mu.predicted}` : mu.kind === 'extra' ? `; ${mu.predicted} is often added when it does not apply` : `; ${mu.gold} is often missed`;
   const lw = best.metrics.lowestField;
   // The lowest field can be at the bar while another check fails: name that check then.
-  const failing = judge(best.metrics, t, total).checks.find(c => !c.met);
+  const failing = judge(best.metrics, t, s.facts.goldEvalDone).checks.find(c => !c.met);
   const why = lw.macroF1 < t.macroF1 || !failing ? `Current score is ${lw.macroF1.toFixed(2)} (target ${t.macroF1.toFixed(2)})` : `${failing.label} is ${failing.actual} (needs ${failing.need})`;
   return {
     template: 'T4',

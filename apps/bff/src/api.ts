@@ -28,6 +28,8 @@ function idempotent<T>(method: string, key: string | undefined, fn: () => Promis
   if (earlier) return earlier as Promise<T>;
   const p = fn();
   seen.set(k, p);
+  // A failed call may be retried with the same key: only a success is kept.
+  p.catch(() => seen.delete(k));
   if (seen.size > KEPT_KEYS) seen.delete(seen.keys().next().value!);
   return p;
 }

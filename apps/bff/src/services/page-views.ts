@@ -111,7 +111,7 @@ function reportView(state: ProjectState, v: PromptVersion | undefined, model: En
   if (!r) return {report: null, why: v ? `${versionLabel(v)} has no report${model ? ` on ${modelName(state, model)}` : ''} yet.` : 'No version has a report yet.'};
   const ver = state.versions.find(x => x.id === r.promptVersionId)!;
   const t = state.setup?.thresholds;
-  const nEval = state.examples.filter(e => e.split === 'eval').length;
+  const nEval = state.facts.goldEvalDone;
   const trend = state.reports
     .filter(x => x.endpoint === r.endpoint && !x.archivedNow)
     .map(x => ({version: versionLabel(state.versions.find(v2 => v2.id === x.promptVersionId)!), lowestFieldMacroF1: r2(x.metrics.lowestField.macroF1), passed: x.passed}))
@@ -127,6 +127,8 @@ function reportView(state: ProjectState, v: PromptVersion | undefined, model: En
       invalid: r.metrics.invalid,
       filtered: r.metrics.filtered ?? 0,
       passed: r.passed,
+      // Under the minimum gold-labeled examples the score is a rough reading and never passes.
+      roughReading: r.rough,
       confirmed: confirmedOf(state, ver.id),
       fields: r.metrics.fields.map(f => ({field: f.field, kind: f.kind, macroF1: r2(f.macroF1), accuracy: r2(f.accuracy), weakestValues: [...f.values].sort((a, b) => a.f1 - b.f1).slice(0, 3).map(x => ({value: x.value, f1: r2(x.f1)}))})),
       lowestField: {field: r.metrics.lowestField.field, macroF1: r2(r.metrics.lowestField.macroF1)},

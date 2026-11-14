@@ -325,6 +325,10 @@ export function Badge({text, tone = 'gray', icon = true}: {text: string; tone?: 
 }
 export const Passed = () => <Badge text="Passed" tone="ok" />;
 export const Below = () => <Badge text="Below" tone="err" />;
+/** Fewer gold-labeled eval examples than the project's minimum: no pass verdict yet (spec 1.0.0, 4.2). */
+export const Rough = ({need}: {need: number}) => (
+  <Hov text={<Badge text="Rough reading" tone="gray" icon={false} />} tip={`Fewer than ${need} eval examples have a gold label, so this score can move a lot and gives no pass. Label more examples for a firm score`} />
+);
 
 // ---------- numbers ----------
 export function Metric({label, value, unit, tone, size = 'md'}: {label?: ReactNode; value: ReactNode; unit?: string; tone?: 'ok' | 'err'; size?: 'md' | 'lg'}) {
@@ -341,7 +345,8 @@ export function Metric({label, value, unit, tone, size = 'md'}: {label?: ReactNo
 export function Metrics({children, vertical}: {children: ReactNode; vertical?: boolean}) {
   return <div className={`metrics${vertical ? ' v' : ''}`}>{children}</div>;
 }
-export const Score = ({v, ok}: {v: number; ok: boolean}) => <b className={`t-${ok ? 'ok' : 'err'}`}>{v.toFixed(2)}</b>;
+/** A score in green (passes) or red (below); `ok` null: a rough reading, with no verdict, so no colour. */
+export const Score = ({v, ok}: {v: number; ok: boolean | null}) => <b className={ok == null ? undefined : `t-${ok ? 'ok' : 'err'}`}>{v.toFixed(2)}</b>;
 export const Code = ({children}: {children: ReactNode}) => <span className="code">{children}</span>;
 
 /** A word with a dashed underline whose detail shows on hover. */
@@ -374,7 +379,7 @@ function useTip() {
   return {at, id, show, hide: () => setAt(null), pop};
 }
 
-export function Hov({text, tip}: {text: string; tip: string}) {
+export function Hov({text, tip}: {text: ReactNode; tip: string}) {
   const ref = useRef<HTMLSpanElement>(null);
   const t = useTip();
   const show = () => t.show(ref.current);

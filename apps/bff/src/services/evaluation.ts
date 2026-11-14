@@ -171,7 +171,7 @@ export async function confirmScore(setup: SetupVersion, version: PromptVersion, 
   const held = evalExamples.filter(e => !e.optimiserHalf && !!gold[e.id]);
   if (held.some(e => !byExample.has(e.id))) throw new Error('the second labeling is missing answers');
   const m = computeMetrics(setup.schema!, held.map(e => ({exampleId: e.id, gold: gold[e.id].answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd})));
-  return {score: m.lowestField.macroF1, passed: !!setup.thresholds && judge(m, setup.thresholds, evalExamples.length).passed};
+  return {score: m.lowestField.macroF1, passed: !!setup.thresholds && judge(m, setup.thresholds, evalExamples.filter(e => !!gold[e.id]).length).passed};
 }
 
 /** Scores a candidate on the optimiser's own half (used inside the optimiser loop only). */

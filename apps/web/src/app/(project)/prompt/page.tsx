@@ -9,7 +9,7 @@ import {useProject} from '@/components/ProjectContext';
 import {ScoreChart} from '@/components/prompt/ScoreChart';
 import {useSettings} from '@/components/ProjectSettings';
 import {approveNode, improveWithAi, mismatches, predictionsFor, retryOptimiser, scoreVersion, startOptimiser, stopOptimiser, rebuildReports, stopRun, track, type ProjectState} from '@/backend-api';
-import {Badge, Banner, Below, Button, Card, Code, dateTime, Dialog, Empty, Hov, Icon, IconToggle, Metric, num, One, Opt, PageHead, Passed, Progress, reportActionError, Score, Seg, Suggestion, Table, timeOfDay, useCopy} from '@/ui';
+import {Badge, Banner, Below, Rough, Button, Card, Code, dateTime, Dialog, Empty, Hov, Icon, IconToggle, Metric, num, One, Opt, PageHead, Passed, Progress, reportActionError, Score, Seg, Suggestion, Table, timeOfDay, useCopy} from '@/ui';
 import {LabelDistribution, labelCounts} from '@/components/LabelDistribution';
 import {fieldRows, modelName, reportFor, runsFor, versionScore} from '@/components/prompt/scores';
 
@@ -125,7 +125,7 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
 
   const scored = list.map(v => ({v, s: versionScore(state, v.id)}));
   const best = scored.filter(x => x.s).sort((a, b) => b.s!.score - a.s!.score)[0];
-  const points = [...scored].reverse().flatMap(({v, s}) => (s ? [{label: versionLabel(v), score: s.score, passed: s.passed}] : []));
+  const points = [...scored].reverse().flatMap(({v, s}) => (s ? [{label: versionLabel(v), score: s.score, passed: s.passed && !s.rough}] : []));
   const selInfo = info.get(sel.id);
   const selDropped = selInfo?.round.outcome === 'dropped';
   const selRunning = runsFor(state, sel.id).some(r => r.state === 'running' && r.purpose !== 'optimiser');
@@ -133,7 +133,7 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
   const selNoGold = !showPanel && !selDropped && !selRunning && !versionScore(state, sel.id) && labeledRuns(state, sel.id).length > 0;
   const pick = (id: string) => choose(run && id === run.stepVersionId ? null : id);
 
-  const rowRight = (v: PromptVersion, s: {score: number; passed: boolean} | null) => {
+  const rowRight = (v: PromptVersion, s: {score: number; passed: boolean; rough: boolean} | null) => {
     const o = info.get(v.id)?.round;
     const lab = labeledRuns(state, v.id)[0];
     if (o?.outcome === 'running' || runsFor(state, v.id).some(r => r.state === 'running' && r.purpose !== 'optimiser')) return <Badge text="Running" tone="run" />;
@@ -144,7 +144,7 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
         </span>
       );
     if (o?.outcome === 'stopped') return <Badge text="Stopped" icon={false} />;
-    if (s) return <Score v={s.score} ok={s.passed} />;
+    if (s) return <Score v={s.score} ok={s.rough ? null : s.passed} />;
     if (lab)
       return (
         <span className="t-3" style={{fontSize: 13}}>
@@ -172,7 +172,7 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
           <button key={g.major} type="button" className="vrow" aria-current={g.versions.some(v => v.id === sel.id)} onClick={() => pick(g.pick.id)}>
             <span className="v">v{g.major}</span>
             <span style={{display: 'inline-flex', gap: 6, alignItems: 'center'}}>{g.optimiser && optTag}</span>
-            {g.best ? <Score v={g.best.score} ok={g.best.passed} /> : rowRight(g.pick, null)}
+            {g.best ? <Score v={g.best.score} ok={g.best.rough ? null : g.best.passed} /> : rowRight(g.pick, null)}
           </button>
         ));
   const hasOptimiser = state.versions.some(v => v.madeBy === 'optimiser');
@@ -299,8 +299,8 @@ function RightColumn({advice, children}: {advice: ReactNode; children: (box: Box
 }
 
 /** Major view: one row per major version, with its best score; a click opens its best version. */
-function majors(scored: {v: PromptVersion; s: {score: number; passed: boolean} | null}[], info: ReturnType<typeof optimiserVersions>) {
-  const groups = new Map<number, {v: PromptVersion; s: {score: number; passed: boolean} | null}[]>();
+function majors(scored: {v: PromptVersion; s: {score: number; passed: boolean; rough: boolean} | null}[], info: ReturnType<typeof optimiserVersions>) {
+  const groups = new Map<number, {v: PromptVersion; s: {score: number; passed: boolean; rough: boolean} | null}[]>();
   for (const x of scored) groups.set(x.v.major, [...(groups.get(x.v.major) ?? []), x]);
   return [...groups.entries()]
     .sort((a, b) => b[0] - a[0])
@@ -490,9 +490,14 @@ function EndLine({state, run, top, label, onShow}: {state: ProjectState; run: Op
   const need = state.setup?.thresholds?.macroF1.toFixed(2) ?? '–';
   const passes = versionScore(state, top.id!)?.passed;
   const tried = run.history.length;
-  const text = won ? `${best} beat ${start}: ${top.s!.toFixed(2)} against ${startScore?.toFixed(2) ?? '–'}` : `No change beat ${start}. ${start} is still the best at ${top.s!.toFixed(2)}`;
+  const rough = !!versionScore(state, top.id!)?.rough;
+  const said = won ? `${best} beat ${start}: ${top.s!.toFixed(2)} against ${startScore?.toFixed(2) ?? '–'}` : `No change beat ${start}. ${start} is still the best at ${top.s!.toFixed(2)}`;
+  // Too few gold labels for a verdict (spec 1.0.0, 4.2): the end line says the result is rough.
+  const text = rough ? `${said}, a rough reading` : said;
   const tip = won
-    ? `The best change this run kept.${passes ? '' : ` It does not pass yet (needs ${need})`}`
+    ? rough
+      ? `The best change this run kept. Fewer than ${state.setup?.thresholds?.minEval ?? 20} eval examples have a gold label, so the scores are rough and nothing can pass yet`
+      : `The best change this run kept.${passes ? '' : ` It does not pass yet (needs ${need})`}`
     : `None of the ${tried} ${tried === 1 ? 'change' : 'changes'} scored higher than ${start}, or they were dropped in the dry run. Changing the wording more may not help: check your labels on the examples every version gets wrong`;
   return (
     <div className="row" style={{gap: 8, padding: '16px 0 8px', fontSize: 15, lineHeight: '22px', alignItems: 'center'}}>
@@ -690,9 +695,9 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
   return (
     <Card className={box.className} style={box.style}>
       <div style={{display: 'flex', alignItems: 'flex-end', gap: 16, paddingBottom: 16}}>
-        <Metric label={named('Lowest field macro-F1')} value={rep.metrics.lowestField.macroF1.toFixed(2)} unit={`/ ${+t.macroF1.toFixed(2)}`} tone={rep.passed ? 'ok' : 'err'} size="lg" />
+        <Metric label={named('Lowest field macro-F1')} value={rep.metrics.lowestField.macroF1.toFixed(2)} unit={`/ ${+t.macroF1.toFixed(2)}`} tone={rep.rough ? undefined : rep.passed ? 'ok' : 'err'} size="lg" />
         <div style={{display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 9}}>
-          {rep.passed ? <Passed /> : <Below />}
+          {rep.rough ? <Rough need={t.minEval} /> : rep.passed ? <Passed /> : <Below />}
           <span className="t-3" style={{fontSize: 13}}>
             Created {dateTime(v.createdAt)}
           </span>
@@ -701,7 +706,7 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
       </div>
       <Table
         cols={[{label: 'Field'}, {label: named('Macro-F1'), kind: 'c'}, {label: 'Precision', kind: 'c'}, {label: 'Recall', kind: 'c'}, {label: 'Result', kind: 'c'}]}
-        rows={rows.map(r => ({key: r.field, cells: [<Code key="f">{r.field}</Code>, <Score key="s" v={r.f1} ok={r.passed} />, r.precision.toFixed(2), r.recall.toFixed(2), r.passed ? <Passed key="p" /> : <Below key="b" />]}))}
+        rows={rows.map(r => ({key: r.field, cells: [<Code key="f">{r.field}</Code>, <Score key="s" v={r.f1} ok={rep.rough ? null : r.passed} />, r.precision.toFixed(2), r.recall.toFixed(2), rep.rough ? <span key="p" className="t-3">–</span> : r.passed ? <Passed key="p" /> : <Below key="b" />]}))}
       />
       <LeftOut m={rep.metrics} cap={t.invalidRate ?? systemConfig().evaluation.invalidRateCap} />
     </Card>

@@ -105,7 +105,12 @@ export interface CheckLine {
 }
 
 /** Pass or fail is judged against the current thresholds, so a threshold change re-judges old reports without new labeling. */
-export function judge(m: Metrics, t: Thresholds, evalCount: number): {passed: boolean; checks: CheckLine[]} {
+/**
+ * Whether a report passes the thresholds. `labeledCount` is the number of gold-labeled eval
+ * examples (both halves): under `t.minEval` the score is a rough reading (spec 1.0.0, 4.2) and
+ * never passes, however high it is.
+ */
+export function judge(m: Metrics, t: Thresholds, labeledCount: number): {passed: boolean; rough: boolean; checks: CheckLine[]} {
   const checks: CheckLine[] = [];
   checks.push({label: 'Lowest field macro-F1', actual: m.lowestField.macroF1.toFixed(2), need: `≥ ${t.macroF1.toFixed(2)}`, met: m.lowestField.macroF1 >= t.macroF1});
   if (t.valueF1 != null) checks.push({label: 'Lowest value F1', actual: m.lowestValue ? m.lowestValue.f1.toFixed(2) : '–', need: `≥ ${t.valueF1.toFixed(2)}`, met: !m.lowestValue || m.lowestValue.f1 >= t.valueF1});
@@ -122,10 +127,11 @@ export function judge(m: Metrics, t: Thresholds, evalCount: number): {passed: bo
     const lo = singles.length ? Math.min(...singles.map(f => f.accuracy)) : 1;
     checks.push({label: 'Accuracy, single-select fields', actual: lo.toFixed(2), need: `≥ ${t.accuracy.toFixed(2)}`, met: lo >= t.accuracy});
   }
-  // The eval set's size is the setting; the score itself rests on the held-out half (m.n), said
-  // in the label so the check does not read as the score's base (review finding 1).
-  checks.push({label: `Eval examples (the score uses ${m.n} of the ${m.total ?? m.n} held out)`, actual: String(evalCount), need: `≥ ${t.minEval}`, met: evalCount >= t.minEval});
-  return {passed: checks.every(c => c.met), checks};
+  // Gold-labeled eval examples, not the dataset's size (review 2026-11-13): 90 sampled examples
+  // with 4 gold labels are still a rough reading. The score itself rests on the held-out half.
+  const rough = labeledCount < t.minEval;
+  checks.push({label: `Gold-labeled eval examples (the score uses ${m.n} of the ${m.total ?? m.n} held out)`, actual: String(labeledCount), need: `≥ ${t.minEval}`, met: !rough});
+  return {passed: checks.every(c => c.met), rough, checks};
 }
 
 export const pct = (x: number) => `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;

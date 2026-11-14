@@ -1,5 +1,5 @@
 import type {AgentPreset, ChatLink, EndpointId, ProjectState} from '@tsp/contracts';
-import {autoSpendUsd, compilePrompt, readStructured, evalEstimate, optimiserEstimate, versionLabel, visibleToAgents, systemConfig} from '@tsp/domain';
+import {autoSpendUsd, canScore, compilePrompt, readStructured, evalEstimate, optimiserEstimate, versionLabel, visibleToAgents, systemConfig} from '@tsp/domain';
 import {getApp, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {asModel, findVersion, modelName} from './page-views.ts';
@@ -33,6 +33,12 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
     if (!m || !models.some(x => x.endpoint === m)) throw new Error(`${String(args.model)} is not the project's labeling model. It is ${models.map(x => modelName(state, x.endpoint)).join(', ')}.`);
     return m;
   };
+  // The same guardrails as the page buttons and the auto-start manager (review 2026-11-13).
+  if (!state.facts.settingsConfirmed) throw new Error('Project Settings are not confirmed yet. Ask the user to open Settings at the top of the page and confirm them first; nothing paid starts before that.');
+  if (tool !== 'try_prompt' && !canScore(state.facts)) {
+    const need = systemConfig().dataset.minEvalHard;
+    throw new Error(`Scoring needs at least ${need} gold-labeled eval examples, 2 in each half (${state.facts.goldEvalDone} labeled so far). Ask the user to finish labeling on Gold Labels first.`);
+  }
   switch (tool) {
     case 'try_prompt': {
       if (!state.setup?.schema) throw new Error('The labels are not set up yet.');

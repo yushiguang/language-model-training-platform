@@ -136,7 +136,7 @@ export function parseRawPrompt(raw: string, base: StructuredPrompt): {structured
       if (/\b(return|respond|output)\b.*\bjson\b/i.test(line)) unmapped.push(line);
       else task.push(line);
     } else {
-      const v = line.match(/^[-*]\s*["“]?([^:"”]{1,40})["”]?\s*[:：]\s*(.+)$/);
+      const v = line.match(/^[-*]\s*["\u201c]?([^:"\u201d]{1,40})["\u201d]?\s*[:\uff1a]\s*(.+)$/);
       if (v) sec.field.values.push({name: v[1].trim(), definition: v[2].trim()});
       else if (/\b(return|respond|output)\b.*\bjson\b/i.test(line)) unmapped.push(line);
       else sec.extra.push(line.replace(/^[-*]\s*/, ''));

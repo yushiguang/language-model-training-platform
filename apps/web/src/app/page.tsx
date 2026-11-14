@@ -5,6 +5,7 @@ import {useGo} from '@/components/nav';
 import {useEffect, useState} from 'react';
 import type {Project} from '@tsp/contracts';
 import {hrefFor} from '@/components/ProjectContext';
+import {NODES} from '@tsp/domain';
 import {UserEnd} from '@/components/Shell';
 import {createProject, deleteProject, listProjects} from '@/backend-api';
 import {Banner, Button, Card, dateTime, Dialog, Field, Icon, PageHead, Table} from '@/ui';
@@ -107,7 +108,7 @@ export default function Home() {
                     rows={projects.map(p => ({
                       key: p.id,
                       cells: [
-                        <Link key="n" className="one" href={hrefFor(p.id, '/prompt')} title={p.name}>
+                        <Link key="n" className="one" href={hrefFor(p.id, (NODES.find(n => !p.approvedNodes.includes(n.id)) ?? NODES[NODES.length - 1]).path)} title={p.name}>
                           {p.name}
                         </Link>,
                         <span key="d" className="t-3">
