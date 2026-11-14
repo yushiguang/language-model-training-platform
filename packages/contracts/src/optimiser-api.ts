@@ -1,4 +1,3 @@
-import type {AgentToolHost} from './agent-api.ts';
 import type {LabelingTask} from './labeling-api.ts';
 import type {ChatEvent, ChatLink, EndpointId, EvalReport, MixUp, OptimisationRun, ProjectState, PromptVersion, StructuredPrompt} from './types.ts';
 
@@ -71,10 +70,8 @@ export interface OptimiserHost {
   halfScore(req: {projectId: string; promptVersionId: string; endpoint: EndpointId}): Promise<HalfScore>;
   /** Saves a change as the next minor of the run's major. */
   createVersion(req: {projectId: string; structured: StructuredPrompt; parentId: string; change: string; inMajor: number}): Promise<PromptVersion>;
-  /** The labelers' notes the helpers may read, by example id (optimiser half only). */
-  labelerNotes(projectId: string): Promise<Record<string, string>>;
-  /** The read tools lent to the helper that writes a change. */
-  tools(projectId: string): AgentToolHost;
+  /** People's comments the helpers may read, by example id, oldest first (optimiser half only). */
+  labelComments(projectId: string): Promise<Record<string, string[]>>;
   /** A grey action line in the project's Ask AI conversation. */
   postEvent(req: {projectId: string; event: ChatEvent; actor: 'user' | 'workflow'; what: string; link?: ChatLink}): Promise<void>;
 }

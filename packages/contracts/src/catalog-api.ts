@@ -2,11 +2,13 @@ import type {DocUpdatePatch} from './platform-api.ts';
 import type {
   AgentProposal,
   ChatMessage,
+  DatasetRemoval,
   DatasetSnapshot,
   EvalReport,
   Example,
   GateApproval,
   GoldLabel,
+  LabelComment,
   OptimisationRun,
   Project,
   PromptVersion,
@@ -37,6 +39,8 @@ export interface CatalogRecords {
   dataset_snapshots: DatasetSnapshot;
   examples: Example;
   gold_labels: GoldLabel;
+  dataset_removals: DatasetRemoval;
+  label_comments: LabelComment;
   prompt_versions: PromptVersion;
   eval_reports: EvalReport;
   optimisation_runs: OptimisationRun;

@@ -1,10 +1,11 @@
-import {DocFieldValue, type GateApproval, type NodeId, type Project, type ProjectState, type WorkflowFacts} from '@tsp/contracts';
+import {DocFieldValue, type GateApproval, type LabelComment, type NodeId, type Project, type ProjectState, type WorkflowFacts} from '@tsp/contracts';
 import {compareVersions, contextIdFor, gate, judge, newId, scoresUpdating} from '@tsp/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {getSamplingTask, stopSampleDataset} from './dataset.ts';
 import {cannotBuild, latestGold} from './evaluation.ts';
 import {runView} from './views.ts';
 import {initSettings} from './settings.ts';
+import {balanceHalves} from './governance.ts';
 
 export type {ProjectState};
 
@@ -40,7 +41,7 @@ export async function loadProjectState(projectId: string): Promise<ProjectState 
     project.snapshotId ? catalog.get('dataset_snapshots', project.snapshotId) : null,
   ]);
   const schemaVersion = setup?.schemaVersion ?? 0;
-  const [examples, {current: gold, stale: staleGold}, rawVersions, rawReports, tasks, optimisation, autoSpend] = await Promise.all([
+  const [allExamples, {current: gold, stale: staleGold}, rawVersions, rawReports, tasks, optimisation, autoSpend, rawRemovals, rawComments] = await Promise.all([
     snapshot ? catalog.find('examples', {snapshotId: snapshot.id}, 'externalId') : [],
     latestGold(projectId, schemaVersion),
     catalog.find('prompt_versions', {projectId}),
@@ -48,7 +49,14 @@ export async function loadProjectState(projectId: string): Promise<ProjectState 
     labeling.listTasks(projectId),
     catalog.find('optimisation_runs', {projectId}, 'startedAt desc'),
     catalog.find('audit_log', {projectId, action: 'auto_spend'}),
+    catalog.find('dataset_removals', {projectId}, 'removedAt desc'),
+    catalog.find('label_comments', {projectId}, 'createdAt'),
   ]);
+  // Removed examples stay in the store with their trail (spec 1.0.0, 4.4) and leave every count.
+  const examples = allExamples.filter(e => !e.removed);
+  const removals = rawRemovals.filter(r => !r.restoredAt);
+  const comments: Record<string, LabelComment[]> = {};
+  for (const c of rawComments) (comments[c.exampleId] ??= []).push(c);
   const versions = rawVersions.sort((a, b) => compareVersions(b, a));
   const evalExamples = examples.filter(e => e.split === 'eval');
   const contextId = contextIdFor(schemaVersion, evalExamples, gold);
@@ -88,6 +96,8 @@ export async function loadProjectState(projectId: string): Promise<ProjectState 
     contextId,
     endpoints: gateway.labelingEndpoints(),
     samplingTask: getSamplingTask(projectId),
+    removals,
+    comments,
     otherAutoSpendUsd: autoSpend.reduce((n, a) => n + Number((a.data as {costUsd?: number}).costUsd ?? 0), 0),
   };
   return {...out, scoresUpdating: scoresUpdating(out, cannotBuild)};
@@ -111,6 +121,9 @@ export async function approveNode(projectId: string, node: NodeId): Promise<void
   tm().counter('tsp_gate_actions_total', {node, action: 'approve'});
   const project = await catalog.get('projects', projectId);
   if (project) tm().event('step_reached', {node, minutes_since_project_created: Math.round((Date.now() - Date.parse(project.createdAt)) / 60000)});
+  // Leaving Gold Labels: while no helper has read an example, the halves are balanced again by
+  // gold label, so rare values are scored on in both halves (spec 1.0.0, 4.2).
+  if (node === 'gold') await balanceHalves(projectId);
   // Finish on Prompt Tuning ends the project.
   if (project && node === 'prompt') {
     tm().event('project_finished', {minutes_since_created: Math.round((Date.now() - Date.parse(project.createdAt)) / 60000), total_cost_usd: Number(state.runs.reduce((n, r) => n + r.costUsd, 0).toFixed(4)), versions: state.versions.length, gold_labels: Object.keys(state.gold).length});

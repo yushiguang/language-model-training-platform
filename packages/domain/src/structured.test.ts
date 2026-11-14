@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {checkStructured, checkTemplate, compilePrompt, partsToText, renderPrompt, SAMPLE_SCHEMA, sameSignature, signatureOf, structuredChangeSummary, structuredFromSchema, parseOutput, schemaOf} from './index.ts';
+import {checkStructured, checkTemplate, compilePrompt, partsToText, renderPrompt, SAMPLE_SCHEMA, sameSignature, signatureOf, structuredChangeSummary, structuredFromSchema, parseOutput, schemaOf, toFeatures} from './index.ts';
 
 const prompt = () => ({...structuredFromSchema(SAMPLE_SCHEMA, 'Tag short videos for a recommendation team.'), generalRules: 'When the evidence is thin, prefer Other.'});
 
@@ -21,11 +21,11 @@ test('compilePrompt: the same parts always give the same text, and the editor ch
 test('compilePrompt: a feature line is left out for a type that does not load it, and an empty feature reads "none"', () => {
   const p = prompt();
   const text = compilePrompt(p);
-  const video = partsToText(renderPrompt(text, {type: 'video', features: {Description: 'A day out', OCR_Text: ''}}, p.features, p.images));
+  const video = partsToText(renderPrompt(text, {type: 'video', features: toFeatures({Description: 'A day out', OCR_Text: ''})}, p.features, p.images));
   assert.match(video, /Description: A day out/);
   assert.match(video, /OCR Text: none/);
   assert.ok(!video.includes('Title:'), 'Title is ticked for photo and text only');
-  const photo = partsToText(renderPrompt(text, {type: 'photo_text', features: {Title: 'Soup'}}, p.features, p.images));
+  const photo = partsToText(renderPrompt(text, {type: 'photo_text', features: toFeatures({Title: 'Soup'})}, p.features, p.images));
   assert.match(photo, /Title: Soup/);
   assert.ok(!photo.includes('ASR:'));
 });

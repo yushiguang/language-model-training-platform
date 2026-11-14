@@ -8,6 +8,7 @@
 import Link, {useLinkStatus} from 'next/link';
 import {createPortal} from 'react-dom';
 import {createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode} from 'react';
+import {systemConfig} from '@tsp/domain';
 
 /** Mounted once around the app. The kit needs no theme provider; this only sets the root class. */
 export function UiProvider({children}: {children: ReactNode}) {
@@ -285,8 +286,12 @@ export function Button({
     if (r instanceof Promise) {
       setBusy(true);
       group?.set(true);
+      // Motion M1: a fast answer still shows the spinner for a moment, so the press registers.
+      const t0 = Date.now();
       try {
         await r;
+        const left = systemConfig().ui.minActionPendingMs - (Date.now() - t0);
+        if (left > 0) await new Promise(res => setTimeout(res, left));
         clearActionError();
       } catch (e) {
         failed(e);
@@ -357,7 +362,7 @@ export const Code = ({children}: {children: ReactNode}) => <span className="code
  * not know get one (decided 2026-11-10).
  */
 /** Where a hover popover goes for an anchor: below unless near the bottom, from the left unless near the right edge. */
-function useTip() {
+export function useTip() {
   const [at, setAt] = useState<{left?: number; right?: number; top?: number; bottom?: number} | null>(null);
   const id = useRef(`tip-${Math.random().toString(36).slice(2, 8)}`).current;
   const show = (el: Element | null) => {
@@ -750,7 +755,7 @@ export function PageHead({title, actions, back}: {title: string; actions?: React
 }
 
 /** A task in progress, centred on the page: title, progress, start time, Stop. */
-export function CenterProgress({title, chip, done, total, startedAt, onStop}: {title: string; chip?: ReactNode; done: number; total: number; startedAt: string; onStop?: () => void}) {
+export function CenterProgress({title, chip, done, total, startedAt, onStop}: {title: string; chip?: ReactNode; done: number; total: number; startedAt: string; onStop?: () => void | Promise<unknown>}) {
   return (
     <div className="center-block">
       <h2 style={{fontSize: 17, lineHeight: '24px', fontWeight: 700}}>{title}</h2>

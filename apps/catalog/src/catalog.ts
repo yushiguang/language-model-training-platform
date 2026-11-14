@@ -18,10 +18,12 @@ const ID_PREFIX: Record<CatalogKind, string> = {
   agent_proposals: 'ap',
   start_requests: 'sr',
   audit_log: 'au',
+  dataset_removals: 'rm',
+  label_comments: 'lc',
 };
 
 /** Every kind whose records carry their project's id (all but projects and examples). */
-const OWNED: CatalogKind[] = ['dataset_snapshots', 'setup_versions', 'gold_labels', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'audit_log'];
+const OWNED: CatalogKind[] = ['dataset_snapshots', 'setup_versions', 'gold_labels', 'dataset_removals', 'label_comments', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'audit_log'];
 
 /** New record id for a kind, for callers that build the record before inserting it. */
 export const catalogId = (kind: CatalogKind) => newId(ID_PREFIX[kind]);

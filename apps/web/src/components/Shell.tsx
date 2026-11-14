@@ -131,10 +131,29 @@ export function ProjectPage({page, chatOpen = false, children}: Props) {
   return <PageCtx.Provider value={page}>{children({...ctx, state: ctx.state})}</PageCtx.Provider>;
 }
 
+const CHAT_OUT_MS = 200;
+
+/** True while `on`, and for `ms` after it turns off (so an exit animation can play). */
+function usePresence(on: boolean, ms: number): boolean {
+  const [shown, setShown] = useState(on);
+  useEffect(() => {
+    if (on) return setShown(true);
+    const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) return setShown(false);
+    const id = setTimeout(() => setShown(false), ms);
+    return () => clearTimeout(id);
+  }, [on, ms]);
+  return on || shown;
+}
+
 /** A page's header and content, with Ask AI beside them when it is open. */
 export function Frame({head, children, chat}: {head: ReactNode; children: ReactNode; chat?: ChatSlot}) {
   const {open, setOpen, side} = useContext(ShellCtx);
   const page = useContext(PageCtx);
+  // Motion M3: each step's body fades in when the route changes (the top island stays put).
+  const pathname = usePathname();
+  // Motion M5: Ask AI stays mounted while it slides out, so the page widens smoothly.
+  const chatShown = usePresence(open, CHAT_OUT_MS);
   const [scrolled, setScrolled] = useState(false);
   useEffect(() => {
     const on = () => setScrolled(window.scrollY > 0);
@@ -150,11 +169,11 @@ export function Frame({head, children, chat}: {head: ReactNode; children: ReactN
       <div className={`b-head${scrolled ? ' scrolled' : ''}`}>
         <div className="container">{head}</div>
       </div>
-      <div className="container page-in">
+      <div key={pathname} className="container page-in">
         <ActionErrorBanner />
         {children}
       </div>
-      {open && side && createPortal(<AskAi page={page} onClose={() => setOpen(false)} {...chat} />, side)}
+      {chatShown && side && createPortal(<AskAi page={page} leaving={!open} onClose={() => setOpen(false)} {...chat} />, side)}
     </>
   );
 }

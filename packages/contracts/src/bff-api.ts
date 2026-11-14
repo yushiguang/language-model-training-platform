@@ -10,6 +10,7 @@ import type {
   EndpointId,
   EndpointInfo,
   GoldLabel,
+  LabelComment,
   ModelSettings,
   NodeId,
   PageContext,
@@ -18,6 +19,7 @@ import type {
   MismatchList,
   ProjectState,
   PromptVersion,
+  RemovalReason,
   Schema,
   ProjectSettings,
   StructuredPrompt,
@@ -117,6 +119,45 @@ export interface DatasetUploadResult {
   error?: string;
 }
 
+/** Remove examples from the eval dataset (soft delete with a trail, spec 1.0.0, 4.4). */
+export interface RemoveExamplesRequest {
+  projectId: string;
+  exampleIds: string[];
+  reason: RemovalReason;
+}
+
+export interface RestoreExamplesRequest {
+  projectId: string;
+  removalIds: string[];
+}
+
+/**
+ * Batch pruning on Eval Dataset (spec 1.0.0, 4.3): 'unlabeled' removes examples with no gold label
+ * down to `keep` of them; 'downsample' removes examples whose gold label has `value` in `field`,
+ * at random, down to `keep`. Halves stay balanced; no other example changes half.
+ */
+export interface PruneDatasetRequest {
+  projectId: string;
+  mode: 'unlabeled' | 'downsample';
+  field?: string;
+  value?: string;
+  keep: number;
+}
+
+/** Adds examples to the eval dataset without touching the ones there (spec 1.0.0, 4.3). */
+export interface AppendSampleRequest {
+  projectId: string;
+  count: number;
+}
+
+export interface AddCommentRequest {
+  projectId: string;
+  exampleId: string;
+  text: string;
+  /** The version compared on Mismatches, if any. */
+  promptVersionId?: string | null;
+}
+
 export interface ReviewGoldRequest {
   projectId: string;
   exampleId: string;
@@ -175,6 +216,18 @@ export interface BffContract {
   /** Examples where versions disagree with the gold label, for one version (left out: the best). */
   mismatches(projectId: string, promptVersionId?: string | null): Promise<MismatchList>;
   reviewGold(req: ReviewGoldRequest): Promise<void>;
+  /** Adds new, unseen examples to the eval dataset at random; existing examples and gold labels stay. */
+  appendSample(req: AppendSampleRequest): Promise<number>;
+  /** Adds the examples of an uploaded file to the eval dataset; ids already in it are skipped. */
+  appendUpload(projectId: string, name: string, text: string): Promise<DatasetUploadResult & {added?: number; duplicates?: number}>;
+  /** Removes examples (soft delete, each with a `DatasetRemoval`). */
+  removeExamples(req: RemoveExamplesRequest): Promise<void>;
+  /** Puts removed examples back, in their old half. */
+  restoreExamples(req: RestoreExamplesRequest): Promise<void>;
+  /** Batch pruning; returns how many examples it removed. */
+  pruneDataset(req: PruneDatasetRequest): Promise<number>;
+  /** Adds a comment to an example (append-only). */
+  addComment(req: AddCommentRequest): Promise<LabelComment>;
   /** Rebuild scores: works every archived score out again from the saved answers. Returns how many. */
   rebuildReports(projectId: string): Promise<number>;
 

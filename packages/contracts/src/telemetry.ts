@@ -112,7 +112,7 @@ export const LABEL_VALUES: Record<string, readonly string[]> = {
   from: ['front_desk', 'prompt_agent', 'evaluation_agent'],
   to: ['prompt_agent', 'evaluation_agent'],
   intent: ['answer', 'follow_up', 'draft_prompt', 'import_prompt', 'revise_prompt', 'explain_version', 'explain_report', 'reflect', 'merge', 'improve'],
-  tool: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions', 'check_prompt', 'read_feature_info', 'read_doc', 'try_prompt', 'score_version', 'start_optimiser'],
+  tool: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions', 'check_prompt', 'read_feature_info', 'read_doc', 'get_project_summary', 'get_dataset_stats', 'search_examples', 'compare_versions', 'get_mismatch_summary', 'try_prompt', 'score_version', 'start_optimiser'],
   page: ['projects', 'prompt_design', 'dataset', 'gold', 'prompt', 'prompt_edit', 'other'],
   slot: ['A', 'B'],
   what: ['score', 'resume', 'optimiser', 'try_prompt', 'score_version', 'start_optimiser'],
@@ -156,11 +156,16 @@ export interface EventProps {
   sample_finished: {fetched: Num; seconds: Num; outcome: 'done' | 'stopped' | 'failed'};
   dataset_uploaded: {rows: Num; valid: Num; invalid: Num; video: Num; photo_text: Num};
   dataset_upload_failed: {reason: 'format' | 'empty' | 'too_large' | 'other'};
+  dataset_appended: {source: 'sample' | 'upload'; added: Num; duplicates: Num};
+  dataset_examples_removed: {reason: 'broken' | 'out_of_scope' | 'downsample' | 'excess_unlabeled'; count: Num; with_gold: Num};
+  dataset_examples_restored: {count: Num};
+  eval_halves_balanced: {moved: Num; locked: boolean};
   // Gold Labels
   model_answer_revealed: {split: string; had_answer: boolean};
   gold_label_saved: {split: string; revealed: boolean; seconds_on_example: Num; matches_model: boolean | null; was_recheck: boolean};
   gold_labels_uploaded: {source: 'file' | 'bundled'; saved: Num; skipped: Num};
   gold_mismatch_reviewed: {outcome: 'kept' | 'changed'; with_note: boolean};
+  label_comment_added: {where: 'eval' | 'mismatch'; chars: Num};
   // Prompt Engineering
   prompt_draft_requested: Record<string, never>;
   feature_toggled: {group: string; key: string; on: boolean};
@@ -217,11 +222,16 @@ export const EVENT_PROP_KEYS: {[E in EventName]: readonly (keyof EventProps[E] &
   sample_finished: ['fetched', 'seconds', 'outcome'],
   dataset_uploaded: ['rows', 'valid', 'invalid', 'video', 'photo_text'],
   dataset_upload_failed: ['reason'],
+  dataset_appended: ['source', 'added', 'duplicates'],
+  dataset_examples_removed: ['reason', 'count', 'with_gold'],
+  dataset_examples_restored: ['count'],
+  eval_halves_balanced: ['moved', 'locked'],
   // Gold Labels
   model_answer_revealed: ['split', 'had_answer'],
   gold_label_saved: ['split', 'revealed', 'seconds_on_example', 'matches_model', 'was_recheck'],
   gold_labels_uploaded: ['source', 'saved', 'skipped'],
   gold_mismatch_reviewed: ['outcome', 'with_note'],
+  label_comment_added: ['where', 'chars'],
   // Prompt Engineering
   prompt_draft_requested: [],
   feature_toggled: ['group', 'key', 'on'],

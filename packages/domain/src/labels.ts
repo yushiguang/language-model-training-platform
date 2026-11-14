@@ -42,9 +42,15 @@ export const REASON_LINE = 'Put a "reason" key first in the JSON: one short sent
 export const settingsHash = (s: ModelSettings) => hashString(`${s.maxOutputTokens}|${s.temperature ?? 'na'}${s.pass && s.pass > 1 ? `|pass${s.pass}` : ''}`);
 
 /** Evaluation context = schema version + eval examples + their gold labels. Thresholds re-judge without new labeling. */
+/**
+ * The evaluation context: what a score rests on. Only gold-labeled eval examples count, with their
+ * half (spec 1.0.0, 4.4): appending examples without gold labels leaves every score current, while
+ * a new, changed or removed gold label, or a half that moved, makes it stale.
+ */
 export function contextIdFor(schemaVersion: number, evalExamples: Example[], gold: Record<string, GoldLabel>): string {
   const parts = evalExamples
-    .map(e => `${e.id}:${gold[e.id]?.id ?? '-'}`)
+    .filter(e => !!gold[e.id])
+    .map(e => `${e.id}:${e.optimiserHalf ? 'o' : 'h'}:${gold[e.id].id}`)
     .sort()
     .join(',');
   return `ctx_${hashString(`${schemaVersion}|${parts}`)}`;

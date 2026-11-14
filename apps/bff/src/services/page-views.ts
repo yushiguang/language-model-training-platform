@@ -1,7 +1,8 @@
 import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@tsp/contracts';
 import {agentStart, isStartTool} from './starts.ts';
-import {aiSuggestion, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap} from '@tsp/domain';
+import {aiSuggestion, featureItems, featureText, labelBalance, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap} from '@tsp/domain';
 import {getApp} from './app.ts';
+import {lockHoldout} from './governance.ts';
 import {mismatches} from './mismatches.ts';
 import {loadProjectState} from './projects.ts';
 
@@ -146,9 +147,9 @@ function reportView(state: ProjectState, v: PromptVersion | undefined, model: En
 function exampleView(e: Example) {
   const features: Record<string, string | number> = {};
   for (const [k, v] of Object.entries(e.features)) {
-    if (isImageKey(k)) features[k] = `${Array.isArray(v) ? v.length : v ? 1 : 0} image(s)`;
+    if (isImageKey(k)) features[k] = `${featureItems(v).length} image(s)`;
     else {
-      const s = Array.isArray(v) ? v.join(', ') : v;
+      const s = featureText(v);
       features[k] = s.length > 500 ? `${s.slice(0, 500)}…` : s;
     }
   }
@@ -180,6 +181,8 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
       const snap = state.snapshot;
       return base(snap ? `Eval dataset ${snap.number} from ${snap.sourceName}: ${snap.counts.valid} valid examples (${snap.counts.video} video, ${snap.counts.photoText} photo&text). All of them are used for evaluation.` : 'No eval dataset yet.', {
         snapshot: snap ? {number: snap.number, source: snap.source, name: snap.sourceName, counts: snap.counts} : null,
+        // Spec 1.0.0, 4.4: what scores rest on now (get_dataset_stats has the label balance).
+        now: snap ? datasetCounts(state) : null,
         sampling: state.samplingTask ? {state: state.samplingTask.state, done: state.samplingTask.fetched, total: state.samplingTask.total} : null,
       });
     }
@@ -233,6 +236,93 @@ export async function getPageView(projectId: string, loc: PageLocation, unsaved:
 
 const limitOf = (x: unknown, max: number, dflt: number) => Math.max(1, Math.min(max, typeof x === 'number' ? Math.floor(x) : dflt));
 
+/** Tools that read examples; the first such read locks the halves. */
+const READS_EXAMPLES = new Set<string>(['get_examples', 'get_gold_labels', 'get_predictions', 'search_examples', 'try_prompt']);
+
+/** Removed gold-labeled examples and pending ones, as the score line shows them (spec 1.0.0, 4.4). */
+function datasetCounts(state: ProjectState) {
+  const evalEx = state.examples.filter(e => e.split === 'eval');
+  return {
+    examples: evalEx.length,
+    goldLabeled: evalEx.filter(e => !!state.gold[e.id]).length,
+    pendingGoldLabels: evalEx.filter(e => !state.gold[e.id]).length,
+    removed: state.removals.length,
+    removedWithGold: state.removals.filter(r => !!r.gold).length,
+  };
+}
+
+function projectSummary(state: ProjectState) {
+  const best = state.reports.filter(r => !r.archivedNow).sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1)[0];
+  const bv = best && state.versions.find(v => v.id === best.promptVersionId);
+  return {
+    project: state.project.name,
+    stepsDone: state.facts.approved,
+    settings: {model: state.setup?.models[0] ? modelName(state, state.setup.models[0].endpoint) : null, thresholds: state.setup?.thresholds ?? null, confirmed: state.facts.settingsConfirmed},
+    dataset: datasetCounts(state),
+    versions: state.versions.length,
+    best: bv ? {version: versionLabel(bv), lowestFieldMacroF1: r2(best.metrics.lowestField.macroF1), passed: best.passed, roughReading: best.rough} : null,
+    optimiser: state.optimisation[0] ? {state: state.optimisation[0].state, round: state.optimisation[0].round} : null,
+    advice: adviceOf(state),
+  };
+}
+
+function datasetStats(state: ProjectState) {
+  const schema = state.setup?.schema;
+  const evalEx = state.examples.filter(e => e.split === 'eval');
+  const b = schema ? labelBalance(schema, evalEx, state.gold) : null;
+  return {
+    ...datasetCounts(state),
+    // Per-value counts by half are aggregates: they name no example, so the held-out half stays unread.
+    fields: b?.fields.map(f => ({field: f.field, kind: f.kind, values: f.values.map(v => ({value: v.value, goldLabeled: v.count, readableHalf: v.optimiser, heldOutHalf: v.heldOut, rare: v.rare, dominant: v.dominant}))})) ?? [],
+    note: 'Rare: fewer than 4 gold labels, or fewer than 2 in a half; one miss moves Macro-F1 a lot. Dominant: over 70% of the labeled examples.',
+  };
+}
+
+function compareVersions(state: ProjectState, a: PromptVersion | undefined, b: PromptVersion | undefined, model: EndpointId | undefined) {
+  if (!a || !b) throw new Error(`Name two versions. Versions: ${state.versions.map(versionLabel).join(', ')}.`);
+  const sa = a.structured;
+  const sb = b.structured;
+  const changed: string[] = [];
+  if (sa && sb) {
+    if (sa.taskSummary !== sb.taskSummary) changed.push('task summary');
+    if (JSON.stringify(sa.features) !== JSON.stringify(sb.features)) changed.push('input features');
+    if (sa.generalRules !== sb.generalRules) changed.push('general rules');
+    for (const f of sb.fields) {
+      const was = sa.fields.find(x => x.name === f.name);
+      if (!was) changed.push(`field ${f.name} (new)`);
+      else {
+        if ((was.note ?? '') !== (f.note ?? '')) changed.push(`${f.name}: tie-break rules`);
+        for (const v of f.values) {
+          const old = was.values.find(x => x.name === v.name);
+          if (!old || old.definition !== v.definition) changed.push(`${f.name} = ${v.name}: definition`);
+        }
+      }
+    }
+  }
+  const m = model ?? state.setup?.models[0]?.endpoint;
+  const fields = (v: PromptVersion) => {
+    const r = state.reports.find(x => x.promptVersionId === v.id && x.endpoint === m && !x.archivedNow);
+    return r ? {lowestFieldMacroF1: r2(r.metrics.lowestField.macroF1), passed: r.passed, roughReading: r.rough, fields: Object.fromEntries(r.metrics.fields.map(f => [f.field, r2(f.macroF1)]))} : null;
+  };
+  return {a: {version: versionLabel(a), change: a.change || null, scores: fields(a)}, b: {version: versionLabel(b), change: b.change || null, scores: fields(b)}, changedParts: changed, prompts: {a: sa, b: sb}};
+}
+
+async function mismatchSummary(projectId: string, state: ProjectState, v: PromptVersion | undefined) {
+  const m = await mismatches(projectId, v?.id ?? null);
+  const label = m.versions.find(x => x.id === m.versionId)?.label ?? null;
+  const r = state.reports.find(x => x.promptVersionId === m.versionId && !x.archivedNow);
+  return {
+    version: label,
+    toReview: m.items.length,
+    wrongInEveryVersion: m.wrongEverywhere,
+    reviewed: m.reviewed,
+    // Counts only (review finding 2): which side is right is the people's call on Gold Labels.
+    byField: r ? r.metrics.fields.map(f => ({field: f.field, accuracy: r2(f.accuracy)})) : [],
+    topMixUps: r ? r.metrics.mixUps.slice(0, 5).map(x => ({field: x.field, gold: x.gold, predicted: x.predicted, count: x.count})) : [],
+    note: 'Counts only. Never say which side is right: people decide on the Mismatches tab of Gold Labels.',
+  };
+}
+
 /**
  * The read tools, run as the signed-in user. Each call is written to the audit log. Errors come
  * back to the agent as messages it can act on.
@@ -242,6 +332,8 @@ export function agentTools(projectId: string): AgentToolHost {
     async call({agent, name, args}: AgentToolCall): Promise<unknown> {
       const {catalog, labeling} = getApp();
       await catalog.audit(projectId, `agent:${agent}`, 'agent.tool', {name, args});
+      // The first read of examples fixes the halves for good (spec 1.0.0, 4.2).
+      if (READS_EXAMPLES.has(name)) await lockHoldout(projectId);
       // Start-work tools spend money and start at once; they live in starts.ts.
       if (isStartTool(name)) return agentStart(projectId, agent, name, args);
       const state = await loadProjectState(projectId);
@@ -305,6 +397,21 @@ export function agentTools(projectId: string): AgentToolHost {
           const MAX = systemConfig().agent.maxDocChars;
           return {title: doc.title, text: doc.text.length > MAX ? `${doc.text.slice(0, MAX)}… (cut)` : doc.text};
         }
+        case 'get_project_summary':
+          return projectSummary(state);
+        case 'get_dataset_stats':
+          return datasetStats(state);
+        case 'search_examples': {
+          const words = (typeof args.text === 'string' ? args.text : '').toLowerCase().split(/\s+/).filter(Boolean);
+          if (!words.length) throw new Error('Give words to look for.');
+          const hay = (e: Example) => [e.title, ...Object.entries(e.features).filter(([k]) => !isImageKey(k)).map(([, v]) => featureText(v))].join(' ').toLowerCase();
+          const list = state.examples.filter(e => visibleToAgents(e) && (!args.unlabeledOnly || !state.gold[e.id]) && words.every(w => hay(e).includes(w)));
+          return {matching: list.length, note: HIDDEN_NOTE, examples: list.slice(0, limitOf(args.limit, 10, 5)).map(e => ({...exampleView(e), gold: state.gold[e.id]?.answer ?? null}))};
+        }
+        case 'compare_versions':
+          return compareVersions(state, findVersion(state, args.a), findVersion(state, args.b), asModel(args.model, state));
+        case 'get_mismatch_summary':
+          return mismatchSummary(projectId, state, findVersion(state, args.version));
         default:
           throw new Error(`Unknown tool ${String(name)}.`);
       }

@@ -1,8 +1,8 @@
 import type {OptimiserHost, ProjectState, PromptVersion} from '@tsp/contracts';
 import {postEvent} from './chat-events.ts';
 import {buildReport, confirmScore, labelEvalSet, labelExamples, scoreOnOptimiserHalf} from './evaluation.ts';
-import {labelerNotes} from './mismatches.ts';
-import {agentTools} from './page-views.ts';
+import {labelComments} from './mismatches.ts';
+
 import {loadProjectState} from './projects.ts';
 import {createVersion} from './prompts.ts';
 
@@ -50,11 +50,10 @@ export function optimiserHost(): OptimiserHost {
       const {state} = await loaded(projectId);
       return createVersion(projectId, {structured, parent: version(state, parentId), madeBy: 'optimiser', change, kind: 'minor', inMajor});
     },
-    async labelerNotes(projectId) {
+    async labelComments(projectId) {
       const {state} = await loaded(projectId);
-      return Object.fromEntries(await labelerNotes(projectId, state));
+      return Object.fromEntries(await labelComments(projectId, state));
     },
-    tools: agentTools,
     postEvent: ({projectId, event, actor, what, link}) => postEvent(projectId, event, actor, what, link),
   };
 }

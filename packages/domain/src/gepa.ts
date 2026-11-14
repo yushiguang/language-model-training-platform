@@ -1,6 +1,6 @@
 import {systemConfig} from './config.ts';
 import type {Answer, DryRunResult, Example, ExampleBrief, OptimisationRun, OptimiserRound, Prediction, PromptVersion, Schema} from '@tsp/contracts';
-import {placeholderKeys} from './template.ts';
+import {featureItems, featureText, placeholderKeys} from './template.ts';
 import {isImageKey} from './catalogue.ts';
 
 /**
@@ -39,14 +39,17 @@ export const promptKeys = (v: Pick<PromptVersion, 'template' | 'features'>) => n
 export function exampleBrief(e: Example, keys: Iterable<string>, gold: Answer, predicted: Answer | null, rightIn?: 'template' | 'other', said?: HelperNote): ExampleBrief {
   const features: Record<string, string> = {};
   for (const k of keys) {
-    const v = e.features[k];
-    if (typeof v !== 'string' || !v.trim() || /^https?:\/\//.test(v.trim())) continue;
+    const raw = e.features[k];
+    // Text features only: lists (images, URLs) go as images below.
+    if (!raw || Array.isArray(raw) || (typeof raw === 'object' && raw.items)) continue;
+    const v = featureText(raw);
+    if (!v.trim() || /^https?:\/\//.test(v.trim())) continue;
     features[k] = v.length > systemConfig().optimiser.briefFeatureMaxChars ? `${v.slice(0, systemConfig().optimiser.briefFeatureMaxChars - 1).trimEnd()}…` : v;
   }
   const images = Object.entries(e.features)
     .filter(([k]) => isImageKey(k))
-    .flatMap(([, v]) => (Array.isArray(v) ? v : [v]))
-    .filter(u => typeof u === 'string' && u.trim())
+    .flatMap(([, v]) => featureItems(v))
+    .filter(u => u.trim())
     .slice(0, systemConfig().optimiser.briefMaxImages);
   return {externalId: e.externalId, features, gold, predicted, ...(said?.reason ? {reason: said.reason} : {}), ...(said?.invalid ? {invalid: said.invalid} : {}), ...(images.length ? {images} : {}), ...(rightIn ? {rightIn} : {})};
 }
@@ -238,9 +241,9 @@ export function stepLine(step: OptimisationRun['step'], version: string | null, 
   }
 }
 
-/** Adds the labelers' notes (from `labelerNotes`) to the examples a helper reads. */
-export function withLabelerNotes(briefs: ExampleBrief[], examples: Example[], notes: Map<string, string>): ExampleBrief[] {
-  if (!notes.size) return briefs;
-  const byExt = new Map(examples.filter(e => notes.has(e.id)).map(e => [e.externalId, notes.get(e.id)!]));
-  return briefs.map(b => (byExt.has(b.externalId) ? {...b, labelerNote: byExt.get(b.externalId)!} : b));
+/** Adds people's comments (from `labelComments`, optimiser half only) to the examples a helper reads. */
+export function withComments(briefs: ExampleBrief[], examples: Example[], comments: Map<string, string[]>): ExampleBrief[] {
+  if (!comments.size) return briefs;
+  const byExt = new Map(examples.filter(e => comments.get(e.id)?.length).map(e => [e.externalId, comments.get(e.id)!]));
+  return briefs.map(b => (byExt.has(b.externalId) ? {...b, comments: byExt.get(b.externalId)!} : b));
 }

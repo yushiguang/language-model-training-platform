@@ -5,6 +5,7 @@ import {postEvent} from './chat-events.ts';
 import {buildReport, labelEvalSet} from './evaluation.ts';
 import {modelName} from './page-views.ts';
 import {loadProjectState} from './projects.ts';
+import {lockHoldout} from './governance.ts';
 
 /**
  * Background work that runs from the open page. The bff decides when labeling starts (system
@@ -100,6 +101,8 @@ export async function startOptimiser(projectId: string, maxRounds = systemConfig
   const state = await loadProjectState(projectId);
   const endpoint = state?.setup?.models[0]?.endpoint;
   if (!state || !endpoint) throw new Error('Pick a labeling model in Project Settings first.');
+  // The Optimiser reads examples: the halves are fixed from here on (spec 1.0.0, 4.2).
+  await lockHoldout(projectId);
   await optimiserService().startRun({projectId, endpoint, maxRounds, startVersionId, auto: opts.auto});
 }
 

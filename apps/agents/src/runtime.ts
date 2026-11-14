@@ -109,6 +109,16 @@ function workingLine(name: AgentToolName, args: Record<string, unknown>): string
       return 'Reading the feature descriptions…';
     case 'read_doc':
       return 'Reading the linked document…';
+    case 'get_project_summary':
+      return 'Reading the project…';
+    case 'get_dataset_stats':
+      return 'Reading the label balance…';
+    case 'search_examples':
+      return 'Searching examples…';
+    case 'compare_versions':
+      return 'Comparing versions…';
+    case 'get_mismatch_summary':
+      return 'Counting mismatches…';
     case 'try_prompt':
       return 'Trying the prompt on a few examples…';
     case 'score_version':

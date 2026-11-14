@@ -1,6 +1,6 @@
-import type {AgentModel, AgentRuntimeContract, Answer, CatalogContract, EndpointId, Example, ExampleBrief, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@tsp/contracts';
+import type {AgentRuntimeContract, Answer, CatalogContract, EndpointId, Example, ExampleBrief, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@tsp/contracts';
 import {NO_TELEMETRY} from '@tsp/contracts';
-import {checkStructured, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withLabelerNotes, wrongExamples, type PoolEntry} from '@tsp/domain';
+import {checkStructured, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withComments, wrongExamples, type PoolEntry} from '@tsp/domain';
 
 /**
  * The Optimiser (GEPA, ported to TypeScript; docs/design/optimiser.md). Runs from
@@ -21,12 +21,25 @@ import {checkStructured, compilePrompt, compareDryRun, rewordOnly, sameSignature
  */
 
 
+/**
+ * Runs an agent request that the run's Stop cancels: the signal stays in this process, and the
+ * runtime is told by id (spec 1.0.0, 7.1.3: no callbacks or signals across a service call).
+ */
+async function cancellable<T>(signal: AbortSignal, fn: (requestId: string) => Promise<T>, cancel?: (id: string) => Promise<void>): Promise<T> {
+  const requestId = newId('rq');
+  const onAbort = () => void cancel?.(requestId);
+  signal.addEventListener('abort', onAbort, {once: true});
+  try {
+    return await fn(requestId);
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+  }
+}
+
 export interface OptimiserDeps {
   catalog: CatalogContract;
   labeling: LabelingContract;
   agents: AgentRuntimeContract;
-  /** The model the helper that writes changes runs on. */
-  agentModel: () => AgentModel;
   /** What the project's owner does for the loop; see `OptimiserHost`. */
   host: OptimiserHost;
   /** Keeps a second tab from running the same run; without it, only this runner is covered. */
@@ -119,7 +132,7 @@ function memoryLocks(): LockPort {
 }
 
 export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
-  const {catalog, labeling, agents, agentModel, host} = deps;
+  const {catalog, labeling, agents, host} = deps;
   const locks = deps.locks ?? memoryLocks();
   const tm = deps.telemetry ?? NO_TELEMETRY;
   const onChange = deps.onChange ?? (() => {});
@@ -341,10 +354,14 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
 
           const m = await host.halfScore({projectId, promptVersionId: parent.id, endpoint});
           // R4-4: the labelers' Why notes go with optimiser-half examples (never the held-out half).
-          const examples = withLabelerNotes(briefs(state, schema, half, parent, other, answers, entries), state.examples, toMap(await host.labelerNotes(projectId)));
+          const examples = withComments(briefs(state, schema, half, parent, other, answers, entries), state.examples, toMap(await host.labelComments(projectId)));
           const out = await step(other ? 'merge' : 'reflect', parent, () =>
-            agents.reflectPrompt(
-              {
+            cancellable(
+              signal,
+              requestId =>
+              agents.reflectPrompt({
+                projectId,
+                requestId,
                 mode: other ? 'merge' : 'change',
                 prompt: parent.structured,
                 triedChanges: run.history.filter(h => h.parentId === parent.id && h.change).map(h => h.change),
@@ -353,10 +370,8 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
                 lowestValue: m.lowestValue,
                 examples,
                 ...(other ? {other: {prompt: other.structured, change: other.change}} : {}),
-                signal,
-              },
-              agentModel(),
-              host.tools(projectId),
+              }),
+              id => agents.cancel(id),
             ),
           );
           run.candidates++;

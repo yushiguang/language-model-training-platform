@@ -1,5 +1,5 @@
 import type {TelemetrySink} from './telemetry.ts';
-import type {EndpointInfo} from './types.ts';
+import type {EndpointInfo, FeatureValue} from './types.ts';
 import type {EndpointConfig} from './gateway-api.ts';
 import type {DeepPartial, SystemConfig} from './config.ts';
 
@@ -375,7 +375,7 @@ export interface RawExample {
   externalId: string;
   type: 'video' | 'photo_text';
   title: string;
-  features: Record<string, string | string[]>;
+  features: Record<string, FeatureValue>;
 }
 
 export interface ExampleSource {

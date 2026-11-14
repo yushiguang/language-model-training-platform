@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {LabelCallRequest, LabelCallResult, LlmGatewayContract, Schema} from '@tsp/contracts';
 import {createCatalog} from '@tsp/catalog';
+import {toFeatures} from '@tsp/domain';
 import {localDocRuntime} from '@tsp/platform';
 import {createLabeling} from './labeling.ts';
 import {memoryLocks} from './locks.ts';
@@ -14,7 +15,7 @@ async function setup(n: number, prefix: string) {
   await catalog.insert('setup_versions', {id: 'sv_1', projectId: 'pr_1', number: 1, schemaVersion: 1, task: '', schema, thresholds: null, models: [], steps: {schema: true, evaluation: true, models: true}, createdAt: '', createdBy: ''});
   const v = await catalog.createPromptVersion({projectId: 'pr_1', structured: {taskSummary: '', features: {video: [], photo_text: [], metadata: []}, fields: [], generalRules: '', images: []}, template: 'Label {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
   const ids = Array.from({length: n}, (_, i) => `ex_${i}`);
-  await catalog.insertMany('examples', ids.map((id, i) => ({id, snapshotId: 'ds_1', externalId: String(i), type: 'video' as const, title: '', features: {Description: `post ${i}`}, split: 'train' as const, optimiserHalf: false})));
+  await catalog.insertMany('examples', ids.map((id, i) => ({id, snapshotId: 'ds_1', externalId: String(i), type: 'video' as const, title: '', features: toFeatures({Description: `post ${i}`}), split: 'train' as const, optimiserHalf: false})));
   return {db, catalog, v, ids};
 }
 

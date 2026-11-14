@@ -50,8 +50,6 @@ button:focus-visible, a:focus-visible, [tabindex]:focus-visible, input:focus-vis
 
 /* A failed action's banner sits above the page content; a new step's content fades in (150ms). */
 .err-slot { display: contents; }
-@keyframes k-fade-in { from { opacity: 0; } to { opacity: 1; } }
-.page-in { animation: k-fade-in 150ms ease-out; }
 
 /* List rows that select something are buttons (the canvas draws them as links). */
 button.vrow { width: 100%; border: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
@@ -88,9 +86,6 @@ button.vrow { width: 100%; border: 0; background: none; font: inherit; color: in
 
 /* 1.0.0 screens (no canvas boards yet: docs/ui-gaps.md). */
 /* The Approve button asks for attention while a helper's draft waits (spec 6.2). */
-.btn-cue { animation: btn-cue 1.6s ease-out infinite; }
-@keyframes btn-cue { 0% { box-shadow: 0 0 0 0 rgb(0 0 0 / 28%); } 70%, 100% { box-shadow: 0 0 0 10px rgb(0 0 0 / 0%); } }
-@media (prefers-reduced-motion: reduce) { .btn-cue { animation: none; box-shadow: 0 0 0 3px rgb(0 0 0 / 14%); } }
 /* Structured prompt editor (spec 3.3): boxes grow with their text, and nothing leaves its card. */
 .sp-fields { grid-template-columns: 280px minmax(0, 1fr); }
 .sp-field { min-width: 0; max-width: 100%; overflow: hidden; }
@@ -119,3 +114,61 @@ textarea.input.grow-box:not(.sm) { min-height: 36px; padding: 7px 12px; }
 .btn-primary.danger { background: #b42318; }
 .btn-primary.danger:hover { background: #912018; }
 .btn-primary.danger:disabled { background: var(--bg-muted); }
+/* Eval Dataset (spec 4.3): label balance rows, one per value. */
+.bal-row { display: grid; grid-template-columns: 180px minmax(0, 1fr) 48px 112px; align-items: center; gap: 12px; min-height: 28px; font-size: 13px; }
+.bal-bar { height: 6px; border-radius: 3px; background: var(--bg-muted); overflow: hidden; }
+.bal-bar > span { display: block; height: 100%; border-radius: 3px; }
+/* Gold Labels (spec 5.5): every feature row shows its whole text. */
+.kv > span { height: auto; min-height: 36px; padding: 8px 0; align-items: flex-start; white-space: pre-wrap; overflow-wrap: anywhere; text-overflow: clip; }
+.kv > span:nth-child(odd) { padding-right: 12px; }
+/* Comments on an example (spec 5.4): oldest first, each with who and when. */
+.cmts { display: flex; flex-direction: column; gap: 12px; }
+.cmt { display: flex; flex-direction: column; gap: 2px; font-size: 13px; line-height: 20px; }
+.cmt-h { font-size: 12px; line-height: 16px; color: var(--text-3); }
+.cmt-t { color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* ---------- Motion (docs/specs/2026-11-12-ui-motion-and-design-system-audit.md, M2 to M6) ----------
+ * Restrained: 140 to 220ms on one easing. Lives in code only for now (docs/ui-gaps.md). */
+:root { --ease-out: cubic-bezier(0.2, 0, 0, 1); --dur-fast: 140ms; --dur-med: 200ms; }
+/* M2: controls ease their colours and give a small press. */
+.k .btn, .k .ch, .k .opt, .k .seg button, .k .tab, .k .vrow, .k .send, .k .ask, .k .chip {
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out), transform 100ms var(--ease-out);
+}
+.k .btn:active:not(:disabled), .k .ch:active { transform: scale(0.98); }
+/* M3: a step's body fades in and settles 4px. */
+@keyframes k-settle { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.page-in { animation: k-settle 160ms var(--ease-out); }
+/* M4: Gold Labels moves between examples with a short slide; a tab or filter change settles. */
+@keyframes k-from-right { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
+@keyframes k-from-left { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+.step-next { animation: k-from-right 160ms var(--ease-out); }
+.step-prev { animation: k-from-left 160ms var(--ease-out); }
+.step-switch { animation: k-settle 160ms var(--ease-out); }
+.media > img, .media > iframe { opacity: 0; transition: opacity 180ms var(--ease-out); }
+.media > img.loaded, .media > iframe.loaded { opacity: 1; }
+@keyframes k-beat { 0% { transform: scale(0.9); opacity: 0; } 60% { transform: scale(1.04); opacity: 1; } 100% { transform: none; } }
+.saved-beat .badge { animation: k-beat 180ms var(--ease-out); }
+/* M5: Ask AI opens by widening its slot, so the page moves over smoothly; it closes the same way. */
+@keyframes k-chat-in { from { width: 0; margin-right: 0; opacity: 0; } to { width: 400px; opacity: 1; } }
+@keyframes k-chat-out { from { width: 400px; opacity: 1; } to { width: 0; margin-right: 0; opacity: 0; } }
+.b-body > .chat { animation: k-chat-in var(--dur-med) var(--ease-out); overflow: hidden; }
+.b-body > .chat.leaving { animation: k-chat-out var(--dur-med) var(--ease-out) forwards; pointer-events: none; }
+.b-body > .chat > * { min-width: 398px; }
+@keyframes k-fade { from { opacity: 0; } to { opacity: 1; } }
+.k .ask { animation: k-fade var(--dur-med) var(--ease-out); }
+/* M6: dialogs, hints, banners and the version detail come in gently. */
+@keyframes k-pop { from { opacity: 0; transform: scale(0.97) translateY(4px); } to { opacity: 1; transform: none; } }
+.dlg-scrim { animation: k-fade 150ms var(--ease-out); }
+.dlg { animation: k-pop 180ms var(--ease-out); }
+.tip-pop { animation: k-fade 120ms var(--ease-out); }
+.k .banner { animation: k-settle 150ms var(--ease-out); }
+.card.fill-scroll.swap > * { animation: k-fade var(--dur-fast) var(--ease-out); }
+/* The attention cue on the next action: two rings in the brand colour, then still. */
+.btn-cue { animation: btn-cue 1.6s var(--ease-out) 2; }
+@keyframes btn-cue { 0% { box-shadow: 0 0 0 0 rgb(79 70 229 / 35%); } 70%, 100% { box-shadow: 0 0 0 6px rgb(79 70 229 / 0%); } }
+/* Reduced motion: no movement, colours change at once. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  .k .btn:active:not(:disabled), .k .ch:active { transform: none; }
+  .btn-cue { box-shadow: 0 0 0 3px rgb(79 70 229 / 25%); }
+}

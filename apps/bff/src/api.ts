@@ -4,6 +4,7 @@ import * as agents from './services/agents.ts';
 import * as dataset from './services/dataset.ts';
 import * as evaluation from './services/evaluation.ts';
 import * as mismatch from './services/mismatches.ts';
+import * as governance from './services/governance.ts';
 import * as projects from './services/projects.ts';
 import * as prompts from './services/prompts.ts';
 import * as settings from './services/settings.ts';
@@ -71,7 +72,15 @@ export function createBffApi(): BffContract {
     exampleMedia: dataset.exampleMedia,
     startSampleDataset: dataset.startSampleDataset,
     stopSampleDataset: async projectId => dataset.stopSampleDataset(projectId),
-    uploadDatasetText: dataset.uploadDatasetText,
+    uploadDatasetText: (projectId, name, text) => dataset.uploadDatasetText(projectId, name, text),
+    appendSample: r => dataset.appendSample(r.projectId, r.count),
+    appendUpload: (projectId, name, text) => dataset.uploadDatasetText(projectId, name, text, true),
+    async removeExamples({projectId, exampleIds, reason}) {
+      await governance.removeExamples(projectId, exampleIds, reason);
+    },
+    restoreExamples: r => governance.restoreExamples(r.projectId, r.removalIds),
+    pruneDataset: r => governance.pruneDataset(r.projectId, r.mode, r.keep, r.field, r.value),
+    addComment: r => governance.addComment(r.projectId, r.exampleId, r.text, r.promptVersionId ?? null),
     saveGold: dataset.saveGold,
     async uploadGold({projectId, lines}) {
       const state = await stateOf(projectId);

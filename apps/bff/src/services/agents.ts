@@ -1,6 +1,7 @@
 import type {
   AgentLive,
   AgentPreset,
+  AgentProgressPort,
   AgentProposal,
   AgentTurnOutput,
   AgentTurnProgress,
@@ -17,7 +18,20 @@ import {emitChange, getApp, now, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {agentTools, getPageView} from './page-views.ts';
 import {scoreOnOptimiserHalf} from './evaluation.ts';
-import {labelerNotes, withLabelerNotes} from './mismatches.ts';
+import {labelComments, withComments} from './mismatches.ts';
+import {lockHoldout} from './governance.ts';
+
+
+/** Progress handlers of the turns running now, by turn id. */
+const turnProgress = new Map<string, AgentTurnProgress>();
+
+/**
+ * The progress port the agent runtime is built with (spec 1.0.0, 7.1.3): each event goes to the
+ * turn that asked for it, which saves its messages and moves Ask AI's live line.
+ */
+export const agentProgress: AgentProgressPort = {
+  publish: (_projectId, turnId, event) => turnProgress.get(turnId)?.(event),
+};
 
 export type {PageContext};
 
@@ -170,7 +184,9 @@ export async function sendUserMessage(
       } else if ('working' in p) setLive(projectId, {agent: p.agent, working: p.working, reply: null});
       else setLive(projectId, {agent: p.agent, working: null, reply: p.reply});
     };
-    const turnOut = await agents.runAgentTurn({userText: text, page: turnPage, attachments, workspace}, gateway.agentModel(), agentTools(projectId), progress);
+    const turnId = newId('turn');
+    turnProgress.set(turnId, progress);
+    const turnOut = await agents.runTurn({userText: text, page: turnPage, attachments, workspace, turnId}).finally(() => turnProgress.delete(turnId));
     await saving;
     outcome = 'ok';
     recordTurn(turnOut, entry, started);
@@ -286,6 +302,8 @@ export async function closeProposal(p: AgentProposal, state: 'approved' | 'disca
  */
 export async function improveWithAi(projectId: string, versionId: string): Promise<void> {
   const {catalog, agents, gateway, labeling} = getApp();
+  // The helper reads examples: the halves are fixed from here on (spec 1.0.0, 4.2).
+  await lockHoldout(projectId);
   const state = await loadProjectState(projectId);
   const v = state?.versions.find(x => x.id === versionId);
   const setup = state?.setup;
@@ -301,18 +319,14 @@ export async function improveWithAi(projectId: string, versionId: string): Promi
   const mistakes = half.filter(e => !!state.gold[e.id] && fieldsRight(schema, state.gold[e.id]!.answer, answers.get(e.id)?.answer ?? null).length < schema.fields.length).length;
   const gold = new Map(half.filter(e => !!state.gold[e.id]).map(e => [e.id, state.gold[e.id]!.answer]));
   const said = answersForHelpers(half.filter(e => answers.has(e.id)).map(e => answers.get(e.id)!));
-  const examples = withLabelerNotes(wrongExamples(schema, half, promptKeys(v), gold, said.predicted, undefined, said.notes), half, await labelerNotes(projectId, state));
+  const examples = withComments(wrongExamples(schema, half, promptKeys(v), gold, said.predicted, undefined, said.notes), half, await labelComments(projectId, state));
   busyProjects.add(projectId);
   setLive(projectId, {agent: 'prompt_agent', working: `Reading the ${versionLabel(v)} mistakes…`, reply: null});
   await postEvent(projectId, 'start', 'user', `asked the Prompt helper to improve ${versionLabel(v)}`, {path: '/prompt'});
   let outcome = 'error';
   try {
     const m = await scoreOnOptimiserHalf(setup, v, report.endpoint, state.examples, state.gold);
-    const out = await agents.draftImprovement(
-      {version: versionLabel(v), prompt: v.structured, mixUps: m.mixUps.slice(0, 8), lowestField: m.lowestField, lowestValue: m.lowestValue, mistakes, examples},
-      gateway.agentModel(),
-      agentTools(projectId),
-    );
+    const out = await agents.draftImprovement({projectId, version: versionLabel(v), prompt: v.structured, mixUps: m.mixUps.slice(0, 8), lowestField: m.lowestField, lowestValue: m.lowestValue, mistakes, examples});
     for (const prev of await openProposals(projectId)) await catalog.patch('agent_proposals', prev.id, {state: 'discarded'});
     // Improve with AI rewords; the label fields and values stay as they are.
     const structured: StructuredPrompt = tidyStructured(rewordOnly(v.structured, out.prompt));

@@ -4,10 +4,10 @@ import {createCatalog} from '@tsp/catalog';
 import {createTelemetry} from '@tsp/telemetry';
 import {createGateway} from '@tsp/llm-gateway';
 import {browserLocks, createLabeling} from '@tsp/labeling';
-import {agentRuntime} from '@tsp/agents';
+import {createAgentRuntime} from '@tsp/agents';
 import {createPlatform} from '@tsp/platform-impl';
 import {createOptimiser} from '@tsp/optimiser';
-import {agentLive, answeringAgent, bffEvents, configureBff, createBffApi, emitChange, isAgentBusy, onChange, optimiserHost} from '@tsp/bff';
+import {agentLive, agentProgress, agentTools, answeringAgent, bffEvents, configureBff, createBffApi, emitChange, isAgentBusy, onChange, optimiserHost} from '@tsp/bff';
 import type {BffClient} from './client';
 import {webTelemetry} from './web-telemetry';
 
@@ -28,7 +28,9 @@ const telemetry = createTelemetry({
 const gateway = createGateway(platform, {telemetry});
 const catalog = createCatalog(platform.db, {telemetry});
 const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: emitChange, telemetry});
-const optimiser = createOptimiser({catalog, labeling, agents: agentRuntime, agentModel: () => gateway.agentModel(), host: optimiserHost(), locks: browserLocks(), telemetry, onChange: emitChange});
+/** The helpers, built once with their model, the project tools and where live progress goes. */
+const agentRuntime = createAgentRuntime({llm: gateway.agentModel(), tools: agentTools, progress: agentProgress});
+const optimiser = createOptimiser({catalog, labeling, agents: agentRuntime, host: optimiserHost(), locks: browserLocks(), telemetry, onChange: emitChange});
 configureBff({catalog, labeling, gateway, agents: agentRuntime, optimiser, identity: platform.identity, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, standIns: platform.standIns, telemetry, locks: browserLocks()});
 const web = webTelemetry(telemetry);
 void platform.identity.currentUser().then(u => telemetry.setContext({userId: u.id}));
@@ -132,6 +134,9 @@ export const inProcessClient: BffClient = {
   },
   async uploadDatasetFile(projectId, file) {
     return timedApi.uploadDatasetText(projectId, file.name, await file.text());
+  },
+  async appendDatasetFile(projectId, file) {
+    return timedApi.appendUpload(projectId, file.name, await file.text());
   },
   async uploadGoldFile(projectId, file) {
     const lines = (await file.text())

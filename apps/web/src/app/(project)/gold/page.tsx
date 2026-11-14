@@ -3,15 +3,18 @@
 import {useGo} from '@/components/nav';
 import {useSearchParams} from 'next/navigation';
 import {Fragment, Suspense, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import type {Answer, Example, ExampleMedia, LabelField, MismatchList, MismatchReview} from '@tsp/contracts';
-import {FEATURES, gate, versionLabel} from '@tsp/domain';
+import type {Answer, Example, ExampleMedia, LabelComment, LabelField, MismatchList, MismatchReview, RemovalReason} from '@tsp/contracts';
+import {FEATURES, featureText, gate, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {useSettings} from '@/components/ProjectSettings';
-import {approveNode, exampleMedia, mismatches, predictionsFor, reviewGold, saveGold, type ProjectState} from '@/backend-api';
-import {Badge, Banner, Button, Card, Code, dateTime, Empty, Hov, Icon, num, PageHead, reportActionError, Seg, Tabs} from '@/ui';
+import {addComment, approveNode, exampleMedia, mismatches, predictionsFor, removeExamples, reviewGold, saveGold, type ProjectState} from '@/backend-api';
+import {Badge, Banner, Button, Card, Code, dateTime, Dialog, Empty, Hov, Icon, num, Opt, PageHead, Seg, Tabs} from '@/ui';
 
 type SetKey = 'eval' | 'mismatch';
+
+/** The "Saved" beat before a saved example leaves To label or To review (motion M4). */
+const BEAT_MS = 180;
 
 export default function GoldPage() {
   return (
@@ -100,13 +103,20 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   }, [mm?.versionId]); // eslint-disable-line react-hooks/exhaustive-deps
   // R4-5: Mismatches splits into To review and Reviewed, both for the version picked for the page.
   const [sub, setSub] = useState<'open' | 'done'>('open');
+  // Spec 1.0.0, 5.2: the eval set splits the same way, into To label and Labeled.
+  const evalAll = useMemo(() => state.examples.filter(e => e.split === 'eval'), [state.examples]);
+  const [evalSub, setEvalSub] = useState<'open' | 'done'>(() => (evalAll.some(e => !state.gold[e.id]) ? 'open' : 'done'));
   const byId = useMemo(() => new Map(state.examples.map(e => [e.id, e])), [state.examples]);
+  // A just-saved example stays in To label for a short "Saved" beat, then the next slides in (M4).
+  const [hold, setHold] = useState<string | null>(null);
+  const toLabel = useMemo(() => evalAll.filter(e => !state.gold[e.id] || e.id === hold), [evalAll, state.gold, hold]);
+  const labeledEx = useMemo(() => evalAll.filter(e => !!state.gold[e.id] && e.id !== hold), [evalAll, state.gold, hold]);
   const sets = useMemo(
     () => ({
-      eval: state.examples.filter(e => e.split === 'eval'),
+      eval: evalSub === 'open' ? toLabel : labeledEx,
       mismatch: (sub === 'done' ? (mm?.reviewedItems ?? []) : (mm?.items ?? [])).map(x => byId.get(x.exampleId)!).filter(Boolean),
     }),
-    [state.examples, mm, byId, sub],
+    [toLabel, labeledEx, mm, byId, sub, evalSub],
   );
   // "Review labels" on Prompt versions opens the Mismatches tab.
   const [tab, setTab] = useState<SetKey>(tabParam === 'mismatches' ? 'mismatch' : 'eval');
@@ -114,10 +124,9 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
     if (tabParam === 'mismatches') setTab('mismatch');
   }, [tabParam]);
   const list = sets[tab];
-  const firstOpen = (k: SetKey) => (k === 'mismatch' ? 0 : Math.max(0, sets[k].findIndex(e => !state.gold[e.id])));
-  // Opens on the first example without a gold label; it stays put while labels save. On
-  // Mismatches, a kept or changed example leaves the list and the next one takes its place.
-  const [pos, setPos] = useState<Record<SetKey, number>>(() => ({eval: firstOpen('eval'), mismatch: 0}));
+  // In To label and To review a saved example leaves the list, so the next one takes its place;
+  // in Labeled and Reviewed it is updated where it is.
+  const [pos, setPos] = useState<Record<SetKey, number>>(() => ({eval: 0, mismatch: 0}));
   const i = Math.min(pos[tab], Math.max(0, list.length - 1));
   const ex = list[i];
   const onMismatch = tab === 'mismatch';
@@ -134,7 +143,17 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   // Scoring never waits for every example (spec 2.5): a few labels in each half are enough to go on.
   const next = gate('gold', state.facts);
   const settings = useSettings();
-  const move = (n: number) => setPos(p => ({...p, [tab]: n}));
+  // Motion M4: which way the next example comes in (Previous from the left; anything else from the right).
+  const dir = useRef<'next' | 'prev' | 'switch'>('switch');
+  const move = (n: number) => {
+    dir.current = n < pos[tab] ? 'prev' : 'next';
+    setPos(p => ({...p, [tab]: n}));
+  };
+  const stepClass = `step-${dir.current}`;
+  // After each render the default goes back to "next" (a save that advances).
+  useEffect(() => {
+    dir.current = 'next';
+  });
   const versionId = mm?.versionId ?? null;
   const item = onMismatch && ex && sub === 'open' ? mm?.items.find(x => x.exampleId === ex.id) : undefined;
   const done = onMismatch && ex && sub === 'done' ? mm?.reviewedItems.find(x => x.exampleId === ex.id) : undefined;
@@ -145,11 +164,20 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
     const at = new Date().toISOString();
     const used = outcome === 'kept' ? 'kept' : answer && modelAnswer && same(answer, modelAnswer) ? 'model' : 'other';
     await reviewGold({projectId: state.project.id, exampleId: ex.id, promptVersionId: versionId, outcome, answer, note});
+    // In To review the item leaves the list after the "Saved" beat (M4); in Reviewed it updates at once.
+    if (sub === 'open') await beat();
     edited(ex.id, {exampleId: ex.id, outcome: used, note: note.trim() || null, at});
   };
+  const beat = () => new Promise<void>(res => setTimeout(res, BEAT_MS));
   const pickSub = (v: 'open' | 'done') => {
+    dir.current = 'switch';
     setSub(v);
     setPos(p => ({...p, mismatch: 0}));
+  };
+  const pickEvalSub = (v: 'open' | 'done') => {
+    dir.current = 'switch';
+    setEvalSub(v);
+    setPos(p => ({...p, eval: 0}));
   };
 
   const head = (
@@ -157,6 +185,20 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
       title="Gold Labels"
       actions={
         <>
+          {!onMismatch && (
+            <>
+              <Seg
+                label="Eval set"
+                value={evalSub}
+                onChange={pickEvalSub}
+                options={[
+                  {value: 'open', label: `To label ${num(toLabel.length)}`},
+                  {value: 'done', label: `Labeled ${num(labeledEx.length)}`},
+                ]}
+              />
+              <span style={{width: 8}} />
+            </>
+          )}
           {onMismatch && mm && (
             <>
               <Seg
@@ -213,9 +255,12 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
       <Tabs
         label="Sets"
         selected={tab}
-        onSelect={setTab}
+        onSelect={k => {
+          dir.current = 'switch';
+          setTab(k);
+        }}
         items={[
-          {key: 'eval', label: 'Eval set', count: `${num(state.facts.goldEvalDone)} / ${num(sets.eval.length)}`},
+          {key: 'eval', label: 'Eval set', count: `${num(state.facts.goldEvalDone)} / ${num(evalAll.length)}`},
           // Once a version has answers on the whole eval set.
           // R5-1: the tab is there from the first paint when versions have scores; its count
           // follows once the list is worked out.
@@ -250,8 +295,14 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
         }
       />
       {ex ? (
-        <div style={{display: 'grid', gridTemplateColumns: '520px 1fr', gap: 16, alignItems: 'start'}}>
-          <ExampleCard ex={ex} n={onMismatch ? sets.eval.indexOf(ex) + 1 : i + 1} extra={item ? <Hov text={`Wrong in ${item.wrongIn} of ${item.of} versions`} tip="The examples wrong in the most versions come first" /> : undefined} />
+        <div key={`${tab}-${ex.id}`} className={stepClass} style={{display: 'grid', gridTemplateColumns: '520px 1fr', gap: 16, alignItems: 'start'}}>
+          <ExampleCard
+            key={`ex-${ex.id}`}
+            ex={ex}
+            n={evalAll.indexOf(ex) + 1}
+            extra={item ? <Hov text={`Wrong in ${item.wrongIn} of ${item.of} versions`} tip="The examples wrong in the most versions come first" /> : undefined}
+            onRemove={reason => removeExamples({projectId: state.project.id, exampleIds: [ex.id], reason})}
+          />
           <div className="col" style={{gap: 16}}>
             <ModelAnswer
               key={`m-${ex.id}-${versionId ?? ''}`}
@@ -281,10 +332,30 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
               state={state}
               ex={ex}
               modelShown={(showModel || seen.has(ex.id)) && !!modelAnswer}
-              review={onMismatch && picked ? {modelAnswer, done, onKeep: note => review('kept', note), onChange: (a, note) => review('changed', note, a)} : undefined}
+              versionName={id => {
+                const v = state.versions.find(x => x.id === id);
+                return v ? versionLabel(v) : null;
+              }}
+              review={onMismatch && picked ? {done, onKeep: note => review('kept', note), onChange: (a, note) => review('changed', note, a)} : undefined}
+              advance={
+                !onMismatch && evalSub === 'open'
+                  ? async save => {
+                      // Held from before the save, so the reload never drops it early.
+                      setHold(ex.id);
+                      try {
+                        await save();
+                        await beat();
+                      } finally {
+                        setHold(null);
+                      }
+                    }
+                  : undefined
+              }
             />
           </div>
         </div>
+      ) : !onMismatch && evalSub === 'open' && evalAll.length > 0 ? (
+        <Empty title="Every example is labeled" text="Labels you saved are under Labeled. Add examples on Eval Dataset to label more." />
       ) : onMismatch && sub === 'done' ? (
         mm && <Empty title="Nothing reviewed yet" text={`Labels you keep or change for ${picked?.label ?? 'this version'} show here.`} />
       ) : onMismatch ? (
@@ -306,8 +377,9 @@ const SHOWN = new Set(['Title', 'Description', 'OCR_Text', 'ASR', 'Creator_Nick_
 const IMAGE_KEYS = new Set(Object.values(FEATURES).flatMap(list => list.filter(d => d.isImage).map(d => d.key)));
 const FEATURE_LABEL = new Map(Object.values(FEATURES).flatMap(list => list.map(d => [d.key, d.label] as const)));
 
-function ExampleCard({ex, n, extra}: {ex: Example; n: number; extra?: ReactNode}) {
+function ExampleCard({ex, n, extra, onRemove}: {ex: Example; n: number; extra?: ReactNode; onRemove: (reason: RemovalReason) => Promise<void>}) {
   const [media, setMedia] = useState<ExampleMedia | null | undefined>(undefined);
+  const [removing, setRemoving] = useState<RemovalReason | null>(null);
   const [picked, setPicked] = useState(0);
   const [view, setView] = useState<'player' | 'image'>('player');
   useEffect(() => {
@@ -324,8 +396,7 @@ function ExampleCard({ex, n, extra}: {ex: Example; n: number; extra?: ReactNode}
   }, [ex.id]);
   const stills = media ? [...(media.coverUrl ? [media.coverUrl] : []), ...media.imageUrls.filter(u => u !== media.coverUrl)] : [];
   const f = (k: string) => {
-    const v = ex.features[k];
-    return (Array.isArray(v) ? v.join(', ') : (v ?? '')).trim();
+    return featureText(ex.features[k]).trim();
   };
   const joined = (...parts: string[]) => parts.filter(Boolean).join(' · ');
   const posted = f('Create_Time');
@@ -349,10 +420,40 @@ function ExampleCard({ex, n, extra}: {ex: Example; n: number; extra?: ReactNode}
     ] as [string, string][]
   ).filter(([, v]) => v);
   return (
-    <Card title={`Example ${n}`} titleExtra={extra ? <span className="t-3" style={{fontSize: 13}}>{extra}</span> : undefined}>
+    <Card
+      title={`Example ${n}`}
+      titleExtra={extra ? <span className="t-3" style={{fontSize: 13}}>{extra}</span> : undefined}
+      actions={<Button label="Remove example" kind="ghost" size="sm" onClick={() => setRemoving('broken')} />}
+    >
+      {removing && (
+        <Dialog
+          title="Remove this example?"
+          text="It leaves the eval dataset and every score worked out from now on. You can put it back from the Removed list on Eval Dataset."
+          onClose={() => setRemoving(null)}
+          actions={
+            <>
+              <Button label="Cancel" onClick={() => setRemoving(null)} />
+              <Button
+                label="Remove"
+                kind="primary"
+                onClick={async () => {
+                  await onRemove(removing);
+                  setRemoving(null);
+                }}
+              />
+            </>
+          }
+        >
+          <div className="opts" role="radiogroup" aria-label="Why">
+            <Opt title="Broken" tip="The item can't be opened or its features are empty or wrong" checked={removing === 'broken'} onSelect={() => setRemoving('broken')} />
+            <Opt title="Out of scope" tip="Not the kind of item this project labels" checked={removing === 'out_of_scope'} onSelect={() => setRemoving('out_of_scope')} />
+          </div>
+        </Dialog>
+      )}
       <div className="media">
         {media?.playerUrl && view === 'player' ? (
           <iframe
+            onLoad={e => e.currentTarget.classList.add('loaded')}
             src={media.playerUrl}
             title={`Player for item ${ex.externalId}`}
             style={{position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0}}
@@ -361,7 +462,7 @@ function ExampleCard({ex, n, extra}: {ex: Example; n: number; extra?: ReactNode}
             loading="lazy"
           />
         ) : stills.length ? (
-          <img src={stills[Math.min(picked, stills.length - 1)]} alt="" style={{position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain'}} />
+          <img key={stills[Math.min(picked, stills.length - 1)]} onLoad={e => e.currentTarget.classList.add('loaded')} src={stills[Math.min(picked, stills.length - 1)]} alt="" style={{position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain'}} />
         ) : (
           <Icon name={ex.type === 'video' ? 'video' : 'image'} />
         )}
@@ -518,59 +619,58 @@ const kindText = (f: LabelField) => (f.kind === 'single' ? 'Single-select' : `Mu
 const same = (a: Answer, b: Answer) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
 
 /**
- * Picking values saves the answer as soon as every field has one (no Save button in the design).
- * On Mismatches (`review`, R6-3) nothing saves on its own: the chips and "Why" are edited and Save
- * records the decision (the label kept, the model's answer, or a third answer). "Use the model's
- * answer" only fills the chips. A reviewed example opens in place, filled with its standing
- * review; Save adds a new review and the item stays where it is.
+ * Your answer (spec 1.0.0, 5.3 and 5.4): the chips and an optional comment; nothing saves until
+ * Save. In To label and To review, Save moves on to the next example (the saved one leaves the
+ * list); in Labeled and Reviewed it updates the example where it is. On Mismatches (`review`)
+ * Save records a decision for the picked version: the label kept, or changed (to the model's
+ * answer or another one). Comments are added, never edited, and listed oldest first.
  */
 function YourAnswer({
   state,
   ex,
   modelShown,
+  versionName,
   review,
+  advance,
 }: {
   state: ProjectState;
   ex: Example;
   modelShown: boolean;
-  review?: {modelAnswer: Answer | null; done?: MismatchReview; onKeep: (note: string) => Promise<void>; onChange: (a: Answer, note: string) => Promise<void>};
+  versionName: (id: string) => string | null;
+  /** To label: runs the save while the example is held for the "Saved" beat, then lets it leave the list. */
+  advance?: (save: () => Promise<void>) => Promise<void>;
+  review?: {done?: MismatchReview; onKeep: (note: string) => Promise<void>; onChange: (a: Answer, note: string) => Promise<void>};
 }) {
   const schema = state.setup!.schema!;
   const saved = state.gold[ex.id];
   const [answer, setAnswer] = useState<Answer>(saved?.answer ?? {});
-  const savedRef = useRef(saved);
-  savedRef.current = saved;
+  const [note, setNote] = useState('');
+  const [beat, setBeat] = useState(false);
   const complete = schema.fields.every(f => (answer[f.name]?.length ?? 0) >= (f.kind === 'single' ? 1 : (f.min ?? 1)));
-  const isSaved = !!saved && same(saved.answer, answer);
-  const reviewRef = useRef(review);
-  reviewRef.current = review;
+  const changed = !saved || !same(saved.answer, answer);
+  const hasNote = !!note.trim();
   const done = review?.done;
-  const [note, setNote] = useState(done?.note ?? '');
-  // What the standing review says; Save is off until the chips or Why differ from it.
-  const [base, setBase] = useState({answer: saved?.answer ?? {}, note: done?.note ?? ''});
-  const dirty = !same(base.answer, answer) || base.note.trim() !== note.trim();
-  const save = async () => {
-    if (!review) return;
-    if (saved && same(saved.answer, answer)) await review.onKeep(note);
-    else await review.onChange(answer, note);
-    setBase({answer, note});
+  // Save is on when there is something to record: a new or changed label, a comment, or (in To
+  // review) the decision to keep the label.
+  const canSave = complete && (changed || hasNote || (!!review && !done));
+  const comments: LabelComment[] = state.comments[ex.id] ?? [];
+  const save = () => (advance ? advance(record) : record());
+  const record = async () => {
+    if (review) {
+      if (changed) await review.onChange(answer, note);
+      else await review.onKeep(note);
+    } else {
+      if (changed) await saveGold(state.project.id, ex.id, state.setup!.schemaVersion, answer, modelShown);
+      if (hasNote) await addComment({projectId: state.project.id, exampleId: ex.id, text: note});
+    }
+    setNote('');
+    setBeat(true);
   };
-
-  // A complete answer saves a moment after the last click. Moving to another example (which
-  // unmounts this card) saves at once instead of dropping the answer.
-  const pending = useRef<(() => void) | null>(null);
   useEffect(() => {
-    // R6-3: on Mismatches only Save saves.
-    if (reviewRef.current || !complete || (savedRef.current && same(savedRef.current.answer, answer))) return;
-    const save = () => {
-      pending.current = null;
-      void saveGold(state.project.id, ex.id, state.setup!.schemaVersion, answer, modelShown);
-    };
-    pending.current = save;
-    const id = setTimeout(save, 300);
+    if (!beat) return;
+    const id = setTimeout(() => setBeat(false), 1600);
     return () => clearTimeout(id);
-  }, [answer, complete]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => () => pending.current?.(), []);
+  }, [beat]);
 
   const pick = (f: LabelField, value: string) => {
     const cur = answer[f.name] ?? [];
@@ -578,44 +678,40 @@ function YourAnswer({
     const next = cur.includes(value) ? cur.filter(v => v !== value) : cur.length >= (f.max ?? 99) ? cur : [...cur, value];
     setAnswer({...answer, [f.name]: next});
   };
+  const vName = (id: string | null) => (id ? versionName(id) : null);
   return (
     <Card
       title="Your answer"
       titleExtra={
-        isSaved && !review ? (
-          <span className="done-at" style={{margin: 0}}>
+        beat || (!review && saved && !changed && !hasNote) ? (
+          <span className={`done-at${beat ? ' saved-beat' : ''}`} style={{margin: 0}}>
             <Badge text="Saved" tone="ok" />
           </span>
         ) : undefined
       }
       actions={
-        review ? (
-          <div className="row" style={{gap: 8, alignItems: 'center'}}>
-            {done && (
-              <>
-                <Badge text={DONE_TEXT[done.outcome]} tone="ok" />
-                <span className="t-3" style={{fontSize: 13}}>
-                  {dateTime(done.at)}
-                </span>
-                {!!done.earlier?.length && (
-                  <span className="t-3" style={{fontSize: 13}}>
-                    <Hov text={`${done.earlier.length + 1} reviews`} tip={`Earlier: ${done.earlier.map(e => `${DONE_TEXT[e.outcome]} · ${dateTime(e.at)}${e.note ? ` · "${e.note}"` : ''}`).join('; ')}. The newest review counts`} />
-                  </span>
-                )}
-                <span style={{width: 8}} />
-              </>
-            )}
-            {done && dirty && (
+        <div className="row" style={{gap: 8, alignItems: 'center'}}>
+          {done && (
+            <>
+              <Badge text={DONE_TEXT[done.outcome]} tone="ok" />
               <span className="t-3" style={{fontSize: 13}}>
-                Not saved
+                {dateTime(done.at)}
               </span>
-            )}
-            <button type="button" className="btn btn-secondary btn-sm" disabled={!review.modelAnswer} onClick={() => review.modelAnswer && setAnswer(review.modelAnswer)}>
-              <Hov text="Use the model's answer" tip="Puts the model's answer in the chips. Nothing is saved until you press Save" />
-            </button>
-            <Button label="Save" kind="primary" size="sm" disabled={!complete || (!!done && !dirty)} onClick={save} />
-          </div>
-        ) : undefined
+              {!!done.earlier?.length && (
+                <span className="t-3" style={{fontSize: 13}}>
+                  <Hov text={`${done.earlier.length + 1} reviews`} tip={`Earlier: ${done.earlier.map(e => `${DONE_TEXT[e.outcome]} · ${dateTime(e.at)}`).join('; ')}. The newest review counts`} />
+                </span>
+              )}
+              <span style={{width: 8}} />
+            </>
+          )}
+          {saved && (changed || hasNote) && !beat && (
+            <span className="t-3" style={{fontSize: 13}}>
+              Not saved
+            </span>
+          )}
+          <Button label="Save" kind="primary" size="sm" disabled={!canSave} onClick={save} />
+        </div>
       }
     >
       <div className="col" style={{gap: 28}}>
@@ -640,25 +736,34 @@ function YourAnswer({
             </div>
           </div>
         ))}
-        {review && (
-          <div style={{paddingTop: 8}}>
-            <div className="col" style={{gap: 8}}>
-              <span className="field-l">
-                <Hov text="Why" tip="Goes to the Optimiser with this example, so it learns what your label means. It never reaches the held-out half" />
-              </span>
-              <textarea
-                className="input"
-                rows={3}
-                aria-label="Why"
-                placeholder="Optional: for example, the clip is cut from a show, so it is a Clip"
-                maxLength={500}
-                value={note}
-                onChange={e => setNote(e.target.value)}
-                style={{height: 76, padding: '8px 12px', resize: 'none', lineHeight: '20px'}}
-              />
+        <div className="col" style={{gap: 8, paddingTop: 8}}>
+          <span className="field-l">
+            <Hov text="Comment" tip="Optional. Saved with Save. Comments go to the Optimiser and the Prompt helper with this example, so they learn what the label means; comments on the half used for scores never reach them" />
+          </span>
+          {comments.length > 0 && (
+            <div className="cmts" aria-label="Comments">
+              {comments.map(c => (
+                <div key={c.id} className="cmt">
+                  <span className="cmt-h">
+                    {c.authorName} · {dateTime(c.createdAt)}
+                    {vName(c.promptVersionId) ? ` · on ${vName(c.promptVersionId)}` : ''}
+                  </span>
+                  <span className="cmt-t">{c.text}</span>
+                </div>
+              ))}
             </div>
-          </div>
-        )}
+          )}
+          <textarea
+            className="input"
+            rows={3}
+            aria-label="Add a comment"
+            placeholder="Add a comment: for example, the clip is cut from a show, so it is a Clip"
+            maxLength={500}
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            style={{height: 76, padding: '8px 12px', resize: 'none', lineHeight: '20px'}}
+          />
+        </div>
       </div>
     </Card>
   );

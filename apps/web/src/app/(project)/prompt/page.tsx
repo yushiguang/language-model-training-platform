@@ -246,11 +246,11 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
         <RightColumn advice={advice}>
           {box =>
             showPanel ? (
-              <OptimiserPanel state={state} run={(run ?? ended)!} box={box} onShow={choose} />
+              <OptimiserPanel key="optimiser" state={state} run={(run ?? ended)!} box={box} onShow={choose} />
             ) : selDropped ? (
-              <DroppedCard state={state} v={sel} round={selInfo!.round} box={box} />
+              <DroppedCard key={`d-${sel.id}`} state={state} v={sel} round={selInfo!.round} box={box} />
             ) : selRunning ? (
-              <RunningCard state={state} v={sel} box={box} />
+              <RunningCard key={`r-${sel.id}`} state={state} v={sel} box={box} />
             ) : selNoGold ? (
               <NoGoldCard key={sel.id} state={state} v={sel} box={box} />
             ) : (
@@ -285,7 +285,7 @@ function RightColumn({advice, children}: {advice: ReactNode; children: (box: Box
     setH(el.offsetHeight);
     return () => ro.disconnect();
   }, [has]);
-  const box: Box = {className: 'fill-scroll', style: {flex: 'none', height: PV_H - (h ? h + 16 : 0), transition: 'height 200ms ease'}};
+  const box: Box = {className: 'fill-scroll swap', style: {flex: 'none', height: PV_H - (h ? h + 16 : 0), transition: 'height 200ms ease'}};
   return (
     <div className="pv-right" style={{height: PV_H}}>
       {children(box)}
@@ -322,17 +322,33 @@ const named = (name: string) => (
 );
 const LEFT_OUT_TIP = "Answers that can't be read as labels (invalid) or that the safety filter stopped are left out of the score. A version passes only when at most 1% of its answers are invalid";
 /** R4-6: how many answers the score rests on, and how many were left out. Red when invalid answers are over the cap. */
-function LeftOut({m, cap}: {m: ProjectState['reports'][number]['metrics']; cap: number}) {
+function LeftOut({m, cap, state, createdAt}: {m: ProjectState['reports'][number]['metrics']; cap: number; state: ProjectState; createdAt: string}) {
   const total = m.total ?? m.n;
   if (!total) return null;
   const filtered = m.filtered ?? 0;
   const over = m.invalidRate > cap;
   const txt = `Scored on ${m.n} of ${total} examples · ${m.invalid} invalid (${Math.round(100 * m.invalidRate)}%${over ? `, above ${+(100 * cap).toFixed(1)}%` : ''}) · ${filtered} filtered left out`;
+  // Spec 1.0.0, 4.4: examples waiting for gold labels are not in the score, and gold-labeled
+  // examples removed before it was worked out are named, so a score raised by removals shows.
+  const pending = state.examples.filter(e => e.split === 'eval' && !state.gold[e.id]).length;
+  const removed = state.removals.filter(r => r.gold && r.removedAt <= createdAt).length;
   return (
-    <div className="row" style={{paddingTop: 12, fontSize: 13}}>
+    <div className="row" style={{paddingTop: 12, fontSize: 13, gap: 0, flexWrap: 'wrap'}}>
       <span className={over ? 't-err' : 't-3'}>
         <Hov text={txt} tip={LEFT_OUT_TIP} />
       </span>
+      {removed > 0 && (
+        <span className="t-3">
+          &nbsp;·&nbsp;
+          <Hov text={`${num(removed)} gold-labeled ${removed === 1 ? 'example' : 'examples'} removed`} tip="Removed from the eval dataset before this score was worked out. See the Removed list on Eval Dataset" />
+        </span>
+      )}
+      {pending > 0 && (
+        <span className="t-3">
+          &nbsp;·&nbsp;
+          <Hov text={`${num(pending)} new ${pending === 1 ? 'example waits' : 'examples wait'} for gold labels`} tip="Scores leave out examples without a gold label. Label them on Gold Labels" />
+        </span>
+      )}
     </div>
   );
 }
@@ -708,7 +724,7 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
         cols={[{label: 'Field'}, {label: named('Macro-F1'), kind: 'c'}, {label: 'Precision', kind: 'c'}, {label: 'Recall', kind: 'c'}, {label: 'Result', kind: 'c'}]}
         rows={rows.map(r => ({key: r.field, cells: [<Code key="f">{r.field}</Code>, <Score key="s" v={r.f1} ok={rep.rough ? null : r.passed} />, r.precision.toFixed(2), r.recall.toFixed(2), rep.rough ? <span key="p" className="t-3">–</span> : r.passed ? <Passed key="p" /> : <Below key="b" />]}))}
       />
-      <LeftOut m={rep.metrics} cap={t.invalidRate ?? systemConfig().evaluation.invalidRateCap} />
+      <LeftOut m={rep.metrics} cap={t.invalidRate ?? systemConfig().evaluation.invalidRateCap} state={state} createdAt={rep.createdAt} />
     </Card>
   );
 }
@@ -747,12 +763,31 @@ function Advice({state, selId, onStarted, onSwitch}: {state: ProjectState; selId
   // (R4-3, design: U-J-Optimise-Dialog): where to start, shown only when a better minor of the same
   // major exists, and the most rounds to try.
   const [ask, setAsk] = useState<{sel: PromptVersion; selScore: number | null; best: PromptVersion | null; bestScore: number; from: string} | null>(null);
-  const start = (versionId: string, n: number) => {
-    setAsk(null);
-    // R5-4: starting a run takes the user to it (the progress panel), not the version they left.
-    onStarted();
-    startOptimiser({projectId: state.project.id, maxRounds: n, startVersionId: versionId}).catch(e => reportActionError(`The Optimiser could not start: ${(e as Error).message}`, () => start(versionId, n)));
-  };
+  // Motion M1: Start stays pending until the run exists (the call itself lasts the whole run),
+  // then the dialog closes on its progress panel.
+  const runId = state.optimisation[0]?.id;
+  const waiting = useRef<{was: string | undefined; done: () => void} | null>(null);
+  useEffect(() => {
+    if (waiting.current && runId && runId !== waiting.current.was) waiting.current.done();
+  }, [runId]);
+  const start = (versionId: string, n: number) =>
+    new Promise<void>(resolve => {
+      const done = () => {
+        if (!waiting.current) return;
+        waiting.current = null;
+        setAsk(null);
+        // R5-4: starting a run takes the user to it (the progress panel), not the version they left.
+        onStarted();
+        resolve();
+      };
+      waiting.current = {was: runId, done};
+      startOptimiser({projectId: state.project.id, maxRounds: n, startVersionId: versionId}).then(done, e => {
+        waiting.current = null;
+        setAsk(null);
+        resolve();
+        reportActionError(`The Optimiser could not start: ${(e as Error).message}`, () => void start(versionId, n));
+      });
+    });
   const auto = async () => {
     // Paid work: the first start confirms Project Settings (spec 2.3).
     if (!(await settings.confirmed())) return;

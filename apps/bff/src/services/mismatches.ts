@@ -1,8 +1,9 @@
 import type {Answer, Example, ExampleBrief, MismatchList, MismatchReview, Prediction, ProjectState} from '@tsp/contracts';
-import {withLabelerNotes, fieldsRight, versionLabel, visibleToAgents, systemConfig} from '@tsp/domain';
+import {withComments, fieldsRight, versionLabel, visibleToAgents, systemConfig} from '@tsp/domain';
 import {emitChange, getApp, now, once, tm} from './app.ts';
 import {saveGold} from './dataset.ts';
 import {buildReport, predictionsFor} from './evaluation.ts';
+import {addComment} from './governance.ts';
 import {loadProjectState} from './projects.ts';
 
 /** The audit action that records a decision made on the Mismatches tab. */
@@ -51,19 +52,18 @@ async function standingReviews(projectId: string, state: ProjectState): Promise<
 }
 
 /**
- * The labelers' "Why" notes the helpers may read (R4-4), by example id: optimiser-half examples
- * only, never the held-out half. The newest standing note on the example wins, from any version:
- * the note is about what the gold label means, not about one version's answer.
+ * The people's comments the helpers may read (spec 1.0.0, 5.4), by example id, oldest first:
+ * optimiser-half examples only, never the held-out half. A comment is about what the gold label
+ * means, not about one version's answer, so comments from every view are included. Notes saved
+ * with a mismatch decision before 1.0.0 come first.
  */
-export async function labelerNotes(projectId: string, state: ProjectState): Promise<Map<string, string>> {
+export async function labelComments(projectId: string, state: ProjectState): Promise<Map<string, string[]>> {
   const visible = new Set(state.examples.filter(visibleToAgents).map(e => e.id));
-  const notes = new Map<string, {note: string; at: string}>();
-  for (const d of (await standingReviews(projectId, state)).values()) {
-    if (!d.note || !visible.has(d.exampleId)) continue;
-    const had = notes.get(d.exampleId);
-    if (!had || had.at <= d.at) notes.set(d.exampleId, {note: d.note, at: d.at});
-  }
-  return new Map([...notes].map(([id, n]) => [id, n.note]));
+  const out = new Map<string, string[]>();
+  const add = (id: string, text: string) => out.set(id, [...(out.get(id) ?? []), text]);
+  for (const d of (await standingReviews(projectId, state)).values()) if (d.note && visible.has(d.exampleId)) add(d.exampleId, d.note);
+  for (const [id, list] of Object.entries(state.comments)) if (visible.has(id)) for (const c of list) add(id, c.text);
+  return out;
 }
 
 /**
@@ -183,10 +183,12 @@ export async function reviewGold(projectId: string, exampleId: string, versionId
   const g = outcome === 'changed' && answer ? await saveGold(projectId, exampleId, state.setup.schemaVersion, answer, true) : current;
   const theirs = model ? (await predictionsFor(versionId, model.endpoint, model)).get(exampleId)?.answer : null;
   const text = note?.trim().slice(0, systemConfig().labeling.commentMaxChars) || undefined;
-  const data: ReviewData = {exampleId, versionId, outcome, usedModel: outcome === 'changed' && !!theirs && !!answer && same(theirs, answer), goldId: g.id, previousGoldId: current.id, previousAnswer: current.answer, ...(text ? {note: text} : {}), at: now()};
+  const data: ReviewData = {exampleId, versionId, outcome, usedModel: outcome === 'changed' && !!theirs && !!answer && same(theirs, answer), goldId: g.id, previousGoldId: current.id, previousAnswer: current.answer, at: now()};
   await catalog.audit(projectId, (await user()).name, GOLD_REVIEW, data as unknown as Record<string, unknown>);
+  // 1.0.0: the "Why" is a comment on the example (spec 5.4), kept with the version it was written on.
+  if (text) await addComment(projectId, exampleId, text, versionId);
   tm().event('gold_mismatch_reviewed', {outcome, with_note: !!text});
   emitChange();
 }
 
-export {withLabelerNotes};
+export {withComments};

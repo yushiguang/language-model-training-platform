@@ -3,6 +3,7 @@ import test from 'node:test';
 import type {StructuredPrompt} from '@tsp/contracts';
 import {scriptedAgent} from '@tsp/platform';
 import {draftImprovement, partialReply, reflectPrompt, runAgentTurn} from './runtime.ts';
+import {createAgentRuntime} from './index.ts';
 
 test('runAgentTurn hands off from front_desk to the Prompt helper and returns a structured prompt draft', async () => {
   const llm = scriptedAgent();
@@ -275,4 +276,28 @@ test('a reply that is not JSON is asked again once, then never shown as broken o
   assert.deepEqual((await turn(replies(['{"reply": "Hel', '{"reply": "Hello."}']))).messages.map(m => m.text), ['Hello.']);
   assert.deepEqual((await turn(replies(['{"reply": "Hel', '{"reply": "Hel']))).messages.map(m => m.text), ['Sorry, my answer came out garbled. Please ask again.']);
   assert.deepEqual((await turn(replies(['Hello there.']))).messages.map(m => m.text), ['Hello there.']);
+});
+
+test('createAgentRuntime: calls are plain data; progress goes to the injected port under the turn id, tools by project, and cancel stops a request', async () => {
+  const published: string[] = [];
+  const toolsFor: string[] = [];
+  const rt = createAgentRuntime({
+    llm: scriptedAgent(),
+    tools: projectId => (toolsFor.push(projectId), {call: async () => ({})}),
+    progress: {publish: (projectId, turnId, e) => published.push(`${projectId}/${turnId}/${'message' in e ? 'message' : 'working' in e ? 'working' : 'reply'}`)},
+  });
+  const req = {userText: 'Please add value "News" to primary_value', page: {label: 'Prompt Design', agent: 'front_desk' as const, intent: 'answer', context: {}}, workspace: {projectId: 'pr_9', task: '', prompt: null, history: [], pageView: null}, turnId: 't_1'};
+  assert.doesNotThrow(() => JSON.parse(JSON.stringify(req)), 'the request is plain JSON');
+  const out = await rt.runTurn(req);
+  assert.ok(out.invocations.length >= 1);
+  assert.ok(published.length > 0 && published.every(p => p.startsWith('pr_9/t_1/')));
+  assert.deepEqual([...new Set(toolsFor)], ['pr_9']);
+  // A slow reflect that the caller cancels by id.
+  const slow = createAgentRuntime({
+    llm: {chat: (_m: unknown, o: {signal?: AbortSignal}) => new Promise((_, rej) => o.signal?.addEventListener('abort', () => rej(new DOMException('Stopped', 'AbortError'))))} as unknown as Parameters<typeof createAgentRuntime>[0]['llm'],
+    tools: () => ({call: async () => ({})}),
+  });
+  const p = slow.reflectPrompt({projectId: 'pr_9', requestId: 'rq_1', prompt: optPrompt, triedChanges: [], mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null});
+  await slow.cancel('rq_1');
+  await assert.rejects(p);
 });

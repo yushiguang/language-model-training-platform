@@ -1,11 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import {Fragment, useEffect, useRef, useState, useSyncExternalStore} from 'react';
+import {Fragment, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent} from 'react';
 import type {AgentPreset, ChatEvent, ChatMessage, PageContext} from '@tsp/contracts';
 import {agentName, pageFromPath} from '@tsp/domain';
 import {agentLive, answeringAgent, chatHistory, isAgentBusy, sendUserMessage, subscribeAgentLive, subscribeChanges} from '@/backend-api';
-import {dateTime, Icon, LinkChip} from '@/ui';
+import {dateTime, Icon, LinkChip, useTip} from '@/ui';
 import {useProject} from './ProjectContext';
 
 /** A document link pasted into the chat, shown as a chip (the text still goes to the agent as-is). */
@@ -25,9 +25,12 @@ export function AskAi({
   chips,
   placeholder = 'Ask about this page',
   first,
+  leaving,
 }: {
   page: PageContext;
   onClose: () => void;
+  /** Closing: the panel slides out before it unmounts (motion M5). */
+  leaving?: boolean;
   chips?: string[];
   placeholder?: string;
   /** The opening line of the page's helper, shown first. */
@@ -90,7 +93,7 @@ export function AskAi({
   const working = busy || !!liveTurn;
 
   return (
-    <aside className="chat" aria-label="Ask AI">
+    <aside className={`chat${leaving ? ' leaving' : ''}`} aria-label="Ask AI" aria-hidden={leaving || undefined}>
       <div className="chat-h">
         <div className="chat-h-row">
           <Icon name="spark" />
@@ -214,8 +217,13 @@ function Message({m, active}: {m: ChatMessage; active?: boolean}) {
 function Composer({onSend, disabled, placeholder}: {onSend: (text: string) => void | Promise<void>; disabled?: boolean; placeholder: string}) {
   const [text, setText] = useState('');
   const ready = text.trim().length > 0 && !disabled;
-  // Enter adds a new line; only the send button sends. The box grows up to 6 lines, then scrolls.
+  // Spec 1.0.0, 6.1: Enter sends and Shift+Enter adds a new line. While an input method is
+  // composing (Chinese, Japanese, Korean), Enter picks the characters and never sends. The box
+  // grows up to 6 lines, then scrolls.
   const box = useRef<HTMLTextAreaElement | null>(null);
+  const composing = useRef(false);
+  const tip = useTip();
+  const sendBtn = useRef<HTMLButtonElement>(null);
   const grow = (el: HTMLTextAreaElement | null) => {
     box.current = el;
     if (!el) return;
@@ -229,6 +237,13 @@ function Composer({onSend, disabled, placeholder}: {onSend: (text: string) => vo
     setText('');
     void onSend(t);
   };
+  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    // keyCode 229: some browsers report the Enter that ends a composition this way.
+    if (composing.current || e.nativeEvent.isComposing || e.keyCode === 229) return;
+    e.preventDefault();
+    submit();
+  };
   return (
     <div className="chat-in">
       <label className="sr-only" htmlFor="chat-input">
@@ -240,10 +255,29 @@ function Composer({onSend, disabled, placeholder}: {onSend: (text: string) => vo
         value={text}
         placeholder={placeholder}
         onChange={e => setText(e.target.value)}
+        onKeyDown={onKeyDown}
+        onCompositionStart={() => (composing.current = true)}
+        onCompositionEnd={() => (composing.current = false)}
         ref={grow}
       />
-      <button type="button" className="send" aria-label="Send" aria-disabled={!ready} onClick={submit}>
+      <button
+        ref={sendBtn}
+        type="button"
+        className="send"
+        aria-label="Send"
+        aria-disabled={!ready}
+        aria-describedby={tip.at ? tip.id : undefined}
+        onMouseEnter={() => tip.show(sendBtn.current)}
+        onMouseLeave={tip.hide}
+        onFocus={() => tip.show(sendBtn.current)}
+        onBlur={tip.hide}
+        onClick={() => {
+          tip.hide();
+          submit();
+        }}
+      >
         <Icon name="up" />
+        {tip.pop('Enter to send · Shift+Enter for new line')}
       </button>
     </div>
   );

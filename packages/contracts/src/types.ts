@@ -142,10 +142,25 @@ export interface Project {
   sourcePromptVersionId?: string | null;
   /** The user has seen and saved Project Settings (asked once, before the first paid run). */
   settingsConfirmed?: boolean;
+  /**
+   * A helper or the Optimiser has read examples of this project (spec 1.0.0, 4.2). From then on no
+   * example's half ever changes; before it, halves may be balanced again by gold label.
+   */
+  holdoutLocked?: boolean;
   setupVersionId: string | null;
   snapshotId: string | null;
   /** Nodes whose Next step was pressed. Code moves the workflow, never the agent. */
   approvedNodes: NodeId[];
+}
+
+/**
+ * One feature of an example (spec 1.0.0, 7.1): plain text, or a list (image URLs, hashtags).
+ * An explicit struct instead of a `string | string[]` union, so it maps to an IDL. Read it with
+ * `featureText` / `featureItems` from `@tsp/domain`.
+ */
+export interface FeatureValue {
+  text?: string;
+  items?: string[];
 }
 
 export interface Example {
@@ -154,11 +169,53 @@ export interface Example {
   externalId: string;
   type: ExampleType;
   title: string;
-  /** Placeholder key -> value. Image features hold URLs. */
-  features: Record<string, string | string[]>;
+  /** Placeholder key -> value. Image features hold URLs in `items`. */
+  features: Record<string, FeatureValue>;
   split: Split | null;
   /** Eval examples only: true = the optimiser may learn from it; false = held out for scoring. */
   optimiserHalf: boolean;
+  /** Removed from the eval dataset (soft delete, spec 1.0.0, 4.4): its `DatasetRemoval` says why; restorable. */
+  removed?: boolean;
+}
+
+/** Why an example left the eval dataset (spec 1.0.0, 4.4). */
+export type RemovalReason = 'broken' | 'out_of_scope' | 'downsample' | 'excess_unlabeled';
+
+/**
+ * The trail of one removal from the eval dataset (spec 1.0.0, 4.4): what was removed, from which
+ * half, its gold label at the time, and why. A score built after it shows how many gold-labeled
+ * examples were removed, so a score raised by deleting hard examples is visible as such.
+ */
+export interface DatasetRemoval {
+  id: string;
+  projectId: string;
+  exampleId: string;
+  externalId: string;
+  half: 'optimiser' | 'held_out';
+  /** The gold label when it was removed; null when it had none. */
+  gold: Answer | null;
+  reason: RemovalReason;
+  removedBy: string;
+  removedAt: string;
+  /** Set when the example was put back. */
+  restoredAt: string | null;
+}
+
+/**
+ * A person's comment on an example (spec 1.0.0, 5.4), append-only, from Gold Labels or Mismatches.
+ * Comments on optimiser-half examples reach the Optimiser and the Prompt helper; comments on the
+ * held-out half never reach a helper.
+ */
+export interface LabelComment {
+  id: string;
+  projectId: string;
+  exampleId: string;
+  authorId: string;
+  authorName: string;
+  text: string;
+  /** The version compared when it was written on Mismatches; null on the eval set. */
+  promptVersionId: string | null;
+  createdAt: string;
 }
 
 export interface DatasetSnapshot {
@@ -649,6 +706,10 @@ export interface ProjectState {
   endpoints: EndpointInfo[];
   /** Active or recently finished sampling task, if any. */
   samplingTask: SamplingTask | null;
+  /** Removals that still stand (not restored), newest first; the removed examples are not in `examples`. */
+  removals: DatasetRemoval[];
+  /** People's comments by example id, oldest first. */
+  comments: Record<string, LabelComment[]>;
   /**
    * Automatic spend that left no labeling task: the prompt agent's try_prompt runs started
    * within the caps (from `auto_spend` audit records).
