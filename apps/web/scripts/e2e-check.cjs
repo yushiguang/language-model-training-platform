@@ -319,9 +319,10 @@ let current = null;
     }
   }
 
-  // Below the bar: Improve with AI puts the Prompt helper's draft in the editor, saved as v1.1
+  // Improve with AI puts the Prompt helper's draft in the editor, saved as v1.1. It is offered
+  // below the bar and on a passing version too, so the check runs it whether or not v1 passed.
   for (let i = 0; i < 30 && !(await button(page, 'Improve with AI').count()); i++) await page.waitForTimeout(1000);
-  if ((await button(page, 'Auto Optimise').count()) > 0) {
+  if (await button(page, 'Improve with AI').count()) {
     await button(page, 'Improve with AI').first().click();
     await page.waitForURL(/prompt\/edit/);
     await page.getByText('Draft from Prompt helper', {exact: true}).waitFor({timeout: 20000});
