@@ -727,3 +727,17 @@ test('the first read of examples by a helper locks the halves', async () => {
   assert.match(found.message, /words/);
   assert.equal((await w.state()).project.holdoutLocked, true);
 });
+
+test('once a version is scored the halves stay put, so a helper read never makes scores stale', async () => {
+  const w = await world('g6', {gold: id => (id === '1' || id === '3' ? 'Tutorial' : 'Vlog')});
+  await w.newVersion();
+  await tick(await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
+  const before = Object.fromEntries((await w.state()).examples.map(e => [e.id, e.optimiserHalf]));
+  const {lockHoldout} = await import('./governance.ts');
+  await lockHoldout(w.projectId);
+  const s = await w.state();
+  for (const e of s.examples) assert.equal(e.optimiserHalf, before[e.id]);
+  assert.equal(s.reports[0].archivedNow, false);
+  assert.equal(s.project.holdoutLocked, true);
+});

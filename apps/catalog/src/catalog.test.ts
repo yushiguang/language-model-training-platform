@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {PromptVersion} from '@tsp/contracts';
 import {localDocRuntime} from '@tsp/platform';
-import {createCatalog} from './catalog.ts';
+import {LABEL_VALUES} from '@tsp/contracts';
+import {catalogKinds, createCatalog} from './catalog.ts';
 
 const base = {projectId: 'pr_1', structured: {taskSummary: '', features: {video: [], photo_text: [], metadata: []}, fields: [], generalRules: '', images: []}, template: 't', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user' as const, change: '', schemaVersion: 1};
 
@@ -37,4 +38,9 @@ test('catalog patch changes only the given fields; findByIds returns the asked r
   );
   const got = await c.findByIds('examples', ['ex_3', 'ex_35', 'missing']);
   assert.deepEqual(got.map(e => e.id).sort(), ['ex_3', 'ex_35']);
+});
+
+test('every catalog kind is a declared telemetry collection, so no metric falls back to "other"', () => {
+  const missing = catalogKinds().filter(k => !LABEL_VALUES.collection.includes(k));
+  assert.deepEqual(missing, []);
 });

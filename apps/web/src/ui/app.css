@@ -151,9 +151,9 @@ textarea.input.grow-box:not(.sm) { min-height: 36px; padding: 7px 12px; }
 /* M5: Ask AI opens by widening its slot, so the page moves over smoothly; it closes the same way. */
 @keyframes k-chat-in { from { width: 0; margin-right: 0; opacity: 0; } to { width: 400px; opacity: 1; } }
 @keyframes k-chat-out { from { width: 400px; opacity: 1; } to { width: 0; margin-right: 0; opacity: 0; } }
-.b-body > .chat { animation: k-chat-in var(--dur-med) var(--ease-out); overflow: hidden; }
+.b-body > .chat.entering, .b-body > .chat.leaving { overflow: hidden; }
+.b-body > .chat.entering { animation: k-chat-in var(--dur-med) var(--ease-out); }
 .b-body > .chat.leaving { animation: k-chat-out var(--dur-med) var(--ease-out) forwards; pointer-events: none; }
-.b-body > .chat > * { min-width: 398px; }
 @keyframes k-fade { from { opacity: 0; } to { opacity: 1; } }
 .k .ask { animation: k-fade var(--dur-med) var(--ease-out); }
 /* M6: dialogs, hints, banners and the version detail come in gently. */

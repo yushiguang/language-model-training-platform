@@ -25,10 +25,13 @@ export function AskAi({
   chips,
   placeholder = 'Ask about this page',
   first,
+  entering,
   leaving,
 }: {
   page: PageContext;
   onClose: () => void;
+  /** Just opened: the panel slides in (motion M5). */
+  entering?: boolean;
   /** Closing: the panel slides out before it unmounts (motion M5). */
   leaving?: boolean;
   chips?: string[];
@@ -93,7 +96,7 @@ export function AskAi({
   const working = busy || !!liveTurn;
 
   return (
-    <aside className={`chat${leaving ? ' leaving' : ''}`} aria-label="Ask AI" aria-hidden={leaving || undefined}>
+    <aside className={`chat${leaving ? ' leaving' : entering ? ' entering' : ''}`} aria-label="Ask AI" aria-hidden={leaving || undefined}>
       <div className="chat-h">
         <div className="chat-h-row">
           <Icon name="spark" />
@@ -231,6 +234,19 @@ function Composer({onSend, disabled, placeholder}: {onSend: (text: string) => vo
     el.style.height = `${el.scrollHeight}px`;
   };
   useEffect(() => grow(box.current), [text]);
+  // The panel widens as it opens (motion M5): measure the box again when its width changes.
+  useEffect(() => {
+    const el = box.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    let w = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === w) return;
+      w = el.clientWidth;
+      grow(el);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const submit = () => {
     if (!ready) return;
     const t = text.trim();

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import {usePathname} from 'next/navigation';
-import {createContext, Suspense, useContext, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+import {createContext, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
 import {NODES} from '@tsp/domain';
 import type {NodeId, PageContext} from '@tsp/contracts';
@@ -38,11 +38,14 @@ interface Shell {
   setOpen: (o: boolean) => void;
   /** Ask AI is rendered here, beside the main column. */
   side: HTMLElement | null;
+  /** Ask AI was just opened by the user: it slides in (motion M5). A page change keeps it still. */
+  entering: boolean;
 }
 const ShellCtx = createContext<Shell>({
   open: false,
   setOpen: () => undefined,
   side: null,
+  entering: false,
 });
 /** Opens Ask AI: every action that starts or continues a helper's work opens it, so the user lands where the helper works (R3-6). */
 export function useOpenAskAi(): () => void {
@@ -74,9 +77,21 @@ export function ProjectShell({children}: {children: ReactNode}) {
 
 function ShellInner({children}: {children: ReactNode}) {
   const ctx = useProject();
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
+  const [entering, setEntering] = useState(false);
   const [side, setSide] = useState<HTMLElement | null>(null);
-  const shell = useMemo(() => ({open, setOpen, side}), [open, side]);
+  const setOpen = useCallback((o: boolean) => {
+    setOpenState(was => {
+      if (o && !was) setEntering(true);
+      return o;
+    });
+  }, []);
+  useEffect(() => {
+    if (!entering) return;
+    const id = setTimeout(() => setEntering(false), 260);
+    return () => clearTimeout(id);
+  }, [entering]);
+  const shell = useMemo(() => ({open, setOpen, side, entering}), [open, setOpen, side, entering]);
   const node = nodeFromPath(usePathname());
   if (!ctx.projectId) return <Missing text="No project was chosen." />;
   if (ctx.error) return <Missing text={ctx.error} />;
@@ -148,7 +163,7 @@ function usePresence(on: boolean, ms: number): boolean {
 
 /** A page's header and content, with Ask AI beside them when it is open. */
 export function Frame({head, children, chat}: {head: ReactNode; children: ReactNode; chat?: ChatSlot}) {
-  const {open, setOpen, side} = useContext(ShellCtx);
+  const {open, setOpen, side, entering} = useContext(ShellCtx);
   const page = useContext(PageCtx);
   // Motion M3: each step's body fades in when the route changes (the top island stays put).
   const pathname = usePathname();
@@ -173,7 +188,7 @@ export function Frame({head, children, chat}: {head: ReactNode; children: ReactN
         <ActionErrorBanner />
         {children}
       </div>
-      {chatShown && side && createPortal(<AskAi page={page} leaving={!open} onClose={() => setOpen(false)} {...chat} />, side)}
+      {chatShown && side && createPortal(<AskAi page={page} entering={entering} leaving={!open} onClose={() => setOpen(false)} {...chat} />, side)}
     </>
   );
 }

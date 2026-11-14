@@ -66,6 +66,11 @@ The MVP dataset is a prepared file in the format of `apps/web/public/sample-data
 Upload it to the file store and build with `NEXT_PUBLIC_EXAMPLES_URL` set to its URL. Real
 examples never go in this repo.
 
+Since 1.0.0 each feature on a `RawExample` is a `FeatureValue` (`packages/contracts/src/types.ts`):
+`{text}` for text features and `{items}` for lists such as image URLs, never a plain string. An
+`ExampleSource` adapter that still returns plain strings can wrap them with `toFeatures` from
+`@tsp/domain`; prompts read features only through `featureText` and `featureItems`.
+
 ## Media
 
 `MediaSource` (`packages/contracts/src/platform-api.ts`) feeds the player and still images on

@@ -54,6 +54,14 @@ Since 1.0.0 phase 1 every service contract is written so it maps one to one to a
   services' bus, over HTTP Server-Sent Events or polling).
 - `apps/bff/src/api.ts` (`createBffApi`) is the bff as its contract. Services behind it still
   pass records to each other.
+- No callbacks or signals cross a contract (phase 3). The agent runtime is built once with
+  `createAgentRuntime({llm, tools, progress})`: the model, a project's tools and an
+  `AgentProgressPort` for Ask AI's live line are injected, so `runTurn`, `reflectPrompt` and
+  `draftImprovement` take and return plain data. A run's Stop reaches a running change through
+  `cancel(requestId)`.
+- Example features are `FeatureValue {text?, items?}` (text, or a list such as image URLs), read
+  with `featureText` and `featureItems` (`packages/domain/src/template.ts`). Files and older
+  records with plain strings and arrays are read through `toFeatures`.
 
 `apps/web/src/backend-api` has three files: `client.ts` (the `BffClient` interface pages use:
 the contract plus live listeners, file uploads and page telemetry), `in-process.ts` (the default
@@ -196,12 +204,38 @@ third answer), with an optional "Why"; each decision is an audit record (`gold.r
 version) and the example moves from To review to Reviewed for that version only (acceptance R4-5).
 A review stands until it is reopened (`gold.reopen`, which names the review; a changed label goes
 back to what it was) or the gold label changes. `labelerNotes` gives the standing notes on
-optimiser-half examples to the Optimiser and Improve with AI as `ExampleBrief.labelerNote`. A change saves a new gold label, so the evaluation context changes
+optimiser-half examples to the Optimiser and Improve with AI. Since 1.0.0 the "Why" is a
+`LabelComment` (below), and the helpers get every comment on an optimiser-half example as
+`ExampleBrief.comments`. A change saves a new gold label, so the evaluation context changes
 and reports are rebuilt from saved answers: nothing is labeled again
 (`apps/bff/src/services/mismatches.ts`). Prompt Tuning' AI Suggestion points to the tab right
 after the first score (before any review or Optimiser run) and when Auto Optimise ends without a
 pass; never while the Optimiser runs or after a pass. Helpers give the counts only, never which
 side is right.
+
+**The eval dataset changes (1.0.0, spec 4).** `apps/bff/src/services/governance.ts`:
+
+- *Halves.* `assignEvalHalves` (`packages/domain/src/dataset.ts`) puts gold-labeled examples in
+  the two halves by their rarest value, so a rare value lands in both. The bff balances the halves
+  when Gold Labels is left (`approveNode('gold')`) and once more just before a helper or the
+  Optimiser first reads examples (`lockHoldout`: the read tools that return examples, `try_prompt`,
+  Improve with AI, Auto Optimise). From then on `Project.holdoutLocked` is set and no example ever
+  changes half; an added example is placed in the half that keeps the two even.
+- *Adding.* Add from file and Add sampled append to the dataset: ids already in it (removed ones
+  too) are skipped, and nothing there changes. The evaluation context counts gold-labeled examples
+  only, so an unlabeled example is *pending*: it is left out of scores, does not make them stale,
+  and is counted on Eval Dataset and next to the score. Its gold label does make scores stale
+  (Rebuild scores).
+- *Removing.* Remove example on Gold Labels, Remove unlabeled and Downsample on Eval Dataset
+  (`pickToPrune`: evenly from both halves) soft-delete examples (`Example.removed`). Each removal
+  writes a `DatasetRemoval` with the half and gold label at the time, why, who and when; Restore
+  puts the example back in its half. The score line names how many gold-labeled examples were
+  removed before the score was worked out.
+- *Comments.* `LabelComment` records (`label_comments`), append-only, from Save on either Gold
+  Labels tab; a comment on Mismatches keeps the version. Helpers read comments on optimiser-half
+  examples only.
+- *Rough reading.* Below `thresholds.minEval` gold-labeled eval examples a score never passes
+  (`judge` returns `rough`); the Finish gate stays closed.
 
 ## Telemetry
 
@@ -243,6 +277,8 @@ application `id` to the store's document id.
 | Optimiser: Pareto front, parent, merge pair, dry-run pick and comparison | `packages/domain/src/gepa.ts` |
 | Confirming a pass (second labeling of the held-out half) | `confirmScore` in `apps/bff/src/services/evaluation.ts` |
 | Mismatches between saved answers and gold labels; keep or change | `apps/bff/src/services/mismatches.ts` |
+| Halves, label balance and which examples a prune removes | `packages/domain/src/dataset.ts` |
+| Adding, removing, restoring and pruning examples; the holdout lock; comments | `apps/bff/src/services/governance.ts` |
 | Optimiser loop: rounds, retries, Failed and Retry, the end of a run after a confirmed pass | `apps/optimiser/src/optimiser.ts` |
 | Improve with AI (a draft with marked changes, nothing labeled) | `improveWithAi` in `apps/bff/src/services/agents.ts` |
 | The structured prompt: compiling to text, the label signature, wording-only changes | `packages/domain/src/structured.ts` |
@@ -254,8 +290,8 @@ application `id` to the store's document id.
 
 ## Known limits of this version
 
-- `BffContract` still passes some non-JSON values (a `Map` in `ProjectState`, the full state into
-  `tick`) and some client-sent records; a fully serialisable v2 is planned.
+- Services behind `createBffApi` still pass records to each other (only the contracts are plain
+  JSON).
 - Dataset sampling still runs in the page's memory.
 - The Optimiser loop holds a browser lock per project and model, so a second tab cannot run it
   twice; like labeling, it runs only while its page is open.

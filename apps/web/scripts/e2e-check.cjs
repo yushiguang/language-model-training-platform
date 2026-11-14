@@ -36,7 +36,33 @@ let current = null;
   const page = ctx.pages()[0] ?? (await ctx.newPage());
   watch(page);
   current = page;
-  const shot = (p, name) => p.screenshot({path: path.join(SHOTS, `${name}.png`)});
+  // Screenshots wait for the entrance motion (at most 220ms) to end.
+  // With E2E_DUMP set to a folder, each screenshot also saves the page's markup there (media
+  // replaced by their size), which is how the UI canvas boards are made from the build.
+  const shot = async (p, name) => {
+    await p.waitForTimeout(260);
+    await p.screenshot({path: path.join(SHOTS, `${name}.png`)});
+    if (process.env.E2E_DUMP) {
+      const d = await p.evaluate(() => {
+        const marked = [];
+        for (const el of document.querySelectorAll('img, iframe, video')) {
+          const r = el.getBoundingClientRect();
+          el.setAttribute('data-ph', `${Math.round(r.width)}x${Math.round(r.height)}`);
+          marked.push(el);
+        }
+        for (const el of document.querySelectorAll('input, textarea')) {
+          if (el.type === 'checkbox' || el.type === 'radio' || el.type === 'file') continue;
+          if (el.tagName === 'TEXTAREA') el.textContent = el.value;
+          else el.setAttribute('value', el.value);
+        }
+        const html = document.body.innerHTML;
+        for (const el of marked) el.removeAttribute('data-ph');
+        return {html, h: document.documentElement.scrollHeight, cls: document.body.className};
+      });
+      fs.mkdirSync(process.env.E2E_DUMP, {recursive: true});
+      fs.writeFileSync(path.join(process.env.E2E_DUMP, `${name}.json`), JSON.stringify(d));
+    }
+  };
   const main = p => p.locator('main').innerText();
   const progress = async p => ((await p.locator('main .progress small').allInnerTexts()) || []).join(' · ') || 'none';
   const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -44,14 +70,22 @@ let current = null;
   const ask = async (p, text) => {
     await p.locator('aside.chat, button.ask').first().waitFor();
     if (!(await p.locator('aside.chat').count())) await button(p, 'Ask AI').click();
-    // Enter adds a line and never sends; only the Send button does.
+    // Spec 6.1: Shift+Enter adds a line; an Enter that ends an input method's composition never
+    // sends; Enter sends.
     const before = await p.locator('aside.chat .msg-u').count();
-    await p.locator('#chat-input').fill(text);
-    await p.locator('#chat-input').press('Enter');
+    const box = p.locator('#chat-input');
+    await box.fill(text);
+    await box.press('Shift+Enter');
+    if (!(await box.inputValue()).endsWith('\n')) throw new Error('Shift+Enter did not add a line');
+    await box.dispatchEvent('compositionstart');
+    await box.press('Enter');
+    await box.dispatchEvent('compositionend');
+    await box.evaluate(el => el.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', keyCode: 229, isComposing: true, bubbles: true})));
     await p.waitForTimeout(150);
-    if ((await p.locator('aside.chat .msg-u').count()) !== before) throw new Error('Enter sent the message');
-    if (!(await p.locator('#chat-input').inputValue()).endsWith('\n')) throw new Error('Enter did not add a line');
-    await p.locator('aside.chat').getByRole('button', {name: 'Send'}).click();
+    if ((await p.locator('aside.chat .msg-u').count()) !== before) throw new Error('Enter sent the message while composing');
+    await box.fill(text);
+    await box.press('Enter');
+    await p.locator('aside.chat .msg-u').nth(before).waitFor({timeout: 5000});
   };
 
   // Projects: one light list; Delete asks for the exact project name
@@ -155,28 +189,49 @@ let current = null;
 
   // Gold Labels: every eval example and some test examples, picked on the page
   await page.waitForURL(/gold/);
+  // Spec 5.3: nothing saves before Save; in To label, Save moves on to the next example.
   const labelSet = async n => {
     for (let i = 0; i < n; i++) {
       const id = (await page.locator('.media small').innerText()).trim();
       const answer = LABELS.get(id);
       if (!answer) throw new Error(`No bundled label for ${id}`);
-      if (!(await page.getByText('Saved', {exact: true}).count()))
-        for (const [field, values] of Object.entries(answer))
-          for (const v of values) await page.getByRole('group', {name: field}).getByRole('button', {name: v, exact: true}).click();
-      await page.getByText('Saved', {exact: true}).waitFor({timeout: 5000});
-      const fwd = button(page, 'Next');
-      if (await fwd.isEnabled()) {
-        await fwd.click();
-        await page.waitForTimeout(150);
+      for (const [field, values] of Object.entries(answer))
+        for (const v of values) await page.getByRole('group', {name: field}).getByRole('button', {name: v, exact: true}).click();
+      if (i === 0) {
+        await page.waitForTimeout(400);
+        if (await page.getByText('Saved', {exact: true}).count()) throw new Error('a label saved before Save');
       }
+      await button(page, 'Save').click();
+      if (i < n - 1) await page.waitForFunction(was => document.querySelector('.media small')?.textContent?.trim() !== was, id, {timeout: 5000});
+      else await page.getByText('Every example is labeled', {exact: true}).waitFor({timeout: 5000});
     }
   };
   const nEval = +((await page.getByRole('tab', {name: /^Eval set/}).innerText()).match(/\/\s*(\d+)/) || [0, 0])[1];
   if (nEval !== N) throw new Error(`the eval set has ${nEval} examples, not ${N}`);
   if (await page.getByRole('tab', {name: /^Test set/}).count()) throw new Error('Gold Labels still has a Test set tab');
-  await labelSet(nEval);
+  if (!(await page.getByRole('button', {name: `To label ${N}`}).count())) throw new Error('Gold Labels has no To label filter');
+  if (await page.getByText("Use the model's answer").count()) throw new Error("Use the model's answer is still there");
   await shot(page, '3-gold-labels');
+  await labelSet(nEval);
   log('gold labels:', await page.getByRole('tablist', {name: 'Sets'}).innerText());
+  // Labeled: Save updates in place; a comment is added and listed with who and when (spec 5.4).
+  await page.getByRole('button', {name: /^Labeled \d+$/}).click();
+  const firstId = (await page.locator('.media small').innerText()).trim();
+  await page.getByLabel('Add a comment').fill('Shot at home, so it counts as a vlog');
+  await page.getByText('Not saved', {exact: true}).waitFor();
+  await button(page, 'Save').click();
+  await page.locator('.cmts').getByText('Shot at home, so it counts as a vlog').waitFor({timeout: 5000});
+  if ((await page.locator('.media small').innerText()).trim() !== firstId) throw new Error('saving in Labeled moved to another example');
+  await shot(page, '3a-gold-comment');
+  // Remove example: out of scope; it leaves the eval set and shows under Removed on Eval Dataset.
+  await button(page, 'Next').click();
+  await button(page, 'Remove example').click();
+  const rm = page.getByRole('dialog');
+  await rm.getByRole('radio', {name: /Out of scope/}).click();
+  await shot(page, '3c-remove-example');
+  await button(rm, 'Remove').click();
+  await page.getByRole('button', {name: `Labeled ${N - 1}`}).waitFor({timeout: 5000});
+  log('removed one example; gold labels:', await page.getByRole('tablist', {name: 'Sets'}).innerText());
 
   // The first paid run is about to start: Project Settings opens once, to be confirmed (spec 2.3)
   await button(page, 'Next: Prompt Tuning').click();
@@ -217,18 +272,18 @@ let current = null;
     const why = await page.locator('section.card', {hasText: 'Model answer'}).innerText();
     log('model answer card:', why.replace(/\n/g, ' | ').slice(0, 200));
     if (!/Model's reason|Not readable/.test(why)) throw new Error("the Model answer card shows no reason");
-    await page.getByLabel('Why', {exact: true}).fill('The clip is cut from a show');
+    await page.getByLabel('Add a comment').fill('The clip is cut from a show');
     await shot(page, '4c-mismatches');
     const tabCount = n => page.waitForFunction(k => +((document.querySelector('[role=tab][aria-selected=true]')?.textContent ?? '').match(/(\d+)\s*$/) || [0, 0])[1] === k, n, {timeout: 10000});
     // R6-3: nothing saves before Save.
     await button(page, 'Save').click();
     await tabCount(before - 1);
-    // The review shows under Reviewed with its note, in the same editor; Save adds a review in place.
+    // The review shows under Reviewed with its comment listed; Save adds a review in place.
     await page.getByRole('button', {name: /^Reviewed \d+$/}).click();
     await page.getByText('Kept my label', {exact: true}).waitFor({timeout: 5000});
-    if ((await page.getByLabel('Why', {exact: true}).inputValue()) !== 'The clip is cut from a show') throw new Error('the reviewed note is missing');
+    await page.locator('.cmts').getByText('The clip is cut from a show').waitFor({timeout: 5000});
     if (!(await button(page, 'Save').isDisabled())) throw new Error('Save is on before anything changed');
-    await page.getByLabel('Why', {exact: true}).fill('Looked again: it is cut from a show');
+    await page.getByLabel('Add a comment').fill('Looked again: it is cut from a show');
     await page.getByText('Not saved', {exact: true}).waitFor();
     await shot(page, '4d-reviewed-editing');
     const reviewedTab = await page.getByRole('button', {name: /^Reviewed \d+$/}).innerText();
@@ -238,7 +293,16 @@ let current = null;
     log('reviewed item edited in place:', reviewedTab);
     await page.getByRole('button', {name: /^To review \d+$/}).click();
     if (before > 1) {
-      await button(page, "Use the model's answer").click();
+      // Take the model's answer by picking its chips (the shortcut button is gone, spec 5.3).
+      const picks = await page.locator('section.card', {hasText: 'Model answer'}).evaluate(card =>
+        [...card.querySelectorAll('.row')].map(r => [r.querySelector('.code')?.textContent?.trim(), [...r.querySelectorAll('.ch')].map(c => c.textContent.trim())]).filter(([f, v]) => f && v.length),
+      );
+      const ours = page.locator('section.card', {hasText: 'Your answer'});
+      for (const [field, values] of picks) {
+        const group = ours.getByRole('group', {name: field});
+        for (const b of await group.getByRole('button').all()) if ((await b.getAttribute('aria-pressed')) === 'true' && !values.includes((await b.innerText()).trim())) await b.click();
+        for (const v of values) if ((await group.getByRole('button', {name: v, exact: true}).getAttribute('aria-pressed')) !== 'true') await group.getByRole('button', {name: v, exact: true}).click();
+      }
       await button(page, 'Save').click();
       await page.waitForFunction(n => +((document.querySelector('[role=tab][aria-selected=true]')?.textContent ?? '').match(/(\d+)\s*$/) || [0, 0])[1] === n - 2, before, {timeout: 10000});
     }
@@ -378,6 +442,37 @@ let current = null;
   await button(page, 'Discard').click();
   await page.getByText('Unsaved changes', {exact: true}).waitFor({state: 'detached'});
 
+  // Eval dataset governance (spec 4.3, 4.4): the removed example is named next to the score; added
+  // examples wait for gold labels without making scores stale; removals are listed and restorable.
+  await page.goto(url('/prompt/'));
+  await page.locator('nav.vlist').waitFor();
+  await page.getByText(/1 gold-labeled example removed/).first().waitFor({timeout: 10000});
+  await page.goto(url('/dataset/'));
+  await page.getByRole('heading', {name: 'Removed (1)'}).waitFor({timeout: 10000});
+  await page.getByRole('heading', {name: 'Label balance'}).waitFor();
+  await shot(page, '2b-dataset-balance');
+  await page.waitForFunction(() => +document.querySelector('[aria-label="Examples to add"]')?.value > 0, null, {timeout: 10000});
+  await page.getByLabel('Examples to add').fill('5');
+  await button(page, 'Add sampled').click();
+  await page.getByRole('heading', {name: 'Examples'}).waitFor({timeout: 30000});
+  await page.waitForFunction(() => /Waiting for gold labels\s*5(?!\d)/.test(document.querySelector('main .metrics')?.textContent ?? ''), null, {timeout: 30000});
+  log('dataset after adding:', (await page.locator('main .metrics').innerText()).replace(/\s+/g, ' '));
+  await page.goto(url('/prompt/'));
+  await page.locator('nav.vlist').waitFor();
+  await page.getByText(/5 new examples wait for gold labels/).first().waitFor({timeout: 10000});
+  if (await page.getByText('Scores out of date', {exact: true}).count()) throw new Error('adding unlabeled examples made scores stale');
+  await shot(page, '5i-pending');
+  await page.goto(url('/dataset/'));
+  await button(page, 'Remove unlabeled').click();
+  const prune = page.getByRole('dialog');
+  await prune.getByLabel('Unlabeled examples to keep').fill('0');
+  await button(prune, 'Remove').click();
+  await page.getByRole('heading', {name: 'Removed (6)'}).waitFor({timeout: 10000});
+  await page.locator('tr', {hasText: 'Unlabeled extra'}).first().getByRole('button', {name: 'Restore'}).click();
+  await page.getByRole('heading', {name: 'Removed (5)'}).waitFor({timeout: 10000});
+  await shot(page, '2c-dataset-removed');
+  log('dataset after pruning and one restore:', (await page.locator('main .metrics').innerText()).replace(/\s+/g, ' '));
+
   // Settings at the top opens Project Settings at any time
   await button(page, 'Settings').click();
   const again = page.getByRole('dialog');
@@ -431,6 +526,9 @@ let current = null;
       autoStarts: audit.filter(a => a === 'auto_start').length,
       actionLines: mine('chat_messages').filter(m => m.role === 'event' && m.event).length,
       leftovers: ['training_sets', 'setup'].filter(k => localStorage.getItem('tsp-doc:' + k)),
+      removals: mine('dataset_removals').map(r => `${r.reason}${r.restoredAt ? ':restored' : ''}`),
+      comments: mine('label_comments').length,
+      holdoutLocked: !!project.holdoutLocked,
     };
   });
   log('project:', JSON.stringify(facts));

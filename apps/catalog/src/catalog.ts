@@ -28,6 +28,9 @@ const OWNED: CatalogKind[] = ['dataset_snapshots', 'setup_versions', 'gold_label
 /** New record id for a kind, for callers that build the record before inserting it. */
 export const catalogId = (kind: CatalogKind) => newId(ID_PREFIX[kind]);
 
+/** Every catalog kind (the telemetry allowlist must name each one). */
+export const catalogKinds = () => Object.keys(ID_PREFIX) as CatalogKind[];
+
 /**
  * The catalog: platform CRUD over the document store.
  * Writes are partial (`patch`), so a background run and a page action do not undo each other.

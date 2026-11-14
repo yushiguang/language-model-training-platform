@@ -3,6 +3,15 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-14 (building 1.0.0 phases 3 and 4)
+
+- **Unlabeled examples never make a score stale.** Scores rest on gold-labeled eval examples only; an added example waits for its gold label and is counted next to the score.
+- **The halves are fixed at the first helper read**, not at the first score: until then they are rebalanced by gold label when Gold Labels is left.
+- **Removing is a soft delete with a trail**, restorable, and the score line says how many gold-labeled examples were removed before it.
+- **The "Why" on Mismatches is a comment.** Comments are append-only and reach the helpers for the readable half only.
+- **Gold Labels saves only on Save**, on both tabs; "Use the model's answer" is gone.
+- **Motion lives in code only** until the canvas has a way to show it.
+
 ## 2026-11-13 (building 1.0.0 phase 2)
 
 - **The structured prompt is the only thing edited**; the text sent to the model is compiled from it and shown read-only.

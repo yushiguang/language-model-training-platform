@@ -139,8 +139,8 @@ place helpers speak on a page. Who the helpers are and what they may do is in
   signed with its name (Assistant, Prompt helper, Scores helper). Follow-up chips
   under the last message send a question in one click.
 - Input: text and document links only; a pasted link shows as a chip. No files and no item IDs.
-  The box grows to 6 lines, then scrolls. In 0.x Enter adds a new line and only the button sends;
-  1.0.0 changes this to Enter sends and Shift+Enter adds a line, guarded for CJK input methods.
+  The box grows to 6 lines, then scrolls. Enter sends and Shift+Enter adds a line; while an input
+  method composes (Chinese, Japanese, Korean) Enter never sends. The Send button's hover says so.
 - **Live progress.** While a helper works, one grey line with a spinner says what it is doing;
   then the reply streams in.
 - **Action lines.** Anything that changes a page, saves or spends gets one grey line with who did
@@ -162,9 +162,18 @@ spark icon and no "AI Suggestion" label.
 
 Running tags and steps spin; progress bars move with a soft shimmer. A button that starts work
 shows a spinner and locks until the work ends. A failure shows a red banner with Retry and keeps
-the user's edits. Changing step keeps the island and the header in place. The audit of where
-these rules are not yet met, and the motion tokens proposed for the design system, are in
-[the UI motion spec](../specs/2026-11-12-ui-motion-and-design-system-audit.md).
+the user's edits. Changing step keeps the island and the header in place.
+
+Motion is restrained: 140 to 220 ms on one easing (`--ease-out`, `--dur-fast`, `--dur-med` in
+`app.css`). A button that starts work shows its spinner for at least 220 ms, so a fast answer
+still registers; Start and Stop stay pending until the work has started or stopped. Controls ease
+their colours and press in slightly. A step's body fades in and settles 4px; on Gold Labels the
+next example slides in from the right (Previous: from the left), after a short "Saved" beat in To
+label and To review, and media fades in once loaded. Ask AI widens its slot as it opens and
+narrows it as it closes, so the page moves over smoothly. Dialogs, hints and banners come in
+gently; the version detail fades when another version is picked. The attention cue on the next
+action is two rings in the brand colour, then still. Reduced motion turns all of it off. The
+audit behind these rules is [the UI motion spec](../specs/2026-11-12-ui-motion-and-design-system-audit.md).
 
 ## Pages
 
@@ -172,8 +181,8 @@ these rules are not yet met, and the motion tokens proposed for the design syste
 | --- | --- | --- |
 | (Projects) | The list: Project, Created, Delete | Delete asks for the project's exact name |
 | Prompt Design | The structured prompt (Output Labels & Definitions, Input Features, Task summary, General rules), a helper's draft with Approve and Discard, "Not carried over", View full prompt | Replaces Setup's Schema settings. Everything starts in Ask AI: describe the task or paste a prompt |
-| Eval Dataset | Empty, sampling or loading, ready | No split: every example is used for scoring. Append, prune and the label balance card come in phase 3 |
-| Gold Labels | Eval set, Mismatches | The Test set tab is gone. Filters, explicit Save and comments come in phase 3 |
+| Eval Dataset | Empty, sampling or loading, ready (Examples, Label balance, Removed) | No split: every example is used for scoring. Add from file or Add sampled at any time; Remove unlabeled, Downsample and Restore; under 20 examples a banner says scores are rough |
+| Gold Labels | Eval set (To label, Labeled), Mismatches (To review, Reviewed) | Save in Your answer on both tabs (no autosave); comments listed above "Add a comment"; Remove example on the example card; every feature row shows its whole text |
 | Prompt Tuning | Versions with scores, the fixed AI Suggestion card, the Optimiser panel; the prompt editor (same structured parts, change marks under each changed box) | Ends with Copy prompt and Finish |
 | (dialog) | Project Settings: pass rule with its checks, labeling model | Opens from Settings in the top island, and once before the first paid run. Explanations are subtitles, not hovers |
 

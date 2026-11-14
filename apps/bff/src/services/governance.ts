@@ -11,13 +11,15 @@ import {loadProjectState} from './projects.ts';
 /**
  * Balances the halves by gold label while no helper has read an example (spec 1.0.0, 4.2). Once
  * the holdout is locked nothing moves. Called when Gold Labels is left and before the lock.
+ * Once scoring has started nothing moves either: a score rests on its held-out half, and moving
+ * examples would leave every score out of date.
  */
 export async function balanceHalves(projectId: string): Promise<number> {
   const {catalog} = getApp();
   const project = await catalog.get('projects', projectId);
   if (!project || project.holdoutLocked) return 0;
   const state = await loadProjectState(projectId);
-  if (!state) return 0;
+  if (!state || state.reports.length || state.runs.length) return 0;
   const evalEx = state.examples.filter(e => e.split === 'eval');
   const goldAnswers = Object.fromEntries(Object.entries(state.gold).map(([id, g]) => [id, g.answer]));
   const halves = assignEvalHalves(evalEx, goldAnswers, false);

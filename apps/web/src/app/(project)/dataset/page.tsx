@@ -327,7 +327,7 @@ function RemovedCard({state}: {state: ProjectState}) {
     <Card title={`Removed (${state.removals.length})`} actions={<Button label="Restore all" size="sm" onClick={() => restoreExamples({projectId: state.project.id, removalIds: ids})} />}>
       <Table
         cols={[{label: 'Item ID'}, {label: 'Why'}, {label: 'Gold label'}, {label: 'Removed'}, {label: '', kind: 'act'}]}
-        widths={[140, 120, 'auto', 150]}
+        widths={[130, 140, 'auto', 150, 96]}
         actWidth={96}
         rows={state.removals.map(r => ({
           key: r.id,
@@ -335,7 +335,7 @@ function RemovedCard({state}: {state: ProjectState}) {
             <One key="id" text={r.externalId} />,
             REASON[r.reason],
             <One key="g" text={r.gold ? Object.values(r.gold).flat().join(', ') : 'None'} className={r.gold ? undefined : 't-3'} />,
-            <One key="at" text={`${dateTime(r.removedAt)} · ${r.removedBy}`} className="t-3" />,
+            <span key="at" className="t-3"><Hov text={dateTime(r.removedAt)} tip={`Removed by ${r.removedBy}`} /></span>,
             <Button key="r" label="Restore" size="sm" kind="ghost" onClick={() => restoreExamples({projectId: state.project.id, removalIds: [r.id]})} />,
           ],
         }))}

@@ -157,3 +157,16 @@ Canvas page 2, row 14 ("Acceptance round 6"), approved by Evelyn. She skipped R6
 - **R6-2.** An eye icon button in the Versions header, left of All / Major, hides versions the Optimiser dropped. The hover says "Hide dropped versions"; while hiding, the eye is crossed out on a grey button and says "Show dropped versions". Off by default, remembered for the session (per project). It shows in the All view only.
 - **R6-3.** On Mismatches nothing saves on its own. The Your answer header keeps its place and holds "Use the model's answer" (it only fills the chips) and Save. Save records keeping the label, the model's answer, or a third answer, so "Keep my label" and Reopen are gone. A reviewed item opens in place with its review filled in; Save is off until the chips or Why change ("Not saved" shows), and saving adds a review, updates the item where it is, and shows "N reviews" with the earlier ones on hover. On this tab "Next: Prompt Engineering" is grey, so Save is the one accent button.
 - **Run end.** A run that finishes without a pass (or is stopped) keeps its panel, tagged Finished, until a version is picked (remembered for the session). Under the round line it says either "vX beat vY: a against b" or "No change beat vY. vY is still the best at b", with the detail on hover and a "Show vX" button. A run that passes still goes straight on to the training set.
+
+## 0.x rows moved out on 2026-11-14
+
+These rows described screens that 1.0.0 removed (Setup, Training Set, the approved card in Ask AI)
+or features decided out of the MVP. Moved here from `docs/ui-gaps.md` (review of phases 1 and 2,
+Minor 2).
+
+| Where | Canvas | Code | Why |
+| --- | --- | --- | --- |
+| Training Set, Labeling settings | Prompt and Model | Prompt only (one model per project); changes the Optimiser dropped are not offered | One model per project |
+| Ask AI, approved schema | The approved card | The approved card and the line "You approved the schema" | Both are records of the same act |
+| Removed before the canvas (review 2026-11-09) | — | Prompt page: no diff preview, version selector or change note; Labeling models: no description, cost or speed per model | The canvas has none of them; to discuss if they are wanted back |
+| Evaluation report, Compare, gold-label upload, prompt preview, fixed prompt images, placeholder autocomplete | On the canvas but marked not in the MVP | Removed from the code | Out of the MVP (decided 2026-11-06) |

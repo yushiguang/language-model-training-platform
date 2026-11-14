@@ -116,6 +116,8 @@ never saves itself. A saved draft is the user's own version and is scored like a
 Built in phases 1 and 2: the loop lives in `apps/optimiser` behind `OptimiserContract`; changes
 edit the structured prompt (definitions, tie-break rules, general rules) and never the label
 fields or values; a run no longer starts a training set after a pass; the thresholds are in
-`SystemConfig`. Phase 3 ([spec](../specs/2026-11-12-v1.0.0-workflow-and-ddd-spec.md), section 5):
-human comments on optimiser-half examples replace the single "Why" note.
+`SystemConfig`. Phase 3 ([spec](../specs/2026-11-12-v1.0.0-workflow-and-ddd-spec.md), section 5, built
+2026-11-14): people's comments on optimiser-half examples (`ExampleBrief.comments`) replace the
+single "Why" note; the loop locks the halves (`lockHoldout`) before its first read; a run's Stop
+cancels the change being written through the runtime's `cancel(requestId)`.
 move into `SystemConfig`.

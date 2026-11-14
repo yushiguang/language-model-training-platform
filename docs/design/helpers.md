@@ -99,10 +99,25 @@ agent: up to 5 eval examples with an unsaved draft, nothing saved), `score_versi
 `start_optimiser` (prompt and evaluation agents). They run at once, like every automatic start;
 the user stops them from the page.
 
-## Still to come in 1.0.0
+**Reads added in 1.0.0** (spec 6.4, phase 3), for every preset:
+- `get_project_summary`: the steps done, the settings, the eval dataset in numbers (examples,
+  gold-labeled, pending, removed) and the best version;
+- `get_dataset_stats`: the label balance per value and half, rare and dominant values (counts
+  only, so the held-out half stays unread);
+- `search_examples`: examples whose title or text features contain the words, from the readable
+  half only, optionally only unlabeled ones;
+- `compare_versions`: which parts of two structured prompts differ, and their scores per field;
+- `get_mismatch_summary`: the Mismatches tab in counts (to review, wrong in every version,
+  reviewed, accuracy per field, top mix-ups), never which side is right.
 
-From [the 1.0.0 spec](../specs/2026-11-12-v1.0.0-workflow-and-ddd-spec.md), phase 3: new read
-tools (`get_project_summary`, `get_dataset_stats`, `search_examples`, `compare_versions`,
-`get_mismatch_summary`). Also open: the runtime taking its tool host and model at construction
-instead of as call arguments.
-host and model at construction instead of as call arguments.
+**The holdout lock.** The first tool call that returns examples (`get_examples`,
+`get_gold_labels`, `get_predictions`, `search_examples`, `try_prompt`), Improve with AI and Auto
+Optimise call `lockHoldout`: the halves are balanced one last time and then fixed for good, so an
+example a helper has read never moves into the scored half.
+
+**Comments.** People's comments on an example (Gold Labels, both tabs) go to the Optimiser and
+Improve with AI as `ExampleBrief.comments`, for optimiser-half examples only. The instructions
+say to build them into the prompt's rules and never argue with them.
+
+**The runtime** is built once (`createAgentRuntime` in `apps/agents/src/index.ts`) with the
+model, a factory for a project's tools and the progress port; each call is plain data.
