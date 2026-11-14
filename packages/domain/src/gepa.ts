@@ -1,5 +1,6 @@
 import {systemConfig} from './config.ts';
-import type {Answer, DryRunResult, Example, ExampleBrief, OptimisationRun, OptimiserRound, Prediction, PromptVersion, Schema} from '@tsp/contracts';
+import type {Answer, DryRunResult, Example, ExampleBrief, Msg, OptimisationRun, OptimiserRound, Prediction, PromptVersion, Schema} from '@tsp/contracts';
+import {msg, msgText} from './i18n.ts';
 import {featureItems, featureText, placeholderKeys} from './template.ts';
 import {isImageKey} from './catalogue.ts';
 
@@ -219,25 +220,31 @@ export function optimiserVersions(runs: OptimisationRun[]): Map<string, Optimise
 
 /** The labels of the panel's "Now" line. */
 export function stepLine(step: OptimisationRun['step'], version: string | null, examples: number, parent?: string | null): string {
+  return msgText(stepMsg(step, version, examples, parent));
+}
+
+/** `stepLine` as a catalog key, for other languages. */
+export function stepMsg(step: OptimisationRun['step'], version: string | null, examples: number, parent?: string | null): Msg {
   switch (step) {
     case 'parent':
-      return version ? `Labeling ${version} on the eval set, the version to start from` : 'Picking the version to start from';
+      return version ? msg('Labeling {version} on the eval set, the version to start from', {version}) : msg('Picking the version to start from');
     case 'reflect':
-      return `Writing a change to ${version ?? 'the prompt'}`;
+      return version ? msg('Writing a change to {version}', {version}) : msg('Writing a change to the prompt');
     case 'merge':
-      return 'Writing a version that merges two others';
+      return msg('Writing a version that merges two others');
     case 'check':
-      return `Checking ${version ?? 'the change'}`;
+      return version ? msg('Checking {version}', {version}) : msg('Checking the change');
     case 'dry_run':
-      return `Dry run: labeling ${version ?? 'the change'} on ${examples} examples${parent ? `, against ${parent}` : ''}`;
+      if (!version) return msg('Dry run: labeling the change on {n} examples', {n: examples});
+      return parent ? msg('Dry run: labeling {version} on {n} examples, against {parent}', {version, n: examples, parent}) : msg('Dry run: labeling {version} on {n} examples', {version, n: examples});
     case 'full':
-      return `Labeling ${version ?? 'the change'} on the eval set`;
+      return version ? msg('Labeling {version} on the eval set', {version}) : msg('Labeling the change on the eval set');
     case 'report':
-      return `Scoring ${version ?? 'the change'}`;
+      return version ? msg('Scoring {version}', {version}) : msg('Scoring the change');
     case 'confirm':
-      return `Confirming ${version ?? 'the pass'}: labeling the held-out half again`;
+      return version ? msg('Confirming {version}: labeling the held-out half again', {version}) : msg('Confirming the pass: labeling the held-out half again');
     default:
-      return 'Starting';
+      return msg('Starting');
   }
 }
 

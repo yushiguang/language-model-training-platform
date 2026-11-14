@@ -1,5 +1,5 @@
-import type {AgentPreset, AgentToolName, LlmModelId} from '@tsp/contracts';
-import {agentName} from '@tsp/domain';
+import type {AgentPreset, AgentToolName, LlmModelId, Locale} from '@tsp/contracts';
+import {agentName, translate} from '@tsp/domain';
 
 export {agentName};
 
@@ -44,10 +44,17 @@ export const TOOL_SPECS: Record<AgentToolName, {args: string; returns: string}> 
   try_prompt: {args: '{"prompt"?: a structured prompt (default: the newest version), "model"?: a model name, "n"?: up to 5}', returns: "PAID, small: the model's answers on n examples of the part of the eval set helpers can read, next to their gold labels; nothing is saved"},
   score_version: {args: '{"version": a label like "v4", "model"?: a model name}', returns: 'PAID: starts scoring a saved version on the eval set; its scores appear on Prompt versions when it finishes'},
   start_optimiser: {args: '{"rounds"?: how many changes to try, 1 to 50 (default 10)}', returns: 'PAID: starts the Optimiser (Auto Optimise) on the project\'s model; each change it tries appears on Prompt versions'},
+  report_problem: {
+    args: '{"summary": one line, "expected": string, "actual": string, "steps"?: string[], "includeContent"?: boolean (the prompt text, only when the user agrees), "send"?: true (only after the user said yes)}',
+    returns: 'without "send": the draft and what will be attached, to show the user; with "send": true: the ticket id. A send is refused until the user has answered the draft',
+  },
 };
 
 /** Tools that spend money. They start at once; the user stops them from the page. */
 export const START_TOOLS: AgentToolName[] = ['try_prompt', 'score_version', 'start_optimiser'];
+
+/** Every helper can file a problem report (spec 1.1.0, 3). */
+const REPORT: AgentToolName[] = ['report_problem'];
 
 const READ_ALL: AgentToolName[] = ['get_page_view', 'get_project_summary', 'list_versions', 'get_version', 'compare_versions', 'get_report', 'get_dataset_stats', 'get_mismatch_summary', 'get_examples', 'search_examples', 'get_gold_labels', 'get_predictions'];
 
@@ -70,6 +77,13 @@ How to answer.
 - Never mention money, cost, price or how long something takes. The site never shows them.
 - Keep "reply" short: the answer first, then at most a few lines of reasons.
 
+Problem reports. When the user says the site itself does not work (an error message, a button that does nothing, a page that stays loading or looks wrong), or asks to report a problem:
+- If it is unclear, ask one short question: what they expected, and what happened instead.
+- Then call report_problem without "send" to draft it: a one-line summary, what they expected, what happened, and the steps as far as the conversation and the action lines show them. Set "includeContent" only when the problem is about the prompt's text and the user agrees to share it.
+- Show the draft in a few short lines in "reply", say what is attached, and ask whether to send it.
+- Call report_problem with "send": true only after the user says yes in a later message. Then give the ticket id in one line. Never promise a fix or a date.
+A question about labels, scores or what to do next is not a problem report: answer it as usual.
+
 Answer with one JSON object only.`;
 
 /** A helper that stayed on its page may pass a request for another helper's work on. */
@@ -89,7 +103,7 @@ export const PRESETS: Record<AgentPreset | 'optimiser', Preset> = {
     model: 'gpt-5.6-terra',
     observes: ['the current page view', 'the chat history', 'other pages, versions and reports through read tools'],
     intents: {answer: '{"handoff"?: {"to": "prompt_agent" | "evaluation_agent", "intent": string}, "reply": string} (when you hand off, write "handoff" first)'},
-    tools: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'read_doc'],
+    tools: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'read_doc', ...REPORT],
     system: `${common}\n\nYou are the Assistant (front_desk), the first helper the user meets on every page. You answer questions about the page they are on and about how the site works, and you pass work that belongs to a specialist on to that specialist.
 
 Answer yourself: what a page or a control is for, what to do next on this page, where to find something, what a status or tag means, and why a button is unavailable. Answer from the page view, and use a read tool when the answer is on another page.
@@ -119,7 +133,7 @@ On Gold Labels, never say which label is right for the example the user is looki
       explain_version: '{"reply": string}',
       follow_up: `${DRAFT_SHAPE}, plus ${PASS_ON}`,
     },
-    tools: [...READ_ALL, 'check_prompt', 'read_feature_info', 'read_doc', 'try_prompt', 'score_version', 'start_optimiser'],
+    tools: [...READ_ALL, 'check_prompt', 'read_feature_info', 'read_doc', 'try_prompt', 'score_version', 'start_optimiser', ...REPORT],
     system: `${common}\n\nYou are the Prompt helper (prompt_agent). You write and improve the labeling prompt: the instructions a labeling model follows to label every example in the user's dataset. You also own the label fields and values inside it. Its quality is measured against the user's gold labels, and the user takes the best version away to label large datasets, so a rule that is wrong or too narrow is repeated across thousands of rows.
 
 You always return the whole structured prompt in "prompt", never a fragment and never raw prompt text. The parts:
@@ -162,7 +176,7 @@ The paid tools (try_prompt, score_version, start_optimiser) start real labeling 
     model: 'gpt-5.6-terra',
     observes: ['the current page view (on the Eval report: the report, its checks, mix-up counts and trend)', 'any report and version, and predictions on the part of the eval set helpers can read, through read tools'],
     intents: {explain_report: '{"reply": string}', follow_up: `{"reply": string}, plus ${PASS_ON}`},
-    tools: [...READ_ALL, 'score_version', 'start_optimiser'],
+    tools: [...READ_ALL, 'score_version', 'start_optimiser', ...REPORT],
     system: `${common}\n\nYou are the Scores helper (evaluation_agent). You explain what a prompt version's scores mean and recommend one next step. The user decides from your answer whether the prompt is good enough to take away and use, so be exact about what the numbers show and plain about what they do not show.
 
 Reading a report.
@@ -223,3 +237,13 @@ In "merge" you get two prompts, "prompt" and "other.prompt", that each get right
 
 export const systemPrompt = (p: AgentPreset | 'optimiser') => PRESETS[p].system;
 export const presetModel = (p: AgentPreset | 'optimiser'): LlmModelId => PRESETS[p].model;
+
+/** Words the helpers use in Chinese, so their replies match the pages (spec 1.1.0, 2.3). */
+const ZH_TERMS = ['Prompt Design', 'Eval Dataset', 'Gold Labels', 'Prompt Tuning', 'Project Settings', 'Settings', 'Ask AI', 'Assistant', 'Prompt helper', 'Scores helper', 'Optimiser', 'Auto Optimise', 'Improve with AI', 'Mismatches', 'gold label', 'eval set', 'version', 'field', 'value', 'Copy prompt', 'Finish'];
+
+/** The line that tells a helper which language to answer in; empty for English. */
+export function languageLine(locale: Locale | undefined): string {
+  if (locale !== 'zh') return '';
+  const terms = ZH_TERMS.map(t => `${t} = ${translate('zh', t)}`).join('; ');
+  return `\n\nLanguage. The user reads the site in Chinese. Write "reply" and "question" in Simplified Chinese, in the same plain style. Use the site's Chinese words: ${terms}. Keep field names, value names, version labels (v1, v2), model names and any quoted prompt text exactly as they are; a draft's prompt stays in the language the user wrote it in.`;
+}

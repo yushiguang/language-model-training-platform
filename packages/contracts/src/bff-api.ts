@@ -6,6 +6,8 @@ import type {
   Answer,
   ChatAttachment,
   ChatMessage,
+  ClientDiagnostics,
+  Locale,
   DatasetSnapshot,
   EndpointId,
   EndpointInfo,
@@ -175,11 +177,21 @@ export interface DeleteProjectRequest {
   projectId: string;
 }
 
+/** Spec 1.1.0, 1.2: a new name for a project (trimmed, not empty, cut at `project.nameMaxChars`). */
+export interface RenameProjectRequest {
+  projectId: string;
+  name: string;
+}
+
 export interface SendMessageRequest {
   projectId: string;
   text: string;
   page: PageContext;
   attachments?: ChatAttachment[];
+  /** The language the user reads the site in: the helpers answer in it (spec 1.1.0, 2.3). */
+  locale?: Locale;
+  /** What the browser saw just before (spec 1.1.0, 3.2), for a problem report; kept for the turn only. */
+  client?: ClientDiagnostics;
 }
 
 export interface BffContract {
@@ -199,6 +211,8 @@ export interface BffContract {
    * every record it owns (dataset, gold labels, versions, answers, reports, runs, chat).
    */
   deleteProject(req: DeleteProjectRequest): Promise<void>;
+  /** Renames a project (from Project Settings); returns the name as saved. */
+  renameProject(req: RenameProjectRequest): Promise<string>;
 
   // Project Settings (the pass rule and the labeling model). Saving also confirms them.
   saveSettings(req: SaveSettingsRequest): Promise<void>;

@@ -10,6 +10,7 @@ import {useProject} from '@/components/ProjectContext';
 import {useSettings} from '@/components/ProjectSettings';
 import {addComment, approveNode, exampleMedia, mismatches, predictionsFor, removeExamples, reviewGold, saveGold, type ProjectState} from '@/backend-api';
 import {Badge, Banner, Button, Card, Code, dateTime, Dialog, Empty, Hov, Icon, num, Opt, PageHead, Seg, Tabs} from '@/ui';
+import {t, tm} from '@/i18n';
 
 type SetKey = 'eval' | 'mismatch';
 
@@ -182,18 +183,18 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
 
   const head = (
     <PageHead
-      title="Gold Labels"
+      title={t('Gold Labels')}
       actions={
         <>
           {!onMismatch && (
             <>
               <Seg
-                label="Eval set"
+                label={t('Eval set')}
                 value={evalSub}
                 onChange={pickEvalSub}
                 options={[
-                  {value: 'open', label: `To label ${num(toLabel.length)}`},
-                  {value: 'done', label: `Labeled ${num(labeledEx.length)}`},
+                  {value: 'open', label: t('To label {n}', {n: num(toLabel.length)})},
+                  {value: 'done', label: t('Labeled {n}', {n: num(labeledEx.length)})},
                 ]}
               />
               <span style={{width: 8}} />
@@ -202,12 +203,12 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
           {onMismatch && mm && (
             <>
               <Seg
-                label="Mismatches"
+                label={t('Mismatches')}
                 value={sub}
                 onChange={pickSub}
                 options={[
-                  {value: 'open', label: `To review ${num(mm.items.length)}`},
-                  {value: 'done', label: `Reviewed ${num(mm.reviewed)}`},
+                  {value: 'open', label: t('To review {n}', {n: num(mm.items.length)})},
+                  {value: 'done', label: t('Reviewed {n}', {n: num(mm.reviewed)})},
                 ]}
               />
               <span style={{width: 8}} />
@@ -215,18 +216,18 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
           )}
           {list.length > 0 && (
             <>
-              <Button label="" ariaLabel="Previous" kind="ghost" icon="left" disabled={i === 0} onClick={() => move(i - 1)} />
+              <Button label="" ariaLabel={t('Previous')} kind="ghost" icon="left" disabled={i === 0} onClick={() => move(i - 1)} />
               <span className="t-2" style={{fontSize: 13, minWidth: 56, textAlign: 'center'}}>
-                {num(i + 1)} of {num(list.length)}
+                {t('{done} of {total}', {done: num(i + 1), total: num(list.length)})}
               </span>
-              <Button label="" ariaLabel="Next" kind="ghost" icon="right" disabled={i >= list.length - 1} onClick={() => move(i + 1)} />
+              <Button label="" ariaLabel={t('Next')} kind="ghost" icon="right" disabled={i >= list.length - 1} onClick={() => move(i + 1)} />
             </>
           )}
           <Button
-            label="Next: Prompt Tuning"
+            label={t('Next: Prompt Tuning')}
             kind={onMismatch ? 'secondary' : 'primary'}
             disabled={!next.ready}
-            title={next.ready ? undefined : (next.reason ?? undefined)}
+            title={next.msg ? tm(next.msg) : undefined}
             onClick={async () => {
               // The first paid run is about to start: the user confirms Project Settings once.
               if (!(await settings.confirmed())) return;
@@ -241,8 +242,8 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
 
   if (!state.snapshot || !state.setup?.schema)
     return (
-      <Frame head={<PageHead title="Gold Labels" />}>
-        <Empty title="No examples to label yet" text={state.setup?.schema ? 'Add examples on Eval Dataset first, then label them here.' : 'Approve the prompt on Prompt Design first: its fields and values are what you label with.'} />
+      <Frame head={<PageHead title={t('Gold Labels')} />}>
+        <Empty title={t('No examples to label yet')} text={state.setup?.schema ? t('Add examples on Eval Dataset first, then label them here.') : t('Approve the prompt on Prompt Design first: its fields and values are what you label with.')} />
       </Frame>
     );
 
@@ -251,20 +252,20 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   const expectMm = state.reports.some(r => r.schemaVersion === state.setup!.schemaVersion);
   return (
     <Frame head={head}>
-      {Object.keys(state.staleGold).length > 0 && <Banner text={`The label fields or values changed. ${num(Object.keys(state.staleGold).length)} labels were made before the change and need a quick re-check.`} />}
+      {Object.keys(state.staleGold).length > 0 && <Banner text={t('The label fields or values changed. {n} labels were made before the change and need a quick re-check.', {n: num(Object.keys(state.staleGold).length)})} />}
       <Tabs
-        label="Sets"
+        label={t('Sets')}
         selected={tab}
         onSelect={k => {
           dir.current = 'switch';
           setTab(k);
         }}
         items={[
-          {key: 'eval', label: 'Eval set', count: `${num(state.facts.goldEvalDone)} / ${num(evalAll.length)}`},
+          {key: 'eval', label: t('Eval set'), count: `${num(state.facts.goldEvalDone)} / ${num(evalAll.length)}`},
           // Once a version has answers on the whole eval set.
           // R5-1: the tab is there from the first paint when versions have scores; its count
           // follows once the list is worked out.
-          ...(mm?.versions.length || (!mm && expectMm) ? [{key: 'mismatch' as const, label: 'Mismatches', count: mm ? num(mm.items.length) : '–'}] : []),
+          ...(mm?.versions.length || (!mm && expectMm) ? [{key: 'mismatch' as const, label: t('Mismatches'), count: mm ? num(mm.items.length) : '–'}] : []),
         ]}
         end={
           // Evelyn 2026-11-11: one "Compare with" for the page. Every tab shows this version's
@@ -273,18 +274,17 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
             <div className="row" style={{alignItems: 'center', paddingBottom: 6}}>
               {state.scoresUpdating && (
                 <span className="badge b-gray" style={{marginRight: 12}}>
-                  <Hov text="Scores out of date" tip="Your label changes are saved. Rebuild scores on Prompt versions to see them in the scores" />
+                  <Hov text={t('Scores out of date')} tip={t('Your label changes are saved. Rebuild scores on Prompt versions to see them in the scores')} />
                 </span>
               )}
               <span className="t-3" style={{fontSize: 13, marginRight: 8}}>
-                <Hov text="Compare with" tip="The version whose answers show on every tab. Mismatches and reviews are for this version" />
+                <Hov text={t('Compare with')} tip={t('The version whose answers show on every tab. Mismatches and reviews are for this version')} />
               </span>
               <span className="select" style={{width: 132}}>
-                <select aria-label="Compare with" style={{height: 32}} value={versionId ?? ''} disabled={!mm} onChange={e => setCmp(e.target.value)}>
+                <select aria-label={t('Compare with')} style={{height: 32}} value={versionId ?? ''} disabled={!mm} onChange={e => setCmp(e.target.value)}>
                   {(mm?.versions ?? []).map(v => (
                     <option key={v.id} value={v.id}>
-                      {v.label}
-                      {v.best ? ' (best)' : ''}
+                      {v.best ? t('{version} (best)', {version: v.label}) : v.label}
                     </option>
                   ))}
                 </select>
@@ -300,7 +300,7 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
             key={`ex-${ex.id}`}
             ex={ex}
             n={evalAll.indexOf(ex) + 1}
-            extra={item ? <Hov text={`Wrong in ${item.wrongIn} of ${item.of} versions`} tip="The examples wrong in the most versions come first" /> : undefined}
+            extra={item ? <Hov text={t('Wrong in {n} of {of} versions', {n: item.wrongIn, of: item.of})} tip={t('The examples wrong in the most versions come first')} /> : undefined}
             onRemove={reason => removeExamples({projectId: state.project.id, exampleIds: [ex.id], reason})}
           />
           <div className="col" style={{gap: 16}}>
@@ -355,13 +355,13 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
           </div>
         </div>
       ) : !onMismatch && evalSub === 'open' && evalAll.length > 0 ? (
-        <Empty title="Every example is labeled" text="Labels you saved are under Labeled. Add examples on Eval Dataset to label more." />
+        <Empty title={t('Every example is labeled')} text={t('Labels you saved are under Labeled. Add examples on Eval Dataset to label more.')} />
       ) : onMismatch && sub === 'done' ? (
-        mm && <Empty title="Nothing reviewed yet" text={`Labels you keep or change for ${picked?.label ?? 'this version'} show here.`} />
+        mm && <Empty title={t('Nothing reviewed yet')} text={picked ? t('Labels you keep or change for {version} show here.', {version: picked.label}) : t('Labels you keep or change for this version show here.')} />
       ) : onMismatch ? (
-        mm && <Empty title="No mismatches left" text={`Every label ${picked?.label ?? 'the model'} disagrees with has been checked.`} />
+        mm && <Empty title={t('No mismatches left')} text={picked ? t('Every label {version} disagrees with has been checked.', {version: picked.label}) : t('Every label the model disagrees with has been checked.')} />
       ) : (
-        <Empty title="No examples yet" text="Add examples on the Eval Dataset page." />
+        <Empty title={t('No examples yet')} text={t('Add examples on the Eval Dataset page.')} />
       )}
     </Frame>
   );
@@ -419,22 +419,23 @@ function ExampleCard({ex, n, extra, onRemove}: {ex: Example; n: number; extra?: 
         .map(k => [FEATURE_LABEL.get(k) ?? k.replace(/_/g, ' '), f(k)]),
     ] as [string, string][]
   ).filter(([, v]) => v);
+  // Known row names are catalog keys; a feature without a catalogue name keeps its own.
   return (
     <Card
-      title={`Example ${n}`}
+      title={t('Example {n}', {n})}
       titleExtra={extra ? <span className="t-3" style={{fontSize: 13}}>{extra}</span> : undefined}
-      actions={<Button label="Remove example" kind="ghost" size="sm" onClick={() => setRemoving('broken')} />}
+      actions={<Button label={t('Remove example')} kind="ghost" size="sm" onClick={() => setRemoving('broken')} />}
     >
       {removing && (
         <Dialog
-          title="Remove this example?"
-          text="It leaves the eval dataset and every score worked out from now on. You can put it back from the Removed list on Eval Dataset."
+          title={t('Remove this example?')}
+          text={t('It leaves the eval dataset and every score worked out from now on. You can put it back from the Removed list on Eval Dataset.')}
           onClose={() => setRemoving(null)}
           actions={
             <>
-              <Button label="Cancel" onClick={() => setRemoving(null)} />
+              <Button label={t('Cancel')} onClick={() => setRemoving(null)} />
               <Button
-                label="Remove"
+                label={t('Remove')}
                 kind="primary"
                 onClick={async () => {
                   await onRemove(removing);
@@ -444,9 +445,9 @@ function ExampleCard({ex, n, extra, onRemove}: {ex: Example; n: number; extra?: 
             </>
           }
         >
-          <div className="opts" role="radiogroup" aria-label="Why">
-            <Opt title="Broken" tip="The item can't be opened or its features are empty or wrong" checked={removing === 'broken'} onSelect={() => setRemoving('broken')} />
-            <Opt title="Out of scope" tip="Not the kind of item this project labels" checked={removing === 'out_of_scope'} onSelect={() => setRemoving('out_of_scope')} />
+          <div className="opts" role="radiogroup" aria-label={t('Why')}>
+            <Opt title={t('Broken')} tip={t("The item can't be opened or its features are empty or wrong")} checked={removing === 'broken'} onSelect={() => setRemoving('broken')} />
+            <Opt title={t('Out of scope')} tip={t('Not the kind of item this project labels')} checked={removing === 'out_of_scope'} onSelect={() => setRemoving('out_of_scope')} />
           </div>
         </Dialog>
       )}
@@ -455,7 +456,7 @@ function ExampleCard({ex, n, extra, onRemove}: {ex: Example; n: number; extra?: 
           <iframe
             onLoad={e => e.currentTarget.classList.add('loaded')}
             src={media.playerUrl}
-            title={`Player for item ${ex.externalId}`}
+            title={t('Player for item {id}', {id: ex.externalId})}
             style={{position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0}}
             allow="encrypted-media; picture-in-picture; fullscreen"
             allowFullScreen
@@ -474,22 +475,22 @@ function ExampleCard({ex, n, extra, onRemove}: {ex: Example; n: number; extra?: 
       {(stills.length > 1 || media?.playerUrl) && (
         <div className="row" style={{gap: 6, flexWrap: 'wrap', alignItems: 'center'}}>
           {media?.playerUrl && (
-            <button type="button" className="opt" style={{border: '1px solid var(--border)', fontWeight: view === 'player' ? 600 : 400}} aria-label="Show the player" onClick={() => setView('player')}>
-              ▶ Player
+            <button type="button" className="opt" style={{border: '1px solid var(--border)', fontWeight: view === 'player' ? 600 : 400}} aria-label={t('Show the player')} onClick={() => setView('player')}>
+              ▶ {t('Player')}
             </button>
           )}
           {stills.map((u, k) => (
-            <button key={k} type="button" className="copy" style={{padding: 0, visibility: 'visible', outline: view === 'image' && k === picked ? '2px solid var(--line-2)' : undefined}} aria-label={`Show image ${k + 1}`} onClick={() => { setPicked(k); setView('image'); }}>
+            <button key={k} type="button" className="copy" style={{padding: 0, visibility: 'visible', outline: view === 'image' && k === picked ? '2px solid var(--line-2)' : undefined}} aria-label={t('Show image {n}', {n: k + 1})} onClick={() => { setPicked(k); setView('image'); }}>
               <img src={u} alt="" style={{width: 44, height: 44, objectFit: 'cover', borderRadius: 6, display: 'block'}} />
             </button>
           ))}
-          <span className="small muted">{view === 'player' ? 'Stills from the item — click one to inspect it' : 'Still image — click Player to go back to the video'}</span>
+          <span className="small muted">{view === 'player' ? t('Stills from the item: click one to inspect it') : t('Still image: click Player to go back to the video')}</span>
         </div>
       )}
       <div className="kv">
         {rows.map(([k, v]) => (
           <Fragment key={k}>
-            <span>{k}</span>
+            <span>{rowName(k)}</span>
             <span title={v}>{v}</span>
           </Fragment>
         ))}
@@ -497,6 +498,10 @@ function ExampleCard({ex, n, extra, onRemove}: {ex: Example; n: number; extra?: 
     </Card>
   );
 }
+
+/** A row name of the example card: our names are catalog keys; other features keep their catalogue name. */
+const ROW_NAMES = new Set(['Title', 'Description', 'On-screen text', 'Speech', 'Creator', 'Hashtags', 'Posted', 'Country, language', 'Place', 'Interest', 'Summary']);
+const rowName = (k: string) => (ROW_NAMES.has(k) ? t(k) : k);
 
 const CHIP = {cursor: 'default', background: 'var(--bg-muted)', borderColor: 'transparent'} as const;
 const CHIP_DIFF = {cursor: 'default', background: '#fdecec', borderColor: 'transparent', color: '#b42318'} as const;
@@ -567,30 +572,30 @@ function ModelAnswer({
   );
   return (
     <Card
-      title="Model answer"
+      title={t('Model answer')}
       titleExtra={
         shown && found && !paged ? (
           <span className="t-3 one" style={{fontSize: 13}}>
-            {found.endpoint} · prompt {found.label}
+            {t('{model} · prompt {version}', {model: found.endpoint, version: found.label})}
           </span>
         ) : undefined
       }
       actions={
-        toggle ? <Button label={shown ? 'Hide' : 'Show'} kind="ghost" size="sm" icon="eye" onClick={onToggle} /> : undefined
+        toggle ? <Button label={shown ? t('Hide') : t('Show')} kind="ghost" size="sm" icon="eye" onClick={onToggle} /> : undefined
       }
     >
       {!shown ? null : !found ? (
         <span className="t-3 one" style={{fontSize: 13}}>
-          No answer from this version for this example
+          {t('No answer from this version for this example')}
         </span>
       ) : !found.answer ? (
         why ? (
           <div className="col" style={{gap: 12}}>
-            {said('Not readable', found.invalid ?? "The model's reply could not be read", true)}
+            {said(t('Not readable'), found.invalid ?? t("The model's reply could not be read"), true)}
           </div>
         ) : (
           <span className="t-3 one" style={{fontSize: 13}} title={found.invalid ?? undefined}>
-            The model&apos;s answer was invalid
+            {t("The model's answer was invalid")}
           </span>
         )
       ) : (
@@ -607,7 +612,7 @@ function ModelAnswer({
               ))}
             </div>
           ))}
-          {why && found.reason && said("Model's reason", found.reason, false)}
+          {why && found.reason && said(t("Model's reason"), found.reason, false)}
         </div>
       )}
     </Card>
@@ -615,7 +620,7 @@ function ModelAnswer({
 }
 
 const DONE_TEXT: Record<MismatchReview['outcome'], string> = {kept: 'Kept my label', model: "Used the model's answer", other: 'Changed my label'};
-const kindText = (f: LabelField) => (f.kind === 'single' ? 'Single-select' : `Multi-select, ${f.min ?? 1} to ${f.max ?? f.values.length}`);
+const kindText = (f: LabelField) => (f.kind === 'single' ? t('Single-select') : t('Multi-select, {min} to {max}', {min: f.min ?? 1, max: f.max ?? f.values.length}));
 const same = (a: Answer, b: Answer) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
 
 /**
@@ -681,11 +686,11 @@ function YourAnswer({
   const vName = (id: string | null) => (id ? versionName(id) : null);
   return (
     <Card
-      title="Your answer"
+      title={t('Your answer')}
       titleExtra={
         beat || (!review && saved && !changed && !hasNote) ? (
           <span className={`done-at${beat ? ' saved-beat' : ''}`} style={{margin: 0}}>
-            <Badge text="Saved" tone="ok" />
+            <Badge text={t('Saved')} tone="ok" />
           </span>
         ) : undefined
       }
@@ -693,13 +698,13 @@ function YourAnswer({
         <div className="row" style={{gap: 8, alignItems: 'center'}}>
           {done && (
             <>
-              <Badge text={DONE_TEXT[done.outcome]} tone="ok" />
+              <Badge text={t(DONE_TEXT[done.outcome])} tone="ok" />
               <span className="t-3" style={{fontSize: 13}}>
                 {dateTime(done.at)}
               </span>
               {!!done.earlier?.length && (
                 <span className="t-3" style={{fontSize: 13}}>
-                  <Hov text={`${done.earlier.length + 1} reviews`} tip={`Earlier: ${done.earlier.map(e => `${DONE_TEXT[e.outcome]} · ${dateTime(e.at)}`).join('; ')}. The newest review counts`} />
+                  <Hov text={t('{n} reviews', {n: done.earlier.length + 1})} tip={t('Earlier: {list}. The newest review counts', {list: done.earlier.map(e => `${t(DONE_TEXT[e.outcome])} · ${dateTime(e.at)}`).join('; ')})} />
                 </span>
               )}
               <span style={{width: 8}} />
@@ -707,10 +712,10 @@ function YourAnswer({
           )}
           {saved && (changed || hasNote) && !beat && (
             <span className="t-3" style={{fontSize: 13}}>
-              Not saved
+              {t('Not saved')}
             </span>
           )}
-          <Button label="Save" kind="primary" size="sm" disabled={!canSave} onClick={save} />
+          <Button label={t('Save')} kind="primary" size="sm" disabled={!canSave} onClick={save} />
         </div>
       }
     >
@@ -738,15 +743,15 @@ function YourAnswer({
         ))}
         <div className="col" style={{gap: 8, paddingTop: 8}}>
           <span className="field-l">
-            <Hov text="Comment" tip="Optional. Saved with Save. Comments go to the Optimiser and the Prompt helper with this example, so they learn what the label means; comments on the half used for scores never reach them" />
+            <Hov text={t('Comment')} tip={t('Optional. Saved with Save. Comments go to the Optimiser and the Prompt helper with this example, so they learn what the label means; comments on the half used for scores never reach them')} />
           </span>
           {comments.length > 0 && (
-            <div className="cmts" aria-label="Comments">
+            <div className="cmts" aria-label={t('Comments')}>
               {comments.map(c => (
                 <div key={c.id} className="cmt">
                   <span className="cmt-h">
                     {c.authorName} · {dateTime(c.createdAt)}
-                    {vName(c.promptVersionId) ? ` · on ${vName(c.promptVersionId)}` : ''}
+                    {vName(c.promptVersionId) ? ` · ${t('on {version}', {version: vName(c.promptVersionId)!})}` : ''}
                   </span>
                   <span className="cmt-t">{c.text}</span>
                 </div>
@@ -756,8 +761,8 @@ function YourAnswer({
           <textarea
             className="input"
             rows={3}
-            aria-label="Add a comment"
-            placeholder="Add a comment: for example, the clip is cut from a show, so it is a Clip"
+            aria-label={t('Add a comment')}
+            placeholder={t('Add a comment: for example, the clip is cut from a show, so it is a Clip')}
             maxLength={500}
             value={note}
             onChange={e => setNote(e.target.value)}

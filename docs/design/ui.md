@@ -22,6 +22,13 @@ content 1280 wide and centred; the main action of a page shows without scrolling
   Not started (its number), In progress (while a task runs there), Finished (green tick), Needs
   attention (!) or the current page (ink). Finished steps stay clickable and editable. The island
   moves with the main panel when Ask AI opens.
+- **Avatar menu (1.1.0).** The avatar opens a small menu: the user's name, then **Language** with
+  "English" and Chinese, each written in its own language, the current one ticked. Switching
+  re-renders the page in place. The choice is kept in the browser; with none kept, a browser set
+  to Chinese starts in Chinese.
+- **Projects list (1.1.0).** Columns: Project, Created by, Created, then Delete. The project is
+  renamed in Project Settings (a **Name** field at the top of the dialog, prefilled), not on the
+  island.
 - **Page header.** One structure everywhere: the title starts at the content's left edge, the back
   arrow sits in the margin to its left, and the page's actions sit on the right. The forward
   button ("Next: Gold Labels" and so on) is the main button in the header, never a row at the

@@ -1,5 +1,5 @@
 import type {ChatMessage, FeatureInfo, NewVersion, PromptVersion} from '@tsp/contracts';
-import {checkStructured, compilePrompt, MADE_BY, newId, schemaOf, signatureOf, sameSignature, tidyStructured, versionLabel} from '@tsp/domain';
+import {checkStructured, compilePrompt, MADE_BY, newId, schemaOf, signatureOf, sameSignature, tidyStructured, versionLabel, msg, msgText} from '@tsp/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {syncLabels} from './settings.ts';
@@ -41,12 +41,13 @@ export async function createVersion(projectId: string, v: NewVersion): Promise<P
     ...(v.inMajor != null ? {inMajor: v.inMajor} : {}),
   });
   await catalog.audit(projectId, v.madeBy === 'optimiser' ? v.madeBy : (await user()).name, 'prompt.create', {version: versionLabel(version)});
-  if (fromDraft) await postEvent(projectId, 'approved', 'user', `saved it as ${versionLabel(version)}`, {path: '/prompt/edit', params: {v: version.id}});
+  if (fromDraft) await postEvent(projectId, 'approved', 'user', msg('saved it as {version}', {version: versionLabel(version)}), {path: '/prompt/edit', params: {v: version.id}});
   if (!existing.length) {
     // The first version, approved on Prompt Design: the helper says what comes next (spec 6.2).
-    await postEvent(projectId, 'approved', 'user', `approved the prompt as ${versionLabel(version)}`, {path: '/prompt-design'});
-    const msg: ChatMessage = {id: newId('cm'), projectId, createdAt: now(), role: 'agent', agent: 'prompt_agent', text: `${versionLabel(version)} is saved. Next, click "Next: Eval Dataset" at the top right to add the examples it will be scored on.`, page: 'Prompt Design'};
-    await catalog.insert('chat_messages', msg);
+    await postEvent(projectId, 'approved', 'user', msg('approved the prompt as {version}', {version: versionLabel(version)}), {path: '/prompt-design'});
+    const next = msg('{version} is saved. Next, click "Next: Eval Dataset" at the top right to add the examples it will be scored on.', {version: versionLabel(version)});
+    const line: ChatMessage = {id: newId('cm'), projectId, createdAt: now(), role: 'agent', agent: 'prompt_agent', text: msgText(next), msg: next, page: 'Prompt Design'};
+    await catalog.insert('chat_messages', line);
   }
   const before = new Set((v.parent?.template ?? '').split('\n'));
   const after = new Set(template.split('\n'));

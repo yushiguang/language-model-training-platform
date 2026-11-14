@@ -1,4 +1,5 @@
-import type {FeatureSelection, LabelSignature, Schema, StructuredFieldPrompt, StructuredPrompt} from '@tsp/contracts';
+import type {FeatureSelection, LabelSignature, Msg, Schema, StructuredFieldPrompt, StructuredPrompt} from '@tsp/contracts';
+import {msg, msgText} from './i18n.ts';
 import {FEATURES, ITEM_ROWS, labelOf} from './catalogue.ts';
 
 /**
@@ -93,32 +94,36 @@ export interface StructuredIssue {
   where: 'task' | 'features' | 'field' | 'value' | 'rules';
   field?: string;
   value?: string;
+  /** In English. */
   message: string;
+  /** The same as a catalog key and params, for the page (spec 1.1.0, 2.3). */
+  msg: Msg;
 }
 
 /** What stops a structured prompt from being saved, in the user's words. Empty: it can be saved. */
 export function checkStructured(p: StructuredPrompt): StructuredIssue[] {
   const out: StructuredIssue[] = [];
-  if (!featureKeys(p.features).length) out.push({where: 'features', message: 'Tick at least one input feature'});
-  if (!p.fields.length) out.push({where: 'field', message: 'Add at least one label field'});
+  const add = (i: Omit<StructuredIssue, 'message' | 'msg'>, m: Msg) => out.push({...i, message: msgText(m), msg: m});
+  if (!featureKeys(p.features).length) add({where: 'features'}, msg('Tick at least one input feature'));
+  if (!p.fields.length) add({where: 'field'}, msg('Add at least one label field'));
   const names = new Set<string>();
   for (const f of p.fields) {
     const name = f.name.trim();
-    if (!name) out.push({where: 'field', field: f.name, message: 'A field has no name'});
-    else if (names.has(name)) out.push({where: 'field', field: f.name, message: `Two fields are named ${name}`});
+    if (!name) add({where: 'field', field: f.name}, msg('A field has no name'));
+    else if (names.has(name)) add({where: 'field', field: f.name}, msg('Two fields are named {name}', {name}));
     names.add(name);
-    if (f.values.length < 2) out.push({where: 'field', field: f.name, message: `${name || 'A field'} needs at least 2 values`});
+    if (f.values.length < 2) add({where: 'field', field: f.name}, name ? msg('{name} needs at least 2 values', {name}) : msg('A field needs at least 2 values'));
     const values = new Set<string>();
     for (const v of f.values) {
       const vn = v.name.trim();
-      if (!vn) out.push({where: 'value', field: f.name, value: v.name, message: `A value of ${name || 'a field'} has no name`});
-      else if (values.has(vn)) out.push({where: 'value', field: f.name, value: v.name, message: `${name} has the value ${vn} twice`});
+      if (!vn) add({where: 'value', field: f.name, value: v.name}, name ? msg('A value of {name} has no name', {name}) : msg('A value of a field has no name'));
+      else if (values.has(vn)) add({where: 'value', field: f.name, value: v.name}, msg('{name} has the value {value} twice', {name, value: vn}));
       values.add(vn);
     }
     if (f.kind === 'multi') {
       const min = f.min ?? 1;
       const max = f.max ?? f.values.length;
-      if (min < 0 || max < 1 || min > max || max > f.values.length) out.push({where: 'field', field: f.name, message: `${name}: choose ${min} to ${max} does not fit ${f.values.length} values`});
+      if (min < 0 || max < 1 || min > max || max > f.values.length) add({where: 'field', field: f.name}, msg('{name}: choose {min} to {max} does not fit {n} values', {name, min, max, n: f.values.length}));
     }
   }
   return out;

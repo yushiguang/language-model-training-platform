@@ -134,7 +134,10 @@ export interface Project {
   id: string;
   name: string;
   createdAt: string;
+  /** The creator's display name, as the Projects list shows it. */
   createdBy: string;
+  /** The creator's user id (spec 1.1.0, 1.1): for ownership checks once tenants exist. */
+  createdById?: string;
   /** Missing on records made before 1.0.0: `prompt_tuning`. */
   kind?: ProjectKind;
   /** Batch labeling only: the Prompt Tuning project and version it labels with. */
@@ -523,7 +526,7 @@ export interface ChatAttachment {
  * on a page, the user approved or discarded it, paid work started (by a helper, or automatically
  * by the workflow), the user stopped work, or the page's own helper answers again.
  */
-export type ChatEvent = 'join' | 'draft' | 'approved' | 'discarded' | 'start' | 'auto' | 'stop' | 'page';
+export type ChatEvent = 'join' | 'draft' | 'approved' | 'discarded' | 'start' | 'auto' | 'stop' | 'page' | 'report';
 
 /** Where an action line leads: a step page and its query (the page adds the project). */
 export interface ChatLink {
@@ -536,6 +539,8 @@ export interface AgentLive {
   agent: AgentPreset;
   /** A plain line such as "Reading the v4 report…"; null once the reply streams. */
   working: string | null;
+  /** The working line as a catalog key and params, so the page can show it in the user's language (1.1.0). */
+  msg?: Msg | null;
   /** The reply streamed so far. */
   reply: string | null;
 }
@@ -545,7 +550,10 @@ export interface ChatMessage {
   projectId: string;
   role: 'user' | 'agent' | 'event';
   agent: AgentPreset | null;
+  /** In English. A line the site wrote also carries `msg`, so it can be shown in any language. */
   text: string;
+  /** Action lines: the line as a catalog key and params (spec 1.1.0, 2.3). */
+  msg?: Msg;
   /** Action lines only: what happened, for the line's icon. */
   event?: ChatEvent;
   /** Action lines only: the page where it happened; the whole line links there. */
@@ -717,3 +725,40 @@ export interface ProjectState {
   otherAutoSpendUsd?: number;
 }
 
+
+/** A language the site is shown in (spec 1.1.0, 2). English is the source language. */
+export type Locale = 'en' | 'zh';
+
+/**
+ * A text the services make, as a catalog key and its params: the English text with `{name}`
+ * placeholders. Clients translate it. A param may itself be a `Msg` (translated in turn); a string
+ * param named `who`, `page`, `step`, `helper` or `term` is a word of the site and is translated too.
+ */
+export interface Msg {
+  key: string;
+  params?: Record<string, string | number | Msg>;
+}
+
+/**
+ * What the browser saw just before a problem (spec 1.1.0, 3.2). Collected by the web client in a
+ * rolling record and sent with each Ask AI message; the bff keeps it for that turn only. No text
+ * the user typed, no features, no labels.
+ */
+export interface ClientDiagnostics {
+  /** Path and query of the page (ids only). */
+  url: string;
+  userAgent: string;
+  /** Width x height in CSS pixels. */
+  viewport: string;
+  screen: string;
+  timeZone: string;
+  /** The browser's language setting. */
+  language: string;
+  at: string;
+  /** The last pages visited, oldest first. */
+  pages: {at: string; path: string}[];
+  /** The last backend calls that failed: method, the client's call id and the error message. */
+  failedCalls: {at: string; method: string; callId: string; message: string}[];
+  /** The last script errors and unhandled rejections (message cut short). */
+  errors: {at: string; message: string; source?: string}[];
+}

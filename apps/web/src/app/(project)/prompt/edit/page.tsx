@@ -11,6 +11,7 @@ import {FullPromptButton, StructuredEditor} from '@/components/prompt/Structured
 import {useAgentDrafts} from '@/components/prompt/useAgentDrafts';
 import {createVersion, featureInfo, scoreVersion, track, type ProjectState} from '@/backend-api';
 import {Badge, Banner, Button, Empty, num, PageHead} from '@/ui';
+import {t, tm} from '@/i18n';
 
 export default function EditPage() {
   return (
@@ -32,8 +33,8 @@ function EditRouter() {
         return v ? (
           <Edit key={`${v.id}${view}`} state={state} version={v} readOnly={view} setPage={setPage} />
         ) : (
-          <Frame head={<PageHead title="Prompt" />}>
-            <Empty title="No prompt version yet" text="Write the first prompt on Prompt Design." />
+          <Frame head={<PageHead title={t('Prompt')} />}>
+            <Empty title={t('No prompt version yet')} text={t('Write the first prompt on Prompt Design.')} />
           </Frame>
         );
       }}
@@ -113,36 +114,36 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
   const actions = readOnly ? (
     <>
       {full}
-      <Button label="Edit prompt" kind="primary" href={href('/prompt/edit', {v: version.id})} />
+      <Button label={t('Edit prompt')} kind="primary" href={href('/prompt/edit', {v: version.id})} />
     </>
   ) : (
     <>
       {dirty ? (
         <span className="done-at" style={{margin: 0}}>
-          <Badge text={fromHelper ? 'Draft from Prompt helper' : 'Unsaved changes'} tone="warn" icon={false} />
+          <Badge text={fromHelper ? t('Draft from Prompt helper') : t('Unsaved changes')} tone="warn" icon={false} />
         </span>
       ) : (
         fromParent && (
           <span className="done-at" style={{margin: 0}}>
-            <Badge text={`Changes from ${versionLabel(fromParent)}`} tone="gray" icon={false} />
+            <Badge text={t('Changes from {version}', {version: versionLabel(fromParent)})} tone="gray" icon={false} />
           </span>
         )
       )}
       {full}
-      {dirty && <Button label="Discard" kind="ghost" onClick={discard} />}
-      <Button label={`Save as ${nextMajor}`} disabled={blocked} title={issues[0]?.message ?? `New major version ${nextMajor}`} onClick={() => save('major')} />
-      <Button label="Save" kind="primary" className={fromHelper && !blocked ? 'btn-cue' : undefined} disabled={blocked} title={issues[0]?.message ?? `Saves as ${nextMinor}`} onClick={() => save('minor')} />
+      {dirty && <Button label={t('Discard')} kind="ghost" onClick={discard} />}
+      <Button label={t('Save as {version}', {version: nextMajor})} disabled={blocked} title={issues[0] ? tm(issues[0].msg) : t('New major version {version}', {version: nextMajor})} onClick={() => save('major')} />
+      <Button label={t('Save')} kind="primary" className={fromHelper && !blocked ? 'btn-cue' : undefined} disabled={blocked} title={issues[0] ? tm(issues[0].msg) : t('Saves as {version}', {version: nextMinor})} onClick={() => save('minor')} />
     </>
   );
   return (
-    <Frame head={<PageHead title={`Prompt ${versionLabel(version)}`} back={{label: 'Prompt Tuning', href: href('/prompt')}} actions={actions} />}>
+    <Frame head={<PageHead title={t('Prompt {version}', {version: versionLabel(version)})} back={{label: t('Prompt Tuning'), href: href('/prompt')}} actions={actions} />}>
       {signatureChanged && (
         <Banner
-          text={goldCount ? `This changes the label fields or values. After you save, ${num(goldCount)} gold ${goldCount === 1 ? 'label needs' : 'labels need'} a re-check and earlier scores no longer count.` : 'This changes the label fields or values. Earlier scores no longer count after you save.'}
+          text={goldCount === 1 ? t('This changes the label fields or values. After you save, 1 gold label needs a re-check and earlier scores no longer count.') : goldCount ? t('This changes the label fields or values. After you save, {n} gold labels need a re-check and earlier scores no longer count.', {n: num(goldCount)}) : t('This changes the label fields or values. Earlier scores no longer count after you save.')}
           style={{margin: '0 0 16px'}}
         />
       )}
-      <StructuredEditor value={draft} onChange={setDraft} readOnly={readOnly} base={against} reasons={reasons} reasonPrefix={!dirty && fromParent ? (round ? `Optimiser, round ${round.round}: ` : 'Optimiser: ') : ''} featureTips={tips} />
+      <StructuredEditor value={draft} onChange={setDraft} readOnly={readOnly} base={against} reasons={reasons} reasonPrefix={!dirty && fromParent ? (round ? t('Optimiser, round {n}: ', {n: round.round}) : t('Optimiser: ')) : ''} featureTips={tips} />
     </Frame>
   );
 }

@@ -7,7 +7,9 @@ changing, because apps only talk through the contracts in `@tsp/contracts`.
 
 ## Rules
 
-- **English only** in code, comments, docs and commit messages.
+- **English only** in code, comments, docs and commit messages. The one exception is the
+  translation catalogs in `packages/domain/src/locales/` (one file per language, keyed by the
+  English text); nothing else, tests included, holds text in another language.
 - **Nothing internal.** Never commit keys, tokens, internal URLs, internal package scopes or
   internal product names. The public model names (`gpt-5.x`) are fine.
 - **No real examples.** Real data is loaded from `NEXT_PUBLIC_EXAMPLES_URL`; only the made-up

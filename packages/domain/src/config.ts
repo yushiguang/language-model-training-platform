@@ -35,6 +35,8 @@ export const DEFAULT_SYSTEM_CONFIG: SystemConfig = {
   },
   agent: {maxToolCalls: 4, maxToolResultChars: 12_000, recentHistoryCount: 8, maxDocChars: 20_000, maxAttachmentChars: 8_000, tryTemplateMaxExamples: 5},
   ui: {activePollMs: 5000, sweepMs: 60_000, changeDebounceMs: 120, minActionPendingMs: 220},
+  project: {nameMaxChars: 80},
+  reports: {diagnosticsKeep: 10, actionLines: 15, messageMaxChars: 300},
 };
 
 const isPlain = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);

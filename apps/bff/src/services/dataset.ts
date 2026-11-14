@@ -123,7 +123,7 @@ export function hasBundledGold(): boolean {
  */
 export async function uploadDatasetText(projectId: string, name: string, text: string, append = false): Promise<{snapshot?: DatasetSnapshot; error?: string; added?: number; duplicates?: number}> {
   if (!/\.(csv|txt|jsonl|json)$/i.test(name)) {
-    return {error: `"${name}" can't be used. Upload a text or CSV file of item IDs.`};
+    return {error: "This file can't be used. Upload a text or CSV file of item IDs."};
   }
   const raws: RawExample[] = [];
   const ids: string[] = [];

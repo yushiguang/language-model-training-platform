@@ -30,6 +30,9 @@ changing the apps.
   `event_id` (for de-duplication), `session_id` (one per tab, new after 30 idle minutes),
   `user_id` (the sign-in id, never a name or email), `project_id`, `page`, `app_version`. `props`
   hold ids, counts, enums, booleans and numbers only.
+- **1.1.0 events.** `project_renamed` (no name), `locale_changed` (`locale`),
+  `problem_report_drafted` (`page`), `problem_reported` (`page`, `has_content`, `failed_calls`,
+  `errors`). The ticket itself goes to `Platform.tickets`, never to telemetry.
 - **No content, ever.** No example content, prompt text, label text, chat text, file names,
   names or emails, in metrics or events. `apps/telemetry` allowlists label values and event props.
 

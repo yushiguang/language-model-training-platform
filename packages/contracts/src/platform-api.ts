@@ -1,5 +1,5 @@
 import type {TelemetrySink} from './telemetry.ts';
-import type {EndpointInfo, FeatureValue} from './types.ts';
+import type {ClientDiagnostics, EndpointInfo, FeatureValue, Locale, NodeId, PageId} from './types.ts';
 import type {EndpointConfig} from './gateway-api.ts';
 import type {DeepPartial, SystemConfig} from './config.ts';
 
@@ -526,6 +526,52 @@ export interface Platform {
   authorization?: AuthorizationPort;
   /** A job queue for background work. Optional: without it work runs in the open page. */
   jobs?: JobQueuePort;
+  /**
+   * Where problem reports go (spec 1.1.0, 3.3). Optional: without it the helpers say reports
+   * cannot be sent here. See docs/handover/integration.md, "Problem reports".
+   */
+  tickets?: TicketPort;
   /** Shown in the header so nobody mistakes a stand-in for the real service. */
   standIns: string[];
+}
+
+/**
+ * A problem report, filed by a helper after the user agreed (spec 1.1.0, 3). Everything in it is
+ * what the user said, where they were and what the site saw; content only when they agreed.
+ */
+export interface TicketSubmission {
+  /** One line: what went wrong, in the user's words. */
+  summary: string;
+  expected: string;
+  actual: string;
+  /** Steps to reach the problem, from the user's account and the action trail. */
+  steps: string[];
+  reporter: {id: string; name: string};
+  locale: Locale;
+  /** Which helper filed it. */
+  filedBy: string;
+  createdAt: string;
+  where: {
+    appVersion: string;
+    projectId: string | null;
+    projectName: string | null;
+    page: PageId | 'other';
+    /** The page's ids: version (`v`), model (`m`). */
+    params: Record<string, string>;
+    approvedSteps: NodeId[];
+    /** The project's settings in short: pass rule mode and labeling model. */
+    settings: {passRule: string; model: string} | null;
+  };
+  /** The recent Ask AI action lines (what the user and the helpers did), oldest first. */
+  actions: {at: string; text: string}[];
+  /** Null when the client sent none (for example an older client). */
+  diagnostics: ClientDiagnostics | null;
+  /** Only when the user agreed: the prompt the problem is about. */
+  content: {versionLabel: string; prompt: string} | null;
+}
+
+/** Files problem reports in the company's tracker (or hands them to a dev agent). */
+export interface TicketPort {
+  /** Files the ticket and returns the id the user can quote. Throw when it cannot be filed. */
+  submit(ticket: TicketSubmission): Promise<{ticketId: string}>;
 }

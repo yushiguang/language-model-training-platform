@@ -1,5 +1,5 @@
 import type {EndpointId, EvalReport, Example, GoldLabel, LabelingTask, ModelSettings, Prediction, PromptVersion, SetupVersion, TaskPurpose} from '@tsp/contracts';
-import {toMap, computeMetrics, judge, newId, settingsHash, versionLabel, type Scored} from '@tsp/domain';
+import {toMap, computeMetrics, judge, newId, settingsHash, versionLabel, type Scored, msg} from '@tsp/domain';
 import {emitChange, getApp, now} from './app.ts';
 import {postEvent} from './chat-events.ts';
 
@@ -101,7 +101,7 @@ export function stopRun(runId: string): void {
     const t = await labeling.getTask(runId);
     if (!t) return;
     const v = await catalog.get('prompt_versions', t.promptVersionId);
-    if (t.purpose === 'eval') await postEvent(t.projectId, 'stop', 'user', `stopped scoring ${v ? versionLabel(v) : 'a version'}`, {path: '/prompt'});
+    if (t.purpose === 'eval') await postEvent(t.projectId, 'stop', 'user', v ? msg('stopped scoring {version}', {version: versionLabel(v)}) : msg('stopped scoring a version'), {path: '/prompt'});
   });
 }
 

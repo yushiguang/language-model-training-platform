@@ -1,5 +1,5 @@
-import type {AgentPreset, ChatLink, EndpointId, ProjectState} from '@tsp/contracts';
-import {autoSpendUsd, canScore, compilePrompt, readStructured, evalEstimate, optimiserEstimate, versionLabel, visibleToAgents, systemConfig} from '@tsp/domain';
+import type {AgentPreset, ChatLink, EndpointId, Msg, ProjectState} from '@tsp/contracts';
+import {autoSpendUsd, canScore, compilePrompt, readStructured, evalEstimate, optimiserEstimate, versionLabel, visibleToAgents, systemConfig, msg} from '@tsp/domain';
 import {getApp, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {asModel, findVersion, modelName} from './page-views.ts';
@@ -18,7 +18,7 @@ export const isStartTool = (name: string): name is StartTool => (START_TOOLS as 
 
 interface Planned {
   /** The action line once it starts: "<helper> <line>", e.g. "started scoring v4 on gpt-5.4". */
-  line: string;
+  line: string | Msg;
   link?: ChatLink;
   estimateUsd: number;
   run: () => Promise<unknown>;
@@ -52,7 +52,7 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
       const examples = state.examples.filter(e => e.split === 'eval' && visibleToAgents(e)).slice(0, n);
       if (!examples.length) throw new Error('There are no eval examples to try it on.');
       return {
-        line: `tried the prompt on ${examples.length} eval example${examples.length === 1 ? '' : 's'} with ${modelName(state, endpoint)}`,
+        line: examples.length === 1 ? msg('tried the prompt on 1 eval example with {model}', {model: modelName(state, endpoint)}) : msg('tried the prompt on {n} eval examples with {model}', {n: examples.length, model: modelName(state, endpoint)}),
         estimateUsd: evalEstimate(state, draft, endpoint, examples.length),
         run: async () => {
           const settings = models.find(m => m.endpoint === endpoint)!;
@@ -77,7 +77,7 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
         return {line: '', estimateUsd: 0, run: async () => ({already: `${versionLabel(v)} is already scored or being scored on ${modelName(state, endpoint)}.`})};
       }
       return {
-        line: `started scoring ${versionLabel(v)} on ${modelName(state, endpoint)}`,
+        line: msg('started scoring {version} on {model}', {version: versionLabel(v), model: modelName(state, endpoint)}),
         link: {path: '/prompt'},
         estimateUsd: evalEstimate(state, v, endpoint),
         run: async () => {
@@ -91,7 +91,7 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
       if (state.optimisation.some(o => o.state === 'running')) return {line: '', estimateUsd: 0, run: async () => ({already: 'The Optimiser is already running.'})};
       const rounds = typeof args.rounds === 'number' ? Math.max(1, Math.min(systemConfig().optimiser.maxRoundsCap, Math.round(args.rounds))) : systemConfig().optimiser.defaultMaxRounds;
       return {
-        line: `started the Optimiser for up to ${rounds} rounds`,
+        line: msg('started the Optimiser for up to {rounds} rounds', {rounds}),
         link: {path: '/prompt'},
         estimateUsd: optimiserEstimate(state, endpoint, rounds),
         run: async () => {

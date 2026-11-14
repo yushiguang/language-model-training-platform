@@ -287,6 +287,36 @@ function improve(r: Req) {
   };
 }
 
+/** The user says the site is broken, or asks to report a problem. */
+const isProblem = (t: string) => /\b(bug|broken|crash(es|ed)?|error|does ?n[o']?t work|does nothing|is ?n[o']?t working|not working|nothing happens|went wrong|stuck|report (a|this|the) problem)\b/i.test(t);
+/** A yes to "Shall I send it?". */
+const isYes = (t: string) => /^\s*(yes|yep|yeah|sure|ok(ay)?|please do|send( it)?|go ahead)\b/i.test(t);
+const ASK_SEND = 'Shall I send it?';
+
+/**
+ * Problem reports (spec 1.1.0, 3), for every helper: drafts with report_problem, shows the draft
+ * and asks; sends only on a later "yes", then gives the ticket id.
+ */
+function problemReport(r: Req) {
+  const t = (r.userText ?? '').trim();
+  const history = (r.context.recentHistory ?? []) as {role: string; text: string}[];
+  const asked = [...history].reverse().find(m => m.role === 'agent')?.text.includes(ASK_SEND) ?? false;
+  if (asked && isYes(t)) {
+    if (!('report_problem' in r.results)) return {tool: {name: 'report_problem', args: {send: true}}};
+    const res = r.results.report_problem;
+    return {reply: res?.ticketId ? `Sent. Your ticket id is ${res.ticketId}; the team picks it up from there.` : `I couldn't send it: ${res?.error ?? 'unknown error'}`};
+  }
+  // A pasted prompt may say "went wrong" in its own text; only a short message is a report.
+  if (!isProblem(t) || looksLikePrompt(t) || t.length > 400) return null;
+  if (!('report_problem' in r.results)) {
+    const page = r.context.pageView?.title ?? 'this page';
+    return {tool: {name: 'report_problem', args: {summary: t.slice(0, 120), expected: `${page} works as described.`, actual: t, steps: [`Open ${page}`]}}};
+  }
+  const res = r.results.report_problem;
+  if (res?.error) return {reply: `I couldn't draft a report: ${res.error}`};
+  return {reply: `Here is the report I would send: "${res.draft.summary}". It includes ${res.attached.join(', ')}; not ${res.notAttached.join(', ')}. ${ASK_SEND}`};
+}
+
 /** A helper that stayed on its page passes on what the front desk would send to another helper. */
 function passOn(r: Req) {
   if (r.intent !== 'follow_up') return null;
@@ -299,8 +329,9 @@ export function scriptedAgent(): AgentModel {
     await new Promise(res => setTimeout(res, 450));
     const req = readRequest(messages);
     const out =
+      (req.preset !== 'optimiser' && req.intent !== 'improve' ? problemReport(req) : null) ??
       passOn(req) ??
-      req.preset === 'front_desk'
+      (req.preset === 'front_desk'
         ? frontDesk(req)
         : req.preset === 'prompt_agent'
           ? promptAgent(req)
@@ -308,7 +339,7 @@ export function scriptedAgent(): AgentModel {
             ? req.intent === 'merge'
               ? merge(req)
               : reflect(req)
-            : evaluationAgent(req);
+            : evaluationAgent(req));
     return JSON.stringify(out);
   };
 

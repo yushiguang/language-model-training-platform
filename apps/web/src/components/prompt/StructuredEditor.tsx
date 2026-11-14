@@ -4,6 +4,7 @@ import {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {compilePrompt, diffWords, FEATURES, withReasons, type MarkSeg} from '@tsp/domain';
 import type {FeatureSelection, StructuredFieldPrompt, StructuredPrompt} from '@tsp/contracts';
 import {Badge, Button, Card, Cb, Code, Dialog, Empty, Hov, Icon, Seg, Table, useCopy} from '@/ui';
+import {t} from '@/i18n';
 
 /**
  * The structured prompt editor (spec 1.0.0, 3.2 and 3.3), used on Prompt Design and in the prompt
@@ -59,30 +60,30 @@ export function StructuredEditor({
 
   return (
     <div className="col sp" style={{gap: 16}}>
-      <Section title="Output Labels & Definitions" hint="Fields and values" tip="Fields and values are what people label with, what the model must answer with, and what scores are counted on. Each definition tells the model when a value applies.">
+      <Section title={t('Output Labels & Definitions')} hint={t('Fields and values')} tip={t('Fields and values are what people label with, what the model must answer with, and what scores are counted on. Each definition tells the model when a value applies.')}>
         {!value.fields.length ? (
           <Card>
-            <Empty title="No label fields yet" text={readOnly ? 'This prompt has no label fields.' : 'Describe your task in Ask AI, paste the prompt you use today, or add a field yourself.'}>
-              {!readOnly && <Button label="Add field" icon="plus" onClick={addField} />}
+            <Empty title={t('No label fields yet')} text={readOnly ? t('This prompt has no label fields.') : t('Describe your task in Ask AI, paste the prompt you use today, or add a field yourself.')}>
+              {!readOnly && <Button label={t('Add field')} icon="plus" onClick={addField} />}
             </Empty>
           </Card>
         ) : (
           <div className="grid-split sp-fields">
-            <Card title="Fields">
-              <nav className="vlist" aria-label="Fields">
+            <Card title={t('Fields')}>
+              <nav className="vlist" aria-label={t('Fields')}>
                 {value.fields.map((f, i) => (
                   <button key={i} type="button" className="vrow" aria-current={i === at} onClick={() => setSel(i)}>
-                    <Code>{f.name || 'unnamed'}</Code>
-                    <span>{draft ? <Badge text="Draft" icon={false} /> : changed(f) && <Badge text="Changed" tone="warn" icon={false} />}</span>
+                    <Code>{f.name || t('unnamed')}</Code>
+                    <span>{draft ? <Badge text={t('Draft')} icon={false} /> : changed(f) && <Badge text={t('Changed')} tone="warn" icon={false} />}</span>
                     <span className="t-3" style={{fontSize: 13}}>
-                      {f.kind === 'single' ? 'Single' : 'Multi'} · {f.values.length}
+                      {f.kind === 'single' ? t('Single') : t('Multi')} · {f.values.length}
                     </span>
                   </button>
                 ))}
               </nav>
               {!readOnly && (
                 <div style={{margin: '4px -12px 0'}}>
-                  <Button label="Add field" kind="ghost" icon="plus" onClick={addField} />
+                  <Button label={t('Add field')} kind="ghost" icon="plus" onClick={addField} />
                 </div>
               )}
             </Card>
@@ -91,14 +92,14 @@ export function StructuredEditor({
         )}
       </Section>
 
-      <Section title="Input Features" hint="What the model reads" tip="The ticked features of each example go into the prompt, in this order. An empty feature reads as none.">
+      <Section title={t('Input Features')} hint={t('What the model reads')} tip={t('The ticked features of each example go into the prompt, in this order. An empty feature reads as none.')}>
         <Features features={value.features} base={base?.features} onChange={readOnly ? undefined : features => onChange({...value, features})} tips={featureTips} />
       </Section>
 
-      <Section title="Task & General Rules" hint="The task, and rules that span fields" tip="The task says what the items are and what the labels are for. General rules cover more than one field, and what to do when the evidence is thin or missing.">
+      <Section title={t('Task & General Rules')} hint={t('The task, and rules that span fields')} tip={t('The task says what the items are and what the labels are for. General rules cover more than one field, and what to do when the evidence is thin or missing.')}>
         <Card className="form">
-          <Block label="Task summary" value={value.taskSummary} readOnly={readOnly} placeholder="One or two sentences: what the items are, and what the labels are for" marks={marks(base?.taskSummary, value.taskSummary)} onChange={taskSummary => onChange({...value, taskSummary})} />
-          <Block label="General / fallback rules" value={value.generalRules} readOnly={readOnly} placeholder="Rules that span fields, and what to choose when the evidence is thin" marks={marks(base?.generalRules, value.generalRules)} onChange={generalRules => onChange({...value, generalRules})} />
+          <Block label={t('Task summary')} value={value.taskSummary} readOnly={readOnly} placeholder={t('One or two sentences: what the items are, and what the labels are for')} marks={marks(base?.taskSummary, value.taskSummary)} onChange={taskSummary => onChange({...value, taskSummary})} />
+          <Block label={t('General / fallback rules')} value={value.generalRules} readOnly={readOnly} placeholder={t('Rules that span fields, and what to choose when the evidence is thin')} marks={marks(base?.generalRules, value.generalRules)} onChange={generalRules => onChange({...value, generalRules})} />
         </Card>
       </Section>
     </div>
@@ -142,7 +143,7 @@ export function Grow({value, onChange, readOnly, placeholder, label, className =
 function Marks({segs}: {segs?: MarkSeg[]}) {
   if (!segs?.some(m => m.kind !== 'same')) return null;
   return (
-    <div className="sp-marks" aria-label="Changes">
+    <div className="sp-marks" aria-label={t('Changes')}>
       {segs.map((m, i) =>
         m.kind === 'same' ? (
           <span key={i}>{m.text}</span>
@@ -192,17 +193,17 @@ function FieldEditor({
   return (
     <Card className="sp-field">
       <div className="row sp-field-h">
-        <input className="input mono" style={{width: 200}} value={field.name} readOnly={readOnly} aria-label="Field name" onChange={e => onChange({...field, name: e.target.value.replace(/\s+/g, '_')})} />
+        <input className="input mono" style={{width: 200}} value={field.name} readOnly={readOnly} aria-label={t('Field name')} onChange={e => onChange({...field, name: e.target.value.replace(/\s+/g, '_')})} />
         {readOnly ? (
-          <Badge text={multi ? `Multi-select · choose ${field.min ?? 1} to ${field.max ?? field.values.length}` : 'Single-select'} icon={false} />
+          <Badge text={multi ? t('Multi-select · choose {min} to {max}', {min: field.min ?? 1, max: field.max ?? field.values.length}) : t('Single-select')} icon={false} />
         ) : (
           <>
             <Seg
-              label="Type"
+              label={t('Type')}
               value={field.kind}
               options={[
-                {value: 'single', label: 'Single-select'},
-                {value: 'multi', label: 'Multi-select'},
+                {value: 'single', label: t('Single-select')},
+                {value: 'multi', label: t('Multi-select')},
               ]}
               onChange={k => {
                 const {min: _a, max: _b, ...rest} = field;
@@ -211,14 +212,14 @@ function FieldEditor({
             />
             {multi && (
               <span className="row" style={{gap: 8}}>
-                <span className="t-2">Choose</span>
-                <input className="input sm" style={{width: 56, padding: '0 12px'}} aria-label="At least" value={field.min ?? 1} onChange={e => onChange({...field, min: parseInt(e.target.value) || 1})} />
-                <span className="t-2">to</span>
-                <input className="input sm" style={{width: 56, padding: '0 12px'}} aria-label="At most" value={field.max ?? field.values.length} onChange={e => onChange({...field, max: parseInt(e.target.value) || 1})} />
+                <span className="t-2">{t('Choose')}</span>
+                <input className="input sm" style={{width: 56, padding: '0 12px'}} aria-label={t('At least')} value={field.min ?? 1} onChange={e => onChange({...field, min: parseInt(e.target.value) || 1})} />
+                <span className="t-2">{t('to')}</span>
+                <input className="input sm" style={{width: 56, padding: '0 12px'}} aria-label={t('At most')} value={field.max ?? field.values.length} onChange={e => onChange({...field, max: parseInt(e.target.value) || 1})} />
               </span>
             )}
             <span className="grow" />
-            <Button label="Remove field" kind="ghost" onClick={() => onChange(null)} />
+            <Button label={t('Remove field')} kind="ghost" onClick={() => onChange(null)} />
           </>
         )}
       </div>
@@ -226,19 +227,19 @@ function FieldEditor({
         <Table
           first={28}
           actWidth={56}
-          cols={readOnly ? [{label: 'Value'}, {label: 'Definition'}] : [{label: 'Value'}, {label: 'Definition'}, {label: '', kind: 'act'}]}
+          cols={readOnly ? [{label: t('Value')}, {label: t('Definition')}] : [{label: t('Value')}, {label: t('Definition')}, {label: '', kind: 'act'}]}
           rows={field.values.map((v, i) => ({
             key: String(i),
             cells: [
-              <input key="n" className="input sm" value={v.name} readOnly={readOnly} aria-label="Value" onChange={e => setVal(i, {name: e.target.value})} />,
+              <input key="n" className="input sm" value={v.name} readOnly={readOnly} aria-label={t('Value')} onChange={e => setVal(i, {name: e.target.value})} />,
               <div key="d" className="col" style={{gap: 4}}>
-                <Grow label="Definition" value={v.definition} readOnly={readOnly} placeholder="When this value applies, and the nearest thing that does not count" onChange={definition => setVal(i, {definition})} />
+                <Grow label={t('Definition')} value={v.definition} readOnly={readOnly} placeholder={t('When this value applies, and the nearest thing that does not count')} onChange={definition => setVal(i, {definition})} />
                 <Marks segs={marks(was?.values.find(x => x.name === v.name)?.definition, v.definition)} />
               </div>,
               ...(readOnly
                 ? []
                 : [
-                    <button key="x" type="button" className="icon-btn" aria-label="Remove value" onClick={() => onChange({...field, values: field.values.filter((_, k) => k !== i)})}>
+                    <button key="x" type="button" className="icon-btn" aria-label={t('Remove value')} onClick={() => onChange({...field, values: field.values.filter((_, k) => k !== i)})}>
                       <Icon name="x" />
                     </button>,
                   ]),
@@ -248,14 +249,14 @@ function FieldEditor({
       </div>
       {!readOnly && (
         <div style={{margin: '0 -12px'}}>
-          <Button label="Add value" kind="ghost" icon="plus" onClick={() => onChange({...field, values: [...field.values, {name: '', definition: ''}]})} />
+          <Button label={t('Add value')} kind="ghost" icon="plus" onClick={() => onChange({...field, values: [...field.values, {name: '', definition: ''}]})} />
         </div>
       )}
       <div className="field" style={{paddingTop: 8}}>
         <span className="field-l">
-          <Hov text="Tie-break rules" tip="Rules for this field only: which value wins when two could apply. One rule per line. Improve with AI and the Optimiser add their rules here." />
+          <Hov text={t('Tie-break rules')} tip={t('Rules for this field only: which value wins when two could apply. One rule per line. Improve with AI and the Optimiser add their rules here.')} />
         </span>
-        <Grow className="input" label="Tie-break rules" value={field.note ?? ''} readOnly={readOnly} placeholder="Which value wins when two could apply" onChange={setNote} />
+        <Grow className="input" label={t('Tie-break rules')} value={field.note ?? ''} readOnly={readOnly} placeholder={t('Which value wins when two could apply')} onChange={setNote} />
         <Marks segs={marks(was?.note, field.note ?? '')} />
       </div>
     </Card>
@@ -275,7 +276,8 @@ function Features({features, base, onChange, tips}: {features: FeatureSelection;
   return (
     <Card>
       <div className="sp-feats">
-        {GROUPS.map(({group, name}) => {
+        {GROUPS.map(({group, name: key}) => {
+          const name = t(key);
           const keys = FEATURES[group].map(f => f.key);
           const on = keys.filter(k => features[group].includes(k)).length;
           const all = on === keys.length ? 'on' : on === 0 ? 'off' : 'mixed';
@@ -285,8 +287,8 @@ function Features({features, base, onChange, tips}: {features: FeatureSelection;
                 <b style={{fontSize: 13}} className="grow">
                   {name}
                 </b>
-                <span title="Select all">
-                  <Cb state={all} label={`Select all ${name}`} onToggle={onChange ? () => onChange({...features, [group]: all === 'on' ? [] : keys}) : undefined} />
+                <span title={t('Select all')}>
+                  <Cb state={all} label={t('Select all {group}', {group: name})} onToggle={onChange ? () => onChange({...features, [group]: all === 'on' ? [] : keys}) : undefined} />
                 </span>
               </div>
               <div className="col" style={{gap: 0, paddingTop: 4}}>
@@ -295,9 +297,9 @@ function Features({features, base, onChange, tips}: {features: FeatureSelection;
                   const before = base ? base[group].includes(f.key) : now;
                   return (
                     <div key={f.key} className="row" style={{height: 36, gap: 12}}>
-                      <span className="grow one">{tips?.[f.key] ? <Hov text={f.label} tip={tips[f.key]} /> : f.label}</span>
-                      {now !== before && <Badge text={now ? 'Added' : 'Removed'} tone={now ? 'ok' : 'err'} icon={false} />}
-                      <Cb state={now ? 'on' : 'off'} label={`${f.label}, ${name}`} onToggle={onChange ? () => toggle(group, f.key) : undefined} />
+                      <span className="grow one">{tips?.[f.key] ? <Hov text={t(f.label)} tip={tips[f.key]} /> : t(f.label)}</span>
+                      {now !== before && <Badge text={now ? t('Added') : t('Removed')} tone={now ? 'ok' : 'err'} icon={false} />}
+                      <Cb state={now ? 'on' : 'off'} label={`${t(f.label)}, ${name}`} onToggle={onChange ? () => toggle(group, f.key) : undefined} />
                     </div>
                   );
                 })}
@@ -318,7 +320,7 @@ export function FullPromptButton({prompt, onOpen, onCopy}: {prompt: StructuredPr
   return (
     <>
       <Button
-        label="View full prompt"
+        label={t('View full prompt')}
         icon="eye"
         disabled={!prompt.fields.length}
         onClick={() => {
@@ -328,15 +330,15 @@ export function FullPromptButton({prompt, onOpen, onCopy}: {prompt: StructuredPr
       />
       {open && (
         <Dialog
-          title="Full prompt"
-          text="This is the text the model reads. It is written from the parts on the page."
+          title={t('Full prompt')}
+          text={t('This is the text the model reads. It is written from the parts on the page.')}
           width={760}
           onClose={() => setOpen(false)}
           actions={
             <>
-              <Button label="Close" onClick={() => setOpen(false)} />
+              <Button label={t('Close')} onClick={() => setOpen(false)} />
               <Button
-                label={copied === text ? 'Copied' : 'Copy prompt'}
+                label={copied === text ? t('Copied') : t('Copy prompt')}
                 kind="primary"
                 icon={copied === text ? 'check' : 'copy'}
                 onClick={() => {

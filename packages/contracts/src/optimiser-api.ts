@@ -1,5 +1,5 @@
 import type {LabelingTask} from './labeling-api.ts';
-import type {ChatEvent, ChatLink, EndpointId, EvalReport, MixUp, OptimisationRun, ProjectState, PromptVersion, StructuredPrompt} from './types.ts';
+import type {ChatEvent, ChatLink, EndpointId, EvalReport, MixUp, Msg, OptimisationRun, ProjectState, PromptVersion, StructuredPrompt} from './types.ts';
 
 /**
  * Contract: the Optimiser service (`@tsp/optimiser`, spec 1.0.0 section 7.2). It owns the
@@ -73,5 +73,5 @@ export interface OptimiserHost {
   /** People's comments the helpers may read, by example id, oldest first (optimiser half only). */
   labelComments(projectId: string): Promise<Record<string, string[]>>;
   /** A grey action line in the project's Ask AI conversation. */
-  postEvent(req: {projectId: string; event: ChatEvent; actor: 'user' | 'workflow'; what: string; link?: ChatLink}): Promise<void>;
+  postEvent(req: {projectId: string; event: ChatEvent; actor: 'user' | 'workflow'; what: string | Msg; link?: ChatLink}): Promise<void>;
 }

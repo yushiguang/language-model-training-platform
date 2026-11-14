@@ -61,6 +61,7 @@ export function createBffApi(): BffContract {
     loadProjectState: projects.loadProjectState,
     approveNode: projects.approveNode,
     deleteProject: r => projects.deleteProject(r.projectId),
+    renameProject: r => projects.renameProject(r.projectId, r.name),
     async tick({projectId}) {
       const state = await projects.loadProjectState(projectId);
       if (state) await work.tick(state);
@@ -114,7 +115,7 @@ export function createBffApi(): BffContract {
     chatHistory: agents.chatHistory,
     getAgentLive: async projectId => agents.agentLive(projectId),
     getAnsweringAgent: async (projectId, page) => agents.answeringAgent(projectId, page),
-    sendUserMessage: r => agents.sendUserMessage(r.projectId, r.text, r.page, r.attachments),
+    sendUserMessage: r => agents.sendUserMessage(r.projectId, r.text, r.page, r.attachments, false, {locale: r.locale, client: r.client}),
     openProposals: agents.openProposals,
     proposals: agents.proposals,
     async closeProposal({projectId, proposalId, decision}) {

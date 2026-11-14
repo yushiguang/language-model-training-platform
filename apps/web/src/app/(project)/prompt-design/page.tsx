@@ -10,6 +10,7 @@ import {FullPromptButton, StructuredEditor} from '@/components/prompt/Structured
 import {useOpenDraft} from '@/components/prompt/useAgentDrafts';
 import {approveNode, closeProposal, createVersion, featureInfo, track, type ProjectState} from '@/backend-api';
 import {Badge, Button, Card, PageHead} from '@/ui';
+import {t, tm} from '@/i18n';
 
 const FIRST = 'Tell me what you want to label, or paste the prompt you use today. You can paste document links.';
 
@@ -65,17 +66,17 @@ function Design({state, setPage}: {state: ProjectState; setPage: (p: PageContext
 
   const head = (
     <PageHead
-      title="Prompt Design"
+      title={t('Prompt Design')}
       actions={
         <>
           {open && (
             <span className="done-at" style={{margin: 0}}>
-              <Badge text="AI draft" icon={false} />
+              <Badge text={t('AI draft')} icon={false} />
             </span>
           )}
           <FullPromptButton prompt={draft} onOpen={() => track('full_prompt_opened', {})} onCopy={() => track('prompt_copied', {from: 'dialog'})} />
-          {started && <Button label="Discard" kind="ghost" onClick={discard} />}
-          <Button label="Approve" kind="primary" className={open && !issues.length ? 'btn-cue' : undefined} disabled={issues.length > 0} title={issues[0]?.message ?? 'Saves this prompt as v1'} onClick={approve} />
+          {started && <Button label={t('Discard')} kind="ghost" onClick={discard} />}
+          <Button label={t('Approve')} kind="primary" className={open && !issues.length ? 'btn-cue' : undefined} disabled={issues.length > 0} title={issues[0] ? tm(issues[0].msg) : t('Saves this prompt as v1')} onClick={approve} />
         </>
       }
     />
@@ -92,12 +93,12 @@ function Design({state, setPage}: {state: ProjectState; setPage: (p: PageContext
 function NotCarriedOver({draft}: {draft: AgentProposal}) {
   const list = draft.payload.unmapped;
   return (
-    <Card ai title="Not carried over" titleExtra={<Badge text={`${list.length} ${list.length === 1 ? 'passage' : 'passages'}`} tone="warn" icon={false} />} style={{marginBottom: 16}}>
-      <span className="t-2">These parts of your prompt have no place in the structured prompt. Move what matters into a definition or a rule.</span>
+    <Card ai title={t('Not carried over')} titleExtra={<Badge text={list.length === 1 ? t('1 passage') : t('{n} passages', {n: list.length})} tone="warn" icon={false} />} style={{marginBottom: 16}}>
+      <span className="t-2">{t('These parts of your prompt have no place in the structured prompt. Move what matters into a definition or a rule.')}</span>
       <div className="col" style={{gap: 8}}>
-        {list.map((t, i) => (
+        {list.map((text, i) => (
           <pre key={i} className="unmapped">
-            {t}
+            {text}
           </pre>
         ))}
       </div>
@@ -121,15 +122,15 @@ function Approved({state, setPage}: {state: ProjectState; setPage: (p: PageConte
     <Frame
       head={
         <PageHead
-          title="Prompt Design"
+          title={t('Prompt Design')}
           actions={
             <>
               <span className="done-at" style={{margin: 0}}>
-                <Badge text={`Approved as ${versionLabel(v)}`} tone="ok" />
+                <Badge text={t('Approved as {version}', {version: versionLabel(v)})} tone="ok" />
               </span>
               <FullPromptButton prompt={v.structured} onOpen={() => track('full_prompt_opened', {})} onCopy={() => track('prompt_copied', {from: 'dialog'})} />
-              <Button label="Edit prompt" href={href('/prompt/edit', {v: v.id})} />
-              <Button label="Next: Eval Dataset" kind="primary" className={state.project.approvedNodes.includes('prompt_design') ? undefined : 'btn-cue'} onClick={next} />
+              <Button label={t('Edit prompt')} href={href('/prompt/edit', {v: v.id})} />
+              <Button label={t('Next: Eval Dataset')} kind="primary" className={state.project.approvedNodes.includes('prompt_design') ? undefined : 'btn-cue'} onClick={next} />
             </>
           }
         />

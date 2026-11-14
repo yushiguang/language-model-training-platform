@@ -112,7 +112,7 @@ export const LABEL_VALUES: Record<string, readonly string[]> = {
   from: ['front_desk', 'prompt_agent', 'evaluation_agent'],
   to: ['prompt_agent', 'evaluation_agent'],
   intent: ['answer', 'follow_up', 'draft_prompt', 'import_prompt', 'revise_prompt', 'explain_version', 'explain_report', 'reflect', 'merge', 'improve'],
-  tool: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions', 'check_prompt', 'read_feature_info', 'read_doc', 'get_project_summary', 'get_dataset_stats', 'search_examples', 'compare_versions', 'get_mismatch_summary', 'try_prompt', 'score_version', 'start_optimiser'],
+  tool: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions', 'check_prompt', 'read_feature_info', 'read_doc', 'get_project_summary', 'get_dataset_stats', 'search_examples', 'compare_versions', 'get_mismatch_summary', 'try_prompt', 'score_version', 'start_optimiser', 'report_problem'],
   page: ['projects', 'prompt_design', 'dataset', 'gold', 'prompt', 'prompt_edit', 'other'],
   slot: ['A', 'B'],
   what: ['score', 'resume', 'optimiser', 'try_prompt', 'score_version', 'start_optimiser'],
@@ -147,6 +147,8 @@ export interface EventProps {
   project_opened: {node: string; days_since_last_open: Num | null};
   project_finished: {minutes_since_created: Num; total_cost_usd: Num; versions: Num; gold_labels: Num};
   project_deleted: {versions: Num; examples: Num; gold_labels: Num};
+  project_renamed: Record<string, never>;
+  locale_changed: {locale: 'en' | 'zh'};
   // Project Settings and the label signature
   settings_saved: {mode: 'default' | 'custom'; first_confirm: boolean};
   signature_changed: {fields: Num; values: Num; schema_version: Num; gold_labels_needing_recheck: Num};
@@ -194,6 +196,8 @@ export interface EventProps {
   error_shown: {code: string; where: string};
   stale_page_made_read_only: {reason: 'schema_changed' | 'newer_version' | 'other_tab'};
   run_needs_attention: {task_purpose: string; failed: Num; total: Num};
+  problem_report_drafted: {page: string};
+  problem_reported: {page: string; has_content: boolean; failed_calls: Num; errors: Num};
 }
 
 export type EventName = keyof EventProps;
@@ -213,6 +217,8 @@ export const EVENT_PROP_KEYS: {[E in EventName]: readonly (keyof EventProps[E] &
   project_opened: ['node', 'days_since_last_open'],
   project_finished: ['minutes_since_created', 'total_cost_usd', 'versions', 'gold_labels'],
   project_deleted: ['versions', 'examples', 'gold_labels'],
+  project_renamed: [],
+  locale_changed: ['locale'],
   // Project Settings and the label signature
   settings_saved: ['mode', 'first_confirm'],
   signature_changed: ['fields', 'values', 'schema_version', 'gold_labels_needing_recheck'],
@@ -260,6 +266,8 @@ export const EVENT_PROP_KEYS: {[E in EventName]: readonly (keyof EventProps[E] &
   error_shown: ['code', 'where'],
   stale_page_made_read_only: ['reason'],
   run_needs_attention: ['task_purpose', 'failed', 'total'],
+  problem_report_drafted: ['page'],
+  problem_reported: ['page', 'has_content', 'failed_calls', 'errors'],
 };
 
 /** One product event as the sink receives it. */

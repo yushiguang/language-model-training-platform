@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt} from '@tsp/contracts';
+import type {AgentRuntimeContract, ClientDiagnostics, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission} from '@tsp/contracts';
 import {createCatalog} from '@tsp/catalog';
 import {createLabeling, memoryLocks} from '@tsp/labeling';
 import {createOptimiser} from '@tsp/optimiser';
@@ -8,7 +8,8 @@ import {DocRepo, localDocRuntime} from '@tsp/platform';
 import {configureBff, emitChange} from './app.ts';
 import {optimiserHost} from './optimiser-host.ts';
 import {agentProgress} from './agents.ts';
-import {loadProjectState} from './projects.ts';
+import {loadProjectState, renameProject} from './projects.ts';
+import {beginTurn, endTurn, reportProblem} from './problems.ts';
 import {agentStart} from './starts.ts';
 import {tick} from './work.ts';
 import {compilePrompt, DEFAULT_THRESHOLDS, versionLabel} from '@tsp/domain';
@@ -33,6 +34,8 @@ interface WorldOpts {
   agents?: AgentRuntimeContract;
   /** Project Settings confirmed (default true). */
   confirmed?: boolean;
+  /** Where problem reports go (none: reports cannot be sent). */
+  tickets?: TicketPort;
 }
 
 async function world(prefix: string, opts: WorldOpts = {}) {
@@ -65,6 +68,8 @@ async function world(prefix: string, opts: WorldOpts = {}) {
     files: {} as FileStore,
     examples: {} as ExampleSource,
     standIns: [],
+    tickets: opts.tickets,
+    appVersion: '1.1.0-test',
   });
   const projectId = `pr_${prefix}`;
   await catalog.insert('setup_versions', {id: `sv_${prefix}`, projectId, number: 1, schemaVersion: 1, task: '', schema, thresholds: opts.macroF1 == null ? null : {mode: 'custom', macroF1: opts.macroF1, valueF1: null, invalidRate: null, accuracy: null, minEval: EVAL}, models: [{endpoint: 'A', maxOutputTokens: 150, temperature: null}], steps: {schema: true, evaluation: true, models: true}, createdAt: '', createdBy: ''});
@@ -740,4 +745,65 @@ test('once a version is scored the halves stay put, so a helper read never makes
   for (const e of s.examples) assert.equal(e.optimiserHalf, before[e.id]);
   assert.equal(s.reports[0].archivedNow, false);
   assert.equal(s.project.holdoutLocked, true);
+});
+
+
+test('rename (1.1.0): trims, refuses an empty name, cuts long names, keeps the id and audits', async () => {
+  const w = await world('rn1');
+  assert.equal(await renameProject(w.projectId, '  Short-video tags  '), 'Short-video tags');
+  assert.equal((await w.state()).project.name, 'Short-video tags');
+  await assert.rejects(renameProject(w.projectId, '   '), /Give the project a name/);
+  const long = await renameProject(w.projectId, 'x'.repeat(200));
+  assert.equal(long.length, 80);
+  const audit = await w.catalog.find('audit_log', {projectId: w.projectId, action: 'project.rename'});
+  assert.equal(audit.length, 2);
+  assert.equal((await w.state()).project.id, w.projectId);
+});
+
+test('problem report (1.1.0): drafts first, sends only after the user answers, with diagnostics and no prompt unless asked', async () => {
+  const sent: TicketSubmission[] = [];
+  const tickets: TicketPort = {submit: async t => (sent.push(t), {ticketId: `T-TEST${sent.length}`})};
+  const w = await world('pb1', {tickets});
+  await w.newVersion('be careful');
+  const client: ClientDiagnostics = {url: '/prompt?p=x', userAgent: 'test', viewport: '1440x900', screen: '1440x900', timeZone: 'UTC', language: 'en', at: '', pages: [{at: '', path: '/prompt'}], failedCalls: [{at: '', method: 'scoreVersion', callId: 'rq_1', message: 'down'}], errors: []};
+  beginTurn(w.projectId, {page: {label: 'Prompt Tuning', agent: 'front_desk', intent: 'answer', context: {}, where: {page: 'prompt', params: {}}}, locale: 'zh', client});
+  // No draft yet: nothing to send.
+  assert.match(String((await reportProblem(w.projectId, 'front_desk', {send: true}) as {error: string}).error), /no draft/);
+  const draft = (await reportProblem(w.projectId, 'front_desk', {summary: 'Save does nothing', expected: 'A new version', actual: 'Nothing happens'})) as {draft: {summary: string}; attached: string[]};
+  assert.equal(draft.draft.summary, 'Save does nothing');
+  assert.ok(draft.attached.some(a => a.includes('1 failed backend calls')));
+  // The same turn cannot send: the user has not answered.
+  assert.match(String((await reportProblem(w.projectId, 'front_desk', {send: true}) as {error: string}).error), /not answered/);
+  assert.equal(sent.length, 0);
+  await new Promise(r => setTimeout(r, 5));
+  await w.catalog.insert('chat_messages', {id: 'cm_yes', projectId: w.projectId, createdAt: new Date().toISOString(), role: 'user', agent: null, text: 'yes', page: 'prompt'});
+  const res = (await reportProblem(w.projectId, 'front_desk', {send: true})) as {ticketId: string};
+  assert.equal(res.ticketId, 'T-TEST1');
+  const t = sent[0];
+  assert.equal(t.summary, 'Save does nothing');
+  assert.equal(t.locale, 'zh');
+  assert.equal(t.filedBy, 'Assistant');
+  assert.equal(t.where.page, 'prompt');
+  assert.equal(t.where.appVersion, '1.1.0-test');
+  assert.deepEqual(t.diagnostics?.failedCalls.map(c => c.callId), ['rq_1']);
+  assert.equal(t.content, null, 'no prompt unless the user agreed');
+  // The action line records the ticket, in any language.
+  const line = (await w.catalog.find('chat_messages', {projectId: w.projectId, role: 'event'})).find(m => m.event === 'report');
+  assert.equal(line?.text, 'You sent a problem report T-TEST1');
+  assert.deepEqual(line?.msg, {key: '{who} sent a problem report {ticket}', params: {ticket: 'T-TEST1', who: 'You'}});
+  // The draft is used up: a second send needs a new draft.
+  assert.match(String((await reportProblem(w.projectId, 'front_desk', {send: true}) as {error: string}).error), /no draft/);
+  // With the user's consent the prompt goes too.
+  await reportProblem(w.projectId, 'prompt_agent', {summary: 'Odd labels', includeContent: true});
+  await new Promise(r => setTimeout(r, 5));
+  await w.catalog.insert('chat_messages', {id: 'cm_yes2', projectId: w.projectId, createdAt: new Date().toISOString(), role: 'user', agent: null, text: 'yes, include it', page: 'prompt'});
+  await reportProblem(w.projectId, 'prompt_agent', {send: true});
+  assert.ok(sent[1].content?.prompt.includes('be careful'));
+  endTurn(w.projectId);
+});
+
+test('problem report (1.1.0): without a ticket port the helper is told to send the user elsewhere', async () => {
+  const w = await world('pb2');
+  const res = (await reportProblem(w.projectId, 'front_desk', {summary: 'x'})) as {error: string};
+  assert.match(res.error, /cannot be sent/);
 });

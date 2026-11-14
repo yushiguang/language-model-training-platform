@@ -1,6 +1,7 @@
 import type {
   AgentToolHost,
   AgentToolName,
+  Msg,
   ModelMessage,
   ContentPart,
   ExampleBrief,
@@ -17,8 +18,8 @@ import type {
   AgentPreset,
   StructuredPrompt,
 } from '@tsp/contracts';
-import {FEATURES, readStructured, rewordOnly, structuredEquals, systemConfig} from '@tsp/domain';
-import {agentName, presetModel, PRESETS, START_TOOLS, systemPrompt, TOOL_SPECS} from './presets.ts';
+import {FEATURES, msg, msgText, readStructured, rewordOnly, structuredEquals, systemConfig} from '@tsp/domain';
+import {agentName, languageLine, presetModel, PRESETS, START_TOOLS, systemPrompt, TOOL_SPECS} from './presets.ts';
 
 
 /** Handoffs go only to these specialists; anything else is ignored (no handoff). */
@@ -85,46 +86,48 @@ interface TurnTools {
   progress?: AgentTurnProgress;
 }
 
-/** What the live line in Ask AI says while a tool runs (plain words, the page's terms). */
-function workingLine(name: AgentToolName, args: Record<string, unknown>): string {
+/** What the live line in Ask AI says while a tool runs (plain words, the page's terms; a catalog key). */
+function workingLine(name: AgentToolName, args: Record<string, unknown>): Msg {
   const v = typeof args.version === 'string' && args.version ? args.version : null;
   switch (name) {
     case 'get_page_view':
-      return 'Reading another page…';
+      return msg('Reading another page…');
     case 'list_versions':
-      return 'Reading the prompt versions…';
+      return msg('Reading the prompt versions…');
     case 'get_version':
-      return `Reading ${v ?? 'the version'}…`;
+      return v ? msg('Reading {version}…', {version: v}) : msg('Reading the version…');
     case 'get_report':
-      return `Reading the ${v ? `${v} ` : ''}report…`;
+      return v ? msg('Reading the {version} report…', {version: v}) : msg('Reading the report…');
     case 'get_examples':
-      return 'Reading examples…';
+      return msg('Reading examples…');
     case 'get_gold_labels':
-      return 'Reading the gold labels…';
+      return msg('Reading the gold labels…');
     case 'get_predictions':
-      return `Reading the ${v ? `${v} ` : ''}answers…`;
+      return v ? msg('Reading the {version} answers…', {version: v}) : msg('Reading the answers…');
     case 'check_prompt':
-      return 'Checking the prompt…';
+      return msg('Checking the prompt…');
     case 'read_feature_info':
-      return 'Reading the feature descriptions…';
+      return msg('Reading the feature descriptions…');
     case 'read_doc':
-      return 'Reading the linked document…';
+      return msg('Reading the linked document…');
     case 'get_project_summary':
-      return 'Reading the project…';
+      return msg('Reading the project…');
     case 'get_dataset_stats':
-      return 'Reading the label balance…';
+      return msg('Reading the label balance…');
     case 'search_examples':
-      return 'Searching examples…';
+      return msg('Searching examples…');
     case 'compare_versions':
-      return 'Comparing versions…';
+      return msg('Comparing versions…');
     case 'get_mismatch_summary':
-      return 'Counting mismatches…';
+      return msg('Counting mismatches…');
     case 'try_prompt':
-      return 'Trying the prompt on a few examples…';
+      return msg('Trying the prompt on a few examples…');
     case 'score_version':
-      return `Starting scoring${v ? ` ${v}` : ''}…`;
+      return v ? msg('Starting scoring {version}…', {version: v}) : msg('Starting scoring…');
     case 'start_optimiser':
-      return 'Starting the optimiser…';
+      return msg('Starting the optimiser…');
+    case 'report_problem':
+      return msg(args.send === true ? 'Sending the problem report…' : 'Drafting a problem report…');
   }
 }
 
@@ -184,7 +187,9 @@ function toolBlurb(to: AgentPreset, host?: AgentToolHost): string {
   const list = names.map(n => `- ${n} ${TOOL_SPECS[n].args}: ${TOOL_SPECS[n].returns}`).join('\n');
   const paid = names.some(n => START_TOOLS.includes(n))
     ? ' Tools marked PAID spend money and start at once (the user can stop them from the page): use them only when the user asks for that work or clearly agrees.'
-    : ' Tools only read.';
+    : names.includes('report_problem')
+      ? ' Tools only read, except report_problem, which files a report once the user has agreed.'
+      : ' Tools only read.';
   return `\nIf the page view doesn't have what you need, use a tool: answer {"tool": {"name": string, "args": object}} instead, and the result comes back as the next message.${paid} At most ${systemConfig().agent.maxToolCalls} calls per turn. Your tools:\n${list}`;
 }
 
@@ -200,7 +205,7 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
   };
   const shape = PRESETS[to].intents[intent] ?? '{"reply": string}';
   const messages: ModelMessage[] = [
-    {role: 'system', content: `${systemPrompt(to)}\nAnswer shape for "${intent}": ${shape}${toolBlurb(to, tools.host)}`},
+    {role: 'system', content: `${systemPrompt(to)}\nAnswer shape for "${intent}": ${shape}${toolBlurb(to, tools.host)}${languageLine(input.locale)}`},
     // Example images (the label check) go as content parts, like the Optimiser's wrong examples.
     {role: 'user', content: withImages(body)},
   ];
@@ -231,7 +236,8 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
     else if (tools.used.length >= systemConfig().agent.maxToolCalls) result = {error: 'No more tool calls in this turn. Answer now with what you have.'};
     else {
       const started = Date.now();
-      tools.progress?.({agent: to, working: workingLine(name, args)});
+      const line = workingLine(name, args);
+      tools.progress?.({agent: to, working: msgText(line), msg: line});
       try {
         result = await tools.host.call({agent: to, name, args});
         tools.used.push({agent: to, name, args, ok: true, ms: Date.now() - started});
@@ -278,7 +284,7 @@ export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?
     // The handoff line alone tells the user who answers; the "I'll bring in…" reply is not shown.
     agent = out.handoff.to;
     intent = out.handoff.intent;
-    emit({role: 'event', agent: null, event: 'join', text: `${agentName(agent)} joined to answer`});
+    emit({role: 'event', agent: null, event: 'join', text: `${agentName(agent)} joined to answer`, msg: {key: '{who} joined to answer', params: {who: agentName(agent)}}});
     invocations.push({from, to: agent, intent, note: from === 'front_desk' ? 'Handed off by the front desk' : 'Passed on by the helper that stayed'});
     progress?.({agent, working: 'Thinking…'});
     out = await invokePreset(llm, agent, intent, input, tools);

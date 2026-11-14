@@ -29,6 +29,15 @@ explain and propose; the user approves on the page.
   helper; scores and counts built on it do.
 - **Plain words.** No ML jargon, no cost and no time estimates in replies.
 - **All user input goes through Ask AI**, as text or document links. Pages have no input cards.
+- **The user's language.** Helpers answer in the language the site is shown in, using the site's
+  own words for pages and buttons (one line added to the system prompt, built from the catalog's
+  fixed terms). Prompt text, field and value names and version labels stay as written.
+- **Problem reports (1.1.0).** When the user says something is wrong, or asks to report a problem,
+  whichever helper answers asks what was expected and what happened, if it does not know, then
+  calls `report_problem` without `send`, shows the draft in a few lines and asks whether to send
+  it (and whether to include the prompt, when that matters). Only after the user's yes does it call
+  `report_problem` with `send: true`; code refuses a send in the turn that drafted it. The reply
+  gives the ticket id in one line. No helper invents a fix or promises a date.
 
 ## How it works (as built)
 

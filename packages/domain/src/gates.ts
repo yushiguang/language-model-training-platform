@@ -1,5 +1,6 @@
-import type {NodeId, WorkflowFacts} from '@tsp/contracts';
+import type {Msg, NodeId, WorkflowFacts} from '@tsp/contracts';
 import {systemConfig} from './config.ts';
+import {msg, msgText} from './i18n.ts';
 
 /** The four steps of a Prompt Tuning project (spec 1.0.0, 2.1), in order. */
 export const NODES: {id: NodeId; label: string; path: string}[] = [
@@ -11,8 +12,10 @@ export const NODES: {id: NodeId; label: string; path: string}[] = [
 
 export interface Gate {
   ready: boolean;
-  /** One line under the button when it is blocked. */
+  /** One line under the button when it is blocked (English). */
   reason: string | null;
+  /** The same line as a catalog key and params (spec 1.1.0, 2.3). */
+  msg: Msg | null;
 }
 
 /**
@@ -24,37 +27,24 @@ export function canScore(f: Pick<WorkflowFacts, 'examples' | 'goldEvalDone' | 'g
   return f.examples >= minEvalHard && f.goldEvalDone >= minEvalHard && f.goldHalves.optimiser >= 2 && f.goldHalves.heldOut >= 2;
 }
 
+const READY: Gate = {ready: true, reason: null, msg: null};
+const blocked = (m: Msg): Gate => ({ready: false, reason: msgText(m), msg: m});
+
 export function gate(node: NodeId, f: WorkflowFacts): Gate {
   const {minEvalHard} = systemConfig().dataset;
   switch (node) {
     case 'prompt_design':
-      return f.versions ? {ready: true, reason: null} : {ready: false, reason: 'Approve the first prompt to continue.'};
+      return f.versions ? READY : blocked(msg('Approve the first prompt to continue.'));
     case 'dataset':
-      if (!f.snapshot) return {ready: false, reason: 'Add examples to continue.'};
-      if (f.examples < minEvalHard) return {ready: false, reason: `The eval dataset needs at least ${minEvalHard} examples.`};
-      return {ready: true, reason: null};
+      if (!f.snapshot) return blocked(msg('Add examples to continue.'));
+      if (f.examples < minEvalHard) return blocked(msg('The eval dataset needs at least {n} examples.', {n: minEvalHard}));
+      return READY;
     case 'gold':
-      if (!canScore(f)) return {ready: false, reason: `Label at least ${minEvalHard} examples to continue (${f.goldEvalDone} so far).`};
-      return {ready: true, reason: null};
+      if (!canScore(f)) return blocked(msg('Label at least {n} examples to continue ({done} so far).', {n: minEvalHard, done: f.goldEvalDone}));
+      return READY;
     case 'prompt':
-      if (!f.versions) return {ready: false, reason: 'Create the first prompt version.'};
-      if (!f.passing.length) return {ready: false, reason: 'No version passes the threshold yet.'};
-      return {ready: true, reason: null};
+      if (!f.versions) return blocked(msg('Create the first prompt version.'));
+      if (!f.passing.length) return blocked(msg('No version passes the threshold yet.'));
+      return READY;
   }
-}
-
-export type NodeStatus = 'done' | 'current' | 'todo' | 'attention' | 'running';
-
-/** The first node not yet approved is current. */
-export function nodeStatuses(f: WorkflowFacts): Record<NodeId, NodeStatus> {
-  const out = {} as Record<NodeId, NodeStatus>;
-  let foundCurrent = false;
-  for (const n of NODES) {
-    if (f.approved.includes(n.id)) out[n.id] = 'done';
-    else if (!foundCurrent) {
-      out[n.id] = 'current';
-      foundCurrent = true;
-    } else out[n.id] = 'todo';
-  }
-  return out;
 }

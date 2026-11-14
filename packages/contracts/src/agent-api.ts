@@ -6,6 +6,8 @@ import type {
   ChatEvent,
   ChatMessage,
   FieldMetrics,
+  Locale,
+  Msg,
   MixUp,
   PageContext,
   PageView,
@@ -71,7 +73,10 @@ export type AgentToolName =
   // the user with a card in the chat and the turn ends.
   | 'try_prompt'
   | 'score_version'
-  | 'start_optimiser';
+  | 'start_optimiser'
+  // 1.1.0 (spec 3): every helper can file a problem report; it sends only after the user says yes.
+  /** Drafts a problem report, or sends the draft (`send: true`) once the user has agreed. */
+  | 'report_problem';
 
 export interface AgentToolCall {
   agent: AgentPreset;
@@ -90,12 +95,16 @@ export interface AgentTurnInput {
   page: PageContext;
   attachments?: ChatAttachment[];
   workspace: AgentWorkspaceSnapshot;
+  /** The language the user reads the site in; helpers answer in it (spec 1.1.0, 2.3). Default English. */
+  locale?: Locale;
 }
 
 export interface AgentEmittedMessage {
   role: 'agent' | 'event';
   agent: AgentPreset | null;
   text: string;
+  /** Action lines: the line as a catalog key (spec 1.1.0, 2.3). */
+  msg?: Msg;
   choices?: string[];
   event?: ChatEvent;
 }
@@ -104,7 +113,7 @@ export interface AgentEmittedMessage {
  * Live progress of a turn, reported while it runs: a message as soon as it is final (the host
  * saves it then), what an agent is doing (`working`), and its reply as it streams (`reply`).
  */
-export type AgentTurnEvent = {message: AgentEmittedMessage} | {agent: AgentPreset; working: string} | {agent: AgentPreset; reply: string};
+export type AgentTurnEvent = {message: AgentEmittedMessage} | {agent: AgentPreset; working: string; msg?: Msg} | {agent: AgentPreset; reply: string};
 
 /** The runtime's own way to report a turn's progress (inside `apps/agents`). */
 export type AgentTurnProgress = (p: AgentTurnEvent) => void;

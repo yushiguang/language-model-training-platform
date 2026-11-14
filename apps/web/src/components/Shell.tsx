@@ -4,10 +4,11 @@ import Link from 'next/link';
 import {usePathname} from 'next/navigation';
 import {createContext, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
-import {NODES} from '@tsp/domain';
+import {LOCALES, NODES} from '@tsp/domain';
 import type {NodeId, PageContext} from '@tsp/contracts';
 import {getRuntimeInfo, type ProjectState} from '@/backend-api';
 import {ActionErrorBanner, Button, clearActionError, Icon} from '@/ui';
+import {t, useLocale} from '@/i18n';
 import {AskAi} from './AskAi';
 import {ProjectProvider, useProject} from './ProjectContext';
 import {SettingsProvider, useSettings} from './ProjectSettings';
@@ -93,8 +94,8 @@ function ShellInner({children}: {children: ReactNode}) {
   }, [entering]);
   const shell = useMemo(() => ({open, setOpen, side, entering}), [open, setOpen, side, entering]);
   const node = nodeFromPath(usePathname());
-  if (!ctx.projectId) return <Missing text="No project was chosen." />;
-  if (ctx.error) return <Missing text={ctx.error} />;
+  if (!ctx.projectId) return <Missing text={t('No project was chosen.')} />;
+  if (ctx.error) return <Missing text={t(ctx.error)} />;
   const state = ctx.state?.project.id === ctx.projectId ? ctx.state : null;
   return (
     <ShellCtx.Provider value={shell}>
@@ -109,7 +110,7 @@ function ShellInner({children}: {children: ReactNode}) {
         {!open && (
           <button type="button" className="ask" onClick={() => setOpen(true)}>
             <Icon name="spark" />
-            Ask AI
+            {t('Ask AI')}
           </button>
         )}
       </div>
@@ -127,7 +128,7 @@ const nodeFromPath = (path: string): NodeId => {
 /** The spinner shown in the panel while a step's data loads (design: "Step-Loading"). */
 export function Loading({panel}: {panel?: boolean}) {
   const spinner = (
-    <div className="loading" role="status" aria-label="Loading">
+    <div className="loading" role="status" aria-label={t('Loading')}>
       <Icon name="ring" />
     </div>
   );
@@ -199,13 +200,13 @@ function TopNav({state, current}: {state: ProjectState; current: NodeId}) {
   return (
     <header className="topnav">
       <div className="island">
-        <Link className="proj" href="/" title="All projects">
+        <Link className="proj" href="/" title={t('All projects')}>
           <span className="proj-ic" aria-hidden="true">
             {state.project.name.trim().slice(0, 1).toUpperCase()}
           </span>
           <b title={state.project.name}>{state.project.name}</b>
         </Link>
-        <nav className="stepper" aria-label="Workflow">
+        <nav className="stepper" aria-label={t('Workflow')}>
           {NODES.map((n, i) => {
             const s = st[n.id];
             return (
@@ -213,7 +214,7 @@ function TopNav({state, current}: {state: ProjectState; current: NodeId}) {
                 {i > 0 && <span className="step-sep" aria-hidden="true" />}
                 <Link className={`step${s === 'todo' ? '' : ` ${s}`}`} aria-current={n.id === current ? 'page' : undefined} href={href(n.path)}>
                   <span className="step-ic">{s === 'done' ? <Icon name="check" /> : s === 'running' ? <Icon name="ring" /> : s === 'attention' ? '!' : i + 1}</span>
-                  {n.label}
+                  {t(n.label)}
                 </Link>
               </span>
             );
@@ -242,15 +243,75 @@ export function UserEnd({settings}: {settings?: boolean}) {
   return (
     <div className="topbar-end">
       {standIns.length > 0 && (
-        <span className="standin" title={`Stand-ins: ${standIns.join(', ')}`}>
-          Stand-in services
+        <span className="standin" title={t('Stand-ins: {list}', {list: standIns.map(x => t(x)).join(', ')})}>
+          {t('Stand-in services')}
         </span>
       )}
-      {settings && <Button label="Settings" kind="ghost" size="sm" icon="settings" title="Project Settings: the pass rule and the labeling model" onClick={open} />}
-      <span className="avatar" aria-label={user} title={user}>
-        {user.slice(0, 1).toUpperCase()}
-      </span>
+      {settings && <Button label={t('Settings')} kind="ghost" size="sm" icon="settings" title={t('Project Settings: the name, the pass rule and the labeling model')} onClick={open} />}
+      <UserMenu user={user} />
     </div>
+  );
+}
+
+/** The user's avatar: a small menu with the user's name and the language choice (spec 1.1.0, 2.2). */
+function UserMenu({user}: {user: string}) {
+  const {locale, setLocale} = useLocale();
+  const [at, setAt] = useState<{top: number; right: number} | null>(null);
+  const btn = useRef<HTMLButtonElement>(null);
+  const pop = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!at) return;
+    pop.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
+    const away = (e: MouseEvent) => !pop.current?.contains(e.target as Node) && !btn.current?.contains(e.target as Node) && setAt(null);
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setAt(null);
+      btn.current?.focus();
+    };
+    window.addEventListener('mousedown', away);
+    window.addEventListener('keydown', key);
+    return () => {
+      window.removeEventListener('mousedown', away);
+      window.removeEventListener('keydown', key);
+    };
+  }, [at]);
+  const toggle = () => {
+    const r = btn.current?.getBoundingClientRect();
+    setAt(at || !r ? null : {top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right)});
+  };
+  return (
+    <>
+      <button ref={btn} type="button" className="avatar avatar-btn" aria-label={user ? t('{name}: account and language', {name: user}) : t('Account and language')} aria-haspopup="menu" aria-expanded={!!at} title={user} onClick={toggle}>
+        {user.slice(0, 1).toUpperCase()}
+      </button>
+      {at &&
+        createPortal(
+          <div ref={pop} className="k menu-pop" role="menu" style={at}>
+            <div className="menu-name one" title={user}>
+              {user}
+            </div>
+            <div className="menu-l">{t('Language')}</div>
+            {LOCALES.map(l => (
+              <button
+                key={l.id}
+                type="button"
+                role="menuitemradio"
+                aria-checked={l.id === locale}
+                lang={l.id === 'zh' ? 'zh-CN' : 'en'}
+                className="menu-i"
+                onClick={() => {
+                  setAt(null);
+                  if (l.id !== locale) setLocale(l.id);
+                }}
+              >
+                {l.name}
+                {l.id === locale && <Icon name="check" />}
+              </button>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 
@@ -260,7 +321,7 @@ function Missing({text}: {text: string}) {
       <div className="empty">
         <h2>{text}</h2>
         <p>
-          <Link href="/">Back to all projects</Link>
+          <Link href="/">{t('Back to all projects')}</Link>
         </p>
       </div>
     </div>

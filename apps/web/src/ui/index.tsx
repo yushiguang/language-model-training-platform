@@ -9,6 +9,7 @@ import Link, {useLinkStatus} from 'next/link';
 import {createPortal} from 'react-dom';
 import {createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode} from 'react';
 import {systemConfig} from '@tsp/domain';
+import {t} from '@/i18n';
 
 /** Mounted once around the app. The kit needs no theme provider; this only sets the root class. */
 export function UiProvider({children}: {children: ReactNode}) {
@@ -191,7 +192,7 @@ export function ActionErrorBanner() {
         action={
           e.retry ? (
             <Button
-              label="Retry"
+              label={t('Retry')}
               kind="white"
               size="sm"
               onClick={() => {
@@ -305,8 +306,9 @@ export function Button({
     console.warn(e);
     // A plain sentence from the backend ("Fix 2 errors in Checks first.") says why; anything else is a connection problem.
     const msg = e instanceof Error ? e.message : '';
-    const why = /^[A-Z][^{}<>\n]{0,160}\.$/.test(msg) ? msg : 'Check your connection and try again.';
-    reportActionError(`Couldn't ${(label ?? ariaLabel ?? 'do that').toLowerCase()}. ${why}`, () => void click());
+    const why = /^[A-Z][^{}<>\n]{0,160}\.$/.test(msg) ? t(msg) : t('Check your connection and try again.');
+    const what = label ?? ariaLabel;
+    reportActionError(what ? t("Couldn't {action}. {why}", {action: what.toLowerCase(), why}) : t("Couldn't do that. {why}", {why}), () => void click());
   };
   return (
     <button type="button" className={cls} disabled={disabled || busy || (!!group?.pending && !busy)} aria-busy={busy || undefined} onClick={() => void click()} title={title} aria-label={ariaLabel}>
@@ -328,11 +330,11 @@ export function Badge({text, tone = 'gray', icon = true}: {text: string; tone?: 
     </span>
   );
 }
-export const Passed = () => <Badge text="Passed" tone="ok" />;
-export const Below = () => <Badge text="Below" tone="err" />;
+export const Passed = () => <Badge text={t('Passed')} tone="ok" />;
+export const Below = () => <Badge text={t('Below')} tone="err" />;
 /** Fewer gold-labeled eval examples than the project's minimum: no pass verdict yet (spec 1.0.0, 4.2). */
 export const Rough = ({need}: {need: number}) => (
-  <Hov text={<Badge text="Rough reading" tone="gray" icon={false} />} tip={`Fewer than ${need} eval examples have a gold label, so this score can move a lot and gives no pass. Label more examples for a firm score`} />
+  <Hov text={<Badge text={t('Rough reading')} tone="gray" icon={false} />} tip={t('Fewer than {n} eval examples have a gold label, so this score can move a lot and gives no pass. Label more examples for a firm score', {n: need})} />
 );
 
 // ---------- numbers ----------
@@ -550,7 +552,7 @@ export function Progress({done, total}: {done: number; total: number}) {
         <span style={{width: `${pct}%`}} />
       </div>
       <small>
-        {num(done)} of {num(total)}
+        {t('{done} of {total}', {done: num(done), total: num(total)})}
       </small>
     </div>
   );
@@ -641,7 +643,7 @@ export function Suggestion({title, text, actions, kicker = true}: {title: string
       {kicker && (
         <span className="agent-k">
           <Icon name="spark" />
-          AI Suggestion
+          {t('AI Suggestion')}
         </span>
       )}
       <div className="agent-main">
@@ -762,11 +764,11 @@ export function CenterProgress({title, chip, done, total, startedAt, onStop}: {t
       {chip}
       <Progress done={done} total={total} />
       <span className="t-3" style={{fontSize: 13}}>
-        Started {dateTime(startedAt)}
+        {t('Started {time}', {time: dateTime(startedAt)})}
       </span>
       {onStop && (
         <div style={{marginTop: 8}}>
-          <Button label="Stop" icon="stop" onClick={onStop} />
+          <Button label={t('Stop')} icon="stop" onClick={onStop} />
         </div>
       )}
     </div>

@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {StructuredPrompt} from '@tsp/contracts';
 import {scriptedAgent} from '@tsp/platform';
+import {translate} from '@tsp/domain';
 import {draftImprovement, partialReply, reflectPrompt, runAgentTurn} from './runtime.ts';
+import {languageLine, PRESETS, systemPrompt} from './presets.ts';
 import {createAgentRuntime} from './index.ts';
 
 test('runAgentTurn hands off from front_desk to the Prompt helper and returns a structured prompt draft', async () => {
@@ -300,4 +302,38 @@ test('createAgentRuntime: calls are plain data; progress goes to the injected po
   const p = slow.reflectPrompt({projectId: 'pr_9', requestId: 'rq_1', prompt: optPrompt, triedChanges: [], mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null});
   await slow.cancel('rq_1');
   await assert.rejects(p);
+});
+
+
+test('problem reports (1.1.0): every helper has report_problem, the Optimiser does not; the prompt says when to send', () => {
+  for (const p of ['front_desk', 'prompt_agent', 'evaluation_agent'] as const) assert.ok(PRESETS[p].tools.includes('report_problem'), p);
+  assert.ok(!PRESETS.optimiser.tools.includes('report_problem'));
+  assert.match(systemPrompt('front_desk'), /report_problem/);
+});
+
+test('problem reports (1.1.0): the helper drafts, asks, and sends only on the next turn after a yes', async () => {
+  const calls: {name: string; args: Record<string, unknown>}[] = [];
+  const host = {
+    async call({name, args}: {name: string; args: Record<string, unknown>}) {
+      calls.push({name, args});
+      return args.send ? {ticketId: 'T-ABC123'} : {draft: {summary: String(args.summary)}, attached: ['the page'], notAttached: ['your prompt']};
+    },
+  };
+  const page = {label: 'Prompt Tuning', agent: 'front_desk' as const, intent: 'answer' as const, context: {}};
+  const ws = (history: {role: 'user' | 'agent'; text: string}[]) => ({projectId: 'pr_1', task: '', prompt: null, history: history.map(h => ({...h, agent: null, page: 'prompt', createdAt: ''})), pageView: null});
+  const first = await runAgentTurn({userText: 'The Save button does nothing', page, workspace: ws([])}, scriptedAgent(), host);
+  assert.deepEqual(calls.map(c => c.args.send ?? false), [false]);
+  const ask = first.messages.at(-1)!.text;
+  assert.match(ask, /Shall I send it\?/);
+  const second = await runAgentTurn({userText: 'yes', page, workspace: ws([{role: 'user', text: 'The Save button does nothing'}, {role: 'agent', text: ask}])}, scriptedAgent(), host);
+  assert.deepEqual(calls.map(c => c.args.send ?? false), [false, true]);
+  assert.match(second.messages.at(-1)!.text, /T-ABC123/);
+});
+
+test('languages (1.1.0): the helpers answer in Chinese with the site\'s own words, and nothing changes for English', () => {
+  assert.equal(languageLine('en'), '');
+  assert.equal(languageLine(undefined), '');
+  const zh = languageLine('zh');
+  assert.match(zh, /Simplified Chinese/);
+  for (const term of ['Prompt Design', 'Gold Labels', 'Optimiser']) assert.ok(zh.includes(`${term} = ${translate('zh', term)}`), term);
 });

@@ -1,5 +1,5 @@
 import {DocFieldValue, type GateApproval, type LabelComment, type NodeId, type Project, type ProjectState, type WorkflowFacts} from '@tsp/contracts';
-import {compareVersions, contextIdFor, gate, judge, newId, scoresUpdating} from '@tsp/domain';
+import {compareVersions, contextIdFor, gate, judge, newId, scoresUpdating, systemConfig} from '@tsp/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {getSamplingTask, stopSampleDataset} from './dataset.ts';
 import {cannotBuild, latestGold} from './evaluation.ts';
@@ -16,7 +16,7 @@ export async function listProjects(): Promise<Project[]> {
 export async function createProject(name: string): Promise<Project> {
   const {catalog, user} = getApp();
   const u = await user();
-  const p: Project = {id: newId('pr'), name, createdAt: now(), createdBy: u.name, kind: 'prompt_tuning', settingsConfirmed: false, setupVersionId: null, snapshotId: null, approvedNodes: []};
+  const p: Project = {id: newId('pr'), name: cleanName(name), createdAt: now(), createdBy: u.name, createdById: u.id, kind: 'prompt_tuning', settingsConfirmed: false, setupVersionId: null, snapshotId: null, approvedNodes: []};
   await catalog.insert('projects', p);
   // Project Settings start from defaults (the first active model, the default pass rule); the
   // user confirms them once, before the first paid run.
@@ -26,6 +26,26 @@ export async function createProject(name: string): Promise<Project> {
   tm().event('project_created', {});
   emitChange();
   return p;
+}
+
+/** A project name as saved: one line, trimmed, cut at `project.nameMaxChars` (spec 1.1.0, 1.2). */
+export function cleanName(name: string): string {
+  return name.replace(/\s+/g, ' ').trim().slice(0, systemConfig().project.nameMaxChars).trim();
+}
+
+/** Renames a project (Project Settings). Names need not be unique; the id never changes. */
+export async function renameProject(projectId: string, name: string): Promise<string> {
+  const {catalog, user} = getApp();
+  const next = cleanName(name);
+  if (!next) throw new Error('Give the project a name.');
+  const p = await getProject(projectId);
+  if (!p) throw new Error('This project does not exist.');
+  if (p.name === next) return next;
+  await catalog.patch('projects', projectId, {name: next});
+  await catalog.audit(projectId, (await user()).name, 'project.rename', {from: p.name, to: next});
+  tm().event('project_renamed', {});
+  emitChange();
+  return next;
 }
 
 export async function getProject(id: string): Promise<Project | null> {

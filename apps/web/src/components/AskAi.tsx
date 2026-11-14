@@ -6,6 +6,7 @@ import type {AgentPreset, ChatEvent, ChatMessage, PageContext} from '@tsp/contra
 import {agentName, pageFromPath} from '@tsp/domain';
 import {agentLive, answeringAgent, chatHistory, isAgentBusy, sendUserMessage, subscribeAgentLive, subscribeChanges} from '@/backend-api';
 import {dateTime, Icon, LinkChip, useTip} from '@/ui';
+import {currentLocale, t, tm} from '@/i18n';
 import {useProject} from './ProjectContext';
 
 /** A document link pasted into the chat, shown as a chip (the text still goes to the agent as-is). */
@@ -23,7 +24,7 @@ export function AskAi({
   page,
   onClose,
   chips,
-  placeholder = 'Ask about this page',
+  placeholder,
   first,
   entering,
   leaving,
@@ -69,13 +70,14 @@ export function AskAi({
     try {
       // The agent sees the page through the backend's page view; the page only says where it is.
       const params = Object.fromEntries([...new URLSearchParams(location.search)].filter(([k]) => k !== 'p'));
-      await sendUserMessage({projectId, text, page: {...page, where: {page: pageFromPath(location.pathname), params}}});
+      await sendUserMessage({projectId, text, page: {...page, where: {page: pageFromPath(location.pathname), params}}, locale: currentLocale()});
     } finally {
       setBusy(isAgentBusy(projectId));
     }
   };
   const last = [...messages].reverse().find(m => m.role === 'agent');
-  const follow = chips ?? (last?.choices?.length ? last.choices : []);
+  // The page's chips are catalog keys; a helper's choices come in the user's language already.
+  const follow = chips ? chips.map(c => t(c)) : last?.choices?.length ? last.choices : [];
   const where = {...page, where: {page: pageFromPath(typeof location === 'undefined' ? '/' : location.pathname), params: {}}};
   const answering = liveTurn?.agent ?? answeringAgent(projectId, where);
   // The newest start line of work that is still running spins (R2-5): scoring and the Optimiser.
@@ -96,25 +98,25 @@ export function AskAi({
   const working = busy || !!liveTurn;
 
   return (
-    <aside className={`chat${leaving ? ' leaving' : entering ? ' entering' : ''}`} aria-label="Ask AI" aria-hidden={leaving || undefined}>
+    <aside className={`chat${leaving ? ' leaving' : entering ? ' entering' : ''}`} aria-label={t('Ask AI')} aria-hidden={leaving || undefined}>
       <div className="chat-h">
         <div className="chat-h-row">
           <Icon name="spark" />
-          <b>Ask AI</b>
-          <button type="button" className="icon-btn" aria-label="Close" onClick={onClose}>
+          <b>{t('Ask AI')}</b>
+          <button type="button" className="icon-btn" aria-label={t('Close')} onClick={onClose}>
             <Icon name="x" />
           </button>
         </div>
         <div className="ctx-row">
           <span className="ctx">
             <Icon name="eye" />
-            {page.label}
+            {pageLabel(page.label)}
           </span>
-          <span className="chat-who">{agentName(answering)} answers</span>
+          <span className="chat-who">{t('{helper} answers', {helper: agentName(answering)})}</span>
         </div>
       </div>
       <div className="chat-m" ref={bodyRef} aria-live="polite">
-        {first ? <AgentText who={page.agent} text={first} /> : messages.length === 0 && <AgentText who={page.agent} text={page.hint ?? 'Ask me anything about this page.'} />}
+        {first ? <AgentText who={page.agent} text={t(first)} /> : messages.length === 0 && <AgentText who={page.agent} text={t(page.hint ?? 'Ask me anything about this page.')} />}
         {messages.map((m, i) => (
           <Fragment key={m.id}>
             {dayOf(m.createdAt) !== dayOf(messages[i - 1]?.createdAt ?? (i === 0 ? new Date().toISOString() : m.createdAt)) && <div className="day">{dayOf(m.createdAt)}</div>}
@@ -127,7 +129,7 @@ export function AskAi({
           working && (
             <div className="live" role="status">
               <Icon name="ring" />
-              <span>{liveTurn?.working ?? 'Thinking…'}</span>
+              <span>{liveTurn?.msg ? tm(liveTurn.msg) : t(liveTurn?.working ?? 'Thinking…')}</span>
             </div>
           )
         )}
@@ -141,11 +143,19 @@ export function AskAi({
           ))}
         </div>
       )}
-      <Composer onSend={send} disabled={working} placeholder={placeholder} />
-      <div className="chat-note">Helpers read your recent messages</div>
+      <Composer onSend={send} disabled={working} placeholder={t(placeholder ?? 'Ask about this page')} />
+      <div className="chat-note">{t('Helpers read your recent messages')}</div>
     </aside>
   );
 }
+
+/** The page's name ("Prompt v2" names the version it shows). */
+const pageLabel = (label: string) => {
+  const v = /^Prompt (v\d+(?:\.\d+)?)$/.exec(label);
+  if (v) return t('Prompt {version}', {version: v[1]});
+  const pt = /^(.+) · (v\d+(?:\.\d+)?)$/.exec(label);
+  return pt ? `${t(pt[1])} · ${pt[2]}` : t(label);
+};
 
 /** The last history read per project, so Ask AI opens on a new step without an empty flash. */
 const seen = new Map<string, ChatMessage[]>();
@@ -158,7 +168,7 @@ function AgentText({who, text, streaming}: {who: AgentPreset | null; text: strin
     <div className="msg-a">
       <span className="agent-k">
         <Icon name="spark" />
-        <b>{agentName(who ?? 'front_desk')}</b>
+        <b>{t(agentName(who ?? 'front_desk'))}</b>
       </span>
       <p style={{whiteSpace: 'pre-line'}}>
         {text}
@@ -168,16 +178,17 @@ function AgentText({who, text, streaming}: {who: AgentPreset | null; text: strin
   );
 }
 
-const EVENT_ICON: Record<ChatEvent, string> = {join: 'next', page: 'next', draft: 'spark', approved: 'check', discarded: 'x', start: 'play', auto: 'ring', stop: 'x'};
+const EVENT_ICON: Record<ChatEvent, string> = {join: 'next', page: 'next', draft: 'spark', approved: 'check', discarded: 'x', start: 'play', auto: 'ring', stop: 'x', report: 'alert'};
 
 /** A saved action line: who did what, and when; with a place to go, the whole line is the link. */
 function EventLine({m, active}: {m: ChatMessage; active?: boolean}) {
   const {href} = useProject();
+  const text = tm(m.msg, m.text);
   const inner = (
     <>
       <Icon name={active ? 'ring' : EVENT_ICON[m.event ?? 'join']} />
-      <span className="one" title={m.text}>
-        {m.text}
+      <span className="one" title={text}>
+        {text}
       </span>
       <time dateTime={m.createdAt}>{dateTime(m.createdAt).slice(11)}</time>
     </>
@@ -208,13 +219,14 @@ function UserText({text}: {text: string}) {
 }
 const docTitle = (url: string) => {
   const tail = decodeURIComponent(url.split(/[?#]/)[0].split('/').filter(Boolean).pop() ?? '');
-  return /^[A-Za-z0-9]{12,}$/.test(tail) ? 'Document' : tail.replace(/[-_]+/g, ' ');
+  return /^[A-Za-z0-9]{12,}$/.test(tail) ? t('Document') : tail.replace(/[-_]+/g, ' ');
 };
 
 function Message({m, active}: {m: ChatMessage; active?: boolean}) {
   if (m.role === 'user') return <UserText text={m.text} />;
   if (m.role === 'event') return <EventLine m={m} active={active} />;
-  return m.text ? <AgentText who={m.agent} text={m.text} /> : null;
+  // A helper's own words come in the user's language already; a line the site made has its key.
+  return m.text ? <AgentText who={m.agent} text={m.msg ? tm(m.msg) : m.text} /> : null;
 }
 
 function Composer({onSend, disabled, placeholder}: {onSend: (text: string) => void | Promise<void>; disabled?: boolean; placeholder: string}) {
@@ -249,9 +261,9 @@ function Composer({onSend, disabled, placeholder}: {onSend: (text: string) => vo
   }, []);
   const submit = () => {
     if (!ready) return;
-    const t = text.trim();
+    const out = text.trim();
     setText('');
-    void onSend(t);
+    void onSend(out);
   };
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key !== 'Enter' || e.shiftKey) return;
@@ -263,7 +275,7 @@ function Composer({onSend, disabled, placeholder}: {onSend: (text: string) => vo
   return (
     <div className="chat-in">
       <label className="sr-only" htmlFor="chat-input">
-        Message Ask AI
+        {t('Message Ask AI')}
       </label>
       <textarea
         id="chat-input"
@@ -280,7 +292,7 @@ function Composer({onSend, disabled, placeholder}: {onSend: (text: string) => vo
         ref={sendBtn}
         type="button"
         className="send"
-        aria-label="Send"
+        aria-label={t('Send')}
         aria-disabled={!ready}
         aria-describedby={tip.at ? tip.id : undefined}
         onMouseEnter={() => tip.show(sendBtn.current)}
@@ -293,7 +305,7 @@ function Composer({onSend, disabled, placeholder}: {onSend: (text: string) => vo
         }}
       >
         <Icon name="up" />
-        {tip.pop('Enter to send · Shift+Enter for new line')}
+        {tip.pop(t('Enter to send · Shift+Enter for new line'))}
       </button>
     </div>
   );

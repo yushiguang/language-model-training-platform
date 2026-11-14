@@ -1,4 +1,4 @@
-import {NO_TELEMETRY, type AgentRuntimeContract, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type MediaSource, type Identity, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type TelemetryPort} from '@tsp/contracts';
+import {NO_TELEMETRY, type TicketPort, type AgentRuntimeContract, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type MediaSource, type Identity, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type TelemetryPort} from '@tsp/contracts';
 
 /**
  * What the bff talks to. The bff holds no records of its own: product records live in the
@@ -24,6 +24,10 @@ export interface BffDeps {
   featureInfo?: FeatureInfoSource;
   /** Optional document reading for links in Ask AI (the helpers' read_doc tool). */
   documents?: DocumentSource;
+  /** Where problem reports go (spec 1.1.0, 3). Without it the helpers say reports cannot be sent. */
+  tickets?: TicketPort;
+  /** The app's version, written into problem reports. */
+  appVersion?: string;
   standIns: string[];
   telemetry?: TelemetryPort;
   /** Keeps a second tab from running the same optimiser; without it, only this tab is covered. */

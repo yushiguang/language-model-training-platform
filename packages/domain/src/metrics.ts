@@ -1,5 +1,6 @@
 import {DEFAULT_SYSTEM_CONFIG, systemConfig} from './config.ts';
-import type {Answer, FieldMetrics, Metrics, MixUp, Schema, Thresholds, ValueMetrics} from '@tsp/contracts';
+import type {Answer, FieldMetrics, Metrics, MixUp, Msg, Schema, Thresholds, ValueMetrics} from '@tsp/contracts';
+import {fill, msg} from './i18n.ts';
 
 export interface Scored {
   exampleId: string;
@@ -98,7 +99,9 @@ export function computeMetrics(schema: Schema, all: Scored[]): Metrics {
 }
 
 export interface CheckLine {
+  /** In English; `msg` is the same line for other languages. */
   label: string;
+  msg: Msg;
   actual: string;
   need: string;
   met: boolean;
@@ -110,27 +113,30 @@ export interface CheckLine {
  * examples (both halves): under `t.minEval` the score is a rough reading (spec 1.0.0, 4.2) and
  * never passes, however high it is.
  */
+/** A check's label, in English and as a catalog key. */
+const lab = (key: string, params?: Msg['params']) => ({label: fill(key, params), msg: msg(key, params)});
+
 export function judge(m: Metrics, t: Thresholds, labeledCount: number): {passed: boolean; rough: boolean; checks: CheckLine[]} {
   const checks: CheckLine[] = [];
-  checks.push({label: 'Lowest field macro-F1', actual: m.lowestField.macroF1.toFixed(2), need: `≥ ${t.macroF1.toFixed(2)}`, met: m.lowestField.macroF1 >= t.macroF1});
-  if (t.valueF1 != null) checks.push({label: 'Lowest value F1', actual: m.lowestValue ? m.lowestValue.f1.toFixed(2) : '–', need: `≥ ${t.valueF1.toFixed(2)}`, met: !m.lowestValue || m.lowestValue.f1 >= t.valueF1});
+  checks.push({...lab('Lowest field macro-F1'), actual: m.lowestField.macroF1.toFixed(2), need: `≥ ${t.macroF1.toFixed(2)}`, met: m.lowestField.macroF1 >= t.macroF1});
+  if (t.valueF1 != null) checks.push({...lab('Lowest value F1'), actual: m.lowestValue ? m.lowestValue.f1.toFixed(2) : '–', need: `≥ ${t.valueF1.toFixed(2)}`, met: !m.lowestValue || m.lowestValue.f1 >= t.valueF1});
   const values = m.fields.flatMap(f => f.values.map(v => ({...v, field: f.field})));
   const lowest = (k: 'precision' | 'recall') => (values.length ? Math.min(...values.map(v => v[k])) : 1);
-  if (t.precision != null) checks.push({label: 'Lowest value precision', actual: lowest('precision').toFixed(2), need: `≥ ${t.precision.toFixed(2)}`, met: lowest('precision') >= t.precision});
-  if (t.recall != null) checks.push({label: 'Lowest value recall', actual: lowest('recall').toFixed(2), need: `≥ ${t.recall.toFixed(2)}`, met: lowest('recall') >= t.recall});
+  if (t.precision != null) checks.push({...lab('Lowest value precision'), actual: lowest('precision').toFixed(2), need: `≥ ${t.precision.toFixed(2)}`, met: lowest('precision') >= t.precision});
+  if (t.recall != null) checks.push({...lab('Lowest value recall'), actual: lowest('recall').toFixed(2), need: `≥ ${t.recall.toFixed(2)}`, met: lowest('recall') >= t.recall});
   // Always checked (R4-6): invalid answers are left out of the scores, so a version must not pass
   // by giving unreadable answers on the hard examples.
   const cap = t.invalidRate ?? systemConfig().evaluation.invalidRateCap;
-  checks.push({label: 'Invalid outputs', actual: pct(m.invalidRate), need: `≤ ${pct(cap)}`, met: m.invalidRate <= cap});
+  checks.push({...lab('Invalid outputs'), actual: pct(m.invalidRate), need: `≤ ${pct(cap)}`, met: m.invalidRate <= cap});
   if (t.accuracy != null) {
     const singles = m.fields.filter(f => f.kind === 'single');
     const lo = singles.length ? Math.min(...singles.map(f => f.accuracy)) : 1;
-    checks.push({label: 'Accuracy, single-select fields', actual: lo.toFixed(2), need: `≥ ${t.accuracy.toFixed(2)}`, met: lo >= t.accuracy});
+    checks.push({...lab('Accuracy, single-select fields'), actual: lo.toFixed(2), need: `≥ ${t.accuracy.toFixed(2)}`, met: lo >= t.accuracy});
   }
   // Gold-labeled eval examples, not the dataset's size (review 2026-11-13): 90 sampled examples
   // with 4 gold labels are still a rough reading. The score itself rests on the held-out half.
   const rough = labeledCount < t.minEval;
-  checks.push({label: `Gold-labeled eval examples (the score uses ${m.n} of the ${m.total ?? m.n} held out)`, actual: String(labeledCount), need: `≥ ${t.minEval}`, met: !rough});
+  checks.push({...lab('Gold-labeled eval examples (the score uses {n} of the {total} held out)', {n: m.n, total: m.total ?? m.n}), actual: String(labeledCount), need: `≥ ${t.minEval}`, met: !rough});
   return {passed: checks.every(c => c.met), rough, checks};
 }
 

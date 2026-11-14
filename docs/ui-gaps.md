@@ -55,6 +55,24 @@ slide between examples on Gold Labels, media fading in, Ask AI widening its slot
 closes, and dialogs, hints and banners coming in. Reduced motion turns all of it off. Static boards
 cannot show it.
 
+## 1.1.0, built from the spec (2026-11-14)
+
+| Screen | What was built | To decide |
+| --- | --- | --- |
+| Avatar menu | A small menu under the avatar: the user's name, "Language", English and Chinese (current one ticked) | Whether account items join it later |
+| Projects list | A Created by column between Project and Created | — |
+| Project Settings | A Name field at the top of the dialog; Save renames | — |
+| Ask AI, problem report | The helper's draft as a normal reply ending "Shall I send it?"; after a yes, the ticket id in the reply and an action line "You sent a problem report T-…" | — |
+| Chinese pages | Every page, dialog, hover, badge and banner; action lines and the AI Suggestion card too | Wording review by a Chinese reader |
+
+Known limits of the language switch:
+- The static export is built in English, so a Chinese user sees English for the first paint.
+- A switch re-renders the page in place: unsaved edits on that page (a prompt draft, an unsaved
+  gold label) are dropped. The switch is rare and sits in a menu, so this was left as is.
+- Not translated: the Optimiser's change notes and Improve with AI's change reasons (they describe
+  prompt text), model names and descriptions, feature descriptions, and data.
+- The stand-in helper (no model) understands English only; a real model reads either language.
+
 ## Still different from the canvas
 
 | Where | Canvas | Code | Why |

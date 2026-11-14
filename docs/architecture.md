@@ -246,6 +246,26 @@ never content. The browser pushes both to `Platform.telemetry`; the stand-in kee
 `localStorage`. The audit log stays in the catalog. Conventions and the rules for changing the
 catalogue: [design/telemetry.md](design/telemetry.md).
 
+## Languages (1.1.0)
+
+English is the source language: every UI text is its own key, and `t()` (`apps/web/src/i18n.tsx`)
+looks it up in the chosen catalog (`packages/domain/src/locales/`). Texts the services and the
+domain make (action lines, the AI Suggestion card, the Optimiser's now line, gate and check lines,
+reasons a prompt cannot be saved, a helper's live line) carry a `Msg` with their English text, so
+the page can show them in the user's language while helpers and logs read English. Helpers answer
+in the user's language (`AgentTurnInput.locale` adds one line to their system prompt, with the
+site's own Chinese words). The choice lives in the browser (`tsp-locale`); the static export is
+built in English and switches after the first paint. A test lists every key the source uses and
+fails on any the Chinese catalog lacks.
+
+## Problem reports (1.1.0)
+
+`report_problem` is a tool of every helper (not of the Optimiser). It drafts, shows the user the
+draft, and sends only after the user writes again, which code enforces. The ticket goes to
+`Platform.tickets` with the page, the browser's rolling record (`ClientDiagnostics`, sent with
+each Ask AI message and never stored), the last action lines and, only with consent, the prompt.
+Adapter steps: [handover/integration.md](handover/integration.md#problem-reports).
+
 ## Prompts with images
 
 A labeling request is one user message whose content lists text and image parts in order; each

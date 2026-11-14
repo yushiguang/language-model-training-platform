@@ -1,5 +1,5 @@
 import type {EndpointId, ProjectState, PromptVersion} from '@tsp/contracts';
-import {autoSpendUsd, dueStarts, versionLabel, type DueStart, systemConfig} from '@tsp/domain';
+import {autoSpendUsd, dueStarts, versionLabel, type DueStart, systemConfig, msg} from '@tsp/domain';
 import {busy, getApp, once, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {buildReport, labelEvalSet} from './evaluation.ts';
@@ -51,7 +51,7 @@ async function autoStart(state: ProjectState, d: DueStart) {
   const v = state.versions.find(x => x.id === d.versionId);
   if (!v) return;
   void once(`auto:${d.key}`, () => scoreVersion(projectId, v, d.endpoint, {auto: true}));
-  await postEvent(projectId, 'auto', 'workflow', `started scoring ${versionLabel(v)} on ${model}`, {path: '/prompt'});
+  await postEvent(projectId, 'auto', 'workflow', msg('started scoring {version} on {model}', {version: versionLabel(v), model}), {path: '/prompt'});
   await catalog.audit(projectId, 'system', 'auto_start', {what: d.what, version: d.versionId, endpoint: d.endpoint, estimateUsd: d.estimateUsd, autoSpendUsd: spent});
   tm().counter('tsp_auto_starts_total', {what: d.what, decision: 'started'});
   tm().event('auto_started', {what: d.what, estimate_usd: d.estimateUsd, project_auto_spend_usd: spent});

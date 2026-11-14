@@ -37,7 +37,7 @@ const RULES = [
   {dir: 'apps/bff/src', allow: ['@tsp/contracts', '@tsp/domain'], tests: ['@tsp/platform', '@tsp/catalog', '@tsp/labeling', '@tsp/optimiser']},
   {dir: 'apps/telemetry/src', allow: ['@tsp/contracts']},
   {dir: 'apps/web/src/backend-api', allow: '*'},
-  {dir: 'apps/web/src', allow: ['@tsp/contracts', '@tsp/domain', '@/backend-api', '@/components', '@/ui']},
+  {dir: 'apps/web/src', allow: ['@tsp/contracts', '@tsp/domain', '@/backend-api', '@/components', '@/ui', '@/i18n']},
 ];
 
 /** npm packages only one folder may import (Astryx is wrapped in our own components). */

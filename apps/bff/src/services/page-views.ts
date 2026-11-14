@@ -1,5 +1,6 @@
 import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@tsp/contracts';
 import {agentStart, isStartTool} from './starts.ts';
+import {reportProblem} from './problems.ts';
 import {aiSuggestion, featureItems, featureText, labelBalance, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap} from '@tsp/domain';
 import {getApp} from './app.ts';
 import {lockHoldout} from './governance.ts';
@@ -336,6 +337,8 @@ export function agentTools(projectId: string): AgentToolHost {
       if (READS_EXAMPLES.has(name)) await lockHoldout(projectId);
       // Start-work tools spend money and start at once; they live in starts.ts.
       if (isStartTool(name)) return agentStart(projectId, agent, name, args);
+      // A problem report: drafted first, sent only after the user agrees (spec 1.1.0, 3).
+      if (name === 'report_problem') return reportProblem(projectId, agent, args);
       const state = await loadProjectState(projectId);
       if (!state) throw new Error('The project was not found.');
       switch (name) {

@@ -80,6 +80,18 @@ export interface SystemConfig {
     changeDebounceMs: number;
     minActionPendingMs: number;
   };
+  project: {
+    /** A project name is cut at this many characters (spec 1.1.0, 1.2). */
+    nameMaxChars: number;
+  };
+  reports: {
+    /** How many pages, failed calls and script errors the browser keeps for a problem report. */
+    diagnosticsKeep: number;
+    /** How many recent Ask AI action lines a ticket carries. */
+    actionLines: number;
+    /** Script error and failed-call messages are cut at this many characters. */
+    messageMaxChars: number;
+  };
 }
 
 export type DeepPartial<T> = T extends (infer U)[] ? U[] : T extends object ? {[K in keyof T]?: DeepPartial<T[K]>} : T;

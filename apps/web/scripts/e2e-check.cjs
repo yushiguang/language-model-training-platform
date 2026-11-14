@@ -7,6 +7,8 @@
  * sample file), the Project Settings confirmation before the first paid run, then Prompt Tuning:
  * scoring, the fixed AI Suggestion cards, Mismatches, Improve with AI with word marks, Auto
  * Optimise until a version passes, Copy prompt and Finish; and the telemetry events and metrics.
+ * 1.1.0: the Created by column, renaming in Project Settings, a problem report from Ask AI, and the
+ * switch to Chinese (no catalog misses on the pages visited) and back.
  *
  * Needs Playwright with Chromium. Run:
  *   npm run build && npx serve apps/web/out -l 4173   (any static server)
@@ -96,6 +98,10 @@ let current = null;
   await page.goto(BASE + '/');
   await page.getByRole('link', {name: 'Scratch project'}).waitFor();
   if (await page.getByText('Current step', {exact: true}).count()) throw new Error('the Projects list still has a Current step column');
+  // 1.1.0: the list says who created each project.
+  const byCell = await page.locator('tr', {hasText: 'Scratch project'}).locator('td').nth(1).innerText();
+  if (!(await page.getByRole('columnheader', {name: 'Created by'}).count()) || !byCell.trim()) throw new Error('the Projects list has no Created by column');
+  await shot(page, '0b-projects-created-by');
   await page.getByRole('button', {name: 'Delete Scratch project'}).click();
   const del = page.getByRole('dialog');
   await del.waitFor();
@@ -479,7 +485,19 @@ let current = null;
   const again = page.getByRole('dialog');
   await again.getByText('Project Settings', {exact: true}).waitFor();
   if (!(await button(again, 'Save').count())) throw new Error('Project Settings has no Save');
-  await button(again, 'Cancel').click();
+  // 1.1.0: the project is renamed here, and the top island follows.
+  const nameBox = again.getByLabel('Name', {exact: true});
+  if ((await nameBox.inputValue()) !== 'Short-video tagging') throw new Error('the Name field is not prefilled with the project name');
+  await nameBox.fill('  Short-video tags  ');
+  await shot(page, '2d-settings-name');
+  await button(again, 'Save').click();
+  await again.waitFor({state: 'detached', timeout: 10000});
+  await page.locator('.topnav .proj b', {hasText: /^Short-video tags$/}).waitFor({timeout: 10000});
+  await button(page, 'Settings').click();
+  await page.getByRole('dialog').getByLabel('Name', {exact: true}).fill('Short-video tagging');
+  await button(page.getByRole('dialog'), 'Save').click();
+  await page.locator('.topnav .proj b', {hasText: /^Short-video tagging$/}).waitFor({timeout: 10000});
+  log('renamed from Project Settings and back; the top island follows');
 
   // An agent question: the evaluation agent reads the report with a tool
   await page.goto(url('/prompt/'));
@@ -504,6 +522,61 @@ let current = null;
   await page.locator('aside.chat .evt').getByText(/^Prompt helper tried the prompt on \d+ eval examples?/).waitFor({timeout: 5000});
   log('agent start:', tried.split('\n')[0], '|', (await page.locator('aside.chat .evt').allInnerTexts()).map(t => t.replace(/\n/g, ' ')).join(' / '));
   await shot(page, '7b-ask-ai-actions');
+
+  // 1.1.0: a problem told to Ask AI becomes a draft; only the user's yes sends it, and the reply
+  // gives the ticket id. The stored ticket holds the page and the browser's record, and no prompt.
+  await ask(page, 'The Save button does nothing');
+  await page.locator('aside.chat .msg-a', {hasText: 'Shall I send it?'}).last().waitFor({timeout: 20000});
+  const sentBefore = await page.evaluate(() => JSON.parse(localStorage.getItem('tsp-tickets') || '[]').length);
+  if (sentBefore) throw new Error('a report was sent before the user said yes');
+  await shot(page, '8-report-draft');
+  await ask(page, 'yes');
+  const sentLine = await page.locator('aside.chat .msg-a', {hasText: /T-[A-Z0-9]{6}/}).last().innerText({timeout: 20000});
+  await page.locator('aside.chat .evt', {hasText: /You sent a problem report T-/}).waitFor({timeout: 5000});
+  const ticket = await page.evaluate(() => JSON.parse(localStorage.getItem('tsp-tickets') || '[]').at(-1));
+  if (!ticket || ticket.where?.page !== 'prompt' || !ticket.diagnostics?.pages?.length || ticket.content !== null || !ticket.actions?.length) throw new Error(`the stored ticket is not complete: ${JSON.stringify(ticket).slice(0, 400)}`);
+  await shot(page, '8b-report-sent');
+  log('problem report:', sentLine.replace(/\n/g, ' ').slice(0, 120), '| ticket keeps', Object.keys(ticket).join(','));
+
+  // 1.1.0: the avatar menu switches the site to Chinese; every page visited has all its texts in
+  // the catalog, then the switch goes back to English. A second tab, so this page keeps its metrics.
+  const zp = await ctx.newPage();
+  watch(zp);
+  await zp.goto(url('/prompt/'));
+  await zp.locator('.topnav .stepper').waitFor();
+  const avatar = zp.locator('button.avatar-btn');
+  await avatar.click();
+  await zp.getByRole('menu').waitFor();
+  await shot(zp, '9-avatar-menu');
+  await zp.getByRole('menuitemradio').nth(1).click();
+  await zp.waitForFunction(() => document.documentElement.lang === 'zh-CN');
+  const english = [];
+  const visit = async (path, name) => {
+    await zp.goto(url(path));
+    await zp.locator('.topnav .stepper').waitFor();
+    await zp.waitForTimeout(600);
+    await shot(zp, name);
+    // Text still in English (data such as field names and versions aside), for the log.
+    english.push(...(await zp.evaluate(() => [...document.querySelectorAll('main *')].filter(el => el.children.length === 0 && /[A-Za-z]{3,} [A-Za-z]{3,} [A-Za-z]{3,}/.test(el.textContent || '')).map(el => el.textContent.trim().slice(0, 60)))));
+  };
+  await visit('/prompt/', '9b-zh-prompt-tuning');
+  if (await zp.locator('.topnav .stepper').getByText('Prompt Design', {exact: true}).count()) throw new Error('the step names are still in English after switching to Chinese');
+  await visit('/gold/', '9c-zh-gold');
+  await visit('/dataset/', '9d-zh-dataset');
+  await visit('/prompt-design/', '9e-zh-prompt-design');
+  await button(zp, await zp.locator('.topbar-end .btn').first().innerText()).click();
+  await zp.getByRole('dialog').waitFor();
+  await shot(zp, '9f-zh-settings');
+  await zp.keyboard.press('Escape');
+  const missed = await zp.evaluate(() => globalThis.__tspI18nMissing || []);
+  if (missed.length) throw new Error(`texts missing from the Chinese catalog: ${missed.join(' | ')}`);
+  log('Chinese: no catalog misses; English left on the pages:', [...new Set(english)].slice(0, 12).join(' | ') || 'none');
+  await zp.locator('button.avatar-btn').click();
+  await zp.getByRole('menuitemradio').first().click();
+  await zp.waitForFunction(() => document.documentElement.lang === 'en');
+  await zp.locator('.topnav .stepper').getByText('Prompt Design', {exact: true}).waitFor();
+  log('switched back to English');
+  await zp.close();
 
   const facts = await page.evaluate(() => {
     const docs = k => JSON.parse(localStorage.getItem('tsp-doc:' + k) || '[]').map(d => d.data);
@@ -541,6 +614,9 @@ let current = null;
         setTimeout(r, 300);
       }),
   );
+  // The sink is written every 10 seconds: wait for the last events of this run to land.
+  await page.bringToFront();
+  await page.waitForFunction(() => (localStorage.getItem('tsp-telemetry-events') || '').includes('problem_reported'), null, {timeout: 15000}).catch(() => undefined);
   const tel = await page.evaluate(() => {
     const ev = JSON.parse(localStorage.getItem('tsp-telemetry-events') || '[]');
     const names = {};
@@ -555,7 +631,7 @@ let current = null;
   log('telemetry:', JSON.stringify(tel));
   log('console errors:', errors.length ? errors : 'none');
   await ctx.close();
-  const need = ['project_deleted', 'settings_saved', 'full_prompt_opened', 'prompt_copied', 'prompt_proposal_shown', 'signature_changed', 'version_scored'];
+  const need = ['project_deleted', 'settings_saved', 'full_prompt_opened', 'prompt_copied', 'prompt_proposal_shown', 'signature_changed', 'version_scored', 'project_renamed', 'locale_changed', 'problem_report_drafted', 'problem_reported'];
   const missing = need.filter(n => !tel.names[n]);
   if (missing.length) log('missing events:', missing.join(', '));
   const ok =

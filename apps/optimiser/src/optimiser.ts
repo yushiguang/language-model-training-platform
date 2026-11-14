@@ -1,6 +1,6 @@
 import type {AgentRuntimeContract, Answer, CatalogContract, EndpointId, Example, ExampleBrief, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@tsp/contracts';
 import {NO_TELEMETRY} from '@tsp/contracts';
-import {checkStructured, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withComments, wrongExamples, type PoolEntry} from '@tsp/domain';
+import {checkStructured, msg, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withComments, wrongExamples, type PoolEntry} from '@tsp/domain';
 
 /**
  * The Optimiser (GEPA, ported to TypeScript; docs/design/optimiser.md). Runs from
@@ -513,7 +513,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
           const open = (await catalog.find('optimisation_runs', {projectId}, 'startedAt desc')).find(o => o.state === 'running' || o.state === 'paused');
           if (open) return runLoop(open, {resumed: true});
           const run = await newRun(projectId, endpoint, rounds, {auto, startVersionId});
-          if (!auto) await host.postEvent({projectId, event: 'start', actor: 'user', what: `started the Optimiser for up to ${rounds} rounds`, link: {path: '/prompt'}});
+          if (!auto) await host.postEvent({projectId, event: 'start', actor: 'user', what: msg('started the Optimiser for up to {rounds} rounds', {rounds}), link: {path: '/prompt'}});
           return runLoop(run);
         }),
       );
@@ -528,7 +528,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       const run = await catalog.get('optimisation_runs', runId);
       if (!run) return;
       for (const t of await labeling.listTasks(run.projectId)) if (t.purpose === 'optimiser' && t.state === 'running') await labeling.stopTask(t.id);
-      await host.postEvent({projectId: run.projectId, event: 'stop', actor: 'user', what: 'stopped the Optimiser', link: {path: '/prompt'}});
+      await host.postEvent({projectId: run.projectId, event: 'stop', actor: 'user', what: msg('stopped the Optimiser'), link: {path: '/prompt'}});
     },
 
     async retryRun(runId) {

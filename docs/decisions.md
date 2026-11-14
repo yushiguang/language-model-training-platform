@@ -3,6 +3,14 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-14 (1.1.0: creator, languages, problem reports)
+
+- **The Projects list shows who created each project**, nothing more until tenants arrive; the id is stored too, for ownership checks later.
+- **Rename lives in Project Settings**, as a Name field, not on the top island.
+- **English and Chinese now; more languages later**, as new catalog files. The switch sits in a menu under the avatar.
+- **Reporting a problem is a tool every helper has**, not a separate helper, because users get stuck on any page. The site defines the ticket submission interface; the internal platform files the ticket and the user gets its id. There is no reports page.
+- **A report needs the user's yes**, enforced in code: a draft first, a send only after the user writes again. The prompt goes along only when the user agrees; examples and gold labels never do.
+
 ## 2026-11-14 (building 1.0.0 phases 3 and 4)
 
 - **Unlabeled examples never make a score stale.** Scores rest on gold-labeled eval examples only; an added example waits for its gold label and is counted next to the score.

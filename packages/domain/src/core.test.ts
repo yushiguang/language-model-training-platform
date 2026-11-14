@@ -74,7 +74,7 @@ test('macro-F1 and pass judgement', () => {
   const lenient = {...DEFAULT_THRESHOLDS, macroF1: 0.5};
   const j = judge(m, lenient, 30);
   assert.equal(j.passed, false);
-  assert.deepEqual(j.checks.find(c => c.label === 'Invalid outputs'), {label: 'Invalid outputs', actual: '20%', need: '≤ 1.0%', met: false});
+  assert.deepEqual(j.checks.find(c => c.label === 'Invalid outputs'), {label: 'Invalid outputs', msg: {key: 'Invalid outputs'}, actual: '20%', need: '≤ 1.0%', met: false});
   assert.equal(judge(computeMetrics(schema, items.slice(0, 3)), lenient, 30).passed, true);
   // Review 2026-11-13: the count is of gold-labeled eval examples; under minEval it is a rough
   // reading and never passes, however good the score.

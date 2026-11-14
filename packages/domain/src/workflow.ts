@@ -1,5 +1,6 @@
 import {systemConfig} from './config.ts';
-import type {Actor, AgentPreset, EndpointId, EndpointInfo, ProjectState} from '@tsp/contracts';
+import type {Actor, AgentPreset, EndpointId, EndpointInfo, Msg, ProjectState} from '@tsp/contracts';
+import {msg, msgText} from './i18n.ts';
 import {versionLabel} from './versions.ts';
 import {judge} from './metrics.ts';
 
@@ -40,12 +41,24 @@ export type SuggestionAction = 'add_examples' | 'go_gold' | 'auto_optimise' | 'r
  */
 export interface AiSuggestion {
   template: 'T1' | 'T2' | 'T3' | 'T4' | 'T5' | 'T6';
+  /** In English (the helpers read these); `msg` holds the same lines for other languages. */
   title: string;
   text: string;
+  msg: {title: Msg; text: Msg};
   actions: SuggestionAction[];
   /** The version the actions work on (improve, switch, copy), when there is one. */
   versionId: string | null;
 }
+
+/** A card from its two lines as catalog keys. */
+const card = (template: AiSuggestion['template'], title: Msg, text: Msg, actions: SuggestionAction[], versionId: string | null): AiSuggestion => ({
+  template,
+  title: msgText(title),
+  text: msgText(text),
+  msg: {title, text},
+  actions,
+  versionId,
+});
 
 /** Gold-labeled eval examples per value, for the rare-value check. */
 export function goldValueCounts(s: Pick<ProjectState, 'examples' | 'gold' | 'setup'>): {field: string; value: string; count: number}[] {
@@ -61,14 +74,13 @@ export function rareValueSuggestion(s: Pick<ProjectState, 'examples' | 'gold' | 
   if (!Object.keys(s.gold).length) return null;
   const rare = goldValueCounts(s).filter(c => c.count < min);
   if (!rare.length) return null;
-  const names = rare.slice(0, 3).map(r => r.value).join(', ') + (rare.length > 3 ? ` and ${rare.length - 3} more` : '');
-  return {
-    template: 'T1',
-    title: 'Balance rare label values',
-    text: `${rare.length} ${rare.length === 1 ? 'value' : 'values'} (${names}) ${rare.length === 1 ? 'has' : 'have'} fewer than ${min} labeled examples, which can distort Macro-F1.`,
-    actions: ['add_examples'],
-    versionId: null,
-  };
+  const shown = rare.slice(0, 3).map(r => r.value).join(', ');
+  const names = rare.length > 3 ? msg('{names} and {more} more', {names: shown, more: rare.length - 3}) : shown;
+  const text =
+    rare.length === 1
+      ? msg('1 value ({names}) has fewer than {min} labeled examples, which can distort Macro-F1.', {names, min})
+      : msg('{n} values ({names}) have fewer than {min} labeled examples, which can distort Macro-F1.', {n: rare.length, names, min});
+  return card('T1', msg('Balance rare label values'), text, ['add_examples'], null);
 }
 
 export interface SuggestionInput {
@@ -102,25 +114,19 @@ export function aiSuggestion(s: ProjectState, x: SuggestionInput = {}): AiSugges
       if (!round?.dryRun) continue;
       const d = round.dryRun;
       const to = best?.promptVersionId ?? d.parentId;
-      return {
-        template: 'T5',
-        title: `Switch back to ${label(to)}`,
-        text: `${versionLabel(sel)} passed ${d.passed}/${d.examples} dry-run examples vs ${label(d.parentId)}'s ${d.parentPassed}/${d.examples}. Continue from ${label(to)} instead.`,
-        actions: ['switch'],
-        versionId: to,
-      };
+      return card(
+        'T5',
+        msg('Switch back to {version}', {version: label(to)}),
+        msg("{version} passed {passed}/{examples} dry-run examples vs {parent}'s {parentPassed}/{examples}. Continue from {to} instead.", {version: versionLabel(sel), passed: d.passed, examples: d.examples, parent: label(d.parentId), parentPassed: d.parentPassed, to: label(to)}),
+        ['switch'],
+        to,
+      );
     }
   }
 
   // T2: not enough gold labels for any score.
   if (!best && s.facts.goldEvalDone < total) {
-    return {
-      template: 'T2',
-      title: 'Finish labeling the eval set',
-      text: `${s.facts.goldEvalDone} of ${total} eval examples are labeled. Scores are worked out on the labeled examples.`,
-      actions: ['go_gold'],
-      versionId: null,
-    };
+    return card('T2', msg('Finish labeling the eval set'), msg('{done} of {total} eval examples are labeled. Scores are worked out on the labeled examples.', {done: s.facts.goldEvalDone, total}), ['go_gold'], null);
   }
   if (!best) return null;
 
@@ -129,18 +135,18 @@ export function aiSuggestion(s: ProjectState, x: SuggestionInput = {}): AiSugges
   if (best.rough && !passing) {
     const need = t.minEval;
     return total >= need
-      ? {template: 'T2', title: 'Finish labeling the eval set', text: `${s.facts.goldEvalDone} of ${total} eval examples are labeled. Scores stay a rough reading until ${need} are labeled.`, actions: ['go_gold', 'auto_optimise'], versionId: best.promptVersionId}
-      : {template: 'T2', title: 'Add examples to the eval set', text: `The eval set has ${total} examples. Scores stay a rough reading until ${need} examples have a gold label.`, actions: ['add_examples', 'auto_optimise'], versionId: best.promptVersionId};
+      ? card('T2', msg('Finish labeling the eval set'), msg('{done} of {total} eval examples are labeled. Scores stay a rough reading until {need} are labeled.', {done: s.facts.goldEvalDone, total, need}), ['go_gold', 'auto_optimise'], best.promptVersionId)
+      : card('T2', msg('Add examples to the eval set'), msg('The eval set has {total} examples. Scores stay a rough reading until {need} examples have a gold label.', {total, need}), ['add_examples', 'auto_optimise'], best.promptVersionId);
   }
 
   if (passing) {
-    return {
-      template: 'T6',
-      title: `Use ${label(passing.promptVersionId)} as your final prompt`,
-      text: `All fields meet your thresholds (lowest field Macro-F1 ${passing.metrics.lowestField.macroF1.toFixed(2)}).`,
-      actions: ['improve', 'copy_prompt', 'finish'],
-      versionId: passing.promptVersionId,
-    };
+    return card(
+      'T6',
+      msg('Use {version} as your final prompt', {version: label(passing.promptVersionId)}),
+      msg('All fields meet your thresholds (lowest field Macro-F1 {score}).', {score: passing.metrics.lowestField.macroF1.toFixed(2)}),
+      ['improve', 'copy_prompt', 'finish'],
+      passing.promptVersionId,
+    );
   }
 
   const m = x.mismatches;
@@ -149,28 +155,32 @@ export function aiSuggestion(s: ProjectState, x: SuggestionInput = {}): AiSugges
   const afterRun = !!m && lastRun?.state === 'done' && lastRun.stopReason !== 'passes' && m.wrongEverywhere > 0;
   if (m && (firstScore || afterRun)) {
     const n = firstScore ? m.open : m.wrongEverywhere;
-    return {
-      template: 'T3',
-      title: `Review ${n} label ${n === 1 ? 'mismatch' : 'mismatches'}`,
-      text: firstScore ? `The model's answers differ from ${n} of your gold labels. Check them first, so the Optimiser learns from the right labels.` : `${n} ${n === 1 ? 'example was' : 'examples were'} wrong in every version. Check your gold labels for them.`,
-      actions: ['auto_optimise', 'review_labels'],
-      versionId: best.promptVersionId,
-    };
+    return card(
+      'T3',
+      n === 1 ? msg('Review 1 label mismatch') : msg('Review {n} label mismatches', {n}),
+      firstScore
+        ? msg("The model's answers differ from {n} of your gold labels. Check them first, so the Optimiser learns from the right labels.", {n})
+        : n === 1
+          ? msg('1 example was wrong in every version. Check your gold label for it.')
+          : msg('{n} examples were wrong in every version. Check your gold labels for them.', {n}),
+      ['auto_optimise', 'review_labels'],
+      best.promptVersionId,
+    );
   }
 
   const mu = best.metrics.mixUps[0];
-  const confusion = !mu ? '' : mu.kind === 'confused' ? `; top confusion is ${mu.gold} -> ${mu.predicted}` : mu.kind === 'extra' ? `; ${mu.predicted} is often added when it does not apply` : `; ${mu.gold} is often missed`;
+  const confusion: Msg | '' = !mu
+    ? ''
+    : mu.kind === 'confused'
+      ? msg('; top confusion is {gold} -> {predicted}', {gold: mu.gold ?? '', predicted: mu.predicted ?? ''})
+      : mu.kind === 'extra'
+        ? msg('; {value} is often added when it does not apply', {value: mu.predicted ?? ''})
+        : msg('; {value} is often missed', {value: mu.gold ?? ''});
   const lw = best.metrics.lowestField;
   // The lowest field can be at the bar while another check fails: name that check then.
   const failing = judge(best.metrics, t, s.facts.goldEvalDone).checks.find(c => !c.met);
-  const why = lw.macroF1 < t.macroF1 || !failing ? `Current score is ${lw.macroF1.toFixed(2)} (target ${t.macroF1.toFixed(2)})` : `${failing.label} is ${failing.actual} (needs ${failing.need})`;
-  return {
-    template: 'T4',
-    title: `Improve ${label(best.promptVersionId)} to pass ${lw.field}`,
-    text: `${why}${confusion}.`,
-    actions: ['improve', 'auto_optimise'],
-    versionId: best.promptVersionId,
-  };
+  const why = lw.macroF1 < t.macroF1 || !failing ? msg('Current score is {score} (target {target})', {score: lw.macroF1.toFixed(2), target: t.macroF1.toFixed(2)}) : msg('{check} is {actual} (needs {need})', {check: failing.msg, actual: failing.actual, need: failing.need});
+  return card('T4', msg('Improve {version} to pass {field}', {version: label(best.promptVersionId), field: lw.field}), msg('{why}{confusion}.', {why, confusion}), ['improve', 'auto_optimise'], best.promptVersionId);
 }
 
 /**

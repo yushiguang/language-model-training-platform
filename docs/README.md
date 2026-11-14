@@ -66,7 +66,7 @@ Sprint follows [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MINOR.PA
 ## Sanitisation and boundary rules for public docs (`docs/**`)
 
 1. **English only**: every file under `docs/` (and anywhere outside `/internal/`) is written in
-   English.
+   English. The translation catalogs in `packages/domain/src/locales/` are the one exception.
 2. **Interface-level boundary**: public docs may reference contracts in `@tsp/contracts`
    (`Platform`, `BffContract`, service contracts, and extension ports) and public model slugs
    (`gpt-5.x`), never internal service names, internal frameworks, internal package scopes, or
@@ -84,6 +84,9 @@ Sprint follows [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MINOR.PA
 - [`specs/2026-11-12-ui-motion-and-design-system-audit.md`](specs/2026-11-12-ui-motion-and-design-system-audit.md):
   **UI motion and design system spec**: frontend motion, the async pending/feedback bug audit,
   and the Unified UI design-system refinement proposal.
+- [`specs/2026-11-14-v1.1.0-creator-languages-problem-reports-spec.md`](specs/2026-11-14-v1.1.0-creator-languages-problem-reports-spec.md):
+  **Sprint `v1.1.0`**: who created each project, rename in Project Settings, English and Chinese
+  with a switch under the avatar, and problem reports any helper can file as a ticket.
 
 ## Keeping the portfolio in shape
 

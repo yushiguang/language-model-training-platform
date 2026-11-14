@@ -45,6 +45,7 @@ export const {
   approveNode,
   tick,
   deleteProject,
+  renameProject,
   saveSettings,
   getSamplePoolSize,
   exampleMedia,

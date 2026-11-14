@@ -8,14 +8,17 @@ import type {
   AgentWorkspaceSnapshot,
   ChatAttachment,
   ChatMessage,
+  ClientDiagnostics,
+  Locale,
   PageContext,
   StartRequest,
   StructuredPrompt,
 } from '@tsp/contracts';
-import {agentName, answersForHelpers, fieldsRight, newId, promptKeys, readStructured, rewordOnly, settingsHash, structuredEquals, tidyStructured, versionLabel, visibleToAgents, wrongExamples, toMap} from '@tsp/domain';
+import {agentName, answersForHelpers, fieldsRight, newId, promptKeys, readStructured, rewordOnly, settingsHash, structuredEquals, tidyStructured, versionLabel, visibleToAgents, wrongExamples, toMap, msg} from '@tsp/domain';
 import {loadProjectState} from './projects.ts';
 import {emitChange, getApp, now, tm} from './app.ts';
-import {postEvent} from './chat-events.ts';
+import {joinedMsg, postEvent} from './chat-events.ts';
+import {beginTurn, endTurn} from './problems.ts';
 import {agentTools, getPageView} from './page-views.ts';
 import {scoreOnOptimiserHalf} from './evaluation.ts';
 import {labelComments, withComments} from './mismatches.ts';
@@ -142,6 +145,8 @@ export async function sendUserMessage(
   attachments?: ChatAttachment[],
   /** A helper the user called by a button: it joins with a line and keeps answering on this page. */
   join?: boolean,
+  /** The user's language and what their browser saw (spec 1.1.0): for this turn only, never saved. */
+  extra: {locale?: Locale; client?: ClientDiagnostics} = {},
 ): Promise<AgentProposal | null> {
   busyProjects.add(projectId);
   const started = Date.now();
@@ -150,7 +155,7 @@ export async function sendUserMessage(
   const stay = stays.get(projectId);
   if (stay && stay.page !== pageKey(page)) {
     stays.delete(projectId);
-    if (stay.agent !== page.agent) await postEvent(projectId, 'page', page.agent, `answers on ${pageName(page)}`);
+    if (stay.agent !== page.agent) await postEvent(projectId, 'page', page.agent, msg('answers on {page}', {page: pageName(page)}));
   }
   if (join) stays.delete(projectId);
   const turnPage: PageContext = stays.has(projectId) ? {...page, agent: stays.get(projectId)!.agent, intent: 'follow_up'} : page;
@@ -166,7 +171,7 @@ export async function sendUserMessage(
     page: page.label,
     ...(cleanAttachments?.length ? {attachments: cleanAttachments} : {}),
   });
-  if (join) await post(projectId, {role: 'event', agent: null, event: 'join', text: `${agentName(page.agent)} joined to answer`, page: page.label});
+  if (join) await post(projectId, {role: 'event', agent: null, event: 'join', text: `${agentName(page.agent)} joined to answer`, msg: joinedMsg(page.agent), page: page.label});
 
   try {
     const {catalog, agents, gateway} = getApp();
@@ -178,15 +183,20 @@ export async function sendUserMessage(
       if ('message' in p) {
         const msg = p.message;
         saving = saving.then(() =>
-          post(projectId, {role: msg.role, agent: msg.agent, text: msg.text, page: page.label, ...(msg.event ? {event: msg.event} : {}), ...(msg.choices ? {choices: msg.choices} : {})}).then(() => undefined),
+          post(projectId, {role: msg.role, agent: msg.agent, text: msg.text, page: page.label, ...(msg.event ? {event: msg.event} : {}), ...(msg.msg ? {msg: msg.msg} : {}), ...(msg.choices ? {choices: msg.choices} : {})}).then(() => undefined),
         );
         setLive(projectId, msg.role === 'agent' ? null : {agent: agentLive(projectId)?.agent ?? entry, working: 'Thinking…', reply: null});
-      } else if ('working' in p) setLive(projectId, {agent: p.agent, working: p.working, reply: null});
+      } else if ('working' in p) setLive(projectId, {agent: p.agent, working: p.working, msg: p.msg ?? null, reply: null});
       else setLive(projectId, {agent: p.agent, working: null, reply: p.reply});
     };
     const turnId = newId('turn');
     turnProgress.set(turnId, progress);
-    const turnOut = await agents.runTurn({userText: text, page: turnPage, attachments, workspace, turnId}).finally(() => turnProgress.delete(turnId));
+    const locale = extra.locale ?? 'en';
+    beginTurn(projectId, {page: turnPage, locale, client: extra.client ?? null});
+    const turnOut = await agents.runTurn({userText: text, page: turnPage, attachments, workspace, turnId, locale}).finally(() => {
+      turnProgress.delete(turnId);
+      endTurn(projectId);
+    });
     await saving;
     outcome = 'ok';
     recordTurn(turnOut, entry, started);
@@ -229,7 +239,7 @@ export async function sendUserMessage(
         createdAt: now(),
       };
       await catalog.insert('agent_proposals', proposal);
-      await postEvent(projectId, 'draft', proposal.agent, `put a draft on ${newest ? 'Edit prompt' : 'Prompt Design'}`, draftLink(page, newest?.id ?? null, baseVersionId));
+      await postEvent(projectId, 'draft', proposal.agent, msg('put a draft on {page}', {page: newest ? 'Edit prompt' : 'Prompt Design'}), draftLink(page, newest?.id ?? null, baseVersionId));
       emitChange();
       return proposal;
     }
@@ -289,7 +299,7 @@ export async function closeProposal(p: AgentProposal, state: 'approved' | 'disca
   const fresh = await getApp().catalog.get('agent_proposals', p.id);
   if (fresh && fresh.state !== 'open') return;
   await getApp().catalog.patch('agent_proposals', p.id, {state});
-  if (state === 'discarded') await postEvent(p.projectId, 'discarded', 'user', 'discarded the draft');
+  if (state === 'discarded') await postEvent(p.projectId, 'discarded', 'user', msg('discarded the draft'));
   tm().counter('tsp_agent_proposals_total', {agent: p.agent, kind: 'prompt', outcome: state});
   tm().event(state === 'approved' ? 'prompt_proposal_approved' : 'prompt_proposal_discarded', state === 'approved' ? {agent: p.agent, edited_before_approve: false} : {agent: p.agent});
   emitChange();
@@ -321,8 +331,8 @@ export async function improveWithAi(projectId: string, versionId: string): Promi
   const said = answersForHelpers(half.filter(e => answers.has(e.id)).map(e => answers.get(e.id)!));
   const examples = withComments(wrongExamples(schema, half, promptKeys(v), gold, said.predicted, undefined, said.notes), half, await labelComments(projectId, state));
   busyProjects.add(projectId);
-  setLive(projectId, {agent: 'prompt_agent', working: `Reading the ${versionLabel(v)} mistakes…`, reply: null});
-  await postEvent(projectId, 'start', 'user', `asked the Prompt helper to improve ${versionLabel(v)}`, {path: '/prompt'});
+  setLive(projectId, {agent: 'prompt_agent', working: `Reading the ${versionLabel(v)} mistakes…`, msg: msg('Reading the {version} mistakes…', {version: versionLabel(v)}), reply: null});
+  await postEvent(projectId, 'start', 'user', msg('asked the Prompt helper to improve {version}', {version: versionLabel(v)}), {path: '/prompt'});
   let outcome = 'error';
   try {
     const m = await scoreOnOptimiserHalf(setup, v, report.endpoint, state.examples, state.gold);
@@ -346,7 +356,7 @@ export async function improveWithAi(projectId: string, versionId: string): Promi
     const n = out.changes.length;
     const text = n ? `I made ${n} change${n === 1 ? '' : 's'} to ${versionLabel(v)}. Hover each mark to see why.` : `I have no new change for ${versionLabel(v)}.`;
     await post(projectId, {role: 'agent', agent: 'prompt_agent', text, page: 'Edit prompt'});
-    await postEvent(projectId, 'draft', 'prompt_agent', 'put a draft on Edit prompt', {path: '/prompt/edit', params: {v: v.id}});
+    await postEvent(projectId, 'draft', 'prompt_agent', msg('put a draft on {page}', {page: 'Edit prompt'}), {path: '/prompt/edit', params: {v: v.id}});
     tm().counter('tsp_agent_proposals_total', {agent: 'prompt_agent', kind: 'prompt', outcome: 'shown'});
     tm().event('prompt_proposal_shown', {agent: 'prompt_agent', unmapped: 0});
     outcome = 'ok';
