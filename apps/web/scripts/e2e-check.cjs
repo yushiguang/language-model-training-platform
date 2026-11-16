@@ -119,6 +119,13 @@ let current = null;
   await button(page, 'Create project').click();
   await page.waitForURL(/prompt-design/);
   const pid = new URL(page.url()).searchParams.get('p');
+  // 2026-11-16 refinements: a new project ticks no feature, and the parts come in authoring order.
+  await page.locator('section[aria-label="Input Features"]').waitFor({timeout: 10000});
+  const ticked = await page.locator('section[aria-label="Input Features"] [role="checkbox"][aria-checked="true"]').count();
+  if (ticked) throw new Error(`a new project starts with ${ticked} features ticked`);
+  const order = await page.locator('main section[aria-label]').evaluateAll(els => els.map(e => e.getAttribute('aria-label')).filter(l => ['Persona & Task', 'Input Features', 'Output Labels & Definitions', 'Rule Groups'].includes(l)));
+  if (order.join(' > ') !== 'Persona & Task > Input Features > Output Labels & Definitions > Rule Groups') throw new Error(`the prompt parts are in the wrong order: ${order.join(' > ')}`);
+  await shot(page, '1a-prompt-design-start');
   const url = p => `${BASE}${p}?p=${pid}`;
   const approveBtn = page.locator('main').getByRole('button', {name: 'Approve', exact: true});
 
@@ -166,7 +173,8 @@ let current = null;
   await button(page, 'View full prompt').click();
   const full = page.getByRole('dialog');
   const fullText = await full.locator('pre').innerText();
-  if (!fullText.includes('{{Description}}') || !fullText.includes('Return JSON only') || !fullText.includes('primary_value')) throw new Error('the full prompt is not compiled from the parts');
+  if (!fullText.includes('{{Description}}') || !fullText.includes('Return one JSON object only') || !fullText.includes('<field name="primary_value" selection="single">')) throw new Error('the full prompt is not compiled from the parts');
+  if (!/^<persona_and_task>[\s\S]*<\/persona_and_task>\n\n<input_features>[\s\S]*<output_labels>[\s\S]*<output_format>[\s\S]*<\/output_format>$/.test(fullText)) throw new Error('the full prompt is not in XML sections');
   await shot(page, '1c-full-prompt');
   await button(full, 'Copy prompt').click();
   await button(full, 'Close').click();
@@ -248,12 +256,29 @@ let current = null;
   if ((await f1.inputValue()) !== '0.80' || !(await f1.isDisabled())) throw new Error('Default does not show Macro-F1 0.80 locked');
   if ((await set.getByLabel('Value F1 threshold').inputValue()) !== '–') throw new Error('Default does not show Value F1 as off');
   if ((await set.getByLabel('Invalid outputs limit').inputValue()) !== '≤ 1%') throw new Error('Invalid outputs is not shown as locked at 1%');
+  // 2026-11-16 refinements, 3: no intro line, no model description, no native select; Default/Custom sits by the Evaluation heading.
+  if (await set.getByText(/Check these once before the first scoring run/).count()) throw new Error('Project Settings still has its intro line');
+  if (await set.locator('select').count()) throw new Error('Project Settings still uses a native select');
+  if (!(await set.locator('.set-sec-h').filter({hasText: 'Evaluation'}).getByRole('group', {name: 'Pass rule'}).count())) throw new Error('the Default/Custom switch is not beside the Evaluation heading');
+  if ((await set.locator('section.set-sec').count()) !== 3) throw new Error('Project Settings does not have three sections');
   if (!(await set.getByText('Per field. Every value counts the same, so rare values matter.').count())) throw new Error('a check has no plain subtitle');
   if (await set.locator('.hov').count()) throw new Error('Project Settings still uses hover text');
   await shot(page, '3b-project-settings');
-  await set.getByRole('radio', {name: /^Custom/}).click();
+  const passRule = set.getByRole('group', {name: 'Pass rule'});
+  await passRule.getByRole('button', {name: 'Custom', exact: true}).click();
   if (await f1.isDisabled()) throw new Error('Custom does not unlock the thresholds');
-  await set.getByRole('radio', {name: /^Default/}).click();
+  await shot(page, '3c-project-settings-custom');
+  // The model list is the site's own: it opens under the button, the arrows move, Escape closes it and not the dialog.
+  await set.locator('.select-btn').click();
+  const listbox = page.getByRole('listbox');
+  await listbox.waitFor({timeout: 5000});
+  if (!(await listbox.getByRole('option').count())) throw new Error('the model list has no options');
+  await shot(page, '3d-model-list');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Escape');
+  await listbox.waitFor({state: 'detached', timeout: 5000});
+  if (!(await set.isVisible())) throw new Error('Escape in the model list closed Project Settings');
+  await passRule.getByRole('button', {name: 'Default', exact: true}).click();
   await button(set, 'Confirm').click();
   await page.waitForURL(/\/prompt\/?\?/);
   await page.locator('nav.vlist').waitFor();
@@ -334,6 +359,9 @@ let current = null;
     await page.getByText('Draft from Prompt helper', {exact: true}).waitFor({timeout: 20000});
     await page.locator('.sp-marks ins').first().waitFor({timeout: 10000});
     log('improve with AI:', await page.locator('.sp-marks ins').count(), 'changes marked');
+    await page.waitForTimeout(400);
+    const cut = await page.locator('textarea.grow-box').evaluateAll(els => els.filter(el => el.scrollHeight > el.clientHeight + 2).length);
+    if (cut) throw new Error(`${cut} text boxes are clipped in the helper's draft`);
     // Each change carries its reason
     const why = page.locator('.sp-marks ins.why').first();
     if (!(await why.count())) throw new Error('the helper draft has no change with a reason');
@@ -428,7 +456,7 @@ let current = null;
   // The prompt editor for a version: the same three parts, with word marks against the saved text
   await page.locator('main').getByRole('link', {name: 'Edit prompt', exact: true}).click();
   await page.waitForURL(/prompt\/edit/);
-  await page.getByLabel('Task summary').waitFor();
+  await page.getByLabel('Persona and task').waitFor();
   log('opened version marks:', await page.locator('.sp-marks').count(), (await page.locator('.ph-actions .badge').allInnerTexts()).join(', ') || '(no badge)');
   await shot(page, '6-prompt-edit');
   // Your own edits: new wording is marked, and it does not touch gold labels
@@ -547,6 +575,12 @@ let current = null;
   const avatar = zp.locator('button.avatar-btn');
   await avatar.click();
   await zp.getByRole('menu').waitFor();
+  // The avatar shows the user's initial at once (the identity is read once and kept), in bold.
+  const initial = await avatar.innerText();
+  const weight = await avatar.evaluate(el => getComputedStyle(el).fontWeight);
+  if (!initial.trim() || +weight < 700) throw new Error(`the avatar is "${initial}" at weight ${weight}`);
+  // The stand-in identity cannot end a session, so there is no Sign out.
+  if (await zp.getByRole('menuitem', {name: 'Sign out'}).count()) throw new Error('Sign out shows although the platform cannot sign out');
   await shot(zp, '9-avatar-menu');
   await zp.getByRole('menuitemradio').nth(1).click();
   await zp.waitForFunction(() => document.documentElement.lang === 'zh-CN');

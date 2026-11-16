@@ -59,7 +59,9 @@ what comes next ("v1 is saved. Next, click ..."). When the user pastes an existi
 `import_prompt`), the helper sorts it into the parts and returns every passage that has no place,
 word for word, as `unmapped`; the page lists them under "Not carried over". Improve with AI and the
 Optimiser may change wording only: the runtime keeps the field and value names of the version they
-started from (`rewordOnly`), and a rule for one field goes into that field's tie-break rules.
+started from (`rewordOnly`). Rules go into the user's rule groups, which keep their ids and titles;
+a rule about one field goes into the group for it ("<field> rules"), made when there is none. An
+import keeps each rules section of the pasted prompt as its own group, under its heading.
 
 **Images.** Wrong examples (`ExampleBrief.images`, up to 2 per example from the image features)
 go to the helpers as image content parts after the text, for Improve with AI and the Optimiser. A relative sample URL is not resolved for the model; the stand-in data uses them,

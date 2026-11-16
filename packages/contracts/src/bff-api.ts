@@ -58,6 +58,8 @@ export interface RuntimeInfo {
   standIns: string[];
   endpoints: EndpointInfo[];
   hasBundledGold: boolean;
+  /** True when the platform can end the session: the avatar menu shows Sign out. */
+  canSignOut?: boolean;
 }
 
 /** Paid or mutating starts take an optional key: the same key never starts the same work twice. */
@@ -196,6 +198,8 @@ export interface SendMessageRequest {
 
 export interface BffContract {
   getRuntimeInfo(): Promise<RuntimeInfo>;
+  /** Ends the session; refused when the platform has no sign-out. */
+  signOut(): Promise<void>;
 
   // Projects & workflow gates
   listProjects(): Promise<Project[]>;

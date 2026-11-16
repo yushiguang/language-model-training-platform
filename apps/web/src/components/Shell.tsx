@@ -6,7 +6,8 @@ import {createContext, Suspense, useCallback, useContext, useEffect, useMemo, us
 import {createPortal} from 'react-dom';
 import {LOCALES, NODES} from '@tsp/domain';
 import type {NodeId, PageContext} from '@tsp/contracts';
-import {getRuntimeInfo, type ProjectState} from '@/backend-api';
+import {signOut, type ProjectState} from '@/backend-api';
+import {SignedIn, useRuntime} from './session';
 import {ActionErrorBanner, Button, clearActionError, Icon} from '@/ui';
 import {t, useLocale} from '@/i18n';
 import {AskAi} from './AskAi';
@@ -68,11 +69,13 @@ const PageCtx = createContext<PageContext>({
  */
 export function ProjectShell({children}: {children: ReactNode}) {
   return (
-    <Suspense fallback={<Loading />}>
-      <ProjectProvider>
-        <ShellInner>{children}</ShellInner>
-      </ProjectProvider>
-    </Suspense>
+    <SignedIn>
+      <Suspense fallback={<Loading />}>
+        <ProjectProvider>
+          <ShellInner>{children}</ShellInner>
+        </ProjectProvider>
+      </Suspense>
+    </SignedIn>
   );
 }
 
@@ -229,17 +232,9 @@ function TopNav({state, current}: {state: ProjectState; current: NodeId}) {
 /** The right end of the top island: the stand-in tag (while stand-ins run), Settings inside a project, and the user's avatar. */
 export function UserEnd({settings}: {settings?: boolean}) {
   const {open} = useSettings();
-  const [user, setUser] = useState('');
-  const [standIns, setStandIns] = useState<string[]>([]);
-  const loaded = useRef(false);
-  useEffect(() => {
-    if (loaded.current) return;
-    loaded.current = true;
-    getRuntimeInfo().then(info => {
-      setUser(info.user.name);
-      setStandIns(info.standIns);
-    });
-  }, []);
+  const {info} = useRuntime();
+  const user = info?.user.name ?? '';
+  const standIns = info?.standIns ?? [];
   return (
     <div className="topbar-end">
       {standIns.length > 0 && (
@@ -248,13 +243,16 @@ export function UserEnd({settings}: {settings?: boolean}) {
         </span>
       )}
       {settings && <Button label={t('Settings')} kind="ghost" size="sm" icon="settings" title={t('Project Settings: the name, the pass rule and the labeling model')} onClick={open} />}
-      <UserMenu user={user} />
+      <UserMenu user={user} canSignOut={!!info?.canSignOut} />
     </div>
   );
 }
 
-/** The user's avatar: a small menu with the user's name and the language choice (spec 1.1.0, 2.2). */
-function UserMenu({user}: {user: string}) {
+/**
+ * The user's avatar: a small menu with the user's name, the language choice (spec 1.1.0, 2.2) and,
+ * when the platform can end the session, Sign out (2026-11-16 refinements, 1.2).
+ */
+function UserMenu({user, canSignOut}: {user: string; canSignOut: boolean}) {
   const {locale, setLocale} = useLocale();
   const [at, setAt] = useState<{top: number; right: number} | null>(null);
   const btn = useRef<HTMLButtonElement>(null);
@@ -308,6 +306,27 @@ function UserMenu({user}: {user: string}) {
                 {l.id === locale && <Icon name="check" />}
               </button>
             ))}
+            {canSignOut && (
+              <>
+                <div className="menu-sep" role="separator" />
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="menu-i"
+                  onClick={async () => {
+                    setAt(null);
+                    try {
+                      await signOut();
+                    } finally {
+                      window.location.reload();
+                    }
+                  }}
+                >
+                  {t('Sign out')}
+                  <Icon name="back" />
+                </button>
+              </>
+            )}
           </div>,
           document.body,
         )}

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract} from '@tsp/contracts';
+import type {AgentRuntimeContract, EndpointInfo, ExampleSource, FileStore, Identity, LabelCallResult, LlmGatewayContract} from '@tsp/contracts';
 import {createCatalog} from '@tsp/catalog';
 import {createLabeling, memoryLocks} from '@tsp/labeling';
 import {localDocRuntime} from '@tsp/platform';
@@ -8,10 +8,10 @@ import {createBffApi} from './api.ts';
 import {configureBff} from './services/app.ts';
 
 const endpoint: EndpointInfo = {id: 'A', name: 'Model A', description: '', badge: '', cost: 'Lower', speed: 'Faster', supportsTemperature: true, priceIn: 0, priceOut: 200};
-const structured = (rules = '') => ({taskSummary: 'Label this', features: {video: ['Description'], photo_text: [], metadata: []}, fields: [{name: 'format', kind: 'single' as const, values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}], generalRules: rules, images: []});
+const structured = (rules = '') => ({taskSummary: 'Label this', features: {video: ['Description'], photo_text: [], metadata: []}, fields: [{name: 'format', kind: 'single' as const, values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}], ruleGroups: rules ? [{id: 'rg1', title: 'Rules', content: rules}] : [], images: []});
 
 /** A bff with one project: a schema, 4 eval examples with gold labels, and a fake model. */
-async function world(prefix: string) {
+async function world(prefix: string, identity: Identity = {currentUser: async () => ({id: 'u_1', name: 'Tester'})}) {
   const db = localDocRuntime(prefix);
   const catalog = createCatalog(db);
   const gateway = {
@@ -21,7 +21,7 @@ async function world(prefix: string) {
     label: async (): Promise<LabelCallResult> => ({text: '{"format": "Vlog"}', inputTokens: 0, outputTokens: 150, costUsd: 0.03, endpointId: 'labeling-A', attempts: 1}),
   } as unknown as LlmGatewayContract;
   const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks()});
-  configureBff({catalog, labeling, gateway, agents: {} as AgentRuntimeContract, identity: {currentUser: async () => ({id: 'u_1', name: 'Tester'})}, files: {} as FileStore, examples: {} as ExampleSource, standIns: []});
+  configureBff({catalog, labeling, gateway, agents: {} as AgentRuntimeContract, identity, files: {} as FileStore, examples: {} as ExampleSource, standIns: []});
   const projectId = `pr_${prefix}`;
   await catalog.insert('setup_versions', {id: `sv_${prefix}`, projectId, number: 1, schemaVersion: 1, task: '', schema: {fields: [{name: 'format', kind: 'single', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}]}, thresholds: null, models: [{endpoint: 'A', maxOutputTokens: 150, temperature: null}], steps: {schema: true, evaluation: true, models: true}, createdAt: '', createdBy: ''});
   await catalog.insert('dataset_snapshots', {id: `ds_${prefix}`, projectId, number: 1, source: 'sample', sourceName: 'test', createdAt: '', counts: {rows: 4, valid: 4, invalid: 0, video: 4, photoText: 0}, split: {eval: 4, test: 0, train: 0}});
@@ -89,4 +89,17 @@ test('contract: a failed call is not kept under its idempotency key, so a retry 
   await assert.rejects(api.createVersion(req));
   const ok = await api.createVersion({...req, parentId: null, kind: 'major'});
   assert.ok(ok.id);
+});
+
+test('contract: Sign out is offered only when the platform can end the session (2026-11-16 refinements, 1.2)', async () => {
+  const none = await world('so1');
+  assert.equal((await none.api.getRuntimeInfo()).canSignOut, false);
+  await assert.rejects(none.api.signOut(), /no sign-out/);
+  let out = 0;
+  const sso = await world('so2', {currentUser: async () => ({id: 'u_1', name: 'Tester'}), signOut: async () => void out++});
+  const info = await sso.api.getRuntimeInfo();
+  assert.equal(info.canSignOut, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(info)), info, 'plain JSON');
+  await sso.api.signOut();
+  assert.equal(out, 1);
 });

@@ -3,6 +3,15 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-16 (acceptance refinements)
+
+- **No page renders before the signed-in user is known**; the identity is read once per page load and kept, so the avatar never flashes empty. Sign out shows only when the platform can end the session.
+- **A new project ticks no features.** A pre-ticked feature can break a task's own rules (for example a cover-only check that forbids on-screen text); the user or the Prompt helper ticks them.
+- **The prompt reads in authoring order**: Persona & Task, Input Features, Output Labels & Definitions, Rule Groups.
+- **Rules live in groups the user names**, replacing the per-field tie-break box and the one general-rules box, because real prompts organise their rules by topic, with paragraphs and nested bullets. An import keeps each rules section as its own group.
+- **The compiled prompt uses XML-style sections**, for clear boundaries and so that item text cannot pass for an instruction.
+- **Project Settings is three sections set apart by a line**; Default/Custom is a switch beside the Evaluation heading; no intro line and no model description; the Model list is the site's own dropdown.
+
 ## 2026-11-14 (1.1.0: creator, languages, problem reports)
 
 - **The Projects list shows who created each project**, nothing more until tenants arrive; the id is stored too, for ownership checks later.

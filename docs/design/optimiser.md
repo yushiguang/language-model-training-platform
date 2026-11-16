@@ -56,7 +56,7 @@ improves the prompt on the project's one labeling model, for up to the user's Ma
   of the version's own major; Save as vN makes the next major, written without ".0"
   (2026-11-10). The catalog assigns every number.
 - **Change marks.** The editor compares each part of the structured prompt (task summary, each
-  definition, each field's tie-break rules, general rules) word by word with the version it came
+  definition, each rule group's title and rules) word by word with the version it came
   from (`diffWords` in `packages/domain/src/template.ts`). A changed box shows a strip under it
   with added words in green and removed words struck through; a helper's or a round's reason sits
   on the mark as its hover text.
@@ -114,7 +114,7 @@ never saves itself. A saved draft is the user's own version and is scored like a
 ## Still to come in 1.0.0
 
 Built in phases 1 and 2: the loop lives in `apps/optimiser` behind `OptimiserContract`; changes
-edit the structured prompt (definitions, tie-break rules, general rules) and never the label
+edit the structured prompt (definitions and rule groups) and never the label
 fields or values; a run no longer starts a training set after a pass; the thresholds are in
 `SystemConfig`. Phase 3 ([spec](../specs/2026-11-12-v1.0.0-workflow-and-ddd-spec.md), section 5, built
 2026-11-14): people's comments on optimiser-half examples (`ExampleBrief.comments`) replace the

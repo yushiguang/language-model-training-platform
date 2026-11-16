@@ -346,7 +346,10 @@ export interface AgentModel {
 // Identity: who is using the page (identification only, not access control).
 
 export interface Identity {
+  /** The signed-in user. Rejects when nobody is signed in. */
   currentUser(): Promise<{id: string; name: string; email?: string; organization?: string}>;
+  /** Ends the session (the hosting platform's single sign-on). Absent: the site offers no Sign out. */
+  signOut?(): Promise<void>;
 }
 
 // ---------------------------------------------------------------------------------------------

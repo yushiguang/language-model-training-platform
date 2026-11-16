@@ -38,6 +38,7 @@ export const client: BffClient = inProcessClient;
 
 export const {
   getRuntimeInfo,
+  signOut,
   listProjects,
   createProject,
   getProject,

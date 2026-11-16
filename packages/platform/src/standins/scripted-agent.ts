@@ -6,8 +6,8 @@ import {
   type LlmStreamChunk,
   type ModelMessage,
 } from '@tsp/contracts';
-import {SAMPLE_STRUCTURED, addFieldRule, hasRule, ruleFor, schemaOf} from '@tsp/domain';
-import type {MixUp, StructuredFieldPrompt, StructuredPrompt} from '@tsp/contracts';
+import {SAMPLE_STRUCTURED, addFieldRule, hasRule, nextRuleGroupId, ruleFor, schemaOf} from '@tsp/domain';
+import type {MixUp, RuleGroup, StructuredFieldPrompt, StructuredPrompt} from '@tsp/contracts';
 
 /**
  * Stand-in agent model. It answers each agent request with fixed, sensible JSON so the whole
@@ -95,21 +95,27 @@ const looksLikePrompt = (t: string) => t.trim().split('\n').filter(l => l.trim()
 
 /**
  * Sorts a raw prompt into the structured parts, by its layout: the text before the first heading
- * is the task; a heading followed by "- Value: definition" lines is a field; other lines under a
- * field are its rules; a "Rules" section is the general rules. Everything else (examples, output
- * format, a field with fewer than two values) is returned in `unmapped`, word for word.
+ * is the task; a heading followed by "- Value: definition" lines is a field, and other lines under
+ * it go to a "<field> rules" group; a heading with rules under it (or with no values) becomes a
+ * rule group of that title. Everything else (examples, output format, a field with only one value)
+ * is returned in `unmapped`, word for word.
  */
 export function parseRawPrompt(raw: string, base: StructuredPrompt): {structured: StructuredPrompt | null; unmapped: string[]} {
   const unmapped: string[] = [];
   const task: string[] = [];
-  const rules: string[] = [];
+  const groups: RuleGroup[] = [];
   const fields: StructuredFieldPrompt[] = [];
-  type Section = {kind: 'task'} | {kind: 'rules'} | {kind: 'skip'; lines: string[]} | {kind: 'field'; field: StructuredFieldPrompt; heading: string; extra: string[]};
+  const group = (title: string, lines: string[]) => lines.length && groups.push({id: `rg${groups.length + 1}`, title, content: lines.join('\n')});
+  type Section = {kind: 'task'} | {kind: 'rules'; title: string; lines: string[]} | {kind: 'skip'; lines: string[]} | {kind: 'field'; field: StructuredFieldPrompt; heading: string; title: string; extra: string[]};
   let sec: Section = {kind: 'task'};
   const close = () => {
     if (sec.kind === 'skip' && sec.lines.length) unmapped.push(sec.lines.join('\n'));
+    if (sec.kind === 'rules') group(sec.title, sec.lines);
     if (sec.kind === 'field') {
-      if (sec.field.values.length >= 2) fields.push({...sec.field, ...(sec.extra.length ? {note: sec.extra.join('\n')} : {})});
+      if (sec.field.values.length >= 2) {
+        fields.push(sec.field);
+        group(`${sec.field.name} rules`, sec.extra);
+      } else if (!sec.field.values.length && sec.extra.length) group(sec.title, sec.extra);
       else unmapped.push([sec.heading, ...sec.field.values.map(v => `- ${v.name}: ${v.definition}`), ...sec.extra].join('\n'));
     }
   };
@@ -121,17 +127,17 @@ export function parseRawPrompt(raw: string, base: StructuredPrompt): {structured
       close();
       const title = h[1].trim();
       if (/^(examples?|few[- ]shot|output|format|response|input|inputs)\b/i.test(title)) sec = {kind: 'skip', lines: [line]};
-      else if (/^(general |other |fallback )?(rules?|guidelines|notes?)\b/i.test(title)) sec = {kind: 'rules'};
+      else if (/\b(rules?|guidelines|notes?|principles?|priority|handling|policy|policies)\b/i.test(title)) sec = {kind: 'rules', title, lines: []};
       else if (/^(task|role|goal|context|background)\b/i.test(title)) sec = {kind: 'task'};
       else {
         const multi = /\b(multi|choose up to|one or more|all that apply)\b/i.test(title);
         const name = title.replace(/\s*\(.*\)\s*$/, '').trim().toLowerCase().replace(/[^\w]+/g, '_').replace(/^_|_$/g, '');
-        sec = {kind: 'field', heading: line, extra: [], field: {name, kind: multi ? 'multi' : 'single', ...(multi ? {min: 1, max: 3} : {}), values: []}};
+        sec = {kind: 'field', heading: line, title, extra: [], field: {name, kind: multi ? 'multi' : 'single', ...(multi ? {min: 1, max: 3} : {}), values: []}};
       }
       continue;
     }
     if (sec.kind === 'skip') sec.lines.push(line);
-    else if (sec.kind === 'rules') rules.push(line.replace(/^[-*]\s*/, ''));
+    else if (sec.kind === 'rules') sec.lines.push(line);
     else if (sec.kind === 'task') {
       if (/\b(return|respond|output)\b.*\bjson\b/i.test(line)) unmapped.push(line);
       else task.push(line);
@@ -139,13 +145,13 @@ export function parseRawPrompt(raw: string, base: StructuredPrompt): {structured
       const v = line.match(/^[-*]\s*["\u201c]?([^:"\u201d]{1,40})["\u201d]?\s*[:\uff1a]\s*(.+)$/);
       if (v) sec.field.values.push({name: v[1].trim(), definition: v[2].trim()});
       else if (/\b(return|respond|output)\b.*\bjson\b/i.test(line)) unmapped.push(line);
-      else sec.extra.push(line.replace(/^[-*]\s*/, ''));
+      else sec.extra.push(line);
     }
   }
   close();
   if (!fields.length) return {structured: null, unmapped};
   for (const f of fields) if (f.kind === 'multi') f.max = Math.min(f.max ?? 3, f.values.length);
-  return {structured: {taskSummary: task.join(' '), features: base.features, fields, generalRules: rules.join('\n'), images: base.images}, unmapped};
+  return {structured: {taskSummary: task.join(' '), features: base.features, fields, ruleGroups: groups, images: base.images}, unmapped};
 }
 
 function importPrompt(r: Req) {
@@ -250,10 +256,14 @@ function merge(r: Req) {
   let prompt = r.context.prompt as StructuredPrompt;
   if (!other) return reflect(r);
   let added = 0;
-  for (const f of other.fields) {
-    for (const line of (f.note ?? '').split('\n').map(l => l.trim()).filter(Boolean)) {
+  for (const g of other.ruleGroups) {
+    for (const line of g.content.split('\n').map(l => l.trim()).filter(Boolean)) {
       if (hasRule(prompt, line)) continue;
-      prompt = addFieldRule(prompt, f.name, line);
+      const at = prompt.ruleGroups.findIndex(x => x.title.trim().toLowerCase() === g.title.trim().toLowerCase());
+      prompt =
+        at < 0
+          ? {...prompt, ruleGroups: [...prompt.ruleGroups, {id: nextRuleGroupId(prompt.ruleGroups), title: g.title, content: line}]}
+          : {...prompt, ruleGroups: prompt.ruleGroups.map((x, i) => (i === at ? {...x, content: `${x.content.trim()}\n${line}`.trim()} : x))};
       added++;
     }
   }

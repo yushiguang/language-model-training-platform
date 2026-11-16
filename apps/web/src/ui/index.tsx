@@ -7,7 +7,7 @@
  */
 import Link, {useLinkStatus} from 'next/link';
 import {createPortal} from 'react-dom';
-import {createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode} from 'react';
+import {createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode} from 'react';
 import {systemConfig} from '@tsp/domain';
 import {t} from '@/i18n';
 
@@ -124,6 +124,7 @@ const PATHS: Record<string, ReactNode> = {
     </>
   ),
   chev: <path d="m6 9 6 6 6-6" />,
+  'chev-up': <path d="m18 15-6-6-6 6" />,
   ring: <path d="M21 12a9 9 0 1 1-6.219-8.56" />,
   alert: (
     <>
@@ -526,21 +527,110 @@ export function Field({label, children, width, off}: {label: ReactNode; children
   );
 }
 
+/**
+ * A dropdown drawn like the rest of the site (2026-11-16 refinements, 3.5): a button that opens a
+ * rounded list under it, never the browser's own menu. Keyboard: Enter, Space or the arrows open
+ * it; the arrows, Home and End move; Enter or Space picks; Escape or Tab closes.
+ */
 export function Select<T extends string>({label, options, value, onChange, disabled}: {label: string; options: {value: T; label: string}[]; value: T; onChange: (v: T) => void; disabled?: boolean}) {
+  const [at, setAt] = useState<{top: number; left: number; width: number} | null>(null);
+  const [active, setActive] = useState(0);
+  const btn = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const id = useRef(`sel-${Math.random().toString(36).slice(2, 8)}`).current;
+  const current = options.find(o => o.value === value);
+  const close = (focus = true) => {
+    setAt(null);
+    if (focus) btn.current?.focus();
+  };
+  const open = () => {
+    const r = btn.current?.getBoundingClientRect();
+    if (!r || disabled) return;
+    setActive(Math.max(0, options.findIndex(o => o.value === value)));
+    setAt({top: r.bottom + 4, left: r.left, width: r.width});
+  };
+  const pick = (i: number) => {
+    const o = options[i];
+    if (o && o.value !== value) onChange(o.value);
+    close();
+  };
+  useEffect(() => {
+    if (!at) return;
+    list.current?.focus();
+    const away = (e: MouseEvent) => !list.current?.contains(e.target as Node) && !btn.current?.contains(e.target as Node) && close(false);
+    window.addEventListener('mousedown', away);
+    return () => window.removeEventListener('mousedown', away);
+  }, [at]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    list.current?.querySelector<HTMLElement>(`[data-i="${active}"]`)?.scrollIntoView({block: 'nearest'});
+  }, [active, at]);
+  const onListKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const last = options.length - 1;
+    const go = (i: number) => (e.preventDefault(), setActive(Math.min(last, Math.max(0, i))));
+    if (e.key === 'ArrowDown') go(active + 1);
+    else if (e.key === 'ArrowUp') go(active - 1);
+    else if (e.key === 'Home') go(0);
+    else if (e.key === 'End') go(last);
+    else if (e.key === 'Enter' || e.key === ' ') (e.preventDefault(), pick(active));
+    else if (e.key === 'Escape') (e.preventDefault(), e.stopPropagation(), close());
+    else if (e.key === 'Tab') close(false);
+  };
   return (
-    <label className="field">
-      <span className="field-l">{label}</span>
+    <div className="field">
+      <span className="field-l" id={`${id}-l`}>
+        {label}
+      </span>
       <span className="select">
-        <select aria-label={label} value={value} disabled={disabled} onChange={e => onChange(e.target.value as T)}>
-          {options.map(o => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+        <button
+          ref={btn}
+          type="button"
+          className="input select-btn"
+          aria-haspopup="listbox"
+          aria-expanded={!!at}
+          aria-labelledby={`${id}-l ${id}-v`}
+          disabled={disabled}
+          onClick={() => (at ? close() : open())}
+          onKeyDown={e => {
+            if (!at && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) (e.preventDefault(), open());
+          }}
+        >
+          <span className="one" id={`${id}-v`}>
+            {current?.label ?? ''}
+          </span>
+        </button>
         <Icon name="chev" />
       </span>
-    </label>
+      {at &&
+        createPortal(
+          <div
+            ref={list}
+            className="k menu-pop select-pop"
+            role="listbox"
+            aria-labelledby={`${id}-l`}
+            aria-activedescendant={`${id}-o${active}`}
+            tabIndex={-1}
+            style={{top: at.top, left: at.left, minWidth: at.width}}
+            onKeyDown={onListKey}
+          >
+            {options.map((o, i) => (
+              <div
+                key={o.value}
+                id={`${id}-o${i}`}
+                data-i={i}
+                role="option"
+                aria-selected={o.value === value}
+                className={`menu-i${i === active ? ' on' : ''}`}
+                onMouseEnter={() => setActive(i)}
+                onClick={() => pick(i)}
+              >
+                <span className="one">{o.label}</span>
+                {o.value === value && <Icon name="check" />}
+              </div>
+            ))}
+          </div>,
+          document.body,
+        )}
+    </div>
   );
 }
 
@@ -810,7 +900,7 @@ export function Dialog({title, text, actions, onClose, children, width}: {title:
     const prev = document.activeElement as HTMLElement | null;
     const btns = box.current?.querySelectorAll<HTMLButtonElement>('button');
     btns?.[btns.length - 1]?.focus();
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && !e.defaultPrevented && onClose();
     window.addEventListener('keydown', key);
     return () => {
       window.removeEventListener('keydown', key);

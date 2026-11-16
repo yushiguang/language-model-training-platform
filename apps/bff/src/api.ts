@@ -52,7 +52,12 @@ export function createBffApi(): BffContract {
   return {
     async getRuntimeInfo() {
       const {identity, standIns, gateway} = getApp();
-      return {user: await identity.currentUser(), standIns, endpoints: gateway.labelingEndpoints(), hasBundledGold: dataset.hasBundledGold()};
+      return {user: await identity.currentUser(), standIns, endpoints: gateway.labelingEndpoints(), hasBundledGold: dataset.hasBundledGold(), canSignOut: typeof identity.signOut === 'function'};
+    },
+    async signOut() {
+      const {identity} = getApp();
+      if (!identity.signOut) throw new Error('This site has no sign-out.');
+      await identity.signOut();
     },
 
     listProjects: projects.listProjects,

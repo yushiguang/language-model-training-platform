@@ -9,14 +9,31 @@ export function ruleFor(m: MixUp, schema: Schema): string {
   return `Always include ${m.gold} when the post fits it (${def(m.gold) || m.gold}).`;
 }
 
-/** Adds a rule to a field's note (its tie-break rules), one rule per line; unknown field: the general rules. */
+/** An id no group in the list has yet ("rg1", "rg2", ...). */
+export function nextRuleGroupId(groups: {id: string}[]): string {
+  let n = groups.length + 1;
+  while (groups.some(g => g.id === `rg${n}`)) n++;
+  return `rg${n}`;
+}
+
+/** The title of the rule group that holds rules about one field. */
+export const fieldRulesTitle = (fieldName: string) => `${fieldName} rules`;
+
+/**
+ * Adds a rule, one rule per line, to the rule group for that field ("<field> rules"), made at the
+ * end when there is none; an unknown field: the "General rules" group.
+ */
 export function addFieldRule(p: StructuredPrompt, fieldName: string, rule: string): StructuredPrompt {
-  if (!p.fields.some(f => f.name === fieldName)) return {...p, generalRules: [p.generalRules.trim(), rule].filter(Boolean).join('\n')};
-  return {...p, fields: p.fields.map(f => (f.name === fieldName ? {...f, note: [f.note?.trim(), rule].filter(Boolean).join('\n')} : f))};
+  const title = p.fields.some(f => f.name === fieldName) ? fieldRulesTitle(fieldName) : 'General rules';
+  const at = p.ruleGroups.findIndex(g => g.title.trim().toLowerCase() === title.toLowerCase());
+  if (at < 0) {
+    return {...p, ruleGroups: [...p.ruleGroups, {id: nextRuleGroupId(p.ruleGroups), title, content: rule}]};
+  }
+  return {...p, ruleGroups: p.ruleGroups.map((g, i) => (i === at ? {...g, content: [g.content.trim(), rule].filter(Boolean).join('\n')} : g))};
 }
 
 /** True when the prompt already says this rule somewhere. */
-export const hasRule = (p: StructuredPrompt, rule: string) => p.generalRules.includes(rule) || p.fields.some(f => (f.note ?? '').includes(rule));
+export const hasRule = (p: StructuredPrompt, rule: string) => p.ruleGroups.some(g => g.content.includes(rule));
 
 export const SAMPLE_SCHEMA: Schema = {
   fields: [
@@ -72,6 +89,6 @@ export const SAMPLE_STRUCTURED: StructuredPrompt = {
     metadata: ['Country_Code', 'Language'],
   },
   fields: SAMPLE_SCHEMA.fields.map(f => ({...f, values: f.values.map(v => ({...v}))})),
-  generalRules: '',
+  ruleGroups: [],
   images: [],
 };

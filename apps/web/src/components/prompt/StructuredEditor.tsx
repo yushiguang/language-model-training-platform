@@ -1,19 +1,20 @@
 'use client';
 
 import {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import {compilePrompt, diffWords, FEATURES, withReasons, type MarkSeg} from '@tsp/domain';
-import type {FeatureSelection, StructuredFieldPrompt, StructuredPrompt} from '@tsp/contracts';
+import {compilePrompt, diffWords, FEATURES, matchRuleGroup, nextRuleGroupId, withReasons, type MarkSeg} from '@tsp/domain';
+import type {FeatureSelection, RuleGroup, StructuredFieldPrompt, StructuredPrompt} from '@tsp/contracts';
 import {Badge, Button, Card, Cb, Code, Dialog, Empty, Hov, Icon, Seg, Table, useCopy} from '@/ui';
 import {t} from '@/i18n';
 
 /**
  * The structured prompt editor (spec 1.0.0, 3.2 and 3.3), used on Prompt Design and in the prompt
- * editor. Three parts, top to bottom: Output Labels & Definitions (fields on the left, the picked
- * field on the right), Input Features, Task & General Rules. The text the model reads is compiled
- * from these parts, so there are no placeholders to write and no checks to fix.
+ * editor. Four parts in authoring order (2026-11-16 refinements, 2.2): Persona & Task, Input
+ * Features, Output Labels & Definitions (fields on the left, the picked field on the right), Rule
+ * Groups (named by the user). The text the model reads is compiled from these parts, so there are
+ * no placeholders to write and no checks to fix.
  *
  * With `base` (the version being edited), changed wording shows its word-level marks under the
- * box it belongs to, and features carry Added / Removed badges.
+ * box it belongs to, features carry Added / Removed badges and rule groups New / Changed.
  */
 export function StructuredEditor({
   value,
@@ -60,6 +61,16 @@ export function StructuredEditor({
 
   return (
     <div className="col sp" style={{gap: 16}}>
+      <Section title={t('Persona & Task')} hint={t('Who the model is and what it judges')} tip={t('The role the model takes, what the items are, and what the labels are for.')}>
+        <Card className="form">
+          <Block label={t('Persona and task')} value={value.taskSummary} readOnly={readOnly} placeholder={t('Who the model is, what the items are, and what the labels are for')} marks={marks(base?.taskSummary, value.taskSummary)} onChange={taskSummary => onChange({...value, taskSummary})} />
+        </Card>
+      </Section>
+
+      <Section title={t('Input Features')} hint={t('What the model reads')} tip={t('The ticked features of each example go into the prompt, in this order. An empty feature reads as none.')}>
+        <Features features={value.features} base={base?.features} onChange={readOnly ? undefined : features => onChange({...value, features})} tips={featureTips} />
+      </Section>
+
       <Section title={t('Output Labels & Definitions')} hint={t('Fields and values')} tip={t('Fields and values are what people label with, what the model must answer with, and what scores are counted on. Each definition tells the model when a value applies.')}>
         {!value.fields.length ? (
           <Card>
@@ -92,16 +103,75 @@ export function StructuredEditor({
         )}
       </Section>
 
-      <Section title={t('Input Features')} hint={t('What the model reads')} tip={t('The ticked features of each example go into the prompt, in this order. An empty feature reads as none.')}>
-        <Features features={value.features} base={base?.features} onChange={readOnly ? undefined : features => onChange({...value, features})} tips={featureTips} />
+      <Section title={t('Rule Groups')} hint={t('Rules in groups you name')} tip={t('Name a group for each kind of rule, for example label priority or input handling. Tie-breaks between values go here too. Improve with AI and the Optimiser add their rules to these groups.')}>
+        <RuleGroups groups={value.ruleGroups} base={base?.ruleGroups} readOnly={readOnly} marks={marks} onChange={ruleGroups => onChange({...value, ruleGroups})} />
       </Section>
+    </div>
+  );
+}
 
-      <Section title={t('Task & General Rules')} hint={t('The task, and rules that span fields')} tip={t('The task says what the items are and what the labels are for. General rules cover more than one field, and what to do when the evidence is thin or missing.')}>
-        <Card className="form">
-          <Block label={t('Task summary')} value={value.taskSummary} readOnly={readOnly} placeholder={t('One or two sentences: what the items are, and what the labels are for')} marks={marks(base?.taskSummary, value.taskSummary)} onChange={taskSummary => onChange({...value, taskSummary})} />
-          <Block label={t('General / fallback rules')} value={value.generalRules} readOnly={readOnly} placeholder={t('Rules that span fields, and what to choose when the evidence is thin')} marks={marks(base?.generalRules, value.generalRules)} onChange={generalRules => onChange({...value, generalRules})} />
+/** Rule Groups: one card per group (title, rules, move and remove), then Add rule group. */
+function RuleGroups({groups, base, readOnly, marks, onChange}: {groups: RuleGroup[]; base?: RuleGroup[]; readOnly?: boolean; marks: (was: string | undefined, now: string) => MarkSeg[] | undefined; onChange: (g: RuleGroup[]) => void}) {
+  const set = (i: number, g: RuleGroup) => onChange(groups.map((x, k) => (k === i ? g : x)));
+  const move = (i: number, by: number) => {
+    const next = [...groups];
+    const [g] = next.splice(i, 1);
+    next.splice(i + by, 0, g);
+    onChange(next);
+  };
+  const add = () => onChange([...groups, {id: nextRuleGroupId(groups), title: '', content: ''}]);
+  const removed = base?.filter(b => !groups.some(g => matchRuleGroup(g, [b]))) ?? [];
+  return (
+    <div className="col" style={{gap: 12}}>
+      {!groups.length && (
+        <Card>
+          <Empty title={t('No rule groups yet')} text={readOnly ? t('This prompt has no rules.') : t('Add a group for each kind of rule, or let the Prompt helper sort the rules of a prompt you paste.')}>
+            {!readOnly && <Button label={t('Add rule group')} icon="plus" onClick={add} />}
+          </Empty>
         </Card>
-      </Section>
+      )}
+      {groups.map((g, i) => {
+        const was = base ? matchRuleGroup(g, base) : undefined;
+        const tag = !base ? null : !was ? <Badge text={t('New')} tone="ok" icon={false} /> : was.title !== g.title || was.content !== g.content ? <Badge text={t('Changed')} tone="warn" icon={false} /> : null;
+        return (
+          <Card key={g.id || i} className="sp-group">
+            <section className="col" style={{gap: 8}} aria-label={g.title || t('Rule group')}>
+              <div className="row" style={{gap: 8}}>
+                <input className="input sp-group-t" value={g.title} readOnly={readOnly} placeholder={readOnly ? undefined : t('Group title, for example Label priority')} aria-label={t('Rule group title')} onChange={e => set(i, {...g, title: e.target.value})} />
+                {tag}
+                <span className="grow" />
+                {!readOnly && (
+                  <>
+                    <button type="button" className="icon-btn" aria-label={t('Move up')} title={t('Move up')} disabled={i === 0} onClick={() => move(i, -1)}>
+                      <Icon name="chev-up" />
+                    </button>
+                    <button type="button" className="icon-btn" aria-label={t('Move down')} title={t('Move down')} disabled={i === groups.length - 1} onClick={() => move(i, 1)}>
+                      <Icon name="chev" />
+                    </button>
+                    <button type="button" className="icon-btn" aria-label={t('Remove rule group')} title={t('Remove rule group')} onClick={() => onChange(groups.filter((_, k) => k !== i))}>
+                      <Icon name="x" />
+                    </button>
+                  </>
+                )}
+              </div>
+              <Marks segs={was && was.title !== g.title ? marks(was.title, g.title) : undefined} />
+              <Grow className="input" label={t('Rules')} value={g.content} readOnly={readOnly} placeholder={t('Paragraphs, or one rule per line')} onChange={content => set(i, {...g, content})} />
+              <Marks segs={base ? marks(was?.content, g.content) : undefined} />
+            </section>
+          </Card>
+        );
+      })}
+      {removed.map(g => (
+        <div key={`gone-${g.id}`} className="row sp-group-gone">
+          <Badge text={t('Removed')} tone="err" icon={false} />
+          <del className="one">{g.title || t('Rule group')}</del>
+        </div>
+      ))}
+      {!readOnly && groups.length > 0 && (
+        <div style={{margin: '-4px -12px 0'}}>
+          <Button label={t('Add rule group')} kind="ghost" icon="plus" onClick={add} />
+        </div>
+      )}
     </div>
   );
 }
@@ -133,8 +203,20 @@ export function Grow({value, onChange, readOnly, placeholder, label, className =
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${el.scrollHeight + 2}px`;
+    const fit = () => {
+      el.style.height = 'auto';
+      el.style.height = `${el.scrollHeight + 2}px`;
+    };
+    fit();
+    // The box also changes width (Ask AI opening or closing, a window resize): measure again.
+    let width = el.clientWidth;
+    const ro = new ResizeObserver(() => {
+      if (el.clientWidth === width) return;
+      width = el.clientWidth;
+      fit();
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
   }, [value]);
   return <textarea ref={ref} rows={1} className={`${className} grow-box`} value={value} readOnly={readOnly} placeholder={readOnly ? undefined : placeholder} aria-label={label} spellCheck={false} onChange={e => onChange(e.target.value)} />;
 }
@@ -186,10 +268,6 @@ function FieldEditor({
 }) {
   const multi = field.kind === 'multi';
   const setVal = (i: number, patch: Partial<{name: string; definition: string}>) => onChange({...field, values: field.values.map((v, k) => (k === i ? {...v, ...patch} : v))});
-  const setNote = (note: string) => {
-    const {note: _old, ...rest} = field;
-    onChange(note ? {...rest, note} : rest);
-  };
   return (
     <Card className="sp-field">
       <div className="row sp-field-h">
@@ -252,13 +330,6 @@ function FieldEditor({
           <Button label={t('Add value')} kind="ghost" icon="plus" onClick={() => onChange({...field, values: [...field.values, {name: '', definition: ''}]})} />
         </div>
       )}
-      <div className="field" style={{paddingTop: 8}}>
-        <span className="field-l">
-          <Hov text={t('Tie-break rules')} tip={t('Rules for this field only: which value wins when two could apply. One rule per line. Improve with AI and the Optimiser add their rules here.')} />
-        </span>
-        <Grow className="input" label={t('Tie-break rules')} value={field.note ?? ''} readOnly={readOnly} placeholder={t('Which value wins when two could apply')} onChange={setNote} />
-        <Marks segs={marks(was?.note, field.note ?? '')} />
-      </div>
     </Card>
   );
 }

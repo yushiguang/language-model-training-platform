@@ -150,10 +150,12 @@ const optPrompt: StructuredPrompt = {
   taskSummary: 'Label the post.',
   features: {video: ['Description'], photo_text: [], metadata: []},
   fields: [{name: 'format', kind: 'single', values: [{name: 'Vlog', definition: 'a day in a life'}, {name: 'Clip', definition: 'a cut from a longer video'}]}],
-  generalRules: '',
+  ruleGroups: [],
   images: [],
 };
-const withNote = (note: string): StructuredPrompt => ({...optPrompt, fields: [{...optPrompt.fields[0], note}]});
+/** All the prompt's rules as one text. */
+const rules = (p: StructuredPrompt) => p.ruleGroups.map(g => g.content).join('\n');
+const withRules = (content: string): StructuredPrompt => ({...optPrompt, ruleGroups: [{id: 'rg1', title: 'format rules', content}]});
 const mix = {field: 'format', kind: 'confused' as const, gold: 'Clip', predicted: 'Vlog', count: 5, exampleIds: []};
 
 test('the Optimiser may read feature descriptions before its change, through the tool host', async () => {
@@ -176,15 +178,16 @@ test('the Optimiser may read feature descriptions before its change, through the
     {call: async c => (asked.push(c.name), {OCR_Text: {description: 'text on screen'}})},
   );
   assert.deepEqual(asked, ['read_feature_info']);
-  assert.match(out.prompt.fields[0].note ?? '', /Before choosing Vlog/);
+  assert.match(rules(out.prompt), /Before choosing Vlog/);
+  assert.deepEqual(out.prompt.ruleGroups.map(g => g.title), ['format rules'], 'the rule goes to the group for its field');
 });
 
 test('merge keeps the rules of both versions', async () => {
   const out = await reflectPrompt(
-    {mode: 'merge', prompt: withNote('Rule A.'), triedChanges: [], mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, other: {prompt: withNote('Rule B.'), change: 'Rule B'}},
+    {mode: 'merge', prompt: withRules('Rule A.'), triedChanges: [], mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, other: {prompt: withRules('Rule B.'), change: 'Rule B'}},
     scriptedAgent(),
   );
-  assert.equal(out.prompt.fields[0].note, 'Rule A.\nRule B.');
+  assert.deepEqual(out.prompt.ruleGroups, [{id: 'rg1', title: 'format rules', content: 'Rule A.\nRule B.'}]);
 });
 
 test('a helper that renames a value or drops a field is overruled: the Optimiser changes wording only', async () => {
@@ -203,7 +206,7 @@ test('Improve with AI returns a draft with each change and its reason', async ()
   );
   assert.equal(out.changes.length, 1);
   assert.equal(out.changes[0].reason, '5 Clip examples were read as Vlog');
-  assert.ok(out.prompt.fields[0].note!.includes(out.changes[0].text));
+  assert.ok(rules(out.prompt).includes(out.changes[0].text));
 });
 
 test('a question on a page gets an answer and never a draft (R3-10)', async () => {
@@ -215,10 +218,10 @@ test('a question on a page gets an answer and never a draft (R3-10)', async () =
   const vague = await ask('improve it', 'revise_prompt');
   assert.equal(vague.proposal, null);
   assert.ok(vague.messages.some(m => m.role === 'agent' && m.text.endsWith('?')));
-  // A request still drafts: the rule lands in the note of the field it names.
+  // A request still drafts: the rule lands in the rule group of the field it names.
   const change = await ask('In format, treat cooking clips as Clip', 'revise_prompt');
   assert.equal(change.proposal?.kind, 'prompt');
-  assert.match(change.proposal!.payload.structured.fields[0].note ?? '', /cooking clips/);
+  assert.match(rules(change.proposal!.payload.structured), /cooking clips/);
 });
 
 test('importing a pasted prompt sorts it into the structured parts and lists what has no place', async () => {
@@ -243,8 +246,15 @@ test('importing a pasted prompt sorts it into the structured parts and lists wha
   assert.deepEqual(out.invocations.map(i => `${i.to}:${i.intent}`), ['front_desk:answer', 'prompt_agent:import_prompt']);
   const p = out.proposal!.payload;
   assert.equal(p.structured.taskSummary, 'You label customer messages for a support team.');
-  assert.deepEqual(p.structured.fields.map(f => [f.name, f.values.map(v => v.name), f.note]), [['intent', ['Complaint', 'Question'], 'When a message does both, choose Complaint.']]);
-  assert.equal(p.structured.generalRules, 'If the message is empty, choose Question.');
+  assert.deepEqual(p.structured.fields.map(f => [f.name, f.values.map(v => v.name)]), [['intent', ['Complaint', 'Question']]]);
+  // Each rules section keeps its heading as a rule group; rules under a label go to "<field> rules".
+  assert.deepEqual(
+    p.structured.ruleGroups.map(g => [g.title, g.content]),
+    [
+      ['intent rules', 'When a message does both, choose Complaint.'],
+      ['Rules', '- If the message is empty, choose Question.'],
+    ],
+  );
   // Examples and the output format have no slot: they are reported word for word, never dropped.
   assert.deepEqual(p.unmapped, ['## Examples\nMessage: "my order is late" -> Complaint', '## Output\nReturn JSON only.']);
   assert.match(out.messages.at(-1)!.text, /2 passages have no place/);
@@ -253,11 +263,12 @@ test('importing a pasted prompt sorts it into the structured parts and lists wha
 test('an answer with a question, or with the same prompt, proposes nothing', async () => {
   const llm = (o: object) => ({chat: async () => JSON.stringify(o)}) as unknown as Parameters<typeof runAgentTurn>[1];
   const turn = (o: object) => runAgentTurn({userText: 'x', page: {label: 'Edit prompt', agent: 'prompt_agent', intent: 'revise_prompt', context: {}}, workspace: {projectId: 'pr_1', task: '', prompt: optPrompt, history: [], pageView: null}}, llm(o));
-  const a = await turn({reply: 'Sure.', question: 'Which field?', prompt: {...optPrompt, generalRules: 'More.'}});
+  const more = {...optPrompt, ruleGroups: [{id: '', title: 'Extra', content: 'More.'}]};
+  const a = await turn({reply: 'Sure.', question: 'Which field?', prompt: more});
   assert.equal(a.proposal, null);
   assert.deepEqual(a.messages.map(m => m.text), ['Sure.\n\nWhich field?']);
   assert.equal((await turn({reply: 'It reads the description first.', prompt: optPrompt})).proposal, null);
-  assert.equal((await turn({reply: 'Done.', prompt: {...optPrompt, generalRules: 'More.'}})).proposal?.payload.structured.generalRules, 'More.');
+  assert.deepEqual((await turn({reply: 'Done.', prompt: more})).proposal?.payload.structured.ruleGroups, [{id: 'rg1', title: 'Extra', content: 'More.'}]);
 });
 
 test('the Optimiser and Improve with AI get the wrong examples', async () => {

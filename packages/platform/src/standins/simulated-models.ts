@@ -33,18 +33,18 @@ const textOf = (messages: ModelMessage[]) =>
   messages.map(m => (typeof m.content === 'string' ? m.content : m.content.map(p => (p.type === 'text' ? p.text : '')).join(''))).join('\n');
 const imageCount = (messages: ModelMessage[]) => messages.reduce((n, m) => n + (typeof m.content === 'string' ? 0 : m.content.filter(p => p.type === 'image').length), 0);
 
-/** Field names the prompt asks for, read from the output line or field headings. */
+/** Field names the prompt asks for, read from the output line or the <field> tags. */
 function fieldsAsked(text: string): string[] {
   const names = new Set<string>();
-  for (const m of text.matchAll(/###\s*\d+\.\s*([A-Za-z_][A-Za-z0-9_]*)/g)) names.add(m[1]);
+  for (const m of text.matchAll(/<field name="([A-Za-z_][A-Za-z0-9_]*)"/g)) names.add(m[1]);
   for (const m of text.matchAll(/"([a-z_][a-z0-9_]*)"\s*:/g)) if (!['summary', 'reasoning', 'reason'].includes(m[1])) names.add(m[1]);
   return [...names];
 }
 
 function valuesFor(text: string, field: string): string[] {
   if (SCHEMA_VALUES[field]) return SCHEMA_VALUES[field];
-  const sec = text.split(new RegExp(`###\\s*\\d+\\.\\s*${field}`))[1]?.split('###')[0] ?? '';
-  return [...sec.matchAll(/^\s*-\s*([^:\n]+):/gm)].map(m => m[1].trim());
+  const sec = text.split(`<field name="${field}"`)[1]?.split('</field>')[0] ?? '';
+  return [...sec.matchAll(/<label value="([^"]+)"/g)].map(m => m[1].replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
 }
 
 async function answer(req: ChatRequest): Promise<ChatResult> {
@@ -52,7 +52,7 @@ async function answer(req: ChatRequest): Promise<ChatResult> {
   const truth = (await loadSampleFile('')).labels.find(l => l.externalId === req.traceId)?.answer ?? {};
   const rules = text.split('\n').filter(l => /\b(before|unless|never|only|check|if|always|prefer|when|not)\b/i.test(l)).length;
   const base = req.endpoint === 'A' ? 0.72 : 0.66;
-  const q = Math.min(0.985, base + 0.035 * Math.max(0, rules - 2) + (text.includes('Return JSON only') ? 0.02 : 0));
+  const q = Math.min(0.985, base + 0.035 * Math.max(0, rules - 2) + (text.includes('Return one JSON object only') ? 0.02 : 0));
   const r = rng(`${req.endpoint}|${req.traceId}|${text.length}|${rules}|${req.temperature ?? 0}`);
   const out: Record<string, unknown> = text.includes('"reason" key') ? {reason: 'Based on the description and what is shown.'} : {summary: 'A short post.', reasoning: 'Based on the description and what is shown.'};
   for (const field of fieldsAsked(text)) {

@@ -25,7 +25,11 @@ content 1280 wide and centred; the main action of a page shows without scrolling
 - **Avatar menu (1.1.0).** The avatar opens a small menu: the user's name, then **Language** with
   "English" and Chinese, each written in its own language, the current one ticked. Switching
   re-renders the page in place. The choice is kept in the browser; with none kept, a browser set
-  to Chinese starts in Chinese.
+  to Chinese starts in Chinese. When the platform can end the session, **Sign out** closes the
+  menu after a line (2026-11-16). The avatar and the project logo letters are bold.
+- **Signed in first (2026-11-16).** Projects and every project page wait for the signed-in user
+  (the usual spinner), then show the name at once on every later page and language switch. When
+  nobody is signed in, the page says so with Retry instead of rendering anonymously.
 - **Projects list (1.1.0).** Columns: Project, Created by, Created, then Delete. The project is
   renamed in Project Settings (a **Name** field at the top of the dialog, prefilled), not on the
   island.
@@ -186,12 +190,12 @@ audit behind these rules is [the UI motion spec](../specs/2026-11-12-ui-motion-a
 
 | Step | Pages | Notes |
 | --- | --- | --- |
-| (Projects) | The list: Project, Created, Delete | Delete asks for the project's exact name |
-| Prompt Design | The structured prompt (Output Labels & Definitions, Input Features, Task summary, General rules), a helper's draft with Approve and Discard, "Not carried over", View full prompt | Replaces Setup's Schema settings. Everything starts in Ask AI: describe the task or paste a prompt |
+| (Projects) | The list: Project, Created by, Created, Delete | Delete asks for the project's exact name |
+| Prompt Design | The structured prompt in authoring order (Persona & Task, Input Features, Output Labels & Definitions, Rule Groups; nothing ticked on a new project), a helper's draft with Approve and Discard, "Not carried over", View full prompt | Replaces Setup's Schema settings. Everything starts in Ask AI: describe the task or paste a prompt |
 | Eval Dataset | Empty, sampling or loading, ready (Examples, Label balance, Removed) | No split: every example is used for scoring. Add from file or Add sampled at any time; Remove unlabeled, Downsample and Restore; under 20 examples a banner says scores are rough |
 | Gold Labels | Eval set (To label, Labeled), Mismatches (To review, Reviewed) | Save in Your answer on both tabs (no autosave); comments listed above "Add a comment"; Remove example on the example card; every feature row shows its whole text |
 | Prompt Tuning | Versions with scores, the fixed AI Suggestion card, the Optimiser panel; the prompt editor (same structured parts, change marks under each changed box) | Ends with Copy prompt and Finish |
-| (dialog) | Project Settings: pass rule with its checks, labeling model | Opens from Settings in the top island, and once before the first paid run. Explanations are subtitles, not hovers |
+| (dialog) | Project Settings: Name, Evaluation (Default / Custom switch beside the heading, the checks below), Labeling model, each set apart by a line | Opens from Settings in the top island, and once before the first paid run (no intro line). Explanations are subtitles, not hovers. The Model list is the site's own dropdown, not the browser's |
 
 Setup and Training Set are removed; batch labeling becomes its own project kind later.
 

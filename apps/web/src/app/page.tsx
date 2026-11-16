@@ -7,6 +7,7 @@ import type {Project} from '@tsp/contracts';
 import {hrefFor} from '@/components/ProjectContext';
 import {NODES} from '@tsp/domain';
 import {UserEnd} from '@/components/Shell';
+import {SignedIn} from '@/components/session';
 import {createProject, deleteProject, listProjects} from '@/backend-api';
 import {Banner, Button, Card, dateTime, Dialog, Field, Icon, One, PageHead, Table} from '@/ui';
 import {t} from '@/i18n';
@@ -15,12 +16,21 @@ import {t} from '@/i18n';
  * All projects (design: U-C-Projects, U-F-Projects-Loading, U-F-Projects-Error). One light call
  * lists them (spec 1.0.0, 2.4): a project opens on the step its own page works out. Delete asks
  * for the project's exact name first. The list shows who created each project (spec 1.1.0, 1.1).
+ * Nothing renders until the signed-in user is known (2026-11-16 refinements, 1.1).
  */
 /** Project, Created by, Created, Delete (the card is 706 wide). */
 const WIDTHS: (number | 'auto')[] = ['auto', 150, 150, 104];
 const cols = () => [{label: t('Project')}, {label: t('Created by')}, {label: t('Created')}, {label: '', kind: 'act' as const}];
 
 export default function Home() {
+  return (
+    <SignedIn>
+      <Projects />
+    </SignedIn>
+  );
+}
+
+function Projects() {
   const go = useGo();
   const [projects, setProjects] = useState<Project[] | null>(null);
   const [doomed, setDoomed] = useState<Project | null>(null);

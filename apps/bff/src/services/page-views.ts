@@ -1,7 +1,7 @@
 import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@tsp/contracts';
 import {agentStart, isStartTool} from './starts.ts';
 import {reportProblem} from './problems.ts';
-import {aiSuggestion, featureItems, featureText, labelBalance, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap} from '@tsp/domain';
+import {aiSuggestion, featureItems, featureText, labelBalance, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, normalizeStructured, matchRuleGroup, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap} from '@tsp/domain';
 import {getApp} from './app.ts';
 import {lockHoldout} from './governance.ts';
 import {mismatches} from './mismatches.ts';
@@ -287,12 +287,17 @@ function compareVersions(state: ProjectState, a: PromptVersion | undefined, b: P
   if (sa && sb) {
     if (sa.taskSummary !== sb.taskSummary) changed.push('task summary');
     if (JSON.stringify(sa.features) !== JSON.stringify(sb.features)) changed.push('input features');
-    if (sa.generalRules !== sb.generalRules) changed.push('general rules');
+    const ra = normalizeStructured(sa).ruleGroups;
+    for (const g of normalizeStructured(sb).ruleGroups) {
+      const was = matchRuleGroup(g, ra);
+      if (!was) changed.push(`rule group "${g.title}" (new)`);
+      else if (was.title !== g.title || was.content !== g.content) changed.push(`rule group "${g.title}"`);
+    }
+    for (const g of ra) if (!normalizeStructured(sb).ruleGroups.some(x => matchRuleGroup(x, [g]))) changed.push(`rule group "${g.title}" (removed)`);
     for (const f of sb.fields) {
       const was = sa.fields.find(x => x.name === f.name);
       if (!was) changed.push(`field ${f.name} (new)`);
       else {
-        if ((was.note ?? '') !== (f.note ?? '')) changed.push(`${f.name}: tie-break rules`);
         for (const v of f.values) {
           const old = was.values.find(x => x.name === v.name);
           if (!old || old.definition !== v.definition) changed.push(`${f.name} = ${v.name}: definition`);

@@ -49,10 +49,22 @@ export interface LabelSignature {
   fields: LabelSignatureField[];
 }
 
-/** One field of a structured prompt: the signature's field with the wording the model reads. */
-export interface StructuredFieldPrompt extends LabelField {
-  /** Optional tie-break note for the field as a whole. */
-  note?: string;
+/**
+ * One field of a structured prompt: the signature's field with the wording the model reads. The
+ * per-field note (tie-break rules) was removed on 2026-11-16: such rules go in a rule group.
+ */
+export type StructuredFieldPrompt = LabelField;
+
+/**
+ * A user-named group of rules (2026-11-16 refinements, 2.3), for example "Label priority" or
+ * "Input handling". Replaces the one fixed general-rules box and the per-field notes.
+ */
+export interface RuleGroup {
+  id: string;
+  /** The group's title, as the user named it. */
+  title: string;
+  /** Free multi-line text: paragraphs, numbered or bulleted rules. */
+  content: string;
 }
 
 /**
@@ -64,8 +76,8 @@ export interface StructuredPrompt {
   taskSummary: string;
   features: FeatureSelection;
   fields: StructuredFieldPrompt[];
-  /** Rules across fields, and what to do when the evidence is thin. */
-  generalRules: string;
+  /** The rules, in the user's own named groups, in order. Empty on a new prompt. */
+  ruleGroups: RuleGroup[];
   images: PromptImage[];
 }
 

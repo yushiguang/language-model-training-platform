@@ -80,12 +80,17 @@ per-tenant configuration, permission checks and a job queue (`RequestContext`,
 
 ## The structured prompt (1.0.0)
 
-A prompt version stores a `StructuredPrompt`: a task summary, the input features, the label fields
-(each with values, one definition per value and tie-break rules) and general rules. This is the
-only thing people and helpers edit. The text sent to the model is compiled from it by
-`compilePrompt` (`packages/domain/src/structured.ts`), which adds the feature placeholders and the
-output format; the same input always gives the same text. "View full prompt" shows that text
-read-only with a Copy button.
+A prompt version stores a `StructuredPrompt`: the persona and task (`taskSummary`), the input
+features, the label fields (each with values and one definition per value) and the rule groups
+(`ruleGroups`: a title and free-text rules each, named by the user; since 2026-11-16 they replace
+the per-field tie-break notes and the one general-rules box). This is the only thing people and
+helpers edit. The text sent to the model is compiled from it by `compilePrompt`
+(`packages/domain/src/structured.ts`) in XML-tagged sections (`<persona_and_task>`,
+`<input_features>`, `<output_labels>`, `<rules>`, `<reference_images>`, `<output_format>`), which
+give the model clear boundaries so text inside an item's features cannot pass for an instruction;
+the same input always gives the same text. "View full prompt" shows that text read-only with a
+Copy button. A new project starts with no feature ticked. A prompt saved before rule groups reads
+as one ("General rules", and "<field> rules" per old note) through `normalizeStructured`.
 
 - **Label signature.** The field names, their kinds and their value names are the label signature.
   New wording never changes it; adding, removing or renaming a field or value does. When it

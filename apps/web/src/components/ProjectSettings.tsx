@@ -5,10 +5,12 @@ import {CUSTOM_START, DEFAULT_THRESHOLDS, systemConfig} from '@tsp/domain';
 import type {Thresholds} from '@tsp/contracts';
 import {renameProject, saveSettings, type ProjectState} from '@/backend-api';
 import {t} from '@/i18n';
-import {Button, Dialog, Field, Select, Switch, Table} from '@/ui';
+import {Button, Dialog, Field, Seg, Select, Switch, Table} from '@/ui';
 
 /**
- * Project Settings (spec 1.0.0, 2.3; 1.1.0, 1.2): the project's name, the pass rule and the labeling model. They are not workflow
+ * Project Settings (spec 1.0.0, 2.3; 1.1.0, 1.2; 2026-11-16 refinements, 3): the project's name,
+ * the pass rule (Default or Custom, switched beside the Evaluation heading) and the labeling
+ * model, in three sections set apart by a line and space. They are not workflow
  * steps: a new project starts from defaults, the Settings button at the top opens this dialog at
  * any time, and it opens once by itself before the first paid run so the user confirms them.
  */
@@ -134,7 +136,6 @@ function SettingsDialog({state, first, onDone}: {state: ProjectState; first: boo
   return (
     <Dialog
       title={t('Project Settings')}
-      text={first ? t('Check these once before the first scoring run. You can change them later with Settings at the top.') : undefined}
       width={760}
       onClose={() => onDone(false)}
       actions={
@@ -144,57 +145,45 @@ function SettingsDialog({state, first, onDone}: {state: ProjectState; first: boo
         </>
       }
     >
-      <Field label={t('Name')}>
-        <input className="input" value={name} maxLength={nameMax} aria-invalid={!name.trim() || undefined} onChange={e => setName(e.target.value)} />
-      </Field>
-      <div className="col" style={{gap: 12}}>
-        <h3>{t('Evaluation')}</h3>
-        <div className="set-grid">
-          <div className="col" style={{gap: 8}}>
-            <span className="field-l">{t('Pass rule')}</span>
-            <div className="opts" role="radiogroup" aria-label={t('Pass rule')}>
-              <Rule title={t('Default')} sub={t('Every field reaches Macro-F1 {n}.', {n: DEFAULT_THRESHOLDS.macroF1.toFixed(2)})} checked={!custom} onSelect={() => setMode('default')} />
-              <Rule title={t('Custom')} sub={t('You choose the checks and their thresholds.')} checked={custom} onSelect={() => setMode('custom')} />
-            </div>
+      <div className="set-secs">
+        <section className="set-sec">
+          <h3 id="set-name">{t('Name')}</h3>
+          <input className="input" value={name} maxLength={nameMax} aria-labelledby="set-name" aria-invalid={!name.trim() || undefined} onChange={e => setName(e.target.value)} />
+        </section>
+        <section className="set-sec set-checks">
+          <div className="set-sec-h">
+            <h3 id="set-eval">{t('Evaluation')}</h3>
+            <Seg
+              label={t('Pass rule')}
+              value={mode}
+              options={[
+                {value: 'default', label: t('Default')},
+                {value: 'custom', label: t('Custom')},
+              ]}
+              onChange={setMode}
+            />
           </div>
-          <div className="col set-checks" style={{gap: 8, minWidth: 0}}>
-            <span className="field-l">{t('Checks')}</span>
-            <Table cols={[{label: t('Check')}, {label: t('On'), kind: 'c'}, {label: t('Threshold'), kind: 'c'}]} widths={['auto', 72, 112]} rows={[...CHECKS.map(row), invalid]} />
+          <Table cols={[{label: t('Check')}, {label: t('On'), kind: 'c'}, {label: t('Threshold'), kind: 'c'}]} widths={['auto', 72, 112]} rows={[...CHECKS.map(row), invalid]} />
+        </section>
+        <section className="set-sec">
+          <h3 id="set-model">{t('Labeling model')}</h3>
+          <div className="row" style={{gap: 16, alignItems: 'flex-end'}}>
+            <Select label={t('Model')} value={ep ?? ''} options={eps.map(e => ({value: e.id as string, label: e.name}))} onChange={v => setEp(v as typeof ep)} />
+            <Field label={t('Max output tokens')}>
+              <input className="input" value={tokens} onChange={e => setTokens(e.target.value.replace(/\D/g, ''))} />
+            </Field>
+            {info?.supportsTemperature ? (
+              <Field label={t('Temperature')}>
+                <input className="input" value={temp} onChange={e => setTemp(e.target.value)} />
+              </Field>
+            ) : (
+              <Field label={t('Temperature')} off>
+                <input className="input" value={t('Not supported')} readOnly disabled />
+              </Field>
+            )}
           </div>
-        </div>
-      </div>
-      <div className="col" style={{gap: 12}}>
-        <h3>{t('Labeling model')}</h3>
-        <div className="row" style={{gap: 16, alignItems: 'flex-end'}}>
-          <Select label={t('Model')} value={ep ?? ''} options={eps.map(e => ({value: e.id as string, label: e.name}))} onChange={v => setEp(v as typeof ep)} />
-          <Field label={t('Max output tokens')}>
-            <input className="input" value={tokens} onChange={e => setTokens(e.target.value.replace(/\D/g, ''))} />
-          </Field>
-          {info?.supportsTemperature ? (
-            <Field label={t('Temperature')}>
-              <input className="input" value={temp} onChange={e => setTemp(e.target.value)} />
-            </Field>
-          ) : (
-            <Field label={t('Temperature')} off>
-              <input className="input" value={t('Not supported')} readOnly disabled />
-            </Field>
-          )}
-        </div>
-        {info?.description && <span className="set-sub">{info.description}</span>}
+        </section>
       </div>
     </Dialog>
-  );
-}
-
-/** A pass rule: its name, with what it means on the line below (no hover here, by design). */
-function Rule({title, sub, checked, onSelect}: {title: string; sub: string; checked: boolean; onSelect: () => void}) {
-  return (
-    <div className="opt tall" role="radio" aria-checked={checked} tabIndex={0} onClick={onSelect} onKeyDown={e => (e.key === ' ' || e.key === 'Enter') && (e.preventDefault(), onSelect())}>
-      <span className="radio" />
-      <span>
-        <b>{title}</b>
-        <span className="set-sub">{sub}</span>
-      </span>
-    </div>
   );
 }

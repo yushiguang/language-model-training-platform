@@ -101,7 +101,6 @@ textarea.input.grow-box:not(.sm) { min-height: 36px; padding: 7px 12px; }
 .full-prompt { margin: 0; max-height: 56vh; overflow: auto; padding: 16px; border: 1px solid var(--border); border-radius: var(--r-el); background: var(--bg-muted); font-family: var(--mono); font-size: 13px; line-height: 22px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .unmapped { margin: 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-el); background: var(--bg-muted); font-family: var(--mono); font-size: 13px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* Project Settings dialog (spec 2.3): each check's meaning is a plain line under its name. */
-.set-grid { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 24px; align-items: start; }
 .set-sub { display: block; font-size: 12px; line-height: 16px; color: var(--text-3); font-weight: 400; white-space: normal; }
 .set-checks .tbl td { height: auto; padding-top: 8px; padding-bottom: 8px; }
 .opt.tall { height: auto; padding: 10px 16px; align-items: flex-start; }
@@ -177,7 +176,7 @@ textarea.input.grow-box:not(.sm) { min-height: 36px; padding: 7px 12px; }
 :root:lang(zh-CN) { --sans: Figtree, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
 
 /* The avatar menu: the user's name, then the language choice. */
-.avatar-btn { border: 0; padding: 0; cursor: pointer; font: inherit; color: inherit; }
+.avatar-btn { border: 0; padding: 0; cursor: pointer; font-family: inherit; color: inherit; } /* keeps .avatar's size and bold weight */
 .avatar-btn:focus-visible { outline: 2px solid var(--focus, #4f46e5); outline-offset: 2px; }
 .menu-pop { position: fixed; z-index: 100; min-width: 200px; padding: 6px; background: #fff; border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow-med); font-size: 14px; line-height: 20px; animation: k-fade 120ms var(--ease-out); }
 .menu-pop .menu-name { padding: 8px 10px; font-weight: 600; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
@@ -185,3 +184,22 @@ textarea.input.grow-box:not(.sm) { min-height: 36px; padding: 7px 12px; }
 .menu-pop .menu-i { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: none; font: inherit; color: var(--text); text-align: left; cursor: pointer; }
 .menu-pop .menu-i:hover, .menu-pop .menu-i:focus-visible { background: var(--bg-muted); outline: none; }
 .menu-pop .menu-i .i { width: 16px; height: 16px; }
+.menu-pop .menu-sep { height: 1px; margin: 4px 0; background: var(--border); }
+
+/* Rule Groups on Prompt Design and Edit prompt (2026-11-16 refinements, 2.3). */
+.sp-group-t { flex: 1; max-width: 480px; font-weight: 600; }
+.sp-group-gone { gap: 8px; padding: 0 4px; color: var(--text-3); font-size: 13px; }
+
+/* Select: a button and a rounded list (2026-11-16 refinements, 3.5), like the avatar menu. */
+.select-btn { display: flex; align-items: center; text-align: left; cursor: pointer; font: inherit; color: var(--text); background: #fff; }
+.select-btn:disabled { cursor: default; color: var(--text-off); background: var(--bg-muted); }
+.select-btn:focus-visible, .select-btn[aria-expanded="true"] { border-color: var(--text); outline: none; }
+.select-pop { max-height: 280px; overflow-y: auto; outline: none; }
+.select-pop .menu-i.on { background: var(--bg-muted); }
+
+/* Project Settings (2026-11-16 refinements, 3): three sections, each set off by a line and space. */
+.set-secs { display: flex; flex-direction: column; }
+.set-sec { display: flex; flex-direction: column; gap: 12px; padding: 20px 0; border-top: 1px solid var(--border); }
+.set-sec:first-child { padding-top: 4px; border-top: 0; }
+.set-sec:last-child { padding-bottom: 0; }
+.set-sec-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; }

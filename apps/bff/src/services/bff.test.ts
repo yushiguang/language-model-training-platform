@@ -19,7 +19,10 @@ const schema: Schema = {fields: [{name: 'format', kind: 'single', values: [{name
 const endpoint: EndpointInfo = {id: 'A', name: 'Model A', description: '', badge: '', cost: 'Lower', speed: 'Faster', supportsTemperature: true, priceIn: 0, priceOut: 200};
 const EVAL = 10;
 /** A structured prompt over the test labels; `rules` become its general rules. */
-const sp = (rules = ''): StructuredPrompt => ({taskSummary: 'Label this', features: {video: ['Description'], photo_text: [], metadata: []}, fields: schema.fields.map(f => ({...f, values: f.values.map(v => ({...v}))})), generalRules: rules, images: []});
+/** The prompt's rules as one text, and a prompt with one rule group holding that text. */
+const rulesOf = (p: StructuredPrompt) => p.ruleGroups.map(g => g.content).join('\n');
+const withRules = (p: StructuredPrompt, rules: string): StructuredPrompt => ({...p, ruleGroups: rules ? [{id: 'rg1', title: 'Rules', content: rules}] : []});
+const sp = (rules = ''): StructuredPrompt => ({taskSummary: 'Label this', features: {video: ['Description'], photo_text: [], metadata: []}, fields: schema.fields.map(f => ({...f, values: f.values.map(v => ({...v}))})), ruleGroups: rules ? [{id: 'rg1', title: 'Rules', content: rules}] : [], images: []});
 
 /** A bff over the real catalog and labeling apps, with a fake model that costs `perCall` per example. */
 interface WorldOpts {
@@ -198,7 +201,7 @@ test('a new project starts with default settings, unconfirmed; v1 sets the label
   assert.equal(s.setup?.schemaVersion, 1);
   assert.deepEqual(s.setup?.schema?.fields.map(f => f.name), ['format']);
   // The text the model reads is compiled from the parts: features, the field's values, the output keys.
-  assert.match(v1.template, /Description: \{\{Description\}\}[\s\S]*format[\s\S]*Vlog[\s\S]*Return JSON only/);
+  assert.match(v1.template, /<feature name="Description">\{\{Description\}\}<\/feature>[\s\S]*<field name="format"[\s\S]*Vlog[\s\S]*Return one JSON object only/);
   const chat = await w.catalog.find('chat_messages', {projectId: p.id}, 'createdAt');
   assert.match(chat.at(-1)!.text, /v1 is saved\. Next, click "Next: Eval Dataset" at the top right/);
   assert.equal(chat.at(-1)!.agent, 'prompt_agent');
@@ -297,8 +300,8 @@ const ruleAgent = (fail: {left: number} = {left: 0}): AgentRuntimeContract => ({
       fail.left--;
       throw new Error('boom');
     }
-    const k = (input.prompt.generalRules.match(/RULE/g) ?? []).length + 1;
-    return {prompt: {...input.prompt, generalRules: `${input.prompt.generalRules}\nRULE ${k}`.trim()}, change: `rule ${k}`};
+    const k = (rulesOf(input.prompt).match(/RULE/g) ?? []).length + 1;
+    return {prompt: withRules(input.prompt, `${rulesOf(input.prompt)}\nRULE ${k}`.trim()), change: `rule ${k}`};
   },
   draftImprovement: async input => ({prompt: input.prompt, changes: [], reply: ''}),
 });
@@ -328,7 +331,7 @@ test('Auto Optimise: dry run, full labeling, stops when a version passes; versio
 
 test('Auto Optimise: a change that is no better in the dry run is dropped, unlabeled; 3 in a row end the run', async () => {
   const agents = ruleAgent();
-  agents.reflectPrompt = async input => ({prompt: {...input.prompt, generalRules: `${input.prompt.generalRules}\nNOTE ${Math.random()}`.trim()}, change: 'a note'});
+  agents.reflectPrompt = async input => ({prompt: withRules(input.prompt, `${rulesOf(input.prompt)}\nNOTE ${Math.random()}`.trim()), change: 'a note'});
   const w = await world('b21', {agents, answer: ruled, macroF1: 0.99, gold: goldOf});
   await w.newVersion();
   const {startOptimiser} = await import('./work.ts');
