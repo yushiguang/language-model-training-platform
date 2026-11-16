@@ -91,6 +91,12 @@ Sprint follows [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MINOR.PA
   **Acceptance pass refinements**: auth session readiness & sign-out, bold avatar/project badges,
   empty initial features, `Prompt Design` section order (`Persona & Task` first), custom
   `RuleGroup[]` with XML compilation, and the `Project Settings` dialog redesign.
+- [`specs/2026-11-16-single-label-and-agent-alignment-spec.md`](specs/2026-11-16-single-label-and-agent-alignment-spec.md):
+  **Single-label project scope & agent alignment**: one mutually-exclusive label per project (with
+  second-review request and multi-source `LabelSource[]` batch-labeling reservation), stacked
+  vertical value cards in `Output Labels & Definitions`, custom `<Select>` on `Compare with`,
+  `Shift+Enter` chat send shortcut, and full agent routing / multi-line definition / multimodal
+  feature prompt alignment.
 
 ## Keeping the portfolio in shape
 
