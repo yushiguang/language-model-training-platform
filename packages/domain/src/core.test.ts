@@ -58,16 +58,20 @@ test('pages are found from the URL path, with or without a base path', () => {
 });
 
 test('macro-F1 and pass judgement', () => {
-  const schema: Schema = {fields: [{name: 'f', kind: 'single', values: [{name: 'a', definition: ''}, {name: 'b', definition: ''}]}]};
+  const schema: Schema = {name: 'f', values: [{name: 'a', definition: ''}, {name: 'b', definition: ''}]};
   const items = [
-    {exampleId: '1', gold: {f: ['a']}, predicted: {f: ['a']}, costUsd: 0.001},
-    {exampleId: '2', gold: {f: ['b']}, predicted: {f: ['a']}, costUsd: 0.001},
-    {exampleId: '3', gold: {f: ['b']}, predicted: {f: ['b']}, costUsd: 0.001},
-    {exampleId: '4', gold: {f: ['b']}, predicted: null, costUsd: 0.001},
+    {exampleId: '1', gold: 'a', predicted: 'a', costUsd: 0.001},
+    {exampleId: '2', gold: 'b', predicted: 'a', costUsd: 0.001},
+    {exampleId: '3', gold: 'b', predicted: 'b', costUsd: 0.001},
+    {exampleId: '4', gold: 'b', predicted: null, costUsd: 0.001},
   ];
-  const m = computeMetrics(schema, [...items, {exampleId: '5', gold: {f: ['a']}, predicted: null, filtered: true, costUsd: 0}]);
+  const m = computeMetrics(schema, [...items, {exampleId: '5', gold: 'a', predicted: null, filtered: true, costUsd: 0}]);
   // R4-6: the invalid (4) and filtered (5) answers are left out. a: p=0.5 r=1 f1=0.667; b: p=1 r=1/2 f1=0.667
-  assert.equal(m.fields[0].macroF1, 0.667);
+  assert.equal(m.macroF1, 0.667);
+  assert.equal(m.accuracy, 0.667);
+  assert.deepEqual(m.lowestValue, {value: 'a', f1: 0.667});
+  assert.deepEqual(m.mixUps, [{gold: 'b', predicted: 'a', count: 1, exampleIds: ['2']}]);
+  assert.equal(judge(m, DEFAULT_THRESHOLDS, 30).checks[0].label, 'Macro-F1');
   assert.deepEqual([m.n, m.total, m.invalid, m.filtered, m.invalidRate], [3, 5, 1, 1, 0.2]);
   assert.equal(m.mixUps[0].count, 1);
   // The invalid cap is always checked: 20% invalid fails even with a passing score.
@@ -109,10 +113,25 @@ test('[Image N] without prompt image N is an error, so deleting an image used in
   assert.equal(checkTemplate(t, sel, {images: [...one, ...one]}).errors.length, 0);
 });
 
-test('a multi-select answer with the same value twice keeps it once', async () => {
+test('an answer is exactly one value of the label; a one-item list is read as that value', async () => {
   const {parseOutput} = await import('./labels.ts');
-  const schema: Schema = {fields: [{name: 'topic', kind: 'multi', values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}]}]};
-  assert.deepEqual(parseOutput('{"topic": ["Food", "Food", "Travel"]}', schema).answer, {topic: ['Food', 'Travel']});
+  const schema: Schema = {name: 'topic', values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}]};
+  assert.equal(parseOutput('{"reason": "x", "topic": "Food"}', schema).answer, 'Food');
+  assert.equal(parseOutput('{"topic": ["Travel", "Travel"]}', schema).answer, 'Travel');
+  assert.equal(parseOutput('{"topic": ["Food", "Travel"]}', schema).reason, 'topic needs exactly one value');
+  assert.equal(parseOutput('{"topic": "Games"}', schema).reason, '"Games" isn\'t a value of topic');
+  assert.equal(parseOutput('{"other": "Food"}', schema).answer, null);
+});
+
+test('gold labels from upload files: the value, or an older file\'s one-item list', async () => {
+  const {readGoldAnswer} = await import('./labels.ts');
+  const schema: Schema = {name: 'topic', values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}]};
+  assert.equal(readGoldAnswer('Food', schema), 'Food');
+  assert.equal(readGoldAnswer({topic: ['Travel']}, schema), 'Travel');
+  assert.equal(readGoldAnswer({primary: ['Food']}, schema), 'Food');
+  assert.equal(readGoldAnswer({a: ['Food'], b: ['Travel']}, schema), null);
+  assert.equal(readGoldAnswer({topic: ['Food', 'Travel']}, schema), null);
+  assert.equal(readGoldAnswer('Games', schema), null);
 });
 
 test('change marks: word-level diff with removed text before added text', () => {

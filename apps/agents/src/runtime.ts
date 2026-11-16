@@ -253,6 +253,21 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
 }
 
 /**
+ * A message that holds an existing prompt goes to the Prompt helper's import rules, whatever intent
+ * the page set (2026-11-16, 3.1): Prompt Design opens on "draft_prompt", and a pasted prompt there
+ * must be imported word for word, not summarised. A long, multi-line message counts as a prompt,
+ * and so does a document link sent with words like "use this prompt".
+ */
+export function importIntent(agent: AgentPreset, intent: string, text: string | undefined): string {
+  if (agent !== 'prompt_agent' || !['draft_prompt', 'revise_prompt', 'follow_up'].includes(intent)) return intent;
+  const t = (text ?? '').trim();
+  const lines = t.split('\n').filter(l => l.trim()).length;
+  const pasted = lines >= 8 || (lines >= 4 && t.length >= 400);
+  const linked = /https?:\/\/\S+/.test(t) && /\b(prompt|initiali[sz]e|import|start from|use this)\b/i.test(t) && !/\b(compare|explain|why|what)\b/i.test(t);
+  return pasted || linked ? 'import_prompt' : intent;
+}
+
+/**
  * Executes one user turn in the Agent Runtime service (`@tsp/agents`).
  *
  * Stateless and free of database dependencies: receives `AgentTurnInput` from the BFF,
@@ -271,7 +286,7 @@ export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?
   };
 
   let agent: AgentPreset = input.page.agent;
-  let intent: string = input.page.intent;
+  let intent: string = importIntent(agent, input.page.intent, input.userText);
 
   invocations.push({from: 'user', to: agent, intent, note: ''});
   progress?.({agent, working: 'Thinking…'});
@@ -335,13 +350,13 @@ function withImages(body: {preset: string; intent: string; context: Record<strin
  * A one-shot call (no chat history) that may read feature descriptions first: the model answers
  * {"tool": {"name": "read_feature_info", "args": {"keys": [...]}}} to read them, up to twice.
  */
-async function withFeatureInfo(llm: AgentModel, preset: AgentPreset | 'optimiser', intent: string, context: Record<string, unknown>, tools?: AgentToolHost, signal?: AbortSignal): Promise<string> {
+async function withFeatureInfo(llm: AgentModel, preset: AgentPreset | 'optimiser', intent: string, context: Record<string, unknown>, tools?: AgentToolHost, signal?: AbortSignal, extra = ''): Promise<string> {
   const shape = PRESETS[preset].intents[intent];
   const toolLine = tools
     ? `\nTo read what features hold and when they help, answer {"tool": {"name": "read_feature_info", "args": {"keys": string[]}}} first; the result comes back as the next message. At most 2 reads.`
     : '';
   const messages: ModelMessage[] = [
-    {role: 'system', content: `${systemPrompt(preset)}\nAnswer shape for "${intent}": ${shape}${toolLine}`},
+    {role: 'system', content: `${systemPrompt(preset)}\nAnswer shape for "${intent}": ${shape}${toolLine}${extra}`},
     {role: 'user', content: withImages({preset, intent, context})},
   ];
   for (let step = 0; ; step++) {
@@ -375,7 +390,7 @@ export async function reflectPrompt(input: OptimiserReflectInput, llm: AgentMode
       prompt: input.prompt,
       tried: input.triedChanges,
       mixUps: input.mixUps.slice(0, 6),
-      lowestField: input.lowestField,
+      macroF1: input.macroF1,
       lowestValue: input.lowestValue,
       examples: (input.examples ?? []).slice(0, 8),
       ...(input.other ? {other: input.other} : {}),
@@ -384,18 +399,21 @@ export async function reflectPrompt(input: OptimiserReflectInput, llm: AgentMode
     input.signal,
   );
   const out = parseJsonObject<{prompt?: unknown; change?: unknown}>(raw, {});
-  // Wording only: the fields and value names stay the parent's, whatever the model wrote.
+  // Wording only: the label key and value names stay the parent's, whatever the model wrote.
   return {prompt: reworded(input.prompt, out.prompt), change: typeof out.change === 'string' ? out.change : ''};
 }
 
-/** A model's rewording laid over the prompt it started from (fields and value names kept). */
+/** A model's rewording laid over the prompt it started from (label key and value names kept). */
 function reworded(base: StructuredPrompt, answer: unknown): StructuredPrompt {
   return answer && typeof answer === 'object' ? rewordOnly(base, answer as Partial<StructuredPrompt>) : base;
 }
 
 /** Improve with AI: the Prompt helper's draft of a version, with every change and its reason. */
 export async function draftImprovement(input: DraftImprovementInput, llm: AgentModel, tools?: AgentToolHost): Promise<DraftImprovementOutput> {
-  const raw = await withFeatureInfo(llm, 'prompt_agent', 'improve', {...input, examples: (input.examples ?? []).slice(0, 8)}, tools);
+  const {locale, ...context} = input;
+  // The reply and each change's reason come in the user's language; the prompt keeps its own (2026-11-16).
+  const lang = languageLine(locale) ? `${languageLine(locale)} Write each change's "reason" in Simplified Chinese too; "text" quotes the prompt's own words.` : '';
+  const raw = await withFeatureInfo(llm, 'prompt_agent', 'improve', {...context, examples: (input.examples ?? []).slice(0, 8)}, tools, undefined, lang);
   const out = parseJsonObject<{prompt?: unknown; changes?: {text: string; reason?: string}[]; reply?: unknown}>(raw, {});
   const changes = Array.isArray(out.changes) ? out.changes.filter(c => c && typeof c.text === 'string').map(c => ({text: c.text, reason: typeof c.reason === 'string' ? c.reason : ''})) : [];
   return {

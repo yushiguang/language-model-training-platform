@@ -14,7 +14,7 @@ import {agentStart} from './starts.ts';
 import {tick} from './work.ts';
 import {compilePrompt, DEFAULT_THRESHOLDS, versionLabel} from '@tsp/domain';
 
-const schema: Schema = {fields: [{name: 'format', kind: 'single', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}]};
+const schema: Schema = {name: 'format', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]};
 /** Output price only, so every estimate is 150 tokens x $200/M = $0.03 per example. */
 const endpoint: EndpointInfo = {id: 'A', name: 'Model A', description: '', badge: '', cost: 'Lower', speed: 'Faster', supportsTemperature: true, priceIn: 0, priceOut: 200};
 const EVAL = 10;
@@ -22,7 +22,7 @@ const EVAL = 10;
 /** The prompt's rules as one text, and a prompt with one rule group holding that text. */
 const rulesOf = (p: StructuredPrompt) => p.ruleGroups.map(g => g.content).join('\n');
 const withRules = (p: StructuredPrompt, rules: string): StructuredPrompt => ({...p, ruleGroups: rules ? [{id: 'rg1', title: 'Rules', content: rules}] : []});
-const sp = (rules = ''): StructuredPrompt => ({taskSummary: 'Label this', features: {video: ['Description'], photo_text: [], metadata: []}, fields: schema.fields.map(f => ({...f, values: f.values.map(v => ({...v}))})), ruleGroups: rules ? [{id: 'rg1', title: 'Rules', content: rules}] : [], images: []});
+const sp = (rules = ''): StructuredPrompt => ({taskSummary: 'Label this', features: {video: ['Description'], photo_text: [], metadata: []}, label: {name: schema.name, values: schema.values.map(v => ({...v}))}, ruleGroups: rules ? [{id: 'rg1', title: 'Rules', content: rules}] : [], images: []});
 
 /** A bff over the real catalog and labeling apps, with a fake model that costs `perCall` per example. */
 interface WorldOpts {
@@ -81,7 +81,7 @@ async function world(prefix: string, opts: WorldOpts = {}) {
   const gold = opts.gold === undefined ? () => 'Vlog' : opts.gold;
   if (gold) {
     for (let i = 0; i < EVAL; i++)
-      await catalog.insert('gold_labels', {id: `gl_${prefix}_${i}`, projectId, exampleId: `ex_${prefix}_${i}`, schemaVersion: 1, answer: {format: [gold(String(i))]}, source: 'labeled', revealed: false, createdAt: '', createdBy: 'Tester'});
+      await catalog.insert('gold_labels', {id: `gl_${prefix}_${i}`, projectId, exampleId: `ex_${prefix}_${i}`, schemaVersion: 1, answer: gold(String(i)), source: 'labeled', revealed: false, createdAt: '', createdBy: 'Tester'});
   }
   await catalog.insert('projects', {id: projectId, name: 'p', createdAt: '', createdBy: '', kind: 'prompt_tuning', settingsConfirmed: opts.confirmed ?? true, setupVersionId: `sv_${prefix}`, snapshotId: `ds_${prefix}`, approvedNodes: []});
   const newVersion = (rules = '') => {
@@ -199,29 +199,29 @@ test('a new project starts with default settings, unconfirmed; v1 sets the label
   const v1 = await createVersion(p.id, {structured: sp(), parent: null, madeBy: 'user', change: 'First prompt', kind: 'major'});
   s = (await loadProjectState(p.id))!;
   assert.equal(s.setup?.schemaVersion, 1);
-  assert.deepEqual(s.setup?.schema?.fields.map(f => f.name), ['format']);
-  // The text the model reads is compiled from the parts: features, the field's values, the output keys.
-  assert.match(v1.template, /<feature name="Description">\{\{Description\}\}<\/feature>[\s\S]*<field name="format"[\s\S]*Vlog[\s\S]*Return one JSON object only/);
+  assert.equal(s.setup?.schema?.name, 'format');
+  // The text the model reads is compiled from the parts: features, the label's values, the output key.
+  assert.match(v1.template, /<feature name="Description">\{\{Description\}\}<\/feature>[\s\S]*<output_labels name="format"[\s\S]*Vlog[\s\S]*Return one JSON object only/);
   const chat = await w.catalog.find('chat_messages', {projectId: p.id}, 'createdAt');
   assert.match(chat.at(-1)!.text, /v1 is saved\. Next, click "Next: Eval Dataset" at the top right/);
   assert.equal(chat.at(-1)!.agent, 'prompt_agent');
 
   // New wording: a new version, the same labels, gold labels stand.
   const reworded = sp('When unsure, choose Vlog.');
-  reworded.fields[0].values[0].definition = 'a day in a life';
+  reworded.label.values[0].definition = 'a day in a life';
   const v2 = await createVersion(p.id, {structured: reworded, parent: v1, madeBy: 'user', change: '', kind: 'minor'});
   s = (await loadProjectState(p.id))!;
   assert.equal(v2.schemaVersion, 1);
-  assert.equal(s.setup?.schema?.fields[0].values[0].definition, 'a day in a life');
+  assert.equal(s.setup?.schema?.values[0].definition, 'a day in a life');
   // A new value changes the label signature: the schema version goes up.
   const wider = sp();
-  wider.fields[0].values.push({name: 'Clip', definition: ''});
+  wider.label.values.push({name: 'Clip', definition: ''});
   const v3 = await createVersion(p.id, {structured: wider, parent: v2, madeBy: 'user', change: '', kind: 'major'});
   assert.equal(v3.schemaVersion, 2);
   // The Optimiser may not do that.
   const widest = sp();
-  widest.fields[0].values.push({name: 'Clip', definition: ''}, {name: 'Skit', definition: ''});
-  await assert.rejects(createVersion(p.id, {structured: widest, parent: v3, madeBy: 'optimiser', change: '', kind: 'minor'}), /may not change the label fields/);
+  widest.label.values.push({name: 'Clip', definition: ''}, {name: 'Skit', definition: ''});
+  await assert.rejects(createVersion(p.id, {structured: widest, parent: v3, madeBy: 'optimiser', change: '', kind: 'minor'}), /may not change the label or its values/);
 });
 
 test('Delete project removes its records everywhere and leaves other projects alone', async () => {
@@ -391,7 +391,7 @@ test('Auto Optimise starts from the chosen version, and the helper reads wrong e
     ex.every(e => Number(e.externalId) % 2 === 0),
     'held-out examples never reach the helper',
   );
-  assert.ok(ex.every(e => e.predicted?.format?.[0] !== e.gold.format?.[0]));
+  assert.ok(ex.every(e => e.predicted !== e.gold));
 });
 
 test('Auto Optimise: a pass is confirmed by labeling the held-out half again before the final labeling', async () => {
@@ -467,12 +467,12 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
   m = await mismatches(w.projectId, v1);
   assert.deepEqual(m.items.map(x => x.exampleId), [5, 6, 7, 0, 1, 2, 3, 4].map(id), 'examples wrong in both versions come first');
   await reviewGold(w.projectId, id(5), best.id, 'kept');
-  await reviewGold(w.projectId, id(6), best.id, 'changed', {format: ['Vlog']});
+  await reviewGold(w.projectId, id(6), best.id, 'changed', 'Vlog');
   m = await mismatches(w.projectId);
   assert.deepEqual(m.items.map(x => x.exampleId), [id(7)]);
   assert.equal(m.reviewed, 2);
   const after = await w.state();
-  assert.deepEqual(after.gold[id(6)]!.answer, {format: ['Vlog']});
+  assert.deepEqual(after.gold[id(6)]!.answer, 'Vlog');
   assert.equal(after.gold[id(5)]!.id, s.gold[id(5)]!.id, 'keeping a label saves no new label');
   const log = await w.catalog.find('audit_log', {projectId: w.projectId, action: 'gold.review'});
   assert.deepEqual(log.map(l => (l.data as {outcome: string}).outcome).sort(), ['changed', 'kept']);
@@ -506,7 +506,7 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
   assert.deepEqual(cs.map(c => c.text), ['Its own words', 'Looked again']);
 
   // R5-4, R5-5: a gold change archives the reports; they are rebuilt from saved answers in one go.
-  await reviewGold(w.projectId, id(7), best.id, 'changed', {format: ['Vlog']});
+  await reviewGold(w.projectId, id(7), best.id, 'changed', 'Vlog');
   let st = await w.state();
   assert.equal(st.scoresUpdating, true);
   assert.equal(st.reports.filter(r => !r.archivedNow).length, 0);
@@ -655,7 +655,7 @@ test('appending examples keeps every score current: new ones are pending, and ex
   assert.equal(s.examples.filter(e => !s.gold[e.id]).length, 6, 'six examples wait for gold labels');
   // A gold label on a new example does make the score stale (Rebuild scores brings it back).
   const {saveGold} = await import('./dataset.ts');
-  await saveGold(w.projectId, s.examples.find(e => e.externalId === 'new-0')!.id, 1, {format: ['Vlog']}, false);
+  await saveGold(w.projectId, s.examples.find(e => e.externalId === 'new-0')!.id, 1, 'Vlog', false);
   assert.equal((await w.state()).reports[0].archivedNow, true);
 });
 
@@ -669,7 +669,7 @@ test('removing examples leaves a trail with half and gold label, moves no other 
   let s = await w.state();
   assert.equal(s.examples.length, EVAL - 1);
   assert.equal(s.removals.length, 1);
-  assert.deepEqual({half: s.removals[0].half, gold: s.removals[0].gold, reason: s.removals[0].reason, by: s.removals[0].removedBy}, {half: target.optimiserHalf ? 'optimiser' : 'held_out', gold: {format: ['Vlog']}, reason: 'broken', by: 'Tester'});
+  assert.deepEqual({half: s.removals[0].half, gold: s.removals[0].gold, reason: s.removals[0].reason, by: s.removals[0].removedBy}, {half: target.optimiserHalf ? 'optimiser' : 'held_out', gold: 'Vlog', reason: 'broken', by: 'Tester'});
   for (const e of s.examples) assert.equal(e.optimiserHalf, halves[e.id]);
   await restoreExamples(w.projectId, [s.removals[0].id]);
   s = await w.state();
@@ -677,7 +677,7 @@ test('removing examples leaves a trail with half and gold label, moves no other 
   assert.equal(s.removals.length, 0, 'a restored removal is no longer listed');
   assert.equal(s.examples.find(e => e.id === target.id)?.optimiserHalf, target.optimiserHalf, 'restored in its own half');
   // Downsampling a value keeps K of it, evenly from both halves.
-  assert.equal(await pruneDataset(w.projectId, 'downsample', 4, 'format', 'Vlog'), EVAL - 4);
+  assert.equal(await pruneDataset(w.projectId, 'downsample', 4, 'Vlog'), EVAL - 4);
   s = await w.state();
   assert.equal(s.examples.length, 4);
   assert.equal(s.examples.filter(e => e.optimiserHalf).length, 2);
@@ -699,7 +699,7 @@ test('halves: balanced by gold label until a helper reads examples, then locked;
   const locked = Object.fromEntries(s.examples.map(e => [e.id, e.optimiserHalf]));
   // New gold labels after the lock move nothing.
   const {saveGold} = await import('./dataset.ts');
-  await saveGold(w.projectId, s.examples.find(e => e.externalId === '5')!.id, 1, {format: ['Tutorial']}, false);
+  await saveGold(w.projectId, s.examples.find(e => e.externalId === '5')!.id, 1, 'Tutorial', false);
   assert.equal(await balanceHalves(w.projectId), 0);
   await appendExamples(w.projectId, [{externalId: 'n1', type: 'video', title: '', features: {}}], 'sample');
   s = await w.state();

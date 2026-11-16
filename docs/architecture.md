@@ -81,19 +81,22 @@ per-tenant configuration, permission checks and a job queue (`RequestContext`,
 ## The structured prompt (1.0.0)
 
 A prompt version stores a `StructuredPrompt`: the persona and task (`taskSummary`), the input
-features, the label fields (each with values and one definition per value) and the rule groups
-(`ruleGroups`: a title and free-text rules each, named by the user; since 2026-11-16 they replace
-the per-field tie-break notes and the one general-rules box). This is the only thing people and
+features, the project's one label (`label`: a key and its values, each with a definition; since
+2026-11-16 a project classifies exactly one mutually exclusive label and the model answers one
+plain string) and the rule groups (`ruleGroups`: a title and free-text rules each, named by the
+user; they replace the per-field tie-break notes and the one general-rules box). Rules about one
+value belong in that value's definition; rule groups hold rules across values. This is the only thing people and
 helpers edit. The text sent to the model is compiled from it by `compilePrompt`
 (`packages/domain/src/structured.ts`) in XML-tagged sections (`<persona_and_task>`,
 `<input_features>`, `<output_labels>`, `<rules>`, `<reference_images>`, `<output_format>`), which
 give the model clear boundaries so text inside an item's features cannot pass for an instruction;
 the same input always gives the same text. "View full prompt" shows that text read-only with a
 Copy button. A new project starts with no feature ticked. A prompt saved before rule groups reads
-as one ("General rules", and "<field> rules" per old note) through `normalizeStructured`.
+as one ("General rules", and "<field> rules" per old note) through `normalizeStructured`, and a
+prompt saved with several fields reads its first field as the label.
 
-- **Label signature.** The field names, their kinds and their value names are the label signature.
-  New wording never changes it; adding, removing or renaming a field or value does. When it
+- **Label signature.** The label key and its value names are the label signature (`signatureOf`).
+  New wording never changes it; adding, removing or renaming the key or a value does. When it
   changes, the version starts a new schema version: gold labels need a re-check and earlier scores
   no longer count. The editor says so before the save. The Optimiser and Improve with AI may only
   reword (`rewordOnly`), so they never change the signature.
@@ -291,7 +294,7 @@ application `id` to the store's document id.
 |---|---|
 | `{{Key}}` placeholders, checks and quick fixes; rendering to text and image parts | `packages/domain/src/template.ts` |
 | Reading a model answer against the schema; settings hash; evaluation context id; token estimate | `packages/domain/src/labels.ts` |
-| Metrics (macro-F1 per field, shown as "Score" with the metric name in grey; per-value F1, accuracy, invalid rate, mix-ups; invalid and filtered answers left out of the scores and counted apart) and pass/fail (always at most 1% invalid, `INVALID_CAP`) | `packages/domain/src/metrics.ts` |
+| Metrics (macro-F1 of the label, shown as "Score" with the metric name in grey; per-value one-vs-rest F1, precision and recall, accuracy, invalid rate, mix-ups as gold/predicted pairs; invalid and filtered answers left out of the scores and counted apart) and pass/fail (always at most 1% invalid, `INVALID_CAP`) | `packages/domain/src/metrics.ts` |
 | Versions are major.minor and never overwritten; the catalog assigns the numbers | `packages/domain/src/versions.ts`, `apps/catalog/src/catalog.ts` |
 | Gates between steps; Gold Labels is an ordinary step (R5-8) | `packages/domain/src/gates.ts` |
 | The recommended next step (the best score wins; cost only breaks a tie) | `packages/domain/src/workflow.ts` |

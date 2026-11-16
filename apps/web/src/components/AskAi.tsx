@@ -4,7 +4,7 @@ import Link from 'next/link';
 import {Fragment, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent} from 'react';
 import type {AgentPreset, ChatEvent, ChatMessage, PageContext} from '@tsp/contracts';
 import {agentName, pageFromPath} from '@tsp/domain';
-import {agentLive, answeringAgent, chatHistory, isAgentBusy, sendUserMessage, subscribeAgentLive, subscribeChanges} from '@/backend-api';
+import {agentLive, chatHistory, isAgentBusy, sendUserMessage, subscribeAgentLive, subscribeChanges} from '@/backend-api';
 import {dateTime, Icon, LinkChip, useTip} from '@/ui';
 import {currentLocale, t, tm} from '@/i18n';
 import {useProject} from './ProjectContext';
@@ -78,8 +78,6 @@ export function AskAi({
   const last = [...messages].reverse().find(m => m.role === 'agent');
   // The page's chips are catalog keys; a helper's choices come in the user's language already.
   const follow = chips ? chips.map(c => t(c)) : last?.choices?.length ? last.choices : [];
-  const where = {...page, where: {page: pageFromPath(typeof location === 'undefined' ? '/' : location.pathname), params: {}}};
-  const answering = liveTurn?.agent ?? answeringAgent(projectId, where);
   // The newest start line of work that is still running spins (R2-5): scoring and the Optimiser.
   const active = new Set<string>();
   if (state) {
@@ -106,13 +104,6 @@ export function AskAi({
           <button type="button" className="icon-btn" aria-label={t('Close')} onClick={onClose}>
             <Icon name="x" />
           </button>
-        </div>
-        <div className="ctx-row">
-          <span className="ctx">
-            <Icon name="eye" />
-            {pageLabel(page.label)}
-          </span>
-          <span className="chat-who">{t('{helper} answers', {helper: agentName(answering)})}</span>
         </div>
       </div>
       <div className="chat-m" ref={bodyRef} aria-live="polite">
@@ -144,18 +135,9 @@ export function AskAi({
         </div>
       )}
       <Composer onSend={send} disabled={working} placeholder={t(placeholder ?? 'Ask about this page')} />
-      <div className="chat-note">{t('Helpers read your recent messages')}</div>
     </aside>
   );
 }
-
-/** The page's name ("Prompt v2" names the version it shows). */
-const pageLabel = (label: string) => {
-  const v = /^Prompt (v\d+(?:\.\d+)?)$/.exec(label);
-  if (v) return t('Prompt {version}', {version: v[1]});
-  const pt = /^(.+) · (v\d+(?:\.\d+)?)$/.exec(label);
-  return pt ? `${t(pt[1])} · ${pt[2]}` : t(label);
-};
 
 /** The last history read per project, so Ask AI opens on a new step without an empty flash. */
 const seen = new Map<string, ChatMessage[]>();
@@ -208,7 +190,8 @@ function UserText({text}: {text: string}) {
   const rest = text.replace(DOC_LINK, '').trim();
   return (
     <div className="msg-u">
-      {rest}
+      {/* Enter adds a line (2026-11-16), so the bubble keeps the lines the user typed. */}
+      <span style={{whiteSpace: 'pre-wrap'}}>{rest}</span>
       {links.map((l, i) => (
         <span key={i} style={{display: 'block'}}>
           <LinkChip text={docTitle(l)} />
@@ -266,7 +249,8 @@ function Composer({onSend, disabled, placeholder}: {onSend: (text: string) => vo
     void onSend(out);
   };
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key !== 'Enter' || e.shiftKey) return;
+    // Enter adds a new line; Shift+Enter sends (2026-11-16).
+    if (e.key !== 'Enter' || !e.shiftKey) return;
     // keyCode 229: some browsers report the Enter that ends a composition this way.
     if (composing.current || e.nativeEvent.isComposing || e.keyCode === 229) return;
     e.preventDefault();
@@ -305,7 +289,7 @@ function Composer({onSend, disabled, placeholder}: {onSend: (text: string) => vo
         }}
       >
         <Icon name="up" />
-        {tip.pop(t('Enter to send · Shift+Enter for new line'))}
+        {tip.pop(t('Shift+Enter to send · Enter for new line'))}
       </button>
     </div>
   );

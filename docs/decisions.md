@@ -3,6 +3,15 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-16 (single-label projects and helper alignment)
+
+- **A project classifies exactly one label**, with mutually exclusive values, and the model answers one plain string. Projects are never mixed or merged, so there is no label combining and no multi-project merge; another label is another project.
+- **The Prompt helper suggests a catch-all value** ("Other" or "None") when the values may not cover every item, so every item can get one.
+- **Old projects are test data and start fresh**: the stored-data prefix changed and nothing is migrated. Old gold upload files (`{"name": ["value"]}`) still import.
+- **Value-specific rules go into the value's definition**; rule groups hold rules across values. A long pasted prompt is treated as an import whatever the user asked.
+- **The values are stacked cards** (name, definition, Move up / Move down / Remove), the version card scores each value, and Gold Labels shows one answer per item.
+- **The chat panel shows no page tag and no helper lines** ("Prompt helper answers", "Helpers read your recent messages"). Shift+Enter sends and Enter adds a line.
+
 ## 2026-11-16 (acceptance refinements)
 
 - **No page renders before the signed-in user is known**; the identity is read once per page load and kept, so the avatar never flashes empty. Sign out shows only when the platform can end the session.

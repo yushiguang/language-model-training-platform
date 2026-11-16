@@ -11,8 +11,8 @@ import {useSettings} from '@/components/ProjectSettings';
 import {approveNode, improveWithAi, mismatches, predictionsFor, retryOptimiser, scoreVersion, startOptimiser, stopOptimiser, rebuildReports, stopRun, track, type ProjectState} from '@/backend-api';
 import {Badge, Banner, Below, Rough, Button, Card, Code, dateTime, Dialog, Empty, Hov, Icon, IconToggle, Metric, num, One, Opt, PageHead, Passed, Progress, reportActionError, Score, Seg, Suggestion, Table, timeOfDay, useCopy} from '@/ui';
 import {LabelDistribution, labelCounts} from '@/components/LabelDistribution';
-import {t, tm} from '@/i18n';
-import {fieldRows, modelName, reportFor, runsFor, versionScore} from '@/components/prompt/scores';
+import {currentLocale, t, tm} from '@/i18n';
+import {valueRows, modelName, reportFor, runsFor, versionScore} from '@/components/prompt/scores';
 
 const VERSIONS_PAGE: PageContext = {label: 'Prompt Tuning', agent: 'front_desk', intent: 'answer', hint: 'Ask me about any version.', context: {}};
 
@@ -471,7 +471,7 @@ function OptimiserPanel({state, run, box, onShow}: {state: ProjectState; run: Op
           <span key="r" className="row" style={{gap: 8, justifyContent: 'center'}}>
             <Score v={r.score} ok={r.passed} />
             <span className="badge b-gray">
-              <Hov text={t('Tied')} tip={t('In the dry run it got as many fields right as {version}, on different examples. It was labeled in full but does not count as progress', {version: label(r.parentId) ?? t('its parent')})} />
+              <Hov text={t('Tied')} tip={t('In the dry run it got as many examples right as {version}, but different ones. It was labeled in full but does not count as progress', {version: label(r.parentId) ?? t('its parent')})} />
             </span>
           </span>
         ) : r.score != null ? (
@@ -538,14 +538,14 @@ function EndLine({state, run, top, label, onShow}: {state: ProjectState; run: Op
   );
 }
 
-/** A change the dry run dropped: how many dry-run examples it and its parent got fully right. */
+/** A change the dry run dropped: how many dry-run examples it and its parent got right. */
 function DroppedCard({state, v, round, box}: {state: ProjectState; v: PromptVersion; round: OptimiserRound; box: Box}) {
   const {href} = useProject();
   const dry = round.dryRun!;
   const parent = state.versions.find(x => x.id === dry.parentId);
   const me = versionLabel(v);
   const them = parent ? versionLabel(parent) : t('Parent');
-  const tip = (who: string) => t('In the dry run, how many of the {n} examples {version} labeled fully right', {n: dry.examples, version: who});
+  const tip = (who: string) => t('In the dry run, how many of the {n} examples {version} labeled right', {n: dry.examples, version: who});
   return (
     <Card className={box.className} style={box.style}>
       <div style={{display: 'flex', alignItems: 'flex-end', gap: 16, paddingBottom: 16}}>
@@ -564,11 +564,6 @@ function DroppedCard({state, v, round, box}: {state: ProjectState; v: PromptVers
           <Button label={t('View prompt')} href={href('/prompt/edit', {v: v.id, view: '1'})} />
         </div>
       </div>
-      <Table
-        cols={[{label: t('Field')}, {label: t('{version} passed', {version: me}), kind: 'c'}, {label: t('{version} passed', {version: them}), kind: 'c'}]}
-        first={40}
-        rows={dry.fields.map(f => ({key: f.field, cells: [<Code key="f">{f.field}</Code>, `${f.passed} / ${dry.examples}`, `${f.parentPassed} / ${dry.examples}`]}))}
-      />
     </Card>
   );
 }
@@ -593,7 +588,7 @@ function RunningCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
       </div>
       <Progress done={done} total={total} />
       <div style={{paddingTop: 8}} className="t-3">
-        {t('Field scores appear when scoring is done.')}
+        {t('Value scores appear when scoring is done.')}
       </div>
     </Card>
   );
@@ -608,7 +603,7 @@ function labeledRuns(state: ProjectState, versionId: string): LabelingRun[] {
 /**
  * The version card when the eval set has no gold labels yet (design: "Prompt versions · labeled,
  * no gold labels yet"): how many examples got a label, how many the safety filter stopped, how
- * many failed, then the AI Suggestion and how the labels spread per field.
+ * many failed, then the AI Suggestion and how the labels spread over the values.
  */
 function NoGoldCard({state, v, box}: {state: ProjectState; v: PromptVersion; box: Box}) {
   const {href} = useProject();
@@ -717,11 +712,13 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
       </Card>
     );
   }
-  const rows = fieldRows(rep, thr);
+  const rows = valueRows(rep, thr);
+  // Pass or below per value only when a value-level threshold is on.
+  const perValue = thr.valueF1 != null || thr.precision != null || thr.recall != null;
   return (
     <Card className={box.className} style={box.style}>
       <div style={{display: 'flex', alignItems: 'flex-end', gap: 16, paddingBottom: 16}}>
-        <Metric label={named('Lowest field macro-F1')} value={rep.metrics.lowestField.macroF1.toFixed(2)} unit={`/ ${+thr.macroF1.toFixed(2)}`} tone={rep.rough ? undefined : rep.passed ? 'ok' : 'err'} size="lg" />
+        <Metric label={named('Macro-F1')} value={rep.metrics.macroF1.toFixed(2)} unit={`/ ${+thr.macroF1.toFixed(2)}`} tone={rep.rough ? undefined : rep.passed ? 'ok' : 'err'} size="lg" />
         <div style={{display: 'flex', alignItems: 'center', gap: 12, paddingBottom: 9}}>
           {rep.rough ? <Rough need={thr.minEval} /> : rep.passed ? <Passed /> : <Below />}
           <span className="t-3" style={{fontSize: 13}}>
@@ -731,8 +728,20 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
         {actions}
       </div>
       <Table
-        cols={[{label: t('Field')}, {label: named('Macro-F1'), kind: 'c'}, {label: t('Precision'), kind: 'c'}, {label: t('Recall'), kind: 'c'}, {label: t('Result'), kind: 'c'}]}
-        rows={rows.map(r => ({key: r.field, cells: [<Code key="f">{r.field}</Code>, <Score key="s" v={r.f1} ok={rep.rough ? null : r.passed} />, r.precision.toFixed(2), r.recall.toFixed(2), rep.rough ? <span key="p" className="t-3">–</span> : r.passed ? <Passed key="p" /> : <Below key="b" />]}))}
+        cols={[{label: t('Value')}, {label: t('F1'), kind: 'c'}, {label: t('Precision'), kind: 'c'}, {label: t('Recall'), kind: 'c'}, {label: t('Examples'), kind: 'c'}, ...(perValue ? [{label: t('Result'), kind: 'c' as const}] : [])]}
+        rows={rows.map(r => ({
+          key: r.value,
+          cells: [
+            <span key="v" className="one" title={r.value}>
+              {r.value}
+            </span>,
+            <Score key="s" v={r.f1} ok={rep.rough || !perValue ? null : r.passed} />,
+            r.precision.toFixed(2),
+            r.recall.toFixed(2),
+            num(r.support),
+            ...(perValue ? [rep.rough ? <span key="p" className="t-3">–</span> : r.passed ? <Passed key="p" /> : <Below key="b" />] : []),
+          ],
+        }))}
       />
       <LeftOut m={rep.metrics} cap={thr.invalidRate ?? systemConfig().evaluation.invalidRateCap} state={state} createdAt={rep.createdAt} />
     </Card>
@@ -766,7 +775,7 @@ function Advice({state, selId, onStarted, onSwitch}: {state: ProjectState; selId
   const openAskAi = useOpenAskAi();
   const improve = (versionId: string) => {
     openAskAi();
-    improveWithAi(state.project.id, versionId).catch(e => reportActionError(t('Improve with AI failed: {why}', {why: t((e as Error).message)}), () => improve(versionId)));
+    improveWithAi(state.project.id, versionId, currentLocale()).catch(e => reportActionError(t('Improve with AI failed: {why}', {why: t((e as Error).message)}), () => improve(versionId)));
     return go(href('/prompt/edit', {v: versionId}));
   };
   // Auto Optimise starts from the version selected in the list (R3-7). It always opens one dialog

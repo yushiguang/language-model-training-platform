@@ -18,7 +18,8 @@ import {localTickets} from './standins/tickets.ts';
  */
 export function createPlatform(): Platform {
   return {
-    db: localDocRuntime(),
+    // Single-label projects (2026-11-16): projects saved before are test data and start fresh.
+    db: localDocRuntime('tsp-doc-v2', ['tsp-doc']),
     models: simulatedModels(),
     agent: scriptedAgent(),
     identity: localIdentity(),

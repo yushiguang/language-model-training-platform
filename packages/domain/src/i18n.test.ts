@@ -46,7 +46,7 @@ test('every text the site shows is in the Chinese catalog', () => {
   for (const list of Object.values(FEATURES)) for (const f of list) keys.set(f.label, 'catalogue.ts');
   const standIns = /standIns: \[([^\]]*)\]/.exec(readFileSync(new URL('../../platform/src/config.ts', import.meta.url), 'utf8'))?.[1] ?? '';
   for (const s of standIns.matchAll(/'([^']+)'/g)) keys.set(s[1], 'platform config');
-  for (const w of ['You', 'Workflow', 'gold label', 'eval set', 'version', 'field', 'value']) keys.set(w, 'action lines and helpers');
+  for (const w of ['You', 'Workflow', 'gold label', 'eval set', 'version', 'label', 'value']) keys.set(w, 'action lines and helpers');
   // An action line's key is "{who} " + what the service passed (chat-events.ts).
   const missing = [...keys].filter(([k]) => !(k in ZH) && !(`{who} ${k}` in ZH)).map(([k, f]) => `${f}: ${k}`);
   assert.deepEqual(missing, []);

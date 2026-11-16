@@ -41,7 +41,6 @@ export interface SystemConfig {
     /** A merge is tried after this many kept versions. */
     mergeEveryKept: number;
     dryRunMaxExamples: number;
-    lowestFieldWeight: number;
     briefWrongExamples: number;
     briefMergeWins: number;
     briefMaxImages: number;

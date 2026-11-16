@@ -87,10 +87,6 @@ button.vrow { width: 100%; border: 0; background: none; font: inherit; color: in
 /* 1.0.0 screens (no canvas boards yet: docs/ui-gaps.md). */
 /* The Approve button asks for attention while a helper's draft waits (spec 6.2). */
 /* Structured prompt editor (spec 3.3): boxes grow with their text, and nothing leaves its card. */
-.sp-fields { grid-template-columns: 280px minmax(0, 1fr); }
-.sp-field { min-width: 0; max-width: 100%; overflow: hidden; }
-.sp-field-h { gap: 12px; flex-wrap: wrap; min-width: 0; }
-.sp-values .tbl td { height: auto; vertical-align: top; padding: 8px 12px; white-space: normal; }
 textarea.grow-box { display: block; height: auto; min-height: 32px; padding: 5px 12px; line-height: 20px; resize: none; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
 textarea.input.grow-box:not(.sm) { min-height: 36px; padding: 7px 12px; }
 .sp-feats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; }
@@ -187,6 +183,7 @@ textarea.input.grow-box:not(.sm) { min-height: 36px; padding: 7px 12px; }
 
 /* Rule Groups on Prompt Design and Edit prompt (2026-11-16 refinements, 2.3). */
 .sp-group-t { flex: 1; max-width: 480px; font-weight: 600; }
+.sp-key { padding-top: 16px; padding-bottom: 16px; }
 .sp-group-gone { gap: 8px; padding: 0 4px; color: var(--text-3); font-size: 13px; }
 
 /* Select: a button and a rounded list (2026-11-16 refinements, 3.5), like the avatar menu. */
@@ -194,6 +191,9 @@ textarea.input.grow-box:not(.sm) { min-height: 36px; padding: 7px 12px; }
 .select-btn:disabled { cursor: default; color: var(--text-off); background: var(--bg-muted); }
 .select-btn:focus-visible, .select-btn[aria-expanded="true"] { border-color: var(--text); outline: none; }
 .select-pop { max-height: 280px; overflow-y: auto; outline: none; }
+.select-sm { display: inline-flex; flex-direction: column; }
+.select-sm .select-btn { height: 32px; }
+.select-sm .select svg.i { top: 8px; }
 .select-pop .menu-i.on { background: var(--bg-muted); }
 
 /* Project Settings (2026-11-16 refinements, 3): three sections, each set off by a line and space. */

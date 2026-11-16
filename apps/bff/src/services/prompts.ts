@@ -19,7 +19,7 @@ export async function createVersion(projectId: string, v: NewVersion): Promise<P
   const structured = tidyStructured(v.structured);
   const issues = checkStructured(structured);
   if (issues.length) throw new Error(issues[0].message);
-  if (v.madeBy === 'optimiser' && v.parent && !sameSignature(signatureOf(structured), signatureOf(v.parent.structured))) throw new Error('The Optimiser may not change the label fields or values.');
+  if (v.madeBy === 'optimiser' && v.parent && !sameSignature(signatureOf(structured), signatureOf(v.parent.structured))) throw new Error('The Optimiser may not change the label or its values.');
   // The labels on record follow what people write; an Optimiser candidate may be dropped, so its wording does not.
   const setup = await syncLabels(projectId, schemaOf(structured), {wording: v.madeBy !== 'optimiser'});
   const existing = await catalog.find('prompt_versions', {projectId}, 'createdAt desc');

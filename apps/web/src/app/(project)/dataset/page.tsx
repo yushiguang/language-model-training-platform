@@ -7,7 +7,7 @@ import {gate, labelBalance, systemConfig} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {appendDatasetFile, appendSample, approveNode, getSamplePoolSize, pruneDataset, restoreExamples, startSampleDataset, stopSampleDataset, uploadDatasetFile, type ProjectState, type RemovalReason} from '@/backend-api';
-import {Badge, Banner, Button, Card, CenterProgress, Code, dateTime, Dialog, Empty, Field, Hov, LinkChip, Metric, Metrics, num, One, PageHead, Table} from '@/ui';
+import {Badge, Banner, Button, Card, CenterProgress, dateTime, Dialog, Empty, Field, Hov, LinkChip, Metric, Metrics, num, One, PageHead, Table} from '@/ui';
 import {t, tm} from '@/i18n';
 
 export default function DatasetPage() {
@@ -215,9 +215,10 @@ function PruneUnlabeled({state, pending}: {state: ProjectState; pending: number}
 function BalanceCard({state, schema}: {state: ProjectState; schema: Schema}) {
   const c = systemConfig().dataset;
   const b = labelBalance(schema, state.examples.filter(e => e.split === 'eval'), state.gold);
-  const [down, setDown] = useState<{field: string; value: string; count: number} | null>(null);
+  const [down, setDown] = useState<{value: string; count: number} | null>(null);
   const [keep, setKeep] = useState('');
-  const rare = b.fields.flatMap(f => f.values.filter(v => v.rare));
+  const rare = b.values.filter(v => v.rare);
+  const mx = Math.max(1, ...b.values.map(x => x.count));
   const legend = (
     <div className="row" style={{gap: 16, fontSize: 12}}>
       <span className="row" style={{gap: 6}}>
@@ -235,55 +236,42 @@ function BalanceCard({state, schema}: {state: ProjectState; schema: Schema}) {
   return (
     <Card title={t('Label balance')} actions={legend}>
       <div className="col" style={{gap: 24}}>
-        {b.fields.map((f, i) => {
-          const mx = Math.max(1, ...f.values.map(x => x.count));
-          return (
-            <div key={f.field} className="col" style={{gap: 24}}>
-              {i > 0 && <div style={{height: 1, background: 'var(--border)'}} />}
-              <div className="col" style={{gap: 8, alignItems: 'flex-start'}}>
-                <span>
-                  <Code>{f.field}</Code>
-                </span>
-                <div className="col" style={{gap: 4, alignSelf: 'stretch'}}>
-                  {[...f.values]
-                    .sort((x, y) => y.count - x.count)
-                    .map(x => {
-                      const tone = x.count === 0 ? 'err' : x.rare ? 'warn' : '';
-                      const col = tone === 'err' ? 'var(--err)' : tone === 'warn' ? 'var(--warn)' : 'var(--text)';
-                      const bold = tone ? 600 : undefined;
-                      return (
-                        <div key={x.value} className="bal-row">
-                          <span className="one" title={x.value} style={{color: col, fontWeight: bold}}>
-                            {x.value}
-                          </span>
-                          <span className="bal-bar">
-                            <span style={{width: `${Math.round((x.count / mx) * 100)}%`, background: tone === 'warn' ? '#e0a800' : '#1b1b1b'}} />
-                          </span>
-                          <span style={{textAlign: 'right', color: tone ? col : 'var(--text-2)', fontWeight: bold}}>
-                            <Hov text={num(x.count)} tip={t('{a} in the half the Optimiser learns from, {b} in the half scores use', {a: num(x.optimiser), b: num(x.heldOut)})} />
-                          </span>
-                          <span style={{textAlign: 'right'}}>
-                            {x.dominant && (
-                              <Button
-                                label={t('Downsample')}
-                                size="sm"
-                                kind="ghost"
-                                title={t('Over {pct}% of the gold labels are {value}', {pct: Math.round(c.dominantValueShareWarn * 100), value: x.value})}
-                                onClick={() => {
-                                  setKeep(String(Math.max(c.rareValueMinCount, Math.round(x.count / 2))));
-                                  setDown({field: f.field, value: x.value, count: x.count});
-                                }}
-                              />
-                            )}
-                          </span>
-                        </div>
-                      );
-                    })}
+        <div className="col" style={{gap: 4}}>
+          {[...b.values]
+            .sort((x, y) => y.count - x.count)
+            .map(x => {
+              const tone = x.count === 0 ? 'err' : x.rare ? 'warn' : '';
+              const col = tone === 'err' ? 'var(--err)' : tone === 'warn' ? 'var(--warn)' : 'var(--text)';
+              const bold = tone ? 600 : undefined;
+              return (
+                <div key={x.value} className="bal-row">
+                  <span className="one" title={x.value} style={{color: col, fontWeight: bold}}>
+                    {x.value}
+                  </span>
+                  <span className="bal-bar">
+                    <span style={{width: `${Math.round((x.count / mx) * 100)}%`, background: tone === 'warn' ? '#e0a800' : '#1b1b1b'}} />
+                  </span>
+                  <span style={{textAlign: 'right', color: tone ? col : 'var(--text-2)', fontWeight: bold}}>
+                    <Hov text={num(x.count)} tip={t('{a} in the half the Optimiser learns from, {b} in the half scores use', {a: num(x.optimiser), b: num(x.heldOut)})} />
+                  </span>
+                  <span style={{textAlign: 'right'}}>
+                    {x.dominant && (
+                      <Button
+                        label={t('Downsample')}
+                        size="sm"
+                        kind="ghost"
+                        title={t('Over {pct}% of the gold labels are {value}', {pct: Math.round(c.dominantValueShareWarn * 100), value: x.value})}
+                        onClick={() => {
+                          setKeep(String(Math.max(c.rareValueMinCount, Math.round(x.count / 2))));
+                          setDown({value: x.value, count: x.count});
+                        }}
+                      />
+                    )}
+                  </span>
                 </div>
-              </div>
-            </div>
-          );
-        })}
+              );
+            })}
+        </div>
         {rare.length > 0 && (
           <p className="t-3" style={{margin: 0, fontSize: 13}}>
             {rare.length === 1 ? t('1 value has too few gold labels to score fairly. Add examples that show it, then label them on Gold Labels.') : t('{n} values have too few gold labels to score fairly. Add examples that show them, then label them on Gold Labels.', {n: rare.length})}
@@ -303,7 +291,7 @@ function BalanceCard({state, schema}: {state: ProjectState; schema: Schema}) {
                 kind="primary"
                 disabled={!(parseInt(keep) >= 0 && parseInt(keep) < down.count)}
                 onClick={async () => {
-                  await pruneDataset({projectId: state.project.id, mode: 'downsample', field: down.field, value: down.value, keep: parseInt(keep)});
+                  await pruneDataset({projectId: state.project.id, mode: 'downsample', value: down.value, keep: parseInt(keep)});
                   setDown(null);
                 }}
               />

@@ -5,7 +5,6 @@ import type {
   ChatAttachment,
   ChatEvent,
   ChatMessage,
-  FieldMetrics,
   Locale,
   Msg,
   MixUp,
@@ -183,12 +182,12 @@ export interface ExampleBrief {
 export interface OptimiserReflectInput {
   /** 'change': one change from the parent's mistakes. 'merge': combine `prompt` with `other`. */
   mode?: 'change' | 'merge';
-  /** The parent's structured prompt. Field and value names are fixed: only wording and features change. */
+  /** The parent's structured prompt. The label's key and value names are fixed: only wording and features change. */
   prompt: StructuredPrompt;
   triedChanges: string[];
   mixUps: MixUp[];
-  lowestField: Pick<FieldMetrics, 'field' | 'macroF1'>;
-  lowestValue: {field: string; value: string; f1: number} | null;
+  macroF1: number;
+  lowestValue: {value: string; f1: number} | null;
   /**
    * Change: up to 8 examples of the optimiser half the parent gets wrong, worst first. Merge: up to
    * 4 examples each version gets right that the other misses (`rightIn`).
@@ -200,7 +199,7 @@ export interface OptimiserReflectInput {
 }
 
 export interface OptimiserReflectOutput {
-  /** The changed prompt, with the parent's field and value names. */
+  /** The changed prompt, with the parent's label key and value names. */
   prompt: StructuredPrompt;
   change: string;
 }
@@ -210,12 +209,14 @@ export interface DraftImprovementInput {
   version: string;
   prompt: StructuredPrompt;
   mixUps: MixUp[];
-  lowestField: Pick<FieldMetrics, 'field' | 'macroF1'>;
-  lowestValue: {field: string; value: string; f1: number} | null;
+  macroF1: number;
+  lowestValue: {value: string; f1: number} | null;
   /** Mistakes on the eval set, with the gold label and the model's answer. */
   mistakes: number;
   /** Up to 8 examples of the optimiser half the version gets wrong, worst first (never the held-out half). */
   examples?: ExampleBrief[];
+  /** The language the user reads the site in: the reply and reasons come in it (2026-11-16). */
+  locale?: Locale;
 }
 
 export interface DraftImprovementOutput {

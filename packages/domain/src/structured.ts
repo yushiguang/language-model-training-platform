@@ -1,32 +1,26 @@
-import type {FeatureSelection, LabelSignature, Msg, RuleGroup, Schema, StructuredFieldPrompt, StructuredPrompt} from '@tsp/contracts';
+import type {FeatureSelection, LabelSignature, LabelValue, Msg, RuleGroup, Schema, StructuredPrompt} from '@tsp/contracts';
 import {msg, msgText} from './i18n.ts';
 import {FEATURES, ITEM_ROWS, labelOf} from './catalogue.ts';
 
 /**
- * Structured prompts (spec 1.0.0, section 3). A prompt is parts (task, features, label fields with
- * a definition per value, the user's named rule groups, images); `compilePrompt` writes the text
- * the model reads, in XML-tagged sections (2026-11-16 refinements, 2.4).
- * The label signature (names and bounds, no wording) is what gold labels and scores are tied to.
+ * Structured prompts (spec 1.0.0, section 3). A prompt is parts (task, features, the project's one
+ * mutually-exclusive label with a definition per value, the user's named rule groups, images);
+ * `compilePrompt` writes the text the model reads, in XML-tagged sections (2026-11-16 refinements,
+ * 2.4). Every project classifies exactly one label (2026-11-16, single-label projects).
+ * The label signature (key and value names, no wording) is what gold labels and scores are tied to.
  */
 
 /** The signature a structured prompt answers with. */
-export function signatureOf(p: Pick<StructuredPrompt, 'fields'>): LabelSignature {
-  return {
-    fields: p.fields.map(f => ({
-      name: f.name,
-      kind: f.kind,
-      ...(f.kind === 'multi' ? {min: f.min ?? 1, max: f.max ?? f.values.length} : {}),
-      values: f.values.map(v => v.name),
-    })),
-  };
+export function signatureOf(p: Pick<StructuredPrompt, 'label'>): LabelSignature {
+  return {name: p.label.name, values: p.label.values.map(v => v.name)};
 }
 
-/** True when two signatures allow the same answers (wording and order of fields aside, order of values included). */
-export const sameSignature = (a: LabelSignature, b: LabelSignature) => JSON.stringify(a) === JSON.stringify(b);
+/** True when two signatures allow the same answers (order of values included). */
+export const sameSignature = (a: LabelSignature, b: LabelSignature) => a.name === b.name && JSON.stringify(a.values) === JSON.stringify(b.values);
 
-/** The label fields with their wording, for labeling pages, validation and scoring. */
-export function schemaOf(p: Pick<StructuredPrompt, 'fields'>): Schema {
-  return {fields: p.fields.map(f => ({name: f.name, kind: f.kind, ...(f.kind === 'multi' ? {min: f.min ?? 1, max: f.max ?? f.values.length} : {}), values: f.values.map(v => ({name: v.name, definition: v.definition}))}))};
+/** The label with its wording, for labeling pages, validation and scoring. */
+export function schemaOf(p: Pick<StructuredPrompt, 'label'>): Schema {
+  return {name: p.label.name, values: p.label.values.map(v => ({name: v.name, definition: v.definition}))};
 }
 
 export const emptyFeatures = (): FeatureSelection => ({video: [], photo_text: [], metadata: []});
@@ -36,7 +30,7 @@ export const emptyFeatures = (): FeatureSelection => ({video: [], photo_text: []
  * 2.1). Features are ticked by the user or by the Prompt helper's draft.
  */
 export function emptyStructuredPrompt(): StructuredPrompt {
-  return {taskSummary: '', features: emptyFeatures(), fields: [], ruleGroups: [], images: []};
+  return {taskSummary: '', features: emptyFeatures(), label: {name: '', values: []}, ruleGroups: [], images: []};
 }
 
 /** Ids for rule groups that came without one (a model's answer, an import): unique in the prompt. */
@@ -64,20 +58,36 @@ export function readRuleGroups(x: unknown): RuleGroup[] | null {
   return withIds(out);
 }
 
+/** Label values read from untyped JSON: names as strings or objects with a name and definition. */
+function readValues(x: unknown): LabelValue[] {
+  if (!Array.isArray(x)) return [];
+  return x.flatMap(v => {
+    if (typeof v === 'string') return [{name: v, definition: ''}];
+    if (!v || typeof v !== 'object' || typeof (v as {name?: unknown}).name !== 'string') return [];
+    const d = (v as {definition?: unknown}).definition;
+    return [{name: (v as {name: string}).name, definition: typeof d === 'string' ? d : ''}];
+  });
+}
+
 /**
- * A stored prompt in today's shape. Prompts saved before 2026-11-16 had one "generalRules" text
- * and a "note" per field: they become rule groups ("General rules", and "<field> rules").
+ * A stored prompt in today's shape. Prompts saved before 2026-11-16 had one "generalRules" text,
+ * a "note" per field, and a list of label fields: the rules become rule groups ("General rules",
+ * "<field> rules") and the first field becomes the label. Such projects are test data and are
+ * started fresh; this only keeps an old record from breaking a page.
  */
 export function normalizeStructured(p: StructuredPrompt): StructuredPrompt {
-  type Legacy = Omit<StructuredPrompt, 'fields'> & {generalRules?: unknown; fields: (StructuredFieldPrompt & {note?: unknown})[]};
+  type Legacy = StructuredPrompt & {generalRules?: unknown; fields?: {name?: unknown; note?: unknown; values?: unknown}[]};
   const legacy = p as Legacy;
-  const hasNotes = legacy.fields.some(f => 'note' in f);
-  if (Array.isArray(legacy.ruleGroups) && !('generalRules' in legacy) && !hasNotes) return p;
+  const fields = Array.isArray(legacy.fields) ? legacy.fields : null;
+  const hasLabel = !!legacy.label && typeof legacy.label === 'object';
+  if (hasLabel && !fields && Array.isArray(legacy.ruleGroups) && !('generalRules' in legacy)) return p;
   const groups: RuleGroup[] = [...(Array.isArray(legacy.ruleGroups) ? legacy.ruleGroups : [])];
   if (typeof legacy.generalRules === 'string' && legacy.generalRules.trim()) groups.push({id: '', title: 'General rules', content: legacy.generalRules.trim()});
-  for (const f of legacy.fields) if (typeof f.note === 'string' && f.note.trim()) groups.push({id: '', title: `${f.name} rules`, content: f.note.trim()});
-  const {generalRules: _g, ...rest} = legacy;
-  return {...rest, fields: legacy.fields.map(({note: _n, ...f}) => f as StructuredFieldPrompt), ruleGroups: withIds(groups)};
+  for (const f of fields ?? []) if (typeof f.note === 'string' && f.note.trim() && typeof f.name === 'string') groups.push({id: '', title: `${f.name} rules`, content: f.note.trim()});
+  const first = fields?.[0];
+  const label: Schema = hasLabel ? legacy.label : {name: typeof first?.name === 'string' ? first.name : '', values: readValues(first?.values)};
+  const {generalRules: _g, fields: _f, ...rest} = legacy;
+  return {...rest, label, ruleGroups: withIds(groups)};
 }
 
 /** Ticked feature keys in the order the prompt lists them: item features, then metadata. */
@@ -87,13 +97,6 @@ export function featureKeys(sel: FeatureSelection): string[] {
   return [...item, ...meta];
 }
 
-const cardinality = (f: StructuredFieldPrompt) => {
-  if (f.kind === 'single') return 'Choose exactly 1';
-  const min = f.min ?? 1;
-  const max = f.max ?? f.values.length;
-  return min === max ? `Choose exactly ${min}` : `Choose ${min} to ${max}`;
-};
-
 /** An XML attribute value: quotes, ampersands and angle brackets escaped. */
 const attr = (x: string) => x.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
@@ -101,8 +104,8 @@ const attr = (x: string) => x.replace(/&/g, '&amp;').replace(/"/g, '&quot;').rep
  * The text the model reads, built the same way every time, in XML-tagged sections so the model
  * sees clear boundaries and text inside an item's features cannot pass for an instruction
  * (2026-11-16 refinements, 2.4): persona and task, input features (one line per ticked feature, so
- * a placeholder can never be unticked, unused or broken), the label fields with a definition per
- * value, the rule groups, reference images, the output format. The site adds its reason line after
+ * a placeholder can never be unticked, unused or broken), the label with a multi-line definition
+ * per value, the rule groups, reference images, the output format. The site adds its reason line after
  * it at labeling time.
  */
 export function compilePrompt(p0: StructuredPrompt, signature?: LabelSignature): string {
@@ -121,30 +124,24 @@ export function compilePrompt(p0: StructuredPrompt, signature?: LabelSignature):
     ].join('\n'),
   );
 
-  const fields = sig.fields.map(sf => {
-    const f = p.fields.find(x => x.name === sf.name);
-    const def = (v: string) => f?.values.find(x => x.name === v)?.definition.trim() ?? '';
-    const bounds = sf.kind === 'multi' ? ` min="${sf.min ?? 1}" max="${sf.max ?? sf.values.length}"` : '';
-    return [
-      `  <field name="${attr(sf.name)}" selection="${sf.kind}"${bounds}>`,
-      ...sf.values.map(v => (def(v) ? `    <label value="${attr(v)}">${def(v)}</label>` : `    <label value="${attr(v)}"/>`)),
-      '  </field>',
-    ].join('\n');
-  });
-  blocks.push(['<output_labels>', ...fields, '</output_labels>'].join('\n'));
+  const def = (v: string) => p.label.values.find(x => x.name === v)?.definition.trim() ?? '';
+  blocks.push(
+    [
+      `<output_labels name="${attr(sig.name)}" selection="single">`,
+      ...sig.values.map(v => (def(v) ? `  <label value="${attr(v)}">\n${def(v)}\n  </label>` : `  <label value="${attr(v)}"/>`)),
+      '</output_labels>',
+    ].join('\n'),
+  );
 
   const groups = p.ruleGroups.filter(g => g.content.trim());
   if (groups.length) blocks.push(['<rules>', ...groups.map(g => `  <rule_group name="${attr(g.title.trim())}">\n${g.content.trim()}\n  </rule_group>`), '</rules>'].join('\n'));
   if (p.images.length) blocks.push(['<reference_images>', ...p.images.map((img, i) => `  <image name="${attr(img.name)}">[Image ${i + 1}]</image>`), '</reference_images>'].join('\n'));
 
-  const shape = sig.fields.map(f => `"${f.name}": ${f.kind === 'single' ? `"${f.values.join(' | ')}"` : `["${f.values.join('" | "')}"]`}`).join(', ');
-  const choose = sig.fields.filter(f => f.kind === 'multi').map(f => `${f.name}: ${cardinality({...f, values: f.values.map(name => ({name, definition: ''}))}).toLowerCase()}`);
   blocks.push(
     [
       '<output_format>',
-      'Return one JSON object only, with exactly these field keys and only the label values allowed in <output_labels>:',
-      `{${shape}}`,
-      ...(choose.length ? [`For multi-select fields, ${choose.join('; ')}.`] : []),
+      `Return one JSON object only, with the exact key "${sig.name}" and exactly one allowed value from <output_labels>:`,
+      `{"${sig.name}": "${sig.values.join(' | ')}"}`,
       '</output_format>',
     ].join('\n'),
   );
@@ -153,8 +150,7 @@ export function compilePrompt(p0: StructuredPrompt, signature?: LabelSignature):
 
 export interface StructuredIssue {
   /** Where the problem is, for the editor to point at. */
-  where: 'task' | 'features' | 'field' | 'value' | 'rules';
-  field?: string;
+  where: 'task' | 'features' | 'label' | 'value' | 'rules';
   value?: string;
   /** The rule group's id, when `where` is 'rules'. */
   group?: string;
@@ -170,26 +166,15 @@ export function checkStructured(p: StructuredPrompt): StructuredIssue[] {
   const add = (i: Omit<StructuredIssue, 'message' | 'msg'>, m: Msg) => out.push({...i, message: msgText(m), msg: m});
   if (!featureKeys(p.features).length) add({where: 'features'}, msg('Tick at least one input feature'));
   for (const g of p.ruleGroups ?? []) if (!g.title.trim() && g.content.trim()) add({where: 'rules', group: g.id}, msg('A rule group has rules but no title'));
-  if (!p.fields.length) add({where: 'field'}, msg('Add at least one label field'));
-  const names = new Set<string>();
-  for (const f of p.fields) {
-    const name = f.name.trim();
-    if (!name) add({where: 'field', field: f.name}, msg('A field has no name'));
-    else if (names.has(name)) add({where: 'field', field: f.name}, msg('Two fields are named {name}', {name}));
-    names.add(name);
-    if (f.values.length < 2) add({where: 'field', field: f.name}, name ? msg('{name} needs at least 2 values', {name}) : msg('A field needs at least 2 values'));
-    const values = new Set<string>();
-    for (const v of f.values) {
-      const vn = v.name.trim();
-      if (!vn) add({where: 'value', field: f.name, value: v.name}, name ? msg('A value of {name} has no name', {name}) : msg('A value of a field has no name'));
-      else if (values.has(vn)) add({where: 'value', field: f.name, value: v.name}, msg('{name} has the value {value} twice', {name, value: vn}));
-      values.add(vn);
-    }
-    if (f.kind === 'multi') {
-      const min = f.min ?? 1;
-      const max = f.max ?? f.values.length;
-      if (min < 0 || max < 1 || min > max || max > f.values.length) add({where: 'field', field: f.name}, msg('{name}: choose {min} to {max} does not fit {n} values', {name, min, max, n: f.values.length}));
-    }
+  const label = p.label;
+  if (!label.name.trim()) add({where: 'label'}, msg('Name the label'));
+  if (label.values.length < 2) add({where: 'label'}, msg('The label needs at least 2 values'));
+  const values = new Set<string>();
+  for (const v of label.values) {
+    const vn = v.name.trim();
+    if (!vn) add({where: 'value', value: v.name}, msg('A value has no name'));
+    else if (values.has(vn)) add({where: 'value', value: v.name}, msg('The value {value} is there twice', {value: vn}));
+    values.add(vn);
   }
   return out;
 }
@@ -200,20 +185,15 @@ export function tidyStructured(p0: StructuredPrompt): StructuredPrompt {
   return {
     taskSummary: p.taskSummary.trim(),
     features: {video: [...p.features.video], photo_text: [...p.features.photo_text], metadata: [...p.features.metadata]},
-    fields: p.fields.map(f => ({
-      name: f.name.trim(),
-      kind: f.kind,
-      ...(f.kind === 'multi' ? {min: f.min ?? 1, max: f.max ?? f.values.length} : {}),
-      values: f.values.map(v => ({name: v.name.trim(), definition: v.definition.trim()})),
-    })),
+    label: {name: p.label.name.trim(), values: p.label.values.map(v => ({name: v.name.trim(), definition: v.definition.trim()}))},
     ruleGroups: p.ruleGroups.map(g => ({id: g.id, title: g.title.trim(), content: g.content.trim()})).filter(g => g.title || g.content),
     images: [...p.images],
   };
 }
 
-/** A structured prompt from label fields alone (tests, and the stand-in helper's first draft). */
+/** A structured prompt from a label alone (tests, and the stand-in helper's first draft). */
 export function structuredFromSchema(schema: Schema, taskSummary = '', features?: FeatureSelection): StructuredPrompt {
-  return {...emptyStructuredPrompt(), taskSummary, ...(features ? {features} : {}), fields: schema.fields.map(f => ({...f, values: f.values.map(v => ({...v}))}))};
+  return {...emptyStructuredPrompt(), taskSummary, ...(features ? {features} : {}), label: {name: schema.name, values: schema.values.map(v => ({...v}))}};
 }
 
 /**
@@ -244,12 +224,9 @@ export function structuredChangeSummary(a: StructuredPrompt, b: StructuredPrompt
   const parts: string[] = [];
   if (a.taskSummary !== b.taskSummary) parts.push('task summary');
   let defs = 0;
-  for (const f of b.fields) {
-    const was = a.fields.find(x => x.name === f.name);
-    for (const v of f.values) if ((was?.values.find(x => x.name === v.name)?.definition ?? '') !== v.definition) defs++;
-  }
+  for (const v of b.label.values) if ((a.label.values.find(x => x.name === v.name)?.definition ?? '') !== v.definition) defs++;
   if (defs) parts.push(`${defs} definition${defs === 1 ? '' : 's'}`);
-  if (!sameSignature(signatureOf(a), signatureOf(b))) parts.push('label fields');
+  if (!sameSignature(signatureOf(a), signatureOf(b))) parts.push('label values');
   const rules = ruleGroupChanges(a.ruleGroups, b.ruleGroups);
   if (rules) parts.push(`${rules} rule group${rules === 1 ? '' : 's'}`);
   if (JSON.stringify(a.features) !== JSON.stringify(b.features)) parts.push('features');
@@ -259,7 +236,7 @@ export function structuredChangeSummary(a: StructuredPrompt, b: StructuredPrompt
 
 /**
  * A helper's rewording laid over the prompt it started from: the task, features, rule groups and
- * definitions come from `next`; the fields, their kind and bounds and the value names stay as in
+ * definitions come from `next`; the label's key and value names stay as in
  * `base`. The Optimiser and Improve with AI change wording only, so gold labels and scores stand.
  */
 export function rewordOnly(base: StructuredPrompt, next: Partial<StructuredPrompt> | null | undefined): StructuredPrompt {
@@ -270,10 +247,13 @@ export function rewordOnly(base: StructuredPrompt, next: Partial<StructuredPromp
   return {
     taskSummary: str(next.taskSummary, base.taskSummary),
     features: nf && typeof nf === 'object' ? {video: group(nf.video, base.features.video), photo_text: group(nf.photo_text, base.features.photo_text), metadata: group(nf.metadata, base.features.metadata)} : base.features,
-    fields: base.fields.map(f => {
-      const nx = Array.isArray(next.fields) ? next.fields.find(y => y && y.name === f.name) : undefined;
-      return {...f, values: f.values.map(v => ({name: v.name, definition: str(Array.isArray(nx?.values) ? nx.values.find(y => y && y.name === v.name)?.definition : undefined, v.definition)}))};
-    }),
+    label: {
+      name: base.label.name,
+      values: base.label.values.map(v => {
+        const nv = next.label && typeof next.label === 'object' ? readValues(next.label.values).find(y => y.name === v.name) : undefined;
+        return {name: v.name, definition: nv ? nv.definition : v.definition};
+      }),
+    },
     ruleGroups: keepIds(readRuleGroups(next.ruleGroups) ?? base.ruleGroups, base.ruleGroups),
     images: base.images,
   };
@@ -291,26 +271,25 @@ function keepIds(groups: RuleGroup[], base: RuleGroup[]): RuleGroup[] {
   );
 }
 
-/** A structured prompt read from untyped JSON (a model's answer): null when it has no usable fields. */
+/**
+ * A structured prompt read from untyped JSON (a model's answer): null when it has no usable label.
+ * A model that still writes a list of fields gets its first field read as the label.
+ */
 export function readStructured(x: unknown, fallback?: StructuredPrompt): StructuredPrompt | null {
   if (!x || typeof x !== 'object') return null;
   const o = x as Record<string, unknown>;
-  if (!Array.isArray(o.fields)) return null;
+  const raw = (o.label && typeof o.label === 'object' ? o.label : Array.isArray(o.fields) ? o.fields[0] : null) as Record<string, unknown> | null | undefined;
+  if (!raw || typeof raw !== 'object') return null;
+  const values = readValues(raw.values);
+  if (!values.length) return null;
   const base = fallback ?? emptyStructuredPrompt();
-  const fields: StructuredFieldPrompt[] = [];
-  for (const f of o.fields as Record<string, unknown>[]) {
-    if (!f || typeof f.name !== 'string' || !Array.isArray(f.values)) continue;
-    const kind = f.kind === 'multi' ? 'multi' : 'single';
-    const values = (f.values as unknown[]).flatMap(v => (typeof v === 'string' ? [{name: v, definition: ''}] : v && typeof (v as {name?: unknown}).name === 'string' ? [{name: (v as {name: string}).name, definition: typeof (v as {definition?: unknown}).definition === 'string' ? (v as {definition: string}).definition : ''}] : []));
-    fields.push({name: f.name, kind, ...(kind === 'multi' ? {min: typeof f.min === 'number' ? f.min : 1, max: typeof f.max === 'number' ? f.max : values.length} : {}), values});
-  }
-  if (!fields.length) return null;
+  const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name : base.label.name;
   const nf = o.features as Partial<FeatureSelection> | undefined;
   const group = (g: unknown, d: string[]) => (Array.isArray(g) ? g.filter((k): k is string => typeof k === 'string') : d);
   return tidyStructured({
     taskSummary: typeof o.taskSummary === 'string' ? o.taskSummary : base.taskSummary,
     features: nf && typeof nf === 'object' ? {video: group(nf.video, base.features.video), photo_text: group(nf.photo_text, base.features.photo_text), metadata: group(nf.metadata, base.features.metadata)} : base.features,
-    fields,
+    label: {name, values},
     ruleGroups: keepIds(readRuleGroups(o.ruleGroups) ?? base.ruleGroups, base.ruleGroups),
     images: base.images,
   });

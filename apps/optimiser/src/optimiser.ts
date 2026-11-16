@@ -12,7 +12,7 @@ import {checkStructured, msg, compilePrompt, compareDryRun, rewordOnly, sameSign
  *  3. run the editor's Checks; a failing or repeated change is dropped with no labeling;
  *  4. save it as the next minor of the run's major (v4.1, v4.2…) and dry-run it on 10 examples
  *     of the optimiser half (the parent's answers are known); drop it unless it passes more.
- *     A tie (as many fields right, on different examples) goes on but is not progress (R5-6);
+ *     A tie (as many examples right, but different ones) goes on but is not progress (R5-6);
  *  5. label it on the whole eval set (the dry run's answers are reused) and build its report.
  * Stops when a version passes (the host then does what follows in the workflow), at the round limit,
  * after 3 wasted rounds in a row (ties count), after 2 ties in a row, on Stop, or when a step
@@ -88,7 +88,7 @@ function briefs(state: ProjectState, schema: Schema, half: string[], parent: Pro
   const mine = answers.get(parent.id) ?? new Map<string, Prediction>();
   if (!other) {
     const {predicted, notes} = answersForHelpers(mine.values());
-    return wrongExamples(schema, exs, promptKeys(parent), gold, predicted, undefined, notes);
+    return wrongExamples(exs, promptKeys(parent), gold, predicted, undefined, notes);
   }
   const a = entries.find(x => x.id === parent.id)?.scores;
   const b = entries.find(x => x.id === other.id)?.scores;
@@ -109,7 +109,7 @@ function briefs(state: ProjectState, schema: Schema, half: string[], parent: Pro
 
 /** The version with the highest current score on the model, if any is scored. */
 function bestScored(state: ProjectState, endpoint: EndpointId): PromptVersion | undefined {
-  const scored = state.reports.filter(r => r.endpoint === endpoint && !r.archivedNow).sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1);
+  const scored = state.reports.filter(r => r.endpoint === endpoint && !r.archivedNow).sort((a, b) => b.metrics.macroF1 - a.metrics.macroF1);
   return scored.map(r => state.versions.find(v => v.id === r.promptVersionId)).find(v => !!v);
 }
 
@@ -314,7 +314,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
           id: v.id,
           // R4-6: an answer the safety filter stopped is left out. An invalid answer still scores 0
           // here, so the Optimiser keeps fixing prompts that give unreadable answers.
-          scores: new Map(half.filter(id => answers.get(v.id)!.has(id) && !answers.get(v.id)!.get(id)!.filtered).map(id => [id, exampleScore(schema, state.gold[id]!.answer, answers.get(v.id)!.get(id)!.answer)])),
+          scores: new Map(half.filter(id => answers.get(v.id)!.has(id) && !answers.get(v.id)!.get(id)!.filtered).map(id => [id, exampleScore(state.gold[id]!.answer, answers.get(v.id)!.get(id)!.answer)])),
         }));
         const front = paretoFront(entries, half);
 
@@ -366,7 +366,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
                 prompt: parent.structured,
                 triedChanges: run.history.filter(h => h.parentId === parent.id && h.change).map(h => h.change),
                 mixUps: m.mixUps,
-                lowestField: m.lowestField,
+                macroF1: m.macroF1,
                 lowestValue: m.lowestValue,
                 examples,
                 ...(other ? {other: {prompt: other.structured, change: other.change}} : {}),
@@ -401,14 +401,14 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
         }
 
         // Dry run: examples of the optimiser half at random, up to half of them holding the weakest
-        // value of the parent's lowest field.
+        // value of the parent.
         if (round.step === 'dry_run') {
           const parentAnswers = answers.get(parent.id) ?? toMap(await labeling.predictions(parent.id, endpoint, settingsHash(settings)));
           const pm = await host.halfScore({projectId, promptVersionId: parent.id, endpoint});
           const weak = pm.lowestValue;
           // The weakest value's score suffers from both sides: examples that have it, and examples
           // the parent wrongly gave it.
-          const has = (a: Answer | null | undefined) => !!weak && !!a?.[weak.field]?.includes(weak.value);
+          const has = (a: Answer | null | undefined) => !!weak && a === weak.value;
           const focus = new Set(half.filter(id => has(state.gold[id]!.answer) || has(parentAnswers.get(id)?.answer)));
           const ids = pickDryRun(
             half.filter(id => parentAnswers.has(id)),
@@ -420,11 +420,9 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
             await label(cand, ids);
             const mine = toMap(await labeling.predictions(cand.id, endpoint, settingsHash(settings)));
             return compareDryRun(
-              schema,
               parent.id,
               // R4-6: examples where either answer was stopped by the safety filter are left out.
               ids.filter(id => !mine.get(id)?.filtered && !parentAnswers.get(id)?.filtered).map(id => ({gold: state.gold[id]!.answer, candidate: mine.get(id)?.answer ?? null, parent: parentAnswers.get(id)?.answer ?? null})),
-              pm.lowestField.field,
             );
           });
           const {better, tied, ...dryRun} = result;
@@ -447,7 +445,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
         // must pass again (decided 2026-11-10; review finding 6: with many tries, one passes by luck).
         let confirm: OptimiserRound['confirm'] = null;
         if (s.passed) {
-          round = {...round, score: s.report.metrics.lowestField.macroF1, passed: true, step: 'confirm'};
+          round = {...round, score: s.report.metrics.macroF1, passed: true, step: 'confirm'};
           await putRound(round);
           confirm = await step('confirm', cand, async () => {
             const fresh = (await host.loadState(projectId))!;
@@ -465,7 +463,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
         }
         keptSinceMerge = round.kind === 'merge' ? 0 : keptSinceMerge + 1;
         tm.counter('tsp_optimiser_candidates_total', {slot: endpoint, result: round.tied ? 'tied' : 'kept'});
-        await putRound({...round, outcome: 'kept', score: s.report.metrics.lowestField.macroF1, passed: s.passed, confirm, step: undefined});
+        await putRound({...round, outcome: 'kept', score: s.report.metrics.macroF1, passed: s.passed, confirm, step: undefined});
         if (s.passed && confirm?.passed) {
           passedVersion = cand;
           run.stopReason = 'passes';

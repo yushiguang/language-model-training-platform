@@ -332,8 +332,6 @@ body{margin:0;background:var(--bg-body)}
 .k .btn.pending svg.i{animation:k-spin 1s linear infinite}
 .loading{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:520px;color:var(--text-3)}
 .k .loading svg.i{width:24px;height:24px;color:var(--text-3);animation:k-spin 1s linear infinite}
-.chat-who{font-size:12px;line-height:16px;color:var(--text-2)}
-.chat-h .ctx-row{display:flex;align-items:center;gap:10px}
 .msg-a .agent-k b{font-weight:600}
 .live{display:flex;align-items:center;gap:8px;font-size:13px;line-height:20px;color:var(--text-2)}
 .k .live svg.i{width:14px;height:14px;color:var(--brand);animation:k-spin 1s linear infinite}
@@ -350,4 +348,3 @@ a.evt:hover span.one{color:var(--text-2);text-decoration:underline;text-underlin
 .chat-in{align-items:flex-end}
 .chat-in .typed{flex:1;color:var(--text);white-space:pre-wrap;max-height:120px;overflow:auto;scrollbar-width:none;line-height:20px;padding:4px 0}
 .banner.err{background:var(--err-bg);color:var(--err-ink)}
-.chat-note{margin:-8px 16px 12px;font-size:12px;line-height:16px;color:var(--text-3);text-align:center}

@@ -70,10 +70,10 @@ tokens, not a second copy of the numbers.
 | Label | 14 / 20 · 500 | Prompt |
 | Caption | 12 / 20 · 400 | Macro-F1 |
 | Number / big number | 28 / 36 · 600 · 44 / 52 · 600 | 55 · 0.71 |
-| Field name | 13 / 20 · mono | primary\_value |
+| Label name | 13 / 20 · mono | primary\_value |
 
 - **Type.** Figtree for all text, with tabular figures so columns line up. Sentence case
-  everywhere, except the step names, user data (field names, values, model names) and the fixed
+  everywhere, except the step names, user data (label names, values, model names) and the fixed
   label "AI Suggestion". No ALL CAPS and no full stops in titles, buttons or labels.
 - **Dates.** Always "2026.11.06 10:42": year.month.day, 24-hour time, no seconds, never "2 hours
   ago".
@@ -110,7 +110,7 @@ its Rules board.
 | Component | Use it for | Never |
 | --- | --- | --- |
 | Card | One job: title on the left, its one action on the right, content below | Cards inside cards; two main actions in one card |
-| Table in a card | Lists of same-shaped items: versions, fields, models | Tables for one or two values |
+| Table in a card | Lists of same-shaped items: versions, values, models | Tables for one or two values |
 | Number | A value the user compares or acts on; in a row, split by hairlines | Numbers that need a paragraph to explain |
 | Status badge | The state of one thing: Passed, Below, Running, Finished, Best, Approved | Categories or decoration |
 | Banner | A problem that lowers quality, with the action that fixes it (white button); one per page | Tips, news or success messages |

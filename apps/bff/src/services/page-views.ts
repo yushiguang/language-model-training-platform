@@ -48,7 +48,7 @@ function scoresOf(state: ProjectState, v: PromptVersion) {
     const run = state.runs.find(x => x.promptVersionId === v.id && x.endpoint === m.endpoint);
     return {
       model: modelName(state, m.endpoint),
-      lowestFieldMacroF1: r ? r2(r.metrics.lowestField.macroF1) : null,
+      macroF1: r ? r2(r.metrics.macroF1) : null,
       passed: r ? r.passed : null,
       labeling: !r && run ? `${run.state}, ${run.done} of ${run.total}` : undefined,
     };
@@ -85,7 +85,7 @@ function optimiserView(state: ProjectState) {
     now: o.state === 'running' ? stepLine(o.step, label(o.stepVersionId), dryRunSize(state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && !!state.gold[e.id]).length)) : null,
     stopReason: o.stopReason,
     error: o.error,
-    rounds: o.history.map(r => ({round: r.round, version: label(r.versionId), from: label(r.parentId), kind: r.kind, change: r.change, outcome: r.outcome, lowestFieldMacroF1: r.score == null ? null : r2(r.score), passed: r.passed, confirmed: r.confirm ? r.confirm.passed : null})),
+    rounds: o.history.map(r => ({round: r.round, version: label(r.versionId), from: label(r.parentId), kind: r.kind, change: r.change, outcome: r.outcome, macroF1: r.score == null ? null : r2(r.score), passed: r.passed, confirmed: r.confirm ? r.confirm.passed : null})),
   };
 }
 
@@ -116,7 +116,7 @@ function reportView(state: ProjectState, v: PromptVersion | undefined, model: En
   const nEval = state.facts.goldEvalDone;
   const trend = state.reports
     .filter(x => x.endpoint === r.endpoint && !x.archivedNow)
-    .map(x => ({version: versionLabel(state.versions.find(v2 => v2.id === x.promptVersionId)!), lowestFieldMacroF1: r2(x.metrics.lowestField.macroF1), passed: x.passed}))
+    .map(x => ({version: versionLabel(state.versions.find(v2 => v2.id === x.promptVersionId)!), macroF1: r2(x.metrics.macroF1), passed: x.passed}))
     .reverse();
   return {
     report: {
@@ -132,13 +132,15 @@ function reportView(state: ProjectState, v: PromptVersion | undefined, model: En
       // Under the minimum gold-labeled examples the score is a rough reading and never passes.
       roughReading: r.rough,
       confirmed: confirmedOf(state, ver.id),
-      fields: r.metrics.fields.map(f => ({field: f.field, kind: f.kind, macroF1: r2(f.macroF1), accuracy: r2(f.accuracy), weakestValues: [...f.values].sort((a, b) => a.f1 - b.f1).slice(0, 3).map(x => ({value: x.value, f1: r2(x.f1)}))})),
-      lowestField: {field: r.metrics.lowestField.field, macroF1: r2(r.metrics.lowestField.macroF1)},
+      label: state.setup?.schema?.name ?? null,
+      macroF1: r2(r.metrics.macroF1),
+      accuracy: r2(r.metrics.accuracy),
+      values: r.metrics.values.map(x => ({value: x.value, f1: r2(x.f1), precision: r2(x.precision), recall: r2(x.recall), support: x.support})),
       lowestValue: r.metrics.lowestValue ? {...r.metrics.lowestValue, f1: r2(r.metrics.lowestValue.f1)} : null,
       invalidRate: r2(r.metrics.invalidRate),
       checks: t ? judge(r.metrics, t, nEval).checks : null,
       // Scored on the held-out half, so mix-ups go as counts only: no example ids (finding 3).
-      topMixUps: r.metrics.mixUps.slice(0, 5).map(m => ({field: m.field, kind: m.kind, gold: m.gold, predicted: m.predicted, count: m.count})),
+      topMixUps: r.metrics.mixUps.slice(0, 5).map(m => ({gold: m.gold, predicted: m.predicted, count: m.count})),
     },
     thresholds: t,
     trend,
@@ -253,7 +255,7 @@ function datasetCounts(state: ProjectState) {
 }
 
 function projectSummary(state: ProjectState) {
-  const best = state.reports.filter(r => !r.archivedNow).sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1)[0];
+  const best = state.reports.filter(r => !r.archivedNow).sort((a, b) => b.metrics.macroF1 - a.metrics.macroF1)[0];
   const bv = best && state.versions.find(v => v.id === best.promptVersionId);
   return {
     project: state.project.name,
@@ -261,7 +263,7 @@ function projectSummary(state: ProjectState) {
     settings: {model: state.setup?.models[0] ? modelName(state, state.setup.models[0].endpoint) : null, thresholds: state.setup?.thresholds ?? null, confirmed: state.facts.settingsConfirmed},
     dataset: datasetCounts(state),
     versions: state.versions.length,
-    best: bv ? {version: versionLabel(bv), lowestFieldMacroF1: r2(best.metrics.lowestField.macroF1), passed: best.passed, roughReading: best.rough} : null,
+    best: bv ? {version: versionLabel(bv), macroF1: r2(best.metrics.macroF1), passed: best.passed, roughReading: best.rough} : null,
     optimiser: state.optimisation[0] ? {state: state.optimisation[0].state, round: state.optimisation[0].round} : null,
     advice: adviceOf(state),
   };
@@ -274,7 +276,8 @@ function datasetStats(state: ProjectState) {
   return {
     ...datasetCounts(state),
     // Per-value counts by half are aggregates: they name no example, so the held-out half stays unread.
-    fields: b?.fields.map(f => ({field: f.field, kind: f.kind, values: f.values.map(v => ({value: v.value, goldLabeled: v.count, readableHalf: v.optimiser, heldOutHalf: v.heldOut, rare: v.rare, dominant: v.dominant}))})) ?? [],
+    label: schema?.name ?? null,
+    values: b?.values.map(v => ({value: v.value, goldLabeled: v.count, readableHalf: v.optimiser, heldOutHalf: v.heldOut, rare: v.rare, dominant: v.dominant})) ?? [],
     note: 'Rare: fewer than 4 gold labels, or fewer than 2 in a half; one miss moves Macro-F1 a lot. Dominant: over 70% of the labeled examples.',
   };
 }
@@ -294,23 +297,22 @@ function compareVersions(state: ProjectState, a: PromptVersion | undefined, b: P
       else if (was.title !== g.title || was.content !== g.content) changed.push(`rule group "${g.title}"`);
     }
     for (const g of ra) if (!normalizeStructured(sb).ruleGroups.some(x => matchRuleGroup(x, [g]))) changed.push(`rule group "${g.title}" (removed)`);
-    for (const f of sb.fields) {
-      const was = sa.fields.find(x => x.name === f.name);
-      if (!was) changed.push(`field ${f.name} (new)`);
-      else {
-        for (const v of f.values) {
-          const old = was.values.find(x => x.name === v.name);
-          if (!old || old.definition !== v.definition) changed.push(`${f.name} = ${v.name}: definition`);
-        }
-      }
+    const la = normalizeStructured(sa).label;
+    const lb = normalizeStructured(sb).label;
+    if (la.name !== lb.name) changed.push(`label key ${lb.name}`);
+    for (const v of lb.values) {
+      const old = la.values.find(x => x.name === v.name);
+      if (!old) changed.push(`value ${v.name} (new)`);
+      else if (old.definition !== v.definition) changed.push(`${v.name}: definition`);
     }
+    for (const v of la.values) if (!lb.values.some(x => x.name === v.name)) changed.push(`value ${v.name} (removed)`);
   }
   const m = model ?? state.setup?.models[0]?.endpoint;
-  const fields = (v: PromptVersion) => {
+  const scores = (v: PromptVersion) => {
     const r = state.reports.find(x => x.promptVersionId === v.id && x.endpoint === m && !x.archivedNow);
-    return r ? {lowestFieldMacroF1: r2(r.metrics.lowestField.macroF1), passed: r.passed, roughReading: r.rough, fields: Object.fromEntries(r.metrics.fields.map(f => [f.field, r2(f.macroF1)]))} : null;
+    return r ? {macroF1: r2(r.metrics.macroF1), passed: r.passed, roughReading: r.rough, values: Object.fromEntries(r.metrics.values.map(x => [x.value, r2(x.f1)]))} : null;
   };
-  return {a: {version: versionLabel(a), change: a.change || null, scores: fields(a)}, b: {version: versionLabel(b), change: b.change || null, scores: fields(b)}, changedParts: changed, prompts: {a: sa, b: sb}};
+  return {a: {version: versionLabel(a), change: a.change || null, scores: scores(a)}, b: {version: versionLabel(b), change: b.change || null, scores: scores(b)}, changedParts: changed, prompts: {a: sa, b: sb}};
 }
 
 async function mismatchSummary(projectId: string, state: ProjectState, v: PromptVersion | undefined) {
@@ -323,8 +325,8 @@ async function mismatchSummary(projectId: string, state: ProjectState, v: Prompt
     wrongInEveryVersion: m.wrongEverywhere,
     reviewed: m.reviewed,
     // Counts only (review finding 2): which side is right is the people's call on Gold Labels.
-    byField: r ? r.metrics.fields.map(f => ({field: f.field, accuracy: r2(f.accuracy)})) : [],
-    topMixUps: r ? r.metrics.mixUps.slice(0, 5).map(x => ({field: x.field, gold: x.gold, predicted: x.predicted, count: x.count})) : [],
+    accuracy: r ? r2(r.metrics.accuracy) : null,
+    topMixUps: r ? r.metrics.mixUps.slice(0, 5).map(x => ({gold: x.gold, predicted: x.predicted, count: x.count})) : [],
     note: 'Counts only. Never say which side is right: people decide on the Mismatches tab of Gold Labels.',
   };
 }
@@ -380,11 +382,10 @@ export function agentTools(projectId: string): AgentToolHost {
           const settings = state.setup?.models.find(x => x.endpoint === m);
           if (!v || !settings) throw new Error('Name a version and one of the chosen models.');
           const preds = toMap(await labeling.predictions(v.id, settings.endpoint, settingsHash(settings)));
-          const same = (a?: string[], b?: string[]) => JSON.stringify([...(a ?? [])].sort()) === JSON.stringify([...(b ?? [])].sort());
           const rows = state.examples
             .filter(e => e.split === 'eval' && visibleToAgents(e) && preds.has(e.id))
             .map(e => ({e, p: preds.get(e.id)!, g: state.gold[e.id]?.answer ?? null}))
-            .filter(({p, g}) => !args.mixedUpOnly || !p.answer || (g && state.setup!.schema!.fields.some(f => !same(g[f.name], p.answer![f.name]))));
+            .filter(({p, g}) => !args.mixedUpOnly || !p.answer || (g != null && g !== p.answer));
           return {version: versionLabel(v), model: modelName(state, settings.endpoint), note: HIDDEN_NOTE, rows: rows.slice(0, limitOf(args.limit, 20, 10)).map(({e, p, g}) => ({id: e.externalId, title: e.title, model: p.answer, ...(p.reason ? {reason: p.reason} : {}), invalid: p.invalidReason, gold: g})), matching: rows.length};
         }
         case 'check_prompt': {

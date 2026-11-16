@@ -5,55 +5,39 @@
 
 export type ExampleType = 'video' | 'photo_text';
 export type FeatureGroup = ExampleType | 'metadata';
-export type FieldKind = 'single' | 'multi';
 export type Split = 'eval' | 'test' | 'train';
 export type EndpointId = 'A' | 'B';
 export type Actor = 'user' | 'prompt_agent' | 'optimiser' | 'system';
 
 export interface LabelValue {
   name: string;
+  /**
+   * Everything that says when this value applies or does not (2026-11-16): criteria, thresholds,
+   * sub-cases, exclusions and exemptions. Multi-line: lists and paragraphs.
+   */
   definition: string;
 }
 
-export interface LabelField {
+/**
+ * The project's one mutually-exclusive label (2026-11-16, single-label projects): its key in the
+ * model's JSON answer and its values (at least 2). Every answer is exactly one value. There is no
+ * separate policy text: each value's definition and the rule groups carry the rules.
+ */
+export interface Schema {
+  /** The JSON key for this project's label, e.g. "category". */
   name: string;
-  kind: FieldKind;
-  /** Multi-select only: how many values an answer may hold. */
-  min?: number;
-  max?: number;
   values: LabelValue[];
 }
 
 /**
- * The label fields. There is no separate policy text (removed 2026-11-09): each value's one-line
- * definition and the prompt carry the rules.
+ * What an answer may hold: the label's key and its value names in order. No wording.
+ * `schemaVersion` bumps only when this changes, so refining a definition never touches gold labels
+ * or scores.
  */
-export interface Schema {
-  fields: LabelField[];
-}
-
-/**
- * What an answer may hold (1.0.0): the field names, their kind and bounds, and the value names in
- * order. No wording. `schemaVersion` bumps only when this changes, so refining a definition never
- * touches gold labels or scores.
- */
-export interface LabelSignatureField {
+export interface LabelSignature {
   name: string;
-  kind: FieldKind;
-  min?: number;
-  max?: number;
   values: string[];
 }
-
-export interface LabelSignature {
-  fields: LabelSignatureField[];
-}
-
-/**
- * One field of a structured prompt: the signature's field with the wording the model reads. The
- * per-field note (tie-break rules) was removed on 2026-11-16: such rules go in a rule group.
- */
-export type StructuredFieldPrompt = LabelField;
 
 /**
  * A user-named group of rules (2026-11-16 refinements, 2.3), for example "Label priority" or
@@ -75,18 +59,19 @@ export interface StructuredPrompt {
   /** One or two sentences: what is being classified and why. */
   taskSummary: string;
   features: FeatureSelection;
-  fields: StructuredFieldPrompt[];
+  /** The project's single mutually-exclusive label: its key and its values with definitions. */
+  label: Schema;
   /** The rules, in the user's own named groups, in order. Empty on a new prompt. */
   ruleGroups: RuleGroup[];
   images: PromptImage[];
 }
 
-/** One answer: field name -> chosen values (one value for single-select fields). */
-export type Answer = Record<string, string[]>;
+/** One answer: the chosen value of the project's label (2026-11-16: a plain string). */
+export type Answer = string;
 
 export interface Thresholds {
   mode: 'default' | 'custom';
-  /** Always on: the main score. Lowest macro-F1 across fields must reach it. */
+  /** Always on: the main score. The label's macro-F1 must reach it. */
   macroF1: number;
   /** Per value. null = off. */
   valueF1: number | null;
@@ -383,19 +368,10 @@ export interface ValueMetrics {
   support: number;
 }
 
-export interface FieldMetrics {
-  field: string;
-  kind: FieldKind;
-  macroF1: number;
-  accuracy: number;
-  values: ValueMetrics[];
-}
-
+/** A model answer that differs from the gold label: always a confusion of two values. */
 export interface MixUp {
-  field: string;
-  kind: 'confused' | 'extra' | 'missed';
-  gold: string | null;
-  predicted: string | null;
+  gold: string;
+  predicted: string;
   count: number;
   exampleIds: string[];
 }
@@ -410,9 +386,12 @@ export interface Metrics {
   total?: number;
   /** Answers the safety filter stopped. Missing on reports made before 2026-11-11. */
   filtered?: number;
-  fields: FieldMetrics[];
-  lowestField: {field: string; macroF1: number};
-  lowestValue: {field: string; value: string; f1: number} | null;
+  /** The label's macro-F1: the main score. */
+  macroF1: number;
+  accuracy: number;
+  /** Per value, in label order. */
+  values: ValueMetrics[];
+  lowestValue: {value: string; f1: number} | null;
   invalid: number;
   /** Invalid answers over every example scored for (`total`). */
   invalidRate: number;
@@ -435,16 +414,14 @@ export interface EvalReport {
 
 /**
  * The Optimiser's dry run: before a change is labeled on the whole eval set, it is labeled on a
- * few examples of the optimiser half, next to the version it came from. "Passed" = examples where
- * every field matches the gold label.
+ * few examples of the optimiser half, next to the version it came from. "Passed" = examples whose
+ * answer matches the gold label.
  */
 export interface DryRunResult {
   examples: number;
   passed: number;
   parentPassed: number;
   parentId: string;
-  /** Per field: examples with that field right. */
-  fields: {field: string; passed: number; parentPassed: number}[];
 }
 
 /** What an Optimiser run is doing now (the panel's "Now" line). */
@@ -460,12 +437,12 @@ export interface OptimiserRound {
   kind: 'change' | 'merge';
   change: string;
   outcome: 'running' | 'kept' | 'dropped' | 'checks' | 'repeat' | 'failed' | 'stopped';
-  /** Kept versions: the score on the held-out half (lowest field macro-F1). */
+  /** Kept versions: the score on the held-out half (macro-F1). */
   score: number | null;
   passed: boolean;
   dryRun: DryRunResult | null;
   /**
-   * The dry run tied with the parent (acceptance R5-6): as many fields right, but on different
+   * The dry run tied with the parent (acceptance R5-6): as many examples right, but different
    * examples. The change is labeled in full and kept in the pool, but does not count as progress.
    */
   tied?: boolean;

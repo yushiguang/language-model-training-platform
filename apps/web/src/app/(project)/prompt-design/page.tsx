@@ -51,7 +51,7 @@ function Design({state, setPage}: {state: ProjectState; setPage: (p: PageContext
   const started = !structuredEquals(draft, emptyStructuredPrompt());
 
   useEffect(() => {
-    setPage({label: 'Prompt Design', agent: 'prompt_agent', intent: draft.fields.length ? 'revise_prompt' : 'draft_prompt', hint: FIRST, context: {prompt: draft}});
+    setPage({label: 'Prompt Design', agent: 'prompt_agent', intent: draft.label.values.length ? 'revise_prompt' : 'draft_prompt', hint: FIRST, context: {prompt: draft}});
   }, [JSON.stringify(draft)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Approve is the user's act on the page: it saves v1 and closes the helper's draft.

@@ -3,7 +3,7 @@ import {featureItems, toFeatures} from '@tsp/domain';
 
 interface SampleFile {
   examples: RawExample[];
-  labels: {externalId: string; answer: Record<string, string[]>}[];
+  labels: {externalId: string; answer: string | Record<string, string[]>}[];
 }
 
 let cache: Promise<SampleFile> | null = null;

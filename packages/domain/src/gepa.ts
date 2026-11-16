@@ -1,5 +1,5 @@
 import {systemConfig} from './config.ts';
-import type {Answer, DryRunResult, Example, ExampleBrief, Msg, OptimisationRun, OptimiserRound, Prediction, PromptVersion, Schema} from '@tsp/contracts';
+import type {Answer, DryRunResult, Example, ExampleBrief, Msg, OptimisationRun, OptimiserRound, Prediction, PromptVersion} from '@tsp/contracts';
 import {msg, msgText} from './i18n.ts';
 import {featureItems, featureText, placeholderKeys} from './template.ts';
 import {isImageKey} from './catalogue.ts';
@@ -10,20 +10,11 @@ import {isImageKey} from './catalogue.ts';
  * and comparing a change with its parent in the dry run. The loop itself is in the bff.
  */
 
-const same = (a: string[] | undefined, b: string[] | undefined) => {
-  const x = [...(a ?? [])].sort();
-  const y = [...(b ?? [])].sort();
-  return x.length === y.length && x.every((v, i) => v === y[i]);
-};
+/** Whether one answer matches the gold label. An invalid answer (null) never does. */
+export const isRight = (gold: Answer, predicted: Answer | null) => predicted != null && predicted === gold;
 
-/** Fields of one answer that match the gold label. An invalid answer (null) gets none. */
-export function fieldsRight(schema: Schema, gold: Answer, predicted: Answer | null): string[] {
-  if (!predicted) return [];
-  return schema.fields.filter(f => same(gold[f.name], predicted[f.name])).map(f => f.name);
-}
-
-/** One example's score: the share of fields right (1 = every field matches the gold label). */
-export const exampleScore = (schema: Schema, gold: Answer, predicted: Answer | null) => (schema.fields.length ? fieldsRight(schema, gold, predicted).length / schema.fields.length : 0);
+/** One example's score: 1 when the answer matches the gold label, else 0. */
+export const exampleScore = (gold: Answer, predicted: Answer | null) => (isRight(gold, predicted) ? 1 : 0);
 
 /** Dry-run size: half of the optimiser half, at most 20 (D4, 2026-11-10). */
 export const dryRunSize = (optimiserHalf: number) => Math.min(systemConfig().optimiser.dryRunMaxExamples, Math.max(1, Math.floor(optimiserHalf / 2)));
@@ -66,16 +57,16 @@ export const visibleToAgents = (e: Pick<Example, 'split' | 'optimiserHalf'>): bo
 export const HIDDEN_NOTE = 'The held-out half of the eval set is hidden from helpers so its scores stay fair; it is not in this list.';
 
 /**
- * The examples a version gets wrong, worst first (fewest fields right), at most `max`. Pass only
+ * The examples a version gets wrong (invalid answers first), at most `max`. Pass only
  * optimiser-half examples: the held-out half must never reach a helper.
  */
-export function wrongExamples(schema: Schema, examples: Example[], keys: Iterable<string>, gold: Map<string, Answer>, predicted: Map<string, Answer | null>, max = systemConfig().optimiser.briefWrongExamples, notes?: Map<string, HelperNote>): ExampleBrief[] {
+export function wrongExamples(examples: Example[], keys: Iterable<string>, gold: Map<string, Answer>, predicted: Map<string, Answer | null>, max = systemConfig().optimiser.briefWrongExamples, notes?: Map<string, HelperNote>): ExampleBrief[] {
   const ks = [...keys];
   return examples
     .filter(e => gold.has(e.id) && predicted.has(e.id))
-    .map(e => ({e, s: exampleScore(schema, gold.get(e.id)!, predicted.get(e.id)!)}))
+    .map(e => ({e, s: exampleScore(gold.get(e.id)!, predicted.get(e.id)!), invalid: predicted.get(e.id) == null}))
     .filter(x => x.s < 1)
-    .sort((a, b) => a.s - b.s)
+    .sort((a, b) => Number(b.invalid) - Number(a.invalid))
     .slice(0, max)
     .map(({e}) => exampleBrief(e, ks, gold.get(e.id)!, predicted.get(e.id)!, undefined, notes?.get(e.id)));
 }
@@ -182,27 +173,15 @@ export function pickDryRun(exampleIds: string[], size: number, focus: Set<string
 }
 
 /**
- * Compares a change with its parent on the dry-run examples. It goes on only when it gets more
- * fields right in total (finding 5), the `lowest` field counting double (finding 7: the gate is
- * that field's score). `passed` and `parentPassed` still count examples fully right.
+ * Compares a change with its parent on the dry-run examples. `better`: more examples right.
+ * `tied` (acceptance R5-6): as many, but right on different examples, so the change may hold
+ * something the parent lacks; it goes on to the full labeling without counting as progress.
  */
-/**
- * The dry run's verdict. `better`: more fields right, the lowest field counting double. `tied`
- * (acceptance R5-6): as many, but right on different examples, so the change may hold something
- * the parent lacks; it goes on to the full labeling without counting as progress.
- */
-export function compareDryRun(schema: Schema, parentId: string, items: {gold: Answer; candidate: Answer | null; parent: Answer | null}[], lowest?: string): DryRunResult & {better: boolean; tied: boolean} {
-  const all = (a: Answer | null, gold: Answer) => fieldsRight(schema, gold, a).length === schema.fields.length;
-  const passed = items.filter(i => all(i.candidate, i.gold)).length;
-  const parentPassed = items.filter(i => all(i.parent, i.gold)).length;
-  const fields = schema.fields.map(f => ({
-    field: f.name,
-    passed: items.filter(i => fieldsRight(schema, i.gold, i.candidate).includes(f.name)).length,
-    parentPassed: items.filter(i => fieldsRight(schema, i.gold, i.parent).includes(f.name)).length,
-  }));
-  const weighted = (k: 'passed' | 'parentPassed') => fields.reduce((n, f) => n + f[k] * (f.field === lowest ? systemConfig().optimiser.lowestFieldWeight : 1), 0);
-  const differs = items.some(i => fieldsRight(schema, i.gold, i.candidate).join() !== fieldsRight(schema, i.gold, i.parent).join());
-  return {examples: items.length, passed, parentPassed, parentId, fields, better: weighted('passed') > weighted('parentPassed'), tied: weighted('passed') === weighted('parentPassed') && differs};
+export function compareDryRun(parentId: string, items: {gold: Answer; candidate: Answer | null; parent: Answer | null}[]): DryRunResult & {better: boolean; tied: boolean} {
+  const passed = items.filter(i => isRight(i.gold, i.candidate)).length;
+  const parentPassed = items.filter(i => isRight(i.gold, i.parent)).length;
+  const differs = items.some(i => isRight(i.gold, i.candidate) !== isRight(i.gold, i.parent));
+  return {examples: items.length, passed, parentPassed, parentId, better: passed > parentPassed, tied: passed === parentPassed && differs};
 }
 
 /** What the Optimiser did with a version, for the versions list and the version card. */

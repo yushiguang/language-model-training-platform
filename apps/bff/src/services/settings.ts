@@ -75,11 +75,11 @@ export async function syncLabels(projectId: string, labels: Schema, opts: {wordi
   const {prev} = await currentSetup(projectId);
   const d = prev ? null : defaultSettings();
   const before = prev?.schema ?? null;
-  const changed = !before || !sameSignature(signatureOf(before), signatureOf(labels));
+  const changed = !before || !sameSignature(signatureOf({label: before}), signatureOf({label: labels}));
   if (prev && !changed && (!opts.wording || JSON.stringify(before) === JSON.stringify(labels))) return prev;
   const schemaVersion = (prev?.schemaVersion ?? 0) + (changed ? 1 : 0);
   const stale = changed && before ? (await catalog.find('gold_labels', {projectId})).filter(g => g.schemaVersion === prev!.schemaVersion).length : 0;
   const next = await writeSetup(projectId, prev, {schema: labels, schemaVersion, thresholds: prev?.thresholds ?? d!.thresholds, models: prev?.models.length ? prev.models : [d!.model]});
-  if (changed) tm().event('signature_changed', {fields: labels.fields.length, values: labels.fields.reduce((n, f) => n + f.values.length, 0), schema_version: schemaVersion, gold_labels_needing_recheck: stale});
+  if (changed) tm().event('signature_changed', {fields: 1, values: labels.values.length, schema_version: schemaVersion, gold_labels_needing_recheck: stale});
   return next;
 }

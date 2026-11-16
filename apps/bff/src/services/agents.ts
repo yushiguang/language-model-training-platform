@@ -14,7 +14,7 @@ import type {
   StartRequest,
   StructuredPrompt,
 } from '@tsp/contracts';
-import {agentName, answersForHelpers, fieldsRight, newId, promptKeys, readStructured, rewordOnly, settingsHash, structuredEquals, tidyStructured, versionLabel, visibleToAgents, wrongExamples, toMap, msg} from '@tsp/domain';
+import {agentName, answersForHelpers, isRight, newId, promptKeys, readStructured, rewordOnly, settingsHash, structuredEquals, tidyStructured, versionLabel, visibleToAgents, wrongExamples, toMap, msg} from '@tsp/domain';
 import {loadProjectState} from './projects.ts';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {joinedMsg, postEvent} from './chat-events.ts';
@@ -310,7 +310,7 @@ export async function closeProposal(p: AgentProposal, state: 'approved' | 'disca
  * with a reason. The draft goes into the editor (an open prompt proposal) with the changes
  * marked; nothing is labeled until the user saves it.
  */
-export async function improveWithAi(projectId: string, versionId: string): Promise<void> {
+export async function improveWithAi(projectId: string, versionId: string, locale?: Locale): Promise<void> {
   const {catalog, agents, gateway, labeling} = getApp();
   // The helper reads examples: the halves are fixed from here on (spec 1.0.0, 4.2).
   await lockHoldout(projectId);
@@ -322,23 +322,22 @@ export async function improveWithAi(projectId: string, versionId: string): Promi
   if (!report) throw new Error(`${versionLabel(v)} has no scores yet.`);
   const settings = setup.models.find(m => m.endpoint === report.endpoint);
   const answers = settings ? toMap(await labeling.predictions(v.id, report.endpoint, settingsHash(settings))) : new Map();
-  const schema = setup.schema;
   // R3-9 (D3) and finding 3: the mistakes, mix-ups and up to 8 wrong examples all come from the
   // optimiser half; nothing of the held-out half reaches the helper.
   const half = state.examples.filter(e => e.split === 'eval' && visibleToAgents(e));
-  const mistakes = half.filter(e => !!state.gold[e.id] && fieldsRight(schema, state.gold[e.id]!.answer, answers.get(e.id)?.answer ?? null).length < schema.fields.length).length;
+  const mistakes = half.filter(e => !!state.gold[e.id] && !isRight(state.gold[e.id]!.answer, answers.get(e.id)?.answer ?? null)).length;
   const gold = new Map(half.filter(e => !!state.gold[e.id]).map(e => [e.id, state.gold[e.id]!.answer]));
   const said = answersForHelpers(half.filter(e => answers.has(e.id)).map(e => answers.get(e.id)!));
-  const examples = withComments(wrongExamples(schema, half, promptKeys(v), gold, said.predicted, undefined, said.notes), half, await labelComments(projectId, state));
+  const examples = withComments(wrongExamples(half, promptKeys(v), gold, said.predicted, undefined, said.notes), half, await labelComments(projectId, state));
   busyProjects.add(projectId);
   setLive(projectId, {agent: 'prompt_agent', working: `Reading the ${versionLabel(v)} mistakes…`, msg: msg('Reading the {version} mistakes…', {version: versionLabel(v)}), reply: null});
   await postEvent(projectId, 'start', 'user', msg('asked the Prompt helper to improve {version}', {version: versionLabel(v)}), {path: '/prompt'});
   let outcome = 'error';
   try {
     const m = await scoreOnOptimiserHalf(setup, v, report.endpoint, state.examples, state.gold);
-    const out = await agents.draftImprovement({projectId, version: versionLabel(v), prompt: v.structured, mixUps: m.mixUps.slice(0, 8), lowestField: m.lowestField, lowestValue: m.lowestValue, mistakes, examples});
+    const out = await agents.draftImprovement({projectId, version: versionLabel(v), prompt: v.structured, mixUps: m.mixUps.slice(0, 8), macroF1: m.macroF1, lowestValue: m.lowestValue, mistakes, examples, ...(locale ? {locale} : {})});
     for (const prev of await openProposals(projectId)) await catalog.patch('agent_proposals', prev.id, {state: 'discarded'});
-    // Improve with AI rewords; the label fields and values stay as they are.
+    // Improve with AI rewords; the label's key and values stay as they are.
     const structured: StructuredPrompt = tidyStructured(rewordOnly(v.structured, out.prompt));
     const change = out.changes.map(c => c.text).join('; ') || 'Improved with AI';
     const proposal: AgentProposal = {

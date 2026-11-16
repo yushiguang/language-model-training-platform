@@ -389,7 +389,7 @@ export interface ExampleSource {
   /** Looks up examples by id, for chat attachments. Unknown ids are left out. */
   lookup(ids: string[]): Promise<RawExample[]>;
   /** Gold labels shipped with the prepared file, if any (for "Upload labels"). */
-  bundledLabels?(): Promise<{externalId: string; answer: Record<string, string[]>}[]>;
+  bundledLabels?(): Promise<{externalId: string; answer: string | Record<string, string[]>}[]>;
 }
 
 /**

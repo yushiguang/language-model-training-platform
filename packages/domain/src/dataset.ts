@@ -29,16 +29,10 @@ export function assignEvalHalves(examples: HalfInput[], gold: Record<string, Ans
   for (const e of fixed) out[e.id] = e.optimiserHalf!;
   const free = examples.filter(e => !(e.id in out));
 
-  // The rarest value of each labeled example, counted over every labeled example.
+  // Exact per-value stratification: every labeled example has exactly one value (single-label projects).
+  const stratum = (e: HalfInput) => gold[e.id] ?? '';
   const valueCount = new Map<string, number>();
-  const keysOf = (a: Answer) => Object.entries(a).flatMap(([f, vs]) => vs.map(v => `${f}=${v}`));
-  for (const e of examples) for (const k of gold[e.id] ? keysOf(gold[e.id]!) : []) valueCount.set(k, (valueCount.get(k) ?? 0) + 1);
-  const stratum = (e: HalfInput) => {
-    const a = gold[e.id];
-    if (!a) return '';
-    const keys = keysOf(a).sort((x, y) => (valueCount.get(x)! - valueCount.get(y)!) || (x < y ? -1 : 1));
-    return keys[0] ?? '';
-  };
+  for (const e of examples) if (gold[e.id]) valueCount.set(gold[e.id]!, (valueCount.get(gold[e.id]!) ?? 0) + 1);
 
   const total = {opt: 0, held: 0};
   const per = new Map<string, {opt: number; held: number}>();
@@ -90,7 +84,8 @@ export interface ValueBalance {
 export interface LabelBalance {
   labeled: number;
   unlabeled: number;
-  fields: {field: string; kind: 'single' | 'multi'; values: ValueBalance[]}[];
+  /** Every value of the project's label, in label order. */
+  values: ValueBalance[];
 }
 
 /** The label balance and coverage card on Eval Dataset (spec 1.0.0, 4.3). */
@@ -100,11 +95,8 @@ export function labelBalance(schema: Schema, examples: Pick<Example, 'id' | 'opt
   return {
     labeled: labeled.length,
     unlabeled: examples.length - labeled.length,
-    fields: schema.fields.map(f => ({
-      field: f.name,
-      kind: f.kind,
-      values: f.values.map(v => {
-        const has = labeled.filter(e => (gold[e.id]!.answer[f.name] ?? []).includes(v.name));
+    values: schema.values.map(v => {
+        const has = labeled.filter(e => gold[e.id]!.answer === v.name);
         const optimiser = has.filter(e => e.optimiserHalf).length;
         const heldOut = has.length - optimiser;
         return {
@@ -116,7 +108,6 @@ export function labelBalance(schema: Schema, examples: Pick<Example, 'id' | 'opt
           dominant: labeled.length >= c.dominantWarnMinLabeled && has.length / labeled.length > c.dominantValueShareWarn,
         };
       }),
-    })),
   };
 }
 

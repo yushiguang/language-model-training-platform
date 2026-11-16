@@ -44,7 +44,7 @@ export function optimiserHost(): OptimiserHost {
     async halfScore({projectId, promptVersionId, endpoint}) {
       const {state, setup} = await loaded(projectId);
       const m = await scoreOnOptimiserHalf(setup, version(state, promptVersionId), endpoint, state.examples, state.gold);
-      return {mixUps: m.mixUps, lowestField: m.lowestField, lowestValue: m.lowestValue};
+      return {mixUps: m.mixUps, macroF1: m.macroF1, lowestValue: m.lowestValue};
     },
     async createVersion({projectId, structured, parentId, change, inMajor}) {
       const {state} = await loaded(projectId);

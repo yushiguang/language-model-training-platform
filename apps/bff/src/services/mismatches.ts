@@ -1,5 +1,5 @@
 import type {Answer, Example, ExampleBrief, MismatchList, MismatchReview, Prediction, ProjectState} from '@tsp/contracts';
-import {withComments, fieldsRight, versionLabel, visibleToAgents, systemConfig} from '@tsp/domain';
+import {withComments, isRight, versionLabel, visibleToAgents, systemConfig} from '@tsp/domain';
 import {emitChange, getApp, now, once, tm} from './app.ts';
 import {saveGold} from './dataset.ts';
 import {buildReport, predictionsFor} from './evaluation.ts';
@@ -123,7 +123,6 @@ export async function mismatches(projectId: string, versionId?: string | null): 
   const setup = state?.setup;
   const model = setup?.models[0];
   if (!state || !setup?.schema || !model) return empty;
-  const schema = setup.schema;
   const evalEx = state.examples.filter(e => e.split === 'eval' && !!state.gold[e.id]);
   if (!evalEx.length) return empty;
   const standing = await standingReviews(projectId, state);
@@ -135,13 +134,13 @@ export async function mismatches(projectId: string, versionId?: string | null): 
     if (p) answers.set(v.id, new Map(evalEx.map(e => [e.id, p.get(e.id)!])));
   }
   if (!answers.size) return {...empty, reviewedAll: standing.size};
-  const score = (id: string) => state.reports.find(r => r.promptVersionId === id && r.endpoint === model.endpoint && !r.archivedNow)?.metrics.lowestField.macroF1 ?? null;
+  const score = (id: string) => state.reports.find(r => r.promptVersionId === id && r.endpoint === model.endpoint && !r.archivedNow)?.metrics.macroF1 ?? null;
   const versions = state.versions.filter(v => answers.has(v.id)).map(v => ({id: v.id, label: versionLabel(v), score: score(v.id)}));
   const best = [...versions].filter(v => v.score != null).sort((a, b) => b.score! - a.score!)[0] ?? versions[0];
   const picked = versionId && answers.has(versionId) ? versionId : best.id;
   const wrong = (vid: string, exId: string) => {
     const p = answers.get(vid)!.get(exId)!;
-    return !p.filtered && fieldsRight(schema, state.gold[exId]!.answer, p.answer).length < schema.fields.length;
+    return !p.filtered && !isRight(state.gold[exId]!.answer, p.answer);
   };
   const of = answers.size;
   const reviewedHere = (e: Example) => standing.has(`${e.id}|${picked}`);

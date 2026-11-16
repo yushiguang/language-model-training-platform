@@ -86,6 +86,16 @@ Known limits of the language switch:
 | Avatar and project logo | Letters in bold (700) and a touch larger (14 px) | — |
 | Sign-in | The usual spinner until the user is known; "We could not confirm who you are" with Retry when nobody is signed in; Sign out at the bottom of the avatar menu when the platform supports it | The sign-in error page is not on the canvas |
 
+## 2026-11-16 single-label projects, built from the spec
+
+| Screen | What was built | To decide |
+| --- | --- | --- |
+| Output Labels & Definitions | A Label name box, then one card per value: the value name, its definition in a growing box, Move up / Move down / Remove; Add value below; New and Changed badges and word marks against a base version, removed values struck through | Whether to drag to reorder instead of the arrows |
+| Prompt Tuning version card | Macro-F1 of the label; a table per value (Value, F1, Precision, Recall, Examples) | — |
+| Gold Labels | One model answer and one answer row per item; Compare with is the site's own dropdown | — |
+| Dataset, Label balance | One list of values, no label-name pill | — |
+| Ask AI | No page tag, no "Prompt helper answers" and no "Helpers read your recent messages"; Shift+Enter sends, Enter adds a line | — |
+
 ## Still different from the canvas
 
 | Where | Canvas | Code | Why |

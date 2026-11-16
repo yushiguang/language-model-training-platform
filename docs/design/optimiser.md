@@ -64,7 +64,7 @@ improves the prompt on the project's one labeling model, for up to the user's Ma
   a better minor of the same major exists); an agent's start uses the best scored version.
 - **Pool and parent.** The pool is the start version, the run's kept versions, and every other
   version with a current score on the model (2026-11-11), each scored per example on the optimiser
-  half of the eval set (share of fields right). Round 1 always changes the start version (R5-7).
+  half of the eval set (1 when the answer matches the gold value, else 0). Round 1 always changes the start version (R5-7).
   Later parents are drawn from the Pareto front (versions best on at least one example and not
   dominated), weighted by how many examples each is best on; the round keeps that count
   (`parentWins`) so the panel can say why. After every 2 kept versions, two front versions that
@@ -77,8 +77,8 @@ improves the prompt on the project's one labeling model, for up to the user's Ma
   unlabeled) → the change is saved and **dry-run** on half of the optimiser half, at most 20
   examples, picked at random (review finding 7), up to half of them from the examples that hold
   the parent's weakest value (in the gold label or the parent's answer) → it goes on only when it
-  gets more fields right than the parent on them, the parent's weakest field counting double
-  (`compareDryRun`, review finding 5), or ties it while being right on different examples (R5-6:
+  gets more examples right than the parent on them (`compareDryRun`; since 2026-11-16 there is one
+  label, so no field weighting), or ties it while being right on different examples (R5-6:
   `tied`, labeled in full and kept in the pool, but a wasted round; 2 ties in a row end the run) → it is labeled on the whole eval set (the dry run's
   answers are reused) and scored on the held-out half. `setOptimiserRandom` fixes the random picks
   in tests.
@@ -106,7 +106,7 @@ version the user wrote or an earlier run made.
 Improve with AI is the same reflection, one step at a time and under the user's hand. The Prompt
 helper reads the selected version's mistakes on the optimiser half (the same wrong examples the
 Optimiser reads) and opens the prompt editor with a draft. It may propose several changes at
-once, wording only: field and value names stay as they are. Added words are marked green and
+once, wording only: the label and value names stay as they are. Added words are marked green and
 removed words struck through under each changed box; hovering a mark shows the helper's reason. Nothing is labeled until the user saves, and the draft
 never saves itself. A saved draft is the user's own version and is scored like any other
 (`improveWithAi` in `apps/bff/src/services/agents.ts`).
@@ -115,7 +115,7 @@ never saves itself. A saved draft is the user's own version and is scored like a
 
 Built in phases 1 and 2: the loop lives in `apps/optimiser` behind `OptimiserContract`; changes
 edit the structured prompt (definitions and rule groups) and never the label
-fields or values; a run no longer starts a training set after a pass; the thresholds are in
+or its values; a run no longer starts a training set after a pass; the thresholds are in
 `SystemConfig`. Phase 3 ([spec](../specs/2026-11-12-v1.0.0-workflow-and-ddd-spec.md), section 5, built
 2026-11-14): people's comments on optimiser-half examples (`ExampleBrief.comments`) replace the
 single "Why" note; the loop locks the halves (`lockHoldout`) before its first read; a run's Stop

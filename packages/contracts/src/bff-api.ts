@@ -105,7 +105,8 @@ export interface CloseProposalRequest {
 
 export interface GoldLine {
   externalId: string;
-  answer: Record<string, string[]>;
+  /** The value. Older files hold `{label: ["Value"]}`, which is still read when unambiguous. */
+  answer: string | Record<string, string[]>;
 }
 
 export interface UploadGoldRequest {
@@ -143,7 +144,6 @@ export interface RestoreExamplesRequest {
 export interface PruneDatasetRequest {
   projectId: string;
   mode: 'unlabeled' | 'downsample';
-  field?: string;
   value?: string;
   keep: number;
 }
@@ -264,7 +264,7 @@ export interface BffContract {
   /** Retry on a Failed (or paused) run: resumes from the step that failed. */
   retryOptimiser(runId: string): Promise<void>;
   /** Improve with AI: the Prompt helper drafts changes to a version and puts them in the editor (no labeling). */
-  improveWithAi(projectId: string, promptVersionId: string): Promise<void>;
+  improveWithAi(projectId: string, promptVersionId: string, locale?: Locale): Promise<void>;
   /** Feature descriptions by key, for hover text (empty without a source). */
   featureInfo(keys: string[]): Promise<Record<string, FeatureInfo>>;
   /** A version's saved answers on one model, by example id. */

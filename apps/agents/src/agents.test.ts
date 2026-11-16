@@ -3,7 +3,7 @@ import test from 'node:test';
 import type {StructuredPrompt} from '@tsp/contracts';
 import {scriptedAgent} from '@tsp/platform';
 import {translate} from '@tsp/domain';
-import {draftImprovement, partialReply, reflectPrompt, runAgentTurn} from './runtime.ts';
+import {draftImprovement, importIntent, partialReply, reflectPrompt, runAgentTurn} from './runtime.ts';
 import {languageLine, PRESETS, systemPrompt} from './presets.ts';
 import {createAgentRuntime} from './index.ts';
 
@@ -33,7 +33,7 @@ test('runAgentTurn hands off from front_desk to the Prompt helper and returns a 
   assert.equal(out.invocations[0].to, 'front_desk');
   assert.equal(out.invocations[1].to, 'prompt_agent');
   assert.equal(out.proposal?.kind, 'prompt');
-  assert.ok(out.proposal!.payload.structured.fields.length > 0);
+  assert.ok(out.proposal!.payload.structured.label.values.length > 0);
   assert.deepEqual(out.proposal!.payload.unmapped, []);
   assert.ok(out.messages.some(m => m.role === 'event' && m.event === 'join' && m.text === 'Prompt helper joined to answer'));
   // The front desk's "I'll bring in…" is not shown: the join line says who answers.
@@ -149,14 +149,14 @@ test('with progress, the turn reports the live line, the streamed reply and each
 const optPrompt: StructuredPrompt = {
   taskSummary: 'Label the post.',
   features: {video: ['Description'], photo_text: [], metadata: []},
-  fields: [{name: 'format', kind: 'single', values: [{name: 'Vlog', definition: 'a day in a life'}, {name: 'Clip', definition: 'a cut from a longer video'}]}],
+  label: {name: 'format', values: [{name: 'Vlog', definition: 'a day in a life'}, {name: 'Clip', definition: 'a cut from a longer video'}]},
   ruleGroups: [],
   images: [],
 };
-/** All the prompt's rules as one text. */
-const rules = (p: StructuredPrompt) => p.ruleGroups.map(g => g.content).join('\n');
-const withRules = (content: string): StructuredPrompt => ({...optPrompt, ruleGroups: [{id: 'rg1', title: 'format rules', content}]});
-const mix = {field: 'format', kind: 'confused' as const, gold: 'Clip', predicted: 'Vlog', count: 5, exampleIds: []};
+/** All the prompt's rules as one text: the rule groups and the definitions. */
+const rules = (p: StructuredPrompt) => [...p.ruleGroups.map(g => g.content), ...p.label.values.map(v => v.definition)].join('\n');
+const withRules = (content: string): StructuredPrompt => ({...optPrompt, ruleGroups: [{id: 'rg1', title: 'Label priority', content}]});
+const mix = {gold: 'Clip', predicted: 'Vlog', count: 5, exampleIds: []};
 
 test('the Optimiser may read feature descriptions before its change, through the tool host', async () => {
   const llm = scriptedAgent();
@@ -173,35 +173,36 @@ test('the Optimiser may read feature descriptions before its change, through the
     },
   };
   const out = await reflectPrompt(
-    {prompt: optPrompt, triedChanges: [], mixUps: [mix], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null},
+    {prompt: optPrompt, triedChanges: [], mixUps: [mix], macroF1: 0.5, lowestValue: null},
     reading,
     {call: async c => (asked.push(c.name), {OCR_Text: {description: 'text on screen'}})},
   );
   assert.deepEqual(asked, ['read_feature_info']);
-  assert.match(rules(out.prompt), /Before choosing Vlog/);
-  assert.deepEqual(out.prompt.ruleGroups.map(g => g.title), ['format rules'], 'the rule goes to the group for its field');
+  // A fix for one value's boundary goes into that value's definition, as a list item (2026-11-16, 3.2).
+  assert.equal(out.prompt.label.values[0].definition, '- a day in a life\n- Does not apply when the post fits Clip better (a cut from a longer video).');
+  assert.deepEqual(out.prompt.ruleGroups, [], 'no rule group for a single value');
 });
 
 test('merge keeps the rules of both versions', async () => {
   const out = await reflectPrompt(
-    {mode: 'merge', prompt: withRules('Rule A.'), triedChanges: [], mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, other: {prompt: withRules('Rule B.'), change: 'Rule B'}},
+    {mode: 'merge', prompt: withRules('Rule A.'), triedChanges: [], mixUps: [], macroF1: 0.5, lowestValue: null, other: {prompt: withRules('Rule B.'), change: 'Rule B'}},
     scriptedAgent(),
   );
-  assert.deepEqual(out.prompt.ruleGroups, [{id: 'rg1', title: 'format rules', content: 'Rule A.\nRule B.'}]);
+  assert.deepEqual(out.prompt.ruleGroups, [{id: 'rg1', title: 'Label priority', content: 'Rule A.\nRule B.'}]);
 });
 
-test('a helper that renames a value or drops a field is overruled: the Optimiser changes wording only', async () => {
-  const answer = {prompt: {...optPrompt, taskSummary: 'New task.', fields: [{name: 'format', kind: 'multi', values: [{name: 'Daily vlog', definition: 'x'}, {name: 'Clip', definition: 'sharper'}]}, {name: 'extra', kind: 'single', values: []}]}, change: 'c'};
+test('a helper that renames a value or the key is overruled: the Optimiser changes wording only', async () => {
+  const answer = {prompt: {...optPrompt, taskSummary: 'New task.', label: {name: 'kind', values: [{name: 'Daily vlog', definition: 'x'}, {name: 'Clip', definition: 'sharper'}, {name: 'Extra', definition: ''}]}}, change: 'c'};
   const llm = {chat: async () => JSON.stringify(answer)} as unknown as Parameters<typeof runAgentTurn>[1];
-  const out = await reflectPrompt({prompt: optPrompt, triedChanges: [], mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null}, llm);
+  const out = await reflectPrompt({prompt: optPrompt, triedChanges: [], mixUps: [], macroF1: 0.5, lowestValue: null}, llm);
   assert.equal(out.prompt.taskSummary, 'New task.');
-  assert.deepEqual(out.prompt.fields.map(f => [f.name, f.kind, f.values.map(v => v.name)]), [['format', 'single', ['Vlog', 'Clip']]]);
-  assert.equal(out.prompt.fields[0].values[1].definition, 'sharper');
+  assert.deepEqual([out.prompt.label.name, out.prompt.label.values.map(v => v.name)], ['format', ['Vlog', 'Clip']]);
+  assert.equal(out.prompt.label.values[1].definition, 'sharper');
 });
 
 test('Improve with AI returns a draft with each change and its reason', async () => {
   const out = await draftImprovement(
-    {version: 'v2', prompt: optPrompt, mixUps: [mix], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, mistakes: 5},
+    {version: 'v2', prompt: optPrompt, mixUps: [mix], macroF1: 0.5, lowestValue: null, mistakes: 5},
     scriptedAgent(),
   );
   assert.equal(out.changes.length, 1);
@@ -246,12 +247,12 @@ test('importing a pasted prompt sorts it into the structured parts and lists wha
   assert.deepEqual(out.invocations.map(i => `${i.to}:${i.intent}`), ['front_desk:answer', 'prompt_agent:import_prompt']);
   const p = out.proposal!.payload;
   assert.equal(p.structured.taskSummary, 'You label customer messages for a support team.');
-  assert.deepEqual(p.structured.fields.map(f => [f.name, f.values.map(v => v.name)]), [['intent', ['Complaint', 'Question']]]);
-  // Each rules section keeps its heading as a rule group; rules under a label go to "<field> rules".
+  assert.deepEqual([p.structured.label.name, p.structured.label.values.map(v => v.name)], ['intent', ['Complaint', 'Question']]);
+  // Each rules section keeps its heading as a rule group; task-wide lines under the label go to "Choosing a value".
   assert.deepEqual(
     p.structured.ruleGroups.map(g => [g.title, g.content]),
     [
-      ['intent rules', 'When a message does both, choose Complaint.'],
+      ['Choosing a value', 'When a message does both, choose Complaint.'],
       ['Rules', '- If the message is empty, choose Question.'],
     ],
   );
@@ -274,9 +275,9 @@ test('an answer with a question, or with the same prompt, proposes nothing', asy
 test('the Optimiser and Improve with AI get the wrong examples', async () => {
   const seen: string[] = [];
   const llm = {chat: async (msgs: {content: string}[]) => (seen.push(msgs.at(-1)!.content), JSON.stringify({prompt: optPrompt, change: 'x', changes: [], reply: ''}))} as unknown as Parameters<typeof runAgentTurn>[1];
-  const examples = [{externalId: 'ex-7', features: {Title: 'cooking'}, gold: {format: ['Tutorial']}, predicted: {format: ['Vlog']}}];
-  await reflectPrompt({prompt: optPrompt, triedChanges: [], mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, examples}, llm);
-  await draftImprovement({version: 'v2', prompt: optPrompt, mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null, mistakes: 1, examples}, llm);
+  const examples = [{externalId: 'ex-7', features: {Title: 'cooking'}, gold: 'Clip', predicted: 'Vlog'}];
+  await reflectPrompt({prompt: optPrompt, triedChanges: [], mixUps: [], macroF1: 0.5, lowestValue: null, examples}, llm);
+  await draftImprovement({version: 'v2', prompt: optPrompt, mixUps: [], macroF1: 0.5, lowestValue: null, mistakes: 1, examples}, llm);
   assert.equal(seen.filter(c => c.includes('"ex-7"')).length, 2);
 });
 
@@ -310,7 +311,7 @@ test('createAgentRuntime: calls are plain data; progress goes to the injected po
     llm: {chat: (_m: unknown, o: {signal?: AbortSignal}) => new Promise((_, rej) => o.signal?.addEventListener('abort', () => rej(new DOMException('Stopped', 'AbortError'))))} as unknown as Parameters<typeof createAgentRuntime>[0]['llm'],
     tools: () => ({call: async () => ({})}),
   });
-  const p = slow.reflectPrompt({projectId: 'pr_9', requestId: 'rq_1', prompt: optPrompt, triedChanges: [], mixUps: [], lowestField: {field: 'format', macroF1: 0.5}, lowestValue: null});
+  const p = slow.reflectPrompt({projectId: 'pr_9', requestId: 'rq_1', prompt: optPrompt, triedChanges: [], mixUps: [], macroF1: 0.5, lowestValue: null});
   await slow.cancel('rq_1');
   await assert.rejects(p);
 });
@@ -347,4 +348,40 @@ test('languages (1.1.0): the helpers answer in Chinese with the site\'s own word
   const zh = languageLine('zh');
   assert.match(zh, /Simplified Chinese/);
   for (const term of ['Prompt Design', 'Gold Labels', 'Optimiser']) assert.ok(zh.includes(`${term} = ${translate('zh', term)}`), term);
+});
+
+test('a pasted or linked prompt on Prompt Design is imported, whatever intent the page set (2026-11-16, 3.1)', async () => {
+  const pasted = ['You label posts.', '## Category', '- Strong: clearly explicit', '- Weak: suggestive only', '- None: neither', '## Strong criteria', 'Nudity is shown.', 'A close-up of underwear.'].join('\n');
+  assert.equal(importIntent('prompt_agent', 'draft_prompt', pasted), 'import_prompt');
+  assert.equal(importIntent('prompt_agent', 'revise_prompt', 'Initialize from this prompt: https://docs.example.com/d/abc'), 'import_prompt');
+  assert.equal(importIntent('prompt_agent', 'draft_prompt', 'I want to label posts as strong, weak or none.'), 'draft_prompt');
+  assert.equal(importIntent('evaluation_agent', 'explain_report', pasted), 'explain_report');
+  const out = await runAgentTurn({userText: pasted, page: {label: 'Prompt Design', agent: 'prompt_agent', intent: 'draft_prompt', context: {}}, workspace: {projectId: 'pr_1', task: '', prompt: null, history: [], pageView: null}}, scriptedAgent());
+  assert.deepEqual(out.invocations.map(i => `${i.to}:${i.intent}`), ['prompt_agent:import_prompt']);
+  // A heading named after a value goes into that value's definition, line by line (3.2).
+  const strong = out.proposal!.payload.structured.label.values.find(v => v.name === 'Strong');
+  assert.equal(strong?.definition, '- clearly explicit\n- Nudity is shown.\n- A close-up of underwear.');
+  assert.deepEqual(out.proposal!.payload.structured.ruleGroups, []);
+});
+
+test('Improve with AI answers in Chinese when the user reads the site in Chinese; the prompt keeps its language', async () => {
+  const systems: string[] = [];
+  const llm = {chat: async (msgs: {role: string; content: string}[]) => (systems.push(msgs[0].content), JSON.stringify({prompt: optPrompt, changes: [], reply: ''}))} as unknown as Parameters<typeof runAgentTurn>[1];
+  await draftImprovement({version: 'v2', prompt: optPrompt, mixUps: [], macroF1: 0.5, lowestValue: null, mistakes: 1, locale: 'zh'}, llm);
+  await draftImprovement({version: 'v2', prompt: optPrompt, mixUps: [], macroF1: 0.5, lowestValue: null, mistakes: 1}, llm);
+  assert.match(systems[0], /Simplified Chinese/);
+  assert.match(systems[0], /each change's "reason" in Simplified Chinese/);
+  assert.doesNotMatch(systems[1], /Simplified Chinese/);
+});
+
+test('the helpers know the single-label rules: definitions hold one value, rule groups span values, both item types get features', () => {
+  for (const p of ['prompt_agent', 'optimiser'] as const) {
+    const text = systemPrompt(p);
+    assert.doesNotMatch(text, /"fields"|lowest field|single-select|multi-select|definition is one line/i, p);
+  }
+  assert.match(systemPrompt('prompt_agent'), /Never put a value's own criteria into a rule group/);
+  assert.match(systemPrompt('prompt_agent'), /tick the matching evidence features in BOTH groups/);
+  assert.match(systemPrompt('prompt_agent'), /"Other" or "None"/);
+  assert.match(systemPrompt('optimiser'), /refine that value's "definition"/);
+  assert.match(systemPrompt('evaluation_agent'), /Macro-F1 of the project's label/);
 });

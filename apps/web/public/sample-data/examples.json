@@ -2980,1446 +2980,403 @@
  "labels": [
   {
    "externalId": "7340007919",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Home & renting",
-     "Travel"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340015838",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Clip"
-    ],
-    "topics": [
-     "Work & money",
-     "Food & drink"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340023757",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Pets & animals",
-     "Home & renting"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340031676",
-   "answer": {
-    "primary_value": [
-     "Ecosystem issue"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Food & drink",
-     "Tech"
-    ]
-   }
+   "answer": "Ecosystem issue"
   },
   {
    "externalId": "7340039595",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Food & drink",
-     "Work & money"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340047514",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Travel"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340055433",
-   "answer": {
-    "primary_value": [
-     "Discussion"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Work & money"
-    ]
-   }
+   "answer": "Discussion"
   },
   {
    "externalId": "7340063352",
-   "answer": {
-    "primary_value": [
-     "Ecosystem issue"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Beauty & fashion"
-    ]
-   }
+   "answer": "Ecosystem issue"
   },
   {
    "externalId": "7340071271",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Tech"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340079190",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Skit"
-    ],
-    "topics": [
-     "Work & money"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340087109",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Tech"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340095028",
-   "answer": {
-    "primary_value": [
-     "Discussion"
-    ],
-    "format": [
-     "Other"
-    ],
-    "topics": [
-     "Work & money"
-    ]
-   }
+   "answer": "Discussion"
   },
   {
    "externalId": "7340102947",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Food & drink",
-     "Travel"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340110866",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Health & fitness",
-     "Work & money"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340118785",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Clip"
-    ],
-    "topics": [
-     "News & society"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340126704",
-   "answer": {
-    "primary_value": [
-     "Ecosystem issue"
-    ],
-    "format": [
-     "Other"
-    ],
-    "topics": [
-     "Work & money",
-     "Tech"
-    ]
-   }
+   "answer": "Ecosystem issue"
   },
   {
    "externalId": "7340134623",
-   "answer": {
-    "primary_value": [
-     "Discussion"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Food & drink",
-     "News & society"
-    ]
-   }
+   "answer": "Discussion"
   },
   {
    "externalId": "7340142542",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Games"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340150461",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Clip"
-    ],
-    "topics": [
-     "Games"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340158380",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Travel"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340166299",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Pets & animals",
-     "Travel"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340174218",
-   "answer": {
-    "primary_value": [
-     "Discussion"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "News & society"
-    ]
-   }
+   "answer": "Discussion"
   },
   {
    "externalId": "7340182137",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Beauty & fashion"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340190056",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Skit"
-    ],
-    "topics": [
-     "Food & drink"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340197975",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Work & money"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340205894",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Clip"
-    ],
-    "topics": [
-     "Games"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340213813",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Tech",
-     "Health & fitness"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340221732",
-   "answer": {
-    "primary_value": [
-     "Ecosystem issue"
-    ],
-    "format": [
-     "Other"
-    ],
-    "topics": [
-     "Tech"
-    ]
-   }
+   "answer": "Ecosystem issue"
   },
   {
    "externalId": "7340229651",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Home & renting"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340237570",
-   "answer": {
-    "primary_value": [
-     "Discussion"
-    ],
-    "format": [
-     "Other"
-    ],
-    "topics": [
-     "Beauty & fashion",
-     "News & society"
-    ]
-   }
+   "answer": "Discussion"
   },
   {
    "externalId": "7340245489",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Health & fitness"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340253408",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Clip"
-    ],
-    "topics": [
-     "Home & renting",
-     "News & society"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340261327",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Food & drink",
-     "Travel"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340269246",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Pets & animals",
-     "Tech"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340277165",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Work & money"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340285084",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Skit"
-    ],
-    "topics": [
-     "News & society"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340293003",
-   "answer": {
-    "primary_value": [
-     "Ecosystem issue"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Health & fitness"
-    ]
-   }
+   "answer": "Ecosystem issue"
   },
   {
    "externalId": "7340300922",
-   "answer": {
-    "primary_value": [
-     "Discussion"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Games",
-     "Work & money"
-    ]
-   }
+   "answer": "Discussion"
   },
   {
    "externalId": "7340308841",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Travel",
-     "Work & money"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340316760",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Pets & animals"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340324679",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Home & renting",
-     "Travel"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340332598",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Clip"
-    ],
-    "topics": [
-     "Work & money",
-     "Food & drink"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340340517",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Pets & animals",
-     "Home & renting"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340348436",
-   "answer": {
-    "primary_value": [
-     "Ecosystem issue"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Food & drink",
-     "Tech"
-    ]
-   }
+   "answer": "Ecosystem issue"
   },
   {
    "externalId": "7340356355",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Food & drink",
-     "Work & money"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340364274",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Travel"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340372193",
-   "answer": {
-    "primary_value": [
-     "Discussion"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Work & money"
-    ]
-   }
+   "answer": "Discussion"
   },
   {
    "externalId": "7340380112",
-   "answer": {
-    "primary_value": [
-     "Ecosystem issue"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Beauty & fashion"
-    ]
-   }
+   "answer": "Ecosystem issue"
   },
   {
    "externalId": "7340388031",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Tech"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340395950",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Skit"
-    ],
-    "topics": [
-     "Work & money"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340403869",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Tech"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340411788",
-   "answer": {
-    "primary_value": [
-     "Discussion"
-    ],
-    "format": [
-     "Other"
-    ],
-    "topics": [
-     "Work & money"
-    ]
-   }
+   "answer": "Discussion"
   },
   {
    "externalId": "7340419707",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Food & drink",
-     "Travel"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340427626",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Health & fitness",
-     "Work & money"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340435545",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Clip"
-    ],
-    "topics": [
-     "News & society"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340443464",
-   "answer": {
-    "primary_value": [
-     "Ecosystem issue"
-    ],
-    "format": [
-     "Other"
-    ],
-    "topics": [
-     "Work & money",
-     "Tech"
-    ]
-   }
+   "answer": "Ecosystem issue"
   },
   {
    "externalId": "7340451383",
-   "answer": {
-    "primary_value": [
-     "Discussion"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Food & drink",
-     "News & society"
-    ]
-   }
+   "answer": "Discussion"
   },
   {
    "externalId": "7340459302",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Games"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340467221",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Clip"
-    ],
-    "topics": [
-     "Games"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340475140",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Travel"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340483059",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Pets & animals",
-     "Travel"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340490978",
-   "answer": {
-    "primary_value": [
-     "Discussion"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "News & society"
-    ]
-   }
+   "answer": "Discussion"
   },
   {
    "externalId": "7340498897",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Beauty & fashion"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340506816",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Skit"
-    ],
-    "topics": [
-     "Food & drink"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340514735",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Work & money"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340522654",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Clip"
-    ],
-    "topics": [
-     "Games"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340530573",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Tech",
-     "Health & fitness"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340538492",
-   "answer": {
-    "primary_value": [
-     "Ecosystem issue"
-    ],
-    "format": [
-     "Other"
-    ],
-    "topics": [
-     "Tech"
-    ]
-   }
+   "answer": "Ecosystem issue"
   },
   {
    "externalId": "7340546411",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Home & renting"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340554330",
-   "answer": {
-    "primary_value": [
-     "Discussion"
-    ],
-    "format": [
-     "Other"
-    ],
-    "topics": [
-     "Beauty & fashion",
-     "News & society"
-    ]
-   }
+   "answer": "Discussion"
   },
   {
    "externalId": "7340562249",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Health & fitness"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340570168",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Clip"
-    ],
-    "topics": [
-     "Home & renting",
-     "News & society"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340578087",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Food & drink",
-     "Travel"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340586006",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Pets & animals",
-     "Tech"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340593925",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Work & money"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340601844",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Skit"
-    ],
-    "topics": [
-     "News & society"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340609763",
-   "answer": {
-    "primary_value": [
-     "Ecosystem issue"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Health & fitness"
-    ]
-   }
+   "answer": "Ecosystem issue"
   },
   {
    "externalId": "7340617682",
-   "answer": {
-    "primary_value": [
-     "Discussion"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Games",
-     "Work & money"
-    ]
-   }
+   "answer": "Discussion"
   },
   {
    "externalId": "7340625601",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Travel",
-     "Work & money"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340633520",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Pets & animals"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340641439",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Home & renting",
-     "Travel"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340649358",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Clip"
-    ],
-    "topics": [
-     "Work & money",
-     "Food & drink"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340657277",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Pets & animals",
-     "Home & renting"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340665196",
-   "answer": {
-    "primary_value": [
-     "Ecosystem issue"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Food & drink",
-     "Tech"
-    ]
-   }
+   "answer": "Ecosystem issue"
   },
   {
    "externalId": "7340673115",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Food & drink",
-     "Work & money"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340681034",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Travel"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340688953",
-   "answer": {
-    "primary_value": [
-     "Discussion"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Work & money"
-    ]
-   }
+   "answer": "Discussion"
   },
   {
    "externalId": "7340696872",
-   "answer": {
-    "primary_value": [
-     "Ecosystem issue"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Beauty & fashion"
-    ]
-   }
+   "answer": "Ecosystem issue"
   },
   {
    "externalId": "7340704791",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Tech"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340712710",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Skit"
-    ],
-    "topics": [
-     "Work & money"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340720629",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Tech"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340728548",
-   "answer": {
-    "primary_value": [
-     "Discussion"
-    ],
-    "format": [
-     "Other"
-    ],
-    "topics": [
-     "Work & money"
-    ]
-   }
+   "answer": "Discussion"
   },
   {
    "externalId": "7340736467",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Food & drink",
-     "Travel"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340744386",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Health & fitness",
-     "Work & money"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340752305",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Clip"
-    ],
-    "topics": [
-     "News & society"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340760224",
-   "answer": {
-    "primary_value": [
-     "Ecosystem issue"
-    ],
-    "format": [
-     "Other"
-    ],
-    "topics": [
-     "Work & money",
-     "Tech"
-    ]
-   }
+   "answer": "Ecosystem issue"
   },
   {
    "externalId": "7340768143",
-   "answer": {
-    "primary_value": [
-     "Discussion"
-    ],
-    "format": [
-     "Vlog"
-    ],
-    "topics": [
-     "Food & drink",
-     "News & society"
-    ]
-   }
+   "answer": "Discussion"
   },
   {
    "externalId": "7340776062",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Review"
-    ],
-    "topics": [
-     "Games"
-    ]
-   }
+   "answer": "Practical"
   },
   {
    "externalId": "7340783981",
-   "answer": {
-    "primary_value": [
-     "Entertainment"
-    ],
-    "format": [
-     "Clip"
-    ],
-    "topics": [
-     "Games"
-    ]
-   }
+   "answer": "Entertainment"
   },
   {
    "externalId": "7340791900",
-   "answer": {
-    "primary_value": [
-     "Practical"
-    ],
-    "format": [
-     "Tutorial"
-    ],
-    "topics": [
-     "Travel"
-    ]
-   }
+   "answer": "Practical"
   }
  ]
 }

@@ -1,12 +1,31 @@
 import type {MixUp, Schema, StructuredPrompt} from '@tsp/contracts';
 
-/** A rule aimed at one mix-up, for the stand-in optimiser. A real optimiser writes its own. */
+/**
+ * A fix aimed at one mix-up, for the stand-in helpers (a real model writes its own): an exclusion
+ * for the value the model chose wrongly, which goes into that value's definition (2026-11-16).
+ */
 export function ruleFor(m: MixUp, schema: Schema): string {
-  const field = schema.fields.find(f => f.name === m.field);
-  const def = (v: string | null) => field?.values.find(x => x.name === v)?.definition ?? '';
-  if (m.kind === 'confused') return `Before choosing ${m.predicted}, check that it fits the definition (${def(m.predicted) || m.predicted}); if not, prefer ${m.gold}.`;
-  if (m.kind === 'extra') return `Only add ${m.predicted} when the post clearly fits it (${def(m.predicted) || m.predicted}); tag fewer topics unless the post clearly covers more.`;
-  return `Always include ${m.gold} when the post fits it (${def(m.gold) || m.gold}).`;
+  const def = (v: string) => schema.values.find(x => x.name === v)?.definition.split('\n')[0].replace(/^[-*\d.)\s]+/, '').trim() ?? '';
+  return `- Does not apply when the post fits ${m.gold} better (${def(m.gold) || m.gold}).`;
+}
+
+/**
+ * Adds one line to a value's definition (a criterion, exclusion or exemption, as a list item).
+ * A one-line definition without a list marker becomes the first item of the list.
+ */
+export function addToDefinition(p: StructuredPrompt, value: string, line: string): StructuredPrompt {
+  return {
+    ...p,
+    label: {
+      ...p.label,
+      values: p.label.values.map(v => {
+        if (v.name !== value) return v;
+        const cur = v.definition.trim();
+        const listed = !cur || /^\s*([-*]|\d+[.)])\s/m.test(cur) ? cur : `- ${cur}`;
+        return {...v, definition: [listed, line].filter(Boolean).join('\n')};
+      }),
+    },
+  };
 }
 
 /** An id no group in the list has yet ("rg1", "rg2", ...). */
@@ -16,71 +35,32 @@ export function nextRuleGroupId(groups: {id: string}[]): string {
   return `rg${n}`;
 }
 
-/** The title of the rule group that holds rules about one field. */
-export const fieldRulesTitle = (fieldName: string) => `${fieldName} rules`;
-
 /**
- * Adds a rule, one rule per line, to the rule group for that field ("<field> rules"), made at the
- * end when there is none; an unknown field: the "General rules" group.
+ * Adds a cross-value rule, one rule per line, to the rule group with that title (made at the end
+ * when there is none). Rules about one value belong in that value's definition (2026-11-16).
  */
-export function addFieldRule(p: StructuredPrompt, fieldName: string, rule: string): StructuredPrompt {
-  const title = p.fields.some(f => f.name === fieldName) ? fieldRulesTitle(fieldName) : 'General rules';
-  const at = p.ruleGroups.findIndex(g => g.title.trim().toLowerCase() === title.toLowerCase());
+export function addRule(p: StructuredPrompt, title: string, rule: string): StructuredPrompt {
+  const at = p.ruleGroups.findIndex(g => g.title.trim().toLowerCase() === title.trim().toLowerCase());
   if (at < 0) {
     return {...p, ruleGroups: [...p.ruleGroups, {id: nextRuleGroupId(p.ruleGroups), title, content: rule}]};
   }
   return {...p, ruleGroups: p.ruleGroups.map((g, i) => (i === at ? {...g, content: [g.content.trim(), rule].filter(Boolean).join('\n')} : g))};
 }
 
-/** True when the prompt already says this rule somewhere. */
-export const hasRule = (p: StructuredPrompt, rule: string) => p.ruleGroups.some(g => g.content.includes(rule));
+/** True when the prompt already says this rule somewhere: a rule group or a definition. */
+export const hasRule = (p: StructuredPrompt, rule: string) => p.ruleGroups.some(g => g.content.includes(rule)) || p.label.values.some(v => v.definition.includes(rule));
 
 export const SAMPLE_SCHEMA: Schema = {
-  fields: [
-    {
-      name: 'primary_value',
-      kind: 'single',
-      values: [
-        {name: 'Entertainment', definition: 'fun, emotion or story; nothing usable left afterwards'},
-        {name: 'Practical', definition: 'something the viewer can act on'},
-        {name: 'Discussion', definition: "the poster's own added view, inviting replies (a clip with no added comment is not Discussion)"},
-        {name: 'Ecosystem issue', definition: 'spam, misleading claims, or selling something without saying it is an ad'},
-      ],
-    },
-    {
-      name: 'format',
-      kind: 'single',
-      values: [
-        {name: 'Vlog', definition: "the poster's own day or life, on camera"},
-        {name: 'Tutorial', definition: 'shows how to do something, step by step'},
-        {name: 'Review', definition: 'judges a product, place or service'},
-        {name: 'Skit', definition: 'a scripted, acted scene'},
-        {name: 'Clip', definition: 'cut from a show, film or stream'},
-        {name: 'Other', definition: 'none of the above'},
-      ],
-    },
-    {
-      name: 'topics',
-      kind: 'multi',
-      min: 1,
-      max: 3,
-      values: [
-        {name: 'Food & drink', definition: 'cooking, eating out, drinks'},
-        {name: 'Travel', definition: 'trips, places, getting around'},
-        {name: 'Home & renting', definition: 'flats, moving, home life'},
-        {name: 'Work & money', definition: 'jobs, careers, budgets'},
-        {name: 'Tech', definition: 'devices, apps, the internet'},
-        {name: 'Health & fitness', definition: 'exercise, diet, wellbeing'},
-        {name: 'Beauty & fashion', definition: 'clothes, make-up, style'},
-        {name: 'Pets & animals', definition: 'pets and wildlife'},
-        {name: 'Games', definition: 'video, board and card games'},
-        {name: 'News & society', definition: 'current events, public issues'},
-      ],
-    },
+  name: 'primary_value',
+  values: [
+    {name: 'Entertainment', definition: 'fun, emotion or story; nothing usable left afterwards'},
+    {name: 'Practical', definition: 'something the viewer can act on'},
+    {name: 'Discussion', definition: "the poster's own added view, inviting replies (a clip with no added comment is not Discussion)"},
+    {name: 'Ecosystem issue', definition: 'spam, misleading claims, or selling something without saying it is an ad'},
   ],
 };
 
-/** The stand-in helper's first draft: the sample labels with a task line and the usual features. */
+/** The stand-in helper's first draft: the sample label with a task line and the usual features. */
 export const SAMPLE_STRUCTURED: StructuredPrompt = {
   taskSummary: 'You are a content analyst for a short-video platform. Read the post and tag it.',
   features: {
@@ -88,7 +68,7 @@ export const SAMPLE_STRUCTURED: StructuredPrompt = {
     photo_text: ['Title', 'Description', 'OCR_Text', 'ASR', 'Creator_Nick_Name', 'Creator_Bio'],
     metadata: ['Country_Code', 'Language'],
   },
-  fields: SAMPLE_SCHEMA.fields.map(f => ({...f, values: f.values.map(v => ({...v}))})),
+  label: {name: SAMPLE_SCHEMA.name, values: SAMPLE_SCHEMA.values.map(v => ({...v}))},
   ruleGroups: [],
   images: [],
 };

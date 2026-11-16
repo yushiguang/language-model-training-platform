@@ -34,7 +34,7 @@ The internal module exports `createPlatform()` returning the `Platform` object f
 
 | Field | What it must do | Stand-in |
 |---|---|---|
-| `db: DocRuntime` | Document collections: add, get, set, partial update with `DocFieldValue` (increment, arrayUnion, arrayRemove, delete), delete, find, query with filters and offset paging, polling subscribe, batch writes. `createdAt` is server time | `localDocRuntime` (`localStorage`) |
+| `db: DocRuntime` | Document collections: add, get, set, partial update with `DocFieldValue` (increment, arrayUnion, arrayRemove, delete), delete, find, query with filters and offset paging, polling subscribe, batch writes. `createdAt` is server time | `localDocRuntime('tsp-doc-v2')` (`localStorage`) |
 | `models: LabelingModels` | One labeling call per example (`chat`, `chatStream`) on slot A or B; returns text and token usage. Throw `LlmCallError` (or an error with an HTTP `status`) so the gateway can tell busy from rejected; throw `LlmCallError('filtered', …)` when the endpoint's safety filter stops the answer (Prompt versions shows it as Filtered) | `simulatedModels` |
 | `agent: AgentModel` | Agent chat (`chat`, `complete` with usage and thinking, `chatStream`, `models()`) | `scriptedAgent` |
 | `identity: Identity` | The signed-in user (id, name, email, organization); `currentUser()` rejects when nobody is signed in, and the site then shows a sign-in error with Retry. Optional `signOut()` ends the single sign-on session: when it is there, the avatar menu shows Sign out and the page reloads after it (2026-11-16) | `localIdentity` (no sign-out) |
@@ -71,6 +71,12 @@ Since 1.0.0 each feature on a `RawExample` is a `FeatureValue` (`packages/contra
 `{text}` for text features and `{items}` for lists such as image URLs, never a plain string. An
 `ExampleSource` adapter that still returns plain strings can wrap them with `toFeatures` from
 `@tsp/domain`; prompts read features only through `featureText` and `featureItems`.
+
+Since 2026-11-16 a project has one label (`Schema {name, values}`) and an answer is a plain string
+(`Answer = string`). Bundled labels and gold upload files may give the answer as `"Practical"` or
+in the older shape `{"primary_value": ["Practical"]}`; `readGoldAnswer` reads both. The stand-in
+store keeps documents under the `tsp-doc-v2` prefix and drops the older `tsp-doc` keys, so
+projects made before this change start fresh (they were test data).
 
 ## Media
 

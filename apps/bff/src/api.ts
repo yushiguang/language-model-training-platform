@@ -85,7 +85,7 @@ export function createBffApi(): BffContract {
       await governance.removeExamples(projectId, exampleIds, reason);
     },
     restoreExamples: r => governance.restoreExamples(r.projectId, r.removalIds),
-    pruneDataset: r => governance.pruneDataset(r.projectId, r.mode, r.keep, r.field, r.value),
+    pruneDataset: r => governance.pruneDataset(r.projectId, r.mode, r.keep, r.value),
     addComment: r => governance.addComment(r.projectId, r.exampleId, r.text, r.promptVersionId ?? null),
     saveGold: dataset.saveGold,
     async uploadGold({projectId, lines}) {

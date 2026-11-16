@@ -177,10 +177,9 @@ export function checkTemplate(template: string, sel: FeatureSelection, opts: {sc
     });
   }
   if (opts.schema) {
-    for (const field of opts.schema.fields)
-      for (const v of field.values)
-        if (!template.includes(v.name))
-          warnings.push({severity: 'warning', code: 'value_missing', message: `The value "${v.name}" of ${field.name} isn't named in the prompt, so the model may not use it.`, fixes: []});
+    for (const v of opts.schema.values)
+      if (!template.includes(v.name))
+        warnings.push({severity: 'warning', code: 'value_missing', message: `The value "${v.name}" of ${opts.schema.name} isn't named in the prompt, so the model may not use it.`, fixes: []});
   }
   return {errors, warnings, matched};
 }

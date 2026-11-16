@@ -46,8 +46,8 @@ export interface LockPort {
 /** A version's score on the optimiser half: what the helper is told to fix. */
 export interface HalfScore {
   mixUps: MixUp[];
-  lowestField: {field: string; macroF1: number};
-  lowestValue: {field: string; value: string; f1: number} | null;
+  macroF1: number;
+  lowestValue: {value: string; f1: number} | null;
 }
 
 /**

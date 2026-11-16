@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-16  
 **Target:** External Agent (architectural review + implementation across `@tsp/contracts`, `@tsp/domain`, `@tsp/agents`, `@tsp/optimiser`, `@tsp/bff`, `@tsp/platform`, and `@tsp/web`)  
-**Contract Impact:** Breaking `StructuredPrompt`, `Schema`, `Answer`, `Metrics`, `AgentRuntimeContract`, and `BffContract` simplification (`Contract change: single mutually-exclusive label per project, LabelSource[] for batch labeling, and locale on DraftImprovementInput`)
+**Contract Impact:** Breaking `StructuredPrompt`, `Schema`, `Answer`, `Metrics`, `AgentRuntimeContract`, and `BffContract` simplification (`Contract change: single mutually-exclusive label per project, plain string answers, and locale on DraftImprovementInput`)
 
 ---
 
@@ -27,8 +27,8 @@ Hands-on optimization runs and beta testing established that **the quality and c
 3. **Human labeling focus (distillation quality)**: Human annotators make one clear mutually-exclusive judgement per item instead of juggling multiple schemas at once, minimizing false-negative omission errors.
 4. **How multi-label business scenarios are handled**:
    - **Independent dimensions** -> Separate `Prompt Tuning` projects, each with its own balanced ~3,000-item eval dataset and dedicated prompt.
-   - **Tightly coupled dimensions** -> Combined into a single mutually-exclusive **Label Powerset** within one project (for example `A_only` / `B_only` / `A_and_B` / `Neither`), which directly exposes rare joint combinations in `Label balance`.
-   - **Downstream production (`batch_labeling`)** -> A `Batch Labeling` project takes one unlabelled production item pool (100k+ items), runs multiple approved `Prompt Tuning` project versions over it, and merges their outputs per `externalId` into a multi-column training dataset.
+   - **Never mixed**: each project and its model classify one label only. Projects are never combined or merged with each other (decided 2026-11-16, see section 5).
+   - **Every item needs a value**: because the label is required and exclusive, the prompt helper suggests a catch-all value (for example `Other` or `None`) when the values might not cover every item.
 
 ### 1.2 Contract Simplification (`packages/contracts`)
 
@@ -67,24 +67,14 @@ Flatten the multi-field and multi-select structures across `@tsp/contracts`:
    - Empty initial state (`emptyStructuredPrompt()`): `label: { name: '', values: [] }` (or when the user starts adding values on an empty prompt, a sensible editable key input + value cards).
    - Validation (`checkStructured`): require non-empty `label.name.trim()`, at least 2 values in `label.values`, and non-empty unique `v.name.trim()` for every value.
 2. **`Answer` (`types.ts`)**:
-   - Replace `Record<string, string[]>` with a single value name `export type Answer = string;` (or `{ value: string }` if preferred for IDL clarity—keep it consistent across `GoldLabel.answer`, `Prediction.answer`, `DatasetRemoval.gold`, `GoldLine`, and `ExampleSource.bundledLabels`).
+   - Replace `Record<string, string[]>` with a single value name `export type Answer = string;` (decided 2026-11-16: a plain string, the model's reason already has its own field; keep it consistent across `GoldLabel.answer`, `Prediction.answer`, `DatasetRemoval.gold`, `GoldLine`, and `ExampleSource.bundledLabels`).
    - **Sample-data & upload compatibility**: Update `apps/web/public/sample-data/examples.json`, `simulatedModels`, and `SAMPLE_SCHEMA` / `SAMPLE_STRUCTURED` to a single mutually-exclusive label (for example `primary_value` with its 4 values). In `uploadGold` / `importBundledGold` (`apps/bff/src/services/dataset.ts`), tolerate both the new single-label `answer` format and legacy `{ [labelName]: ["Value"] }` (or single-key `{ [anyKey]: ["Value"] }` when unambiguous) so prepared dataset files uploaded earlier continue to import cleanly.
 3. **`Metrics`, `MixUp`, `DryRunResult`, and Agent Inputs (`types.ts`, `agent-api.ts`)**:
    - Remove `FieldMetrics`, `Metrics.fields`, `Metrics.lowestField`, `DryRunResult.fields`, and `MixUp.field` / `MixUp.kind` (`'extra' | 'missed'`).
    - `Metrics` directly holds the project label's `macroF1: number`, `accuracy: number`, `values: ValueMetrics[]` (`value`, `precision`, `recall`, `f1`, `support`), `lowestValue: { value: string; f1: number } | null`, `invalid`, `invalidRate`, `filtered`, `n`, `total`, `mixUps: MixUp[]` (`{ gold: string; predicted: string; count: number; exampleIds: string[] }`), and `costPer1000`.
    - Update `OptimiserReflectInput` and `DraftImprovementInput`: replace `lowestField` with `macroF1: number`, simplify `lowestValue` to `{ value: string; f1: number } | null`, and add `locale?: Locale` to `DraftImprovementInput` (see Section 3.4).
    - Update `PruneDatasetRequest`: remove `field?: string` (`downsample` needs only `value` and `keep`).
-4. **Multi-Project `Batch Labeling` Reservation on `Project` (`types.ts`)**:
-   - Replace singular `sourceProjectId?: string | null` and `sourcePromptVersionId?: string | null` on `Project` with a multi-source list so a future `batch_labeling` project can merge multiple single-label `Prompt Tuning` projects over one item pool:
-     ```ts
-     export interface LabelSource {
-       projectId: string;
-       promptVersionId: string;
-       /** Output column/field key in the merged training dataset (defaults to that prompt's label.name). */
-       outputKey: string;
-     }
-     ```
-     and `sources?: LabelSource[];` on `Project` (`batch_labeling` contracts only; still no UI pages in this release).
+4. **`Project` sources stay as they are**: the single `sourceProjectId` / `sourcePromptVersionId` remain. No multi-project merge is reserved (decided 2026-11-16).
 
 ### 1.3 XML Prompt Compilation (`compilePrompt`)
 
@@ -174,7 +164,7 @@ Testing `Prompt helper` on real multimodal moderation prompts exposed three mism
 - **Observed bug 1 (wrong slot)**: When importing a full prompt that had headings like `Strong Criteria`, `Weak Criteria`, `Sexy/Portrait Criteria`, `Prompt helper` wrote 1-sentence placeholders into each value's `definition` and dumped all per-value criteria into separate `ruleGroups` (`Strong rules`, `Weak rules`, ...).
 - **Observed bug 2 (wall of text in `definition`)**: `PRESETS.prompt_agent.system` currently says: *"Each definition is one line that a new colleague could apply..."* and *"Rules written under a label go into a group titled `<field> rules`"*. When the user asked `Prompt helper` to move the criteria into `definition`, the model obeyed *"one line"* by stripping every line break and joining 15 criteria with semicolons into an unreadable wall of text.
 - **Updated domain rules for `PRESETS` (`common`, `prompt_agent`, `optimiser`) and `scriptedAgent`**:
-  1. **Single-label scope**: Every project classifies **one mutually-exclusive label**. If a user asks for multiple unrelated labels in one project, explain briefly that Sprint tunes one mutually-exclusive label per project so the eval dataset can be balanced cleanly (suggesting either splitting independent labels into separate projects or using combined mutually-exclusive values when tightly coupled).
+  1. **Single-label scope**: Every project classifies **one mutually-exclusive label**. If a user asks for multiple unrelated labels in one project, explain briefly that Sprint tunes one mutually-exclusive label per project so the eval dataset can be balanced cleanly (suggesting a separate project for each label).
   2. **What belongs in `label.values[].definition`**: **Everything that defines when that specific label value applies or does not apply**—positive criteria, visual/text thresholds, sub-cases, near-miss exclusions, and scene exemptions for that value. Never push value-specific criteria into `ruleGroups` during `draft_prompt`, `import_prompt`, `revise_prompt`, `improve`, or `optimiser` `reflect`/`merge`.
   3. **Proactive multi-line list formatting inside `definition`**: Remove the *"one line"* rule. Instruct `prompt_agent` and `optimiser` explicitly:
      - Short, simple categories may use 1–2 crisp sentences.
@@ -209,3 +199,13 @@ Testing `Prompt helper` on real multimodal moderation prompts exposed three mism
    - `Shift+Enter` to send and `Enter` for newline in `Ask AI`.
    - Stacked vertical value cards in `Output Labels & Definitions` (reorder/add/remove + unclipped `<Grow>`).
    - Single-label `Eval Dataset`, `Gold Labels` (including custom `<Select>` for `Compare with`, zero native `<select>` elements), and per-value metrics table on `Prompt Tuning`.
+
+---
+
+## 5. Decided in review (2026-11-16)
+
+1. Each project and its model classify one label. Projects are never mixed or merged, so the label-combining advice, the multi-project batch merge and `LabelSource[]` are dropped.
+2. The prompt helper suggests a catch-all value (`Other` / `None`) when the values might not cover every item.
+3. Projects saved before this change are test data: they are started fresh rather than migrated. Old gold-label upload files still import.
+4. `Answer` is a plain string.
+5. Chat panel: remove the page tag (for example `Prompt Design`), the "Prompt helper answers" line and the "Helpers read your recent messages" line.

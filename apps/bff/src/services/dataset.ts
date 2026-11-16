@@ -1,5 +1,5 @@
 import type {Answer, DatasetSnapshot, Example, ExampleMedia, GoldLabel, RawExample, SamplingTask, Schema} from '@tsp/contracts';
-import {hashString, newId, toFeatures} from '@tsp/domain';
+import {hashString, newId, readGoldAnswer, toFeatures} from '@tsp/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {appendExamples} from './governance.ts';
 
@@ -212,25 +212,28 @@ export async function saveGold(projectId: string, exampleId: string, schemaVersi
   return g;
 }
 
-/** Upload labels: JSONL lines of {externalId, answer}, or the labels bundled with the sample file. */
+/**
+ * Upload labels: JSONL lines of {externalId, answer}, or the labels bundled with the sample file.
+ * `answer` is the value; older files with `{label: ["Value"]}` still import (2026-11-16).
+ */
 export async function uploadGold(
   projectId: string,
   schema: Schema,
   schemaVersion: number,
   examples: Example[],
-  lines: {externalId: string; answer: Record<string, string[]>}[],
+  lines: {externalId: string; answer: unknown}[],
 ): Promise<{saved: number; skipped: number}> {
   const byExt = new Map(examples.map(e => [e.externalId, e]));
   let saved = 0;
   let skipped = 0;
   for (const l of lines) {
     const ex = byExt.get(l.externalId);
-    const ok = ex && schema.fields.every(f => (l.answer[f.name] ?? []).every(v => f.values.some(x => x.name === v)) && (l.answer[f.name] ?? []).length > 0);
-    if (!ex || !ok) {
+    const answer = readGoldAnswer(l.answer, schema);
+    if (!ex || answer == null) {
       skipped++;
       continue;
     }
-    await saveGold(projectId, ex.id, schemaVersion, l.answer, false, 'uploaded');
+    await saveGold(projectId, ex.id, schemaVersion, answer, false, 'uploaded');
     saved++;
   }
   tm().event('gold_labels_uploaded', {source: 'file', saved, skipped});

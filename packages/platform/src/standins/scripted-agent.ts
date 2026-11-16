@@ -6,8 +6,8 @@ import {
   type LlmStreamChunk,
   type ModelMessage,
 } from '@tsp/contracts';
-import {SAMPLE_STRUCTURED, addFieldRule, hasRule, nextRuleGroupId, ruleFor, schemaOf} from '@tsp/domain';
-import type {MixUp, RuleGroup, StructuredFieldPrompt, StructuredPrompt} from '@tsp/contracts';
+import {SAMPLE_STRUCTURED, addRule, addToDefinition, hasRule, nextRuleGroupId, ruleFor, schemaOf} from '@tsp/domain';
+import type {LabelValue, MixUp, RuleGroup, Schema, StructuredPrompt} from '@tsp/contracts';
 
 /**
  * Stand-in agent model. It answers each agent request with fixed, sensible JSON so the whole
@@ -64,7 +64,7 @@ function promptAgentStart(r: Req) {
   if (res?.already) return {reply: res.already};
   if (s.name === 'try_prompt') {
     const rows = (res?.rows ?? []) as {gold: unknown; model: unknown}[];
-    const same = rows.filter(x => x.gold && JSON.stringify(x.gold) === JSON.stringify(x.model)).length;
+    const same = rows.filter(x => x.gold && x.gold === x.model).length;
     return {reply: `I tried it on ${rows.length} eval examples (nothing saved): ${same} of ${rows.filter(x => x.gold).length} match the gold labels.`};
   }
   return {reply: `Started. ${res?.note ?? ''}`.trim()};
@@ -79,7 +79,7 @@ function frontDesk(r: Req) {
     return {handoff: {to: 'prompt_agent', intent: /^(what|why)\b/.test(t) ? 'explain_version' : 'revise_prompt'}, reply: "I'll bring in the Prompt helper for that."};
   if (/\b(score|report|f1|pass|threshold|good enough|fail)\b/.test(t)) return {handoff: {to: 'evaluation_agent', intent: 'explain_report'}, reply: "I'll ask the Scores helper, who can read the scores."};
   if (/strict|0\.\d+|default/.test(t))
-    return {reply: 'Multi-select fields usually score lower than single-select ones. The default of 0.80 is a common bar for almost perfect agreement. You can change it later without losing any scores.'};
+    return {reply: 'The default of 0.80 is a common bar for almost perfect agreement. You can change it later without losing any scores.'};
   const view = r.context.pageView;
   if (view?.summary) return {reply: `${view.summary} ${r.context.pageHint ?? 'Ask me about anything you see, or tell me what to change.'}`};
   return {reply: `On this page you can ${r.context.pageHint ?? 'follow the steps on the left'}. Ask me about anything you see, or tell me what to change.`};
@@ -93,30 +93,38 @@ const isVague = (t: string) => /^(please )?(improve|fix|change|update|better|rew
 /** A pasted prompt: several lines, or one that says so. */
 const looksLikePrompt = (t: string) => t.trim().split('\n').filter(l => l.trim()).length >= 4 || /^(here is|this is) (my|our|the) (current |existing )?prompt\b/i.test(t.trim());
 
+/** The rule group that holds task-wide lines written under the label's heading. */
+const CHOOSING = 'Choosing a value';
+/** Cross-value rules the stand-in adds (input handling, order of checks). */
+const GENERAL = 'General rules';
+
 /**
- * Sorts a raw prompt into the structured parts, by its layout: the text before the first heading
- * is the task; a heading followed by "- Value: definition" lines is a field, and other lines under
- * it go to a "<field> rules" group; a heading with rules under it (or with no values) becomes a
- * rule group of that title. Everything else (examples, output format, a field with only one value)
- * is returned in `unmapped`, word for word.
+ * Sorts a raw prompt into the structured parts, by its layout. The project has one label
+ * (2026-11-16): the first heading followed by "- Value: definition" lines is the label, and other
+ * lines under it go to a "Choosing a value" group. A heading named after a value ("Strong
+ * criteria") goes into that value's definition, line by line. A heading with rules under it
+ * becomes a rule group of that title. Everything else (examples, output format, a second list of
+ * values) is returned in `unmapped`, word for word.
  */
 export function parseRawPrompt(raw: string, base: StructuredPrompt): {structured: StructuredPrompt | null; unmapped: string[]} {
   const unmapped: string[] = [];
   const task: string[] = [];
   const groups: RuleGroup[] = [];
-  const fields: StructuredFieldPrompt[] = [];
+  let label: Schema | null = null;
+  /** Headings with lines but no values: a value's criteria, or else a rule group. */
+  const loose: {title: string; heading: string; lines: string[]}[] = [];
   const group = (title: string, lines: string[]) => lines.length && groups.push({id: `rg${groups.length + 1}`, title, content: lines.join('\n')});
-  type Section = {kind: 'task'} | {kind: 'rules'; title: string; lines: string[]} | {kind: 'skip'; lines: string[]} | {kind: 'field'; field: StructuredFieldPrompt; heading: string; title: string; extra: string[]};
+  type Section = {kind: 'task'} | {kind: 'rules'; title: string; lines: string[]} | {kind: 'skip'; lines: string[]} | {kind: 'field'; name: string; values: LabelValue[]; heading: string; title: string; extra: string[]};
   let sec: Section = {kind: 'task'};
   const close = () => {
     if (sec.kind === 'skip' && sec.lines.length) unmapped.push(sec.lines.join('\n'));
     if (sec.kind === 'rules') group(sec.title, sec.lines);
     if (sec.kind === 'field') {
-      if (sec.field.values.length >= 2) {
-        fields.push(sec.field);
-        group(`${sec.field.name} rules`, sec.extra);
-      } else if (!sec.field.values.length && sec.extra.length) group(sec.title, sec.extra);
-      else unmapped.push([sec.heading, ...sec.field.values.map(v => `- ${v.name}: ${v.definition}`), ...sec.extra].join('\n'));
+      if (sec.values.length >= 2 && !label) {
+        label = {name: sec.name, values: sec.values};
+        group(CHOOSING, sec.extra);
+      } else if (!sec.values.length && sec.extra.length) loose.push({title: sec.title, heading: sec.heading, lines: sec.extra});
+      else unmapped.push([sec.heading, ...sec.values.map(v => `- ${v.name}: ${v.definition}`), ...sec.extra].join('\n'));
     }
   };
   for (const line0 of raw.split('\n')) {
@@ -130,9 +138,8 @@ export function parseRawPrompt(raw: string, base: StructuredPrompt): {structured
       else if (/\b(rules?|guidelines|notes?|principles?|priority|handling|policy|policies)\b/i.test(title)) sec = {kind: 'rules', title, lines: []};
       else if (/^(task|role|goal|context|background)\b/i.test(title)) sec = {kind: 'task'};
       else {
-        const multi = /\b(multi|choose up to|one or more|all that apply)\b/i.test(title);
         const name = title.replace(/\s*\(.*\)\s*$/, '').trim().toLowerCase().replace(/[^\w]+/g, '_').replace(/^_|_$/g, '');
-        sec = {kind: 'field', heading: line, title, extra: [], field: {name, kind: multi ? 'multi' : 'single', ...(multi ? {min: 1, max: 3} : {}), values: []}};
+        sec = {kind: 'field', heading: line, title, extra: [], name, values: []};
       }
       continue;
     }
@@ -143,24 +150,29 @@ export function parseRawPrompt(raw: string, base: StructuredPrompt): {structured
       else task.push(line);
     } else {
       const v = line.match(/^[-*]\s*["\u201c]?([^:"\u201d]{1,40})["\u201d]?\s*[:\uff1a]\s*(.+)$/);
-      if (v) sec.field.values.push({name: v[1].trim(), definition: v[2].trim()});
+      if (v) sec.values.push({name: v[1].trim(), definition: v[2].trim()});
       else if (/\b(return|respond|output)\b.*\bjson\b/i.test(line)) unmapped.push(line);
       else sec.extra.push(line);
     }
   }
   close();
-  if (!fields.length) return {structured: null, unmapped};
-  for (const f of fields) if (f.kind === 'multi') f.max = Math.min(f.max ?? 3, f.values.length);
-  return {structured: {taskSummary: task.join(' '), features: base.features, fields, ruleGroups: groups, images: base.images}, unmapped};
+  const found = label as Schema | null;
+  if (!found) return {structured: null, unmapped};
+  for (const l of loose) {
+    const v = found.values.find(x => new RegExp(`^${x.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(l.title));
+    if (v) v.definition = [v.definition.trim() ? `- ${v.definition.trim()}` : '', ...l.lines.map(x => (/^([-*]|\d+[.)])\s/.test(x) ? x : `- ${x}`))].filter(Boolean).join('\n');
+    else group(l.title, l.lines);
+  }
+  return {structured: {taskSummary: task.join(' '), features: base.features, label: found, ruleGroups: groups, images: base.images}, unmapped};
 }
 
 function importPrompt(r: Req) {
   const base = (r.context.prompt as StructuredPrompt | null) ?? SAMPLE_STRUCTURED;
   const {structured, unmapped} = parseRawPrompt(r.userText ?? '', base);
-  if (!structured) return {reply: '', question: 'I could not find label fields in that prompt. Which labels should the model give, and what does each value mean?'};
+  if (!structured) return {reply: '', question: 'I could not find the label in that prompt. Which values should the model choose from, and what does each one mean?'};
   const n = unmapped.length;
   return {
-    reply: `I sorted your prompt into ${structured.fields.length} label field${structured.fields.length === 1 ? '' : 's'}, the task and the rules. ${n ? `${n} passage${n === 1 ? ' has' : 's have'} no place in the structured prompt (for example examples or output format): the page lists ${n === 1 ? 'it' : 'them'} under "Not carried over".` : 'Everything was carried over.'} Check the draft, then approve it at the top right.`,
+    reply: `I sorted your prompt into the label ${structured.label.name} with ${structured.label.values.length} values, the task and the rules. ${n ? `${n} passage${n === 1 ? ' has' : 's have'} no place in the structured prompt (for example examples or output format): the page lists ${n === 1 ? 'it' : 'them'} under "Not carried over".` : 'Everything was carried over.'} Check the draft, then approve it at the top right.`,
     prompt: structured,
     change: 'Imported from an existing prompt',
     unmapped,
@@ -179,30 +191,29 @@ function promptAgent(r: Req) {
     return {reply: v ? `${v.label} was made by ${v.madeBy}. ${v.change ? `It changed: ${v.change}.` : ''} ${v.delta ?? ''}`.trim() : 'Pick a version and I can tell you what it changed.'};
   }
   if (t && isQuestion(t)) {
-    return {reply: current?.fields.length ? `The prompt has ${current.fields.length} label fields: ${current.fields.map(f => `${f.name} (${f.values.length} values)`).join(', ')}. I changed nothing; tell me what to change and I'll draft it.` : 'There is no prompt yet. Describe what you want to label, or paste the prompt you use today, and I will draft it.'};
+    return {reply: current?.label.values.length ? `The prompt's label is ${current.label.name}, with ${current.label.values.length} values: ${current.label.values.map(v => v.name).join(', ')}. I changed nothing; tell me what to change and I'll draft it.` : 'There is no prompt yet. Describe what you want to label, or paste the prompt you use today, and I will draft it.'};
   }
-  if (t && isVague(t)) return {reply: '', question: 'Which field should the change help, and what goes wrong with it today?'};
-  if (!current?.fields.length || r.intent === 'draft_prompt') {
+  if (t && isVague(t)) return {reply: '', question: 'Which value should the change help, and what goes wrong with it today?'};
+  if (!current?.label.values.length || r.intent === 'draft_prompt') {
     const prompt = structuredClone(SAMPLE_STRUCTURED);
-    return {reply: `I drafted a prompt from your description: ${prompt.fields.length} label fields, each value with a one-line definition, and the input features they need. It is on the page: edit anything, then press Approve at the top right.`, prompt, change: 'First draft'};
+    return {reply: `I drafted a prompt from your description: the label ${prompt.label.name} with ${prompt.label.values.length} values, each with a definition, and the input features they need. It is on the page: edit anything, then press Approve at the top right.`, prompt, change: 'First draft'};
   }
   const prompt = structuredClone(current);
-  const add = t.match(/add (?:a |the )?(?:value )?["“]?([^"”]+?)["”]? (?:to|in) (\w+)/i);
-  if (add) {
-    const field = prompt.fields.find(f => f.name.toLowerCase() === add[2].toLowerCase());
-    if (field && !field.values.some(v => v.name.toLowerCase() === add[1].toLowerCase())) {
-      field.values.splice(Math.max(0, field.values.length - (field.values.at(-1)?.name === 'Other' ? 1 : 0)), 0, {name: add[1], definition: '[add a one-line definition]'});
-      return {reply: `I added ${add[1]} to ${field.name} in a draft. This changes the labels, so gold labels given before will need a quick re-check.`, prompt, change: `Added the value ${add[1]} to ${field.name}`};
-    }
+  const add = t.match(/add (?:a |the )?(?:value )?["“]?([^"”]+?)["”]?(?: (?:to|in) (?:the )?(?:label|values))?$/i);
+  if (add && /\bvalue\b/i.test(t) && !prompt.label.values.some(v => v.name.toLowerCase() === add[1].toLowerCase())) {
+    const values = prompt.label.values;
+    values.splice(Math.max(0, values.length - (/^(other|none)$/i.test(values.at(-1)?.name ?? '') ? 1 : 0)), 0, {name: add[1], definition: '[say when this value applies]'});
+    return {reply: `I added the value ${add[1]} in a draft. This changes the labels, so gold labels given before will need a quick re-check.`, prompt, change: `Added the value ${add[1]}`};
   }
   const rename = t.match(/rename ["“]?([^"”]+?)["”]? to ["“]?([^"”]+?)["”]?$/i);
   if (rename) {
-    for (const f of prompt.fields) for (const v of f.values) if (v.name.toLowerCase() === rename[1].toLowerCase()) v.name = rename[2];
+    for (const v of prompt.label.values) if (v.name.toLowerCase() === rename[1].toLowerCase()) v.name = rename[2];
     return {reply: `I renamed ${rename[1]} to ${rename[2]} in a draft. This changes the labels, so gold labels given before will need a quick re-check.`, prompt, change: `Renamed ${rename[1]} to ${rename[2]}`};
   }
   const rule = t.replace(/\.?$/, '.');
-  const named = prompt.fields.find(f => new RegExp(`\\b${f.name}\\b`, 'i').test(t));
-  return {reply: 'I drafted that change on the page. Save it to make a new version.', prompt: addFieldRule(prompt, named?.name ?? '', rule), change: rule};
+  // A rule that names a value refines that value's definition; anything else is a cross-value rule.
+  const named = prompt.label.values.find(v => new RegExp(`\\b${v.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(t));
+  return {reply: 'I drafted that change on the page. Save it to make a new version.', prompt: named ? addToDefinition(prompt, named.name, `- ${rule}`) : addRule(prompt, GENERAL, rule), change: rule};
 }
 
 /** Reads the report from the page view; off the report page it asks for one with get_report. */
@@ -225,10 +236,10 @@ function evaluationAgent(r: Req) {
       : '';
   return {
     reply: [
-      `${rep.version} on ${rep.model} has a lowest field Macro-F1 of ${rep.lowestField.macroF1.toFixed(2)} (${rep.lowestField.field}).`,
+      `${rep.version} on ${rep.model} has a Macro-F1 of ${Number(rep.macroF1).toFixed(2)}.`,
       verdict,
       lv ? `The weakest value is ${lv.value} at ${lv.f1.toFixed(2)}.` : '',
-      mix ? `The most common mix-up: ${mix.gold ?? 'nothing'} labeled as ${mix.predicted ?? 'nothing'} in ${mix.field}, ${mix.count} time${mix.count === 1 ? '' : 's'}.` : '',
+      mix ? `The most common mix-up: ${mix.gold} labeled as ${mix.predicted}, ${mix.count} time${mix.count === 1 ? '' : 's'}.` : '',
       fromView?.advice?.nextStep ? `Next step: ${fromView.advice.nextStep}.` : '',
     ]
       .filter(Boolean)
@@ -244,13 +255,14 @@ function reflect(r: Req) {
   const prompt = r.context.prompt as StructuredPrompt;
   for (const m of mixUps) {
     const rule = ruleFor(m, schemaOf(prompt));
-    if (hasRule(prompt, rule) || tried.includes(rule)) continue;
-    return {prompt: addFieldRule(prompt, m.field, rule), change: rule};
+    const change = `${m.predicted}: ${rule.replace(/^- /, '')}`;
+    if (hasRule(prompt, rule) || tried.includes(change)) continue;
+    return {prompt: addToDefinition(prompt, m.predicted, rule), change};
   }
-  return {prompt: hasRule(prompt, FALLBACK_RULE) ? prompt : addFieldRule(prompt, prompt.fields[0]?.name ?? '', FALLBACK_RULE), change: FALLBACK_RULE};
+  return {prompt: hasRule(prompt, FALLBACK_RULE) ? prompt : addRule(prompt, GENERAL, FALLBACK_RULE), change: FALLBACK_RULE};
 }
 
-/** Merge: keeps the prompt's rules and adds the other version's rule lines it lacks, in the same field. */
+/** Merge: keeps the prompt's rules and adds the other version's rule and definition lines it lacks. */
 function merge(r: Req) {
   const other = r.context.other?.prompt as StructuredPrompt | undefined;
   let prompt = r.context.prompt as StructuredPrompt;
@@ -267,12 +279,18 @@ function merge(r: Req) {
       added++;
     }
   }
+  for (const v of other.label.values) {
+    for (const line of v.definition.split('\n').map(l => l.trim()).filter(Boolean)) {
+      if (hasRule(prompt, line) || !prompt.label.values.some(x => x.name === v.name)) continue;
+      prompt = addToDefinition(prompt, v.name, /^([-*]|\d+[.)])\s/.test(line) ? line : `- ${line}`);
+      added++;
+    }
+  }
   return {prompt, change: added ? `Merged the rules of two versions (${added} rule${added === 1 ? '' : 's'} added)` : 'Merged two versions'};
 }
 
 /** What a mix-up looks like in a reason line. */
-const mixLine = (m: MixUp) =>
-  m.kind === 'confused' ? `${m.count} ${m.gold} example${m.count === 1 ? ' was' : 's were'} read as ${m.predicted}` : m.kind === 'extra' ? `${m.predicted} was added ${m.count} time${m.count === 1 ? '' : 's'} when it did not apply` : `${m.gold} was missed ${m.count} time${m.count === 1 ? '' : 's'}`;
+const mixLine = (m: MixUp) => `${m.count} ${m.gold} example${m.count === 1 ? ' was' : 's were'} read as ${m.predicted}`;
 
 /** Improve with AI: up to 3 rules from the top mix-ups, each with its reason. */
 function improve(r: Req) {
@@ -283,11 +301,11 @@ function improve(r: Req) {
     if (changes.length >= 3) break;
     const rule = ruleFor(m, schemaOf(prompt));
     if (hasRule(prompt, rule)) continue;
-    prompt = addFieldRule(prompt, m.field, rule);
+    prompt = addToDefinition(prompt, m.predicted, rule);
     changes.push({text: rule, reason: mixLine(m)});
   }
   if (!changes.length && !hasRule(prompt, FALLBACK_RULE)) {
-    prompt = addFieldRule(prompt, prompt.fields[0]?.name ?? '', FALLBACK_RULE);
+    prompt = addRule(prompt, GENERAL, FALLBACK_RULE);
     changes.push({text: FALLBACK_RULE, reason: `${r.context.mistakes ?? 'Some'} examples are still wrong with no clear mix-up`});
   }
   return {

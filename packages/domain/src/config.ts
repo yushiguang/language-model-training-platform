@@ -12,7 +12,6 @@ export const DEFAULT_SYSTEM_CONFIG: SystemConfig = {
     consecutiveTiesLimit: 2,
     mergeEveryKept: 2,
     dryRunMaxExamples: 20,
-    lowestFieldWeight: 2,
     briefWrongExamples: 8,
     briefMergeWins: 4,
     briefMaxImages: 2,

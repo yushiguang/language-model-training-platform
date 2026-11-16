@@ -12,7 +12,7 @@ explain and propose; the user approves on the page.
 | Name in the UI | Preset | Job |
 | --- | --- | --- |
 | Assistant | `front_desk` | Answers questions about the current page and hands off to a specialist |
-| Prompt helper | `prompt_agent` | Drafts the structured prompt (label fields, values, definitions, rules, input features) from a description, imports a pasted prompt, revises and explains prompts |
+| Prompt helper | `prompt_agent` | Drafts the structured prompt (the label, its values and definitions, rule groups, input features) from a description, imports a pasted prompt, revises and explains prompts |
 | Scores helper | `evaluation_agent` | Explains scores against the thresholds and recommends a next step |
 | (not in chat) | `optimiser` | The reflection and merge step inside an Optimiser run |
 
@@ -31,7 +31,7 @@ explain and propose; the user approves on the page.
 - **All user input goes through Ask AI**, as text or document links. Pages have no input cards.
 - **The user's language.** Helpers answer in the language the site is shown in, using the site's
   own words for pages and buttons (one line added to the system prompt, built from the catalog's
-  fixed terms). Prompt text, field and value names and version labels stay as written.
+  fixed terms). Prompt text, label and value names and version labels stay as written.
 - **Problem reports (1.1.0).** When the user says something is wrong, or asks to report a problem,
   whichever helper answers asks what was expected and what happened, if it does not know, then
   calls `report_problem` without `send`, shows the draft in a few lines and asks whether to send
@@ -53,15 +53,21 @@ short question when the request is unclear) proposes nothing, and neither does a
 the one on the page. Improve with AI reads the same wrong examples as the Optimiser.
 
 **The structured prompt.** A helper's draft is a whole `StructuredPrompt` under the "prompt" key
-(task summary, features, fields with values and definitions, general rules), read by
+(task summary, features, the label with its values and definitions, rule groups), read by
 `readStructured`; helpers never write the compiled text. After the first approval the helper says
 what comes next ("v1 is saved. Next, click ..."). When the user pastes an existing prompt (intent
 `import_prompt`), the helper sorts it into the parts and returns every passage that has no place,
 word for word, as `unmapped`; the page lists them under "Not carried over". Improve with AI and the
-Optimiser may change wording only: the runtime keeps the field and value names of the version they
-started from (`rewordOnly`). Rules go into the user's rule groups, which keep their ids and titles;
-a rule about one field goes into the group for it ("<field> rules"), made when there is none. An
-import keeps each rules section of the pasted prompt as its own group, under its heading.
+Optimiser may change wording only: the runtime keeps the label and value names of the version they
+started from (`rewordOnly`). A criterion, exclusion or exemption for one value goes into that
+value's definition (a one-line definition becomes a list); rules that compare values or apply to
+all of them go into the user's rule groups, which keep their ids and titles. An import keeps each
+rules section of the pasted prompt as its own group, under its heading, and moves a section named
+after a value (for example "Strong criteria") into that value's definition. A long pasted prompt
+is treated as an import whatever the intent (`importIntent` in `apps/agents/src/runtime.ts`). The
+Prompt helper ticks a feature in both the video and the photo-and-text groups when both have it,
+and suggests a catch-all value ("Other" or "None") when the values may not cover every item.
+Improve with AI writes each change's reason in the site's language (`DraftImprovementInput.locale`).
 
 **Images.** Wrong examples (`ExampleBrief.images`, up to 2 per example from the image features)
 go to the helpers as image content parts after the text, for Improve with AI and the Optimiser. A relative sample URL is not resolved for the model; the stand-in data uses them,
@@ -117,9 +123,9 @@ the user stops them from the page.
   only, so the held-out half stays unread);
 - `search_examples`: examples whose title or text features contain the words, from the readable
   half only, optionally only unlabeled ones;
-- `compare_versions`: which parts of two structured prompts differ, and their scores per field;
+- `compare_versions`: which parts of two structured prompts differ, and their scores per value;
 - `get_mismatch_summary`: the Mismatches tab in counts (to review, wrong in every version,
-  reviewed, accuracy per field, top mix-ups), never which side is right.
+  reviewed, accuracy, top mix-ups), never which side is right.
 
 **The holdout lock.** The first tool call that returns examples (`get_examples`,
 `get_gold_labels`, `get_predictions`, `search_examples`, `try_prompt`), Improve with AI and Auto

@@ -3,13 +3,13 @@
 import {useGo} from '@/components/nav';
 import {useSearchParams} from 'next/navigation';
 import {Fragment, Suspense, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import type {Answer, Example, ExampleMedia, LabelComment, LabelField, MismatchList, MismatchReview, RemovalReason} from '@tsp/contracts';
+import type {Answer, Example, ExampleMedia, LabelComment, MismatchList, MismatchReview, RemovalReason} from '@tsp/contracts';
 import {FEATURES, featureText, gate, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {useSettings} from '@/components/ProjectSettings';
 import {addComment, approveNode, exampleMedia, mismatches, predictionsFor, removeExamples, reviewGold, saveGold, type ProjectState} from '@/backend-api';
-import {Badge, Banner, Button, Card, Code, dateTime, Dialog, Empty, Hov, Icon, num, Opt, PageHead, Seg, Tabs} from '@/ui';
+import {Badge, Banner, Button, Card, dateTime, Dialog, Empty, Hov, Icon, num, Opt, PageHead, Seg, Select, Tabs} from '@/ui';
 import {t, tm} from '@/i18n';
 
 type SetKey = 'eval' | 'mismatch';
@@ -86,7 +86,6 @@ function savePick(projectId: string, id: string) {
   }
 }
 
-const sameValues = (a: string[] = [], b: string[] = []) => a.length === b.length && [...a].sort().join('|') === [...b].sort().join('|');
 
 function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null}) {
   const go = useGo();
@@ -159,11 +158,11 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   const item = onMismatch && ex && sub === 'open' ? mm?.items.find(x => x.exampleId === ex.id) : undefined;
   const done = onMismatch && ex && sub === 'done' ? mm?.reviewedItems.find(x => x.exampleId === ex.id) : undefined;
   const gold = ex ? state.gold[ex.id]?.answer : undefined;
-  const diff = onMismatch && gold && modelAnswer ? new Set(state.setup!.schema!.fields.filter(f => !sameValues(gold[f.name], modelAnswer[f.name])).map(f => f.name)) : new Set<string>();
+  const diff = !!onMismatch && gold != null && modelAnswer != null && gold !== modelAnswer;
   const review = async (outcome: 'kept' | 'changed', note: string, answer?: Answer) => {
     if (!ex || !versionId) return;
     const at = new Date().toISOString();
-    const used = outcome === 'kept' ? 'kept' : answer && modelAnswer && same(answer, modelAnswer) ? 'model' : 'other';
+    const used = outcome === 'kept' ? 'kept' : answer && modelAnswer && answer === modelAnswer ? 'model' : 'other';
     await reviewGold({projectId: state.project.id, exampleId: ex.id, promptVersionId: versionId, outcome, answer, note});
     // In To review the item leaves the list after the "Saved" beat (M4); in Reviewed it updates at once.
     if (sub === 'open') await beat();
@@ -243,7 +242,7 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   if (!state.snapshot || !state.setup?.schema)
     return (
       <Frame head={<PageHead title={t('Gold Labels')} />}>
-        <Empty title={t('No examples to label yet')} text={state.setup?.schema ? t('Add examples on Eval Dataset first, then label them here.') : t('Approve the prompt on Prompt Design first: its fields and values are what you label with.')} />
+        <Empty title={t('No examples to label yet')} text={state.setup?.schema ? t('Add examples on Eval Dataset first, then label them here.') : t('Approve the prompt on Prompt Design first: its values are what you label with.')} />
       </Frame>
     );
 
@@ -252,7 +251,7 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   const expectMm = state.reports.some(r => r.schemaVersion === state.setup!.schemaVersion);
   return (
     <Frame head={head}>
-      {Object.keys(state.staleGold).length > 0 && <Banner text={t('The label fields or values changed. {n} labels were made before the change and need a quick re-check.', {n: num(Object.keys(state.staleGold).length)})} />}
+      {Object.keys(state.staleGold).length > 0 && <Banner text={t('The label or its values changed. {n} labels were made before the change and need a quick re-check.', {n: num(Object.keys(state.staleGold).length)})} />}
       <Tabs
         label={t('Sets')}
         selected={tab}
@@ -280,16 +279,7 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
               <span className="t-3" style={{fontSize: 13, marginRight: 8}}>
                 <Hov text={t('Compare with')} tip={t('The version whose answers show on every tab. Mismatches and reviews are for this version')} />
               </span>
-              <span className="select" style={{width: 132}}>
-                <select aria-label={t('Compare with')} style={{height: 32}} value={versionId ?? ''} disabled={!mm} onChange={e => setCmp(e.target.value)}>
-                  {(mm?.versions ?? []).map(v => (
-                    <option key={v.id} value={v.id}>
-                      {v.best ? t('{version} (best)', {version: v.label}) : v.label}
-                    </option>
-                  ))}
-                </select>
-                <Icon name="chev" />
-              </span>
+              <Select size="sm" width={132} label={t('Compare with')} value={versionId ?? ''} disabled={!mm} options={(mm?.versions ?? []).map(v => ({value: v.id, label: v.best ? t('{version} (best)', {version: v.label}) : v.label}))} onChange={setCmp} />
             </div>
           ) : undefined
         }
@@ -532,7 +522,8 @@ function ModelAnswer({
   why: boolean;
   shown: boolean;
   toggle: boolean;
-  diff: Set<string>;
+  /** The model's value differs from the gold label (shown in red on Mismatches). */
+  diff: boolean;
   onToggle: () => void;
   onFound: (answer: Answer | null) => void;
 }) {
@@ -600,18 +591,11 @@ function ModelAnswer({
         )
       ) : (
         <div className="col" style={{gap: 12}}>
-          {schema.fields.map(fl => (
-            <div key={fl.name} className="row" style={{gap: 12}}>
-              <span style={{width: 128, flex: 'none'}}>
-                <Code>{fl.name}</Code>
-              </span>
-              {(found.answer![fl.name] ?? []).map(v => (
-                <span key={v} className="ch" style={diff.has(fl.name) ? CHIP_DIFF : CHIP}>
-                  {v}
-                </span>
-              ))}
-            </div>
-          ))}
+          <div className="row" style={{gap: 12}}>
+            <span className="ch" style={diff ? CHIP_DIFF : CHIP} title={schema.values.find(v => v.name === found.answer)?.definition}>
+              {found.answer}
+            </span>
+          </div>
           {why && found.reason && said(t("Model's reason"), found.reason, false)}
         </div>
       )}
@@ -620,8 +604,6 @@ function ModelAnswer({
 }
 
 const DONE_TEXT: Record<MismatchReview['outcome'], string> = {kept: 'Kept my label', model: "Used the model's answer", other: 'Changed my label'};
-const kindText = (f: LabelField) => (f.kind === 'single' ? t('Single-select') : t('Multi-select, {min} to {max}', {min: f.min ?? 1, max: f.max ?? f.values.length}));
-const same = (a: Answer, b: Answer) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
 
 /**
  * Your answer (spec 1.0.0, 5.3 and 5.4): the chips and an optional comment; nothing saves until
@@ -648,11 +630,11 @@ function YourAnswer({
 }) {
   const schema = state.setup!.schema!;
   const saved = state.gold[ex.id];
-  const [answer, setAnswer] = useState<Answer>(saved?.answer ?? {});
+  const [answer, setAnswer] = useState<Answer | null>(saved?.answer ?? null);
   const [note, setNote] = useState('');
   const [beat, setBeat] = useState(false);
-  const complete = schema.fields.every(f => (answer[f.name]?.length ?? 0) >= (f.kind === 'single' ? 1 : (f.min ?? 1)));
-  const changed = !saved || !same(saved.answer, answer);
+  const complete = answer != null;
+  const changed = !saved || saved.answer !== answer;
   const hasNote = !!note.trim();
   const done = review?.done;
   // Save is on when there is something to record: a new or changed label, a comment, or (in To
@@ -662,10 +644,10 @@ function YourAnswer({
   const save = () => (advance ? advance(record) : record());
   const record = async () => {
     if (review) {
-      if (changed) await review.onChange(answer, note);
+      if (changed && answer != null) await review.onChange(answer, note);
       else await review.onKeep(note);
     } else {
-      if (changed) await saveGold(state.project.id, ex.id, state.setup!.schemaVersion, answer, modelShown);
+      if (changed && answer != null) await saveGold(state.project.id, ex.id, state.setup!.schemaVersion, answer, modelShown);
       if (hasNote) await addComment({projectId: state.project.id, exampleId: ex.id, text: note});
     }
     setNote('');
@@ -677,12 +659,6 @@ function YourAnswer({
     return () => clearTimeout(id);
   }, [beat]);
 
-  const pick = (f: LabelField, value: string) => {
-    const cur = answer[f.name] ?? [];
-    if (f.kind === 'single') return setAnswer({...answer, [f.name]: [value]});
-    const next = cur.includes(value) ? cur.filter(v => v !== value) : cur.length >= (f.max ?? 99) ? cur : [...cur, value];
-    setAnswer({...answer, [f.name]: next});
-  };
   const vName = (id: string | null) => (id ? versionName(id) : null);
   return (
     <Card
@@ -720,27 +696,17 @@ function YourAnswer({
       }
     >
       <div className="col" style={{gap: 28}}>
-        {schema.fields.map(f => (
-          <div key={f.name} className="col" style={{gap: 10}}>
-            <div className="row" style={{gap: 8}}>
-              <Code>{f.name}</Code>
-              <span className="t-3" style={{fontSize: 13}}>
-                {kindText(f)}
-              </span>
-            </div>
-            <div className="chs" role="group" aria-label={f.name}>
-              {f.values.map(v => {
-                const on = (answer[f.name] ?? []).includes(v.name);
-                return (
-                  <button key={v.name} type="button" className="ch" aria-pressed={on} title={v.definition} onClick={() => pick(f, v.name)}>
-                    {on && <Icon name="check" />}
-                    {v.name}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
+        <div className="chs" role="group" aria-label={schema.name}>
+          {schema.values.map(v => {
+            const on = answer === v.name;
+            return (
+              <button key={v.name} type="button" className="ch" aria-pressed={on} title={v.definition} onClick={() => setAnswer(v.name)}>
+                {on && <Icon name="check" />}
+                {v.name}
+              </button>
+            );
+          })}
+        </div>
         <div className="col" style={{gap: 8, paddingTop: 8}}>
           <span className="field-l">
             <Hov text={t('Comment')} tip={t('Optional. Saved with Save. Comments go to the Optimiser and the Prompt helper with this example, so they learn what the label means; comments on the half used for scores never reach them')} />

@@ -15,28 +15,37 @@ export function parseOutput(text: string, schema: Schema): {answer: Answer | nul
   // The model's own short reason (REASON_LINE asks for it). Kept with an invalid answer too.
   const said = typeof obj.reason === 'string' ? obj.reason.trim().slice(0, systemConfig().labeling.reasonMaxChars) : '';
   const note = said ? {note: said} : {};
-  const answer: Answer = {};
-  for (const f of schema.fields) {
-    const raw = obj[f.name];
-    // The same value twice counts once.
-    const list = [...new Set((Array.isArray(raw) ? raw : raw == null ? [] : [raw]).map(String))];
-    const names = f.values.map(v => v.name);
-    const bad = list.find(v => !names.includes(v));
-    if (bad) return {answer: null, reason: `"${bad}" isn't a value of ${f.name}`, ...note};
-    if (f.kind === 'single' && list.length !== 1) return {answer: null, reason: `${f.name} needs exactly one value`, ...note};
-    if (f.kind === 'multi' && (list.length < (f.min ?? 1) || list.length > (f.max ?? names.length)))
-      return {answer: null, reason: `${f.name} needs ${f.min ?? 1} to ${f.max ?? names.length} values`, ...note};
-    answer[f.name] = list;
-  }
+  // One value of the project's label (2026-11-16). A one-item list is read as that value.
+  const raw = obj[schema.name];
+  const list = [...new Set((Array.isArray(raw) ? raw : raw == null ? [] : [raw]).map(String))];
+  if (list.length !== 1) return {answer: null, reason: `${schema.name} needs exactly one value`, ...note};
+  const answer: Answer = list[0];
+  if (!schema.values.some(v => v.name === answer)) return {answer: null, reason: `"${answer}" isn't a value of ${schema.name}`, ...note};
   return {answer, reason: null, ...note};
 }
 
 
 /**
+ * A gold label read from an upload file: the value itself, or an older file's
+ * `{label: ["Value"]}` (or a one-key `{anyKey: ["Value"]}` when that is unambiguous). Null when it
+ * is not exactly one of the label's values.
+ */
+export function readGoldAnswer(raw: unknown, schema: Schema): Answer | null {
+  const ok = (v: unknown) => (typeof v === 'string' && schema.values.some(x => x.name === v) ? v : null);
+  const one = (v: unknown) => (Array.isArray(v) ? (v.length === 1 ? ok(v[0]) : null) : ok(v));
+  if (typeof raw === 'string') return ok(raw);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  if (schema.name in o) return one(o[schema.name]);
+  const keys = Object.keys(o);
+  return keys.length === 1 ? one(o[keys[0]]) : null;
+}
+
+/**
  * The line the site adds after every labeling prompt (decided 2026-11-11), so the Optimiser can
  * read why the model chose its answer. It is not part of the user's template and is not a label.
  */
-export const REASON_LINE = 'Put a "reason" key first in the JSON: one short sentence (25 words at most) saying what in the input led to these values.';
+export const REASON_LINE = 'Put a "reason" key first in the JSON: one short sentence (25 words at most) saying what in the input led to this value.';
 
 /** Model settings that change answers. Predictions are reused only for the same hash. */
 export const settingsHash = (s: ModelSettings) => hashString(`${s.maxOutputTokens}|${s.temperature ?? 'na'}${s.pass && s.pass > 1 ? `|pass${s.pass}` : ''}`);

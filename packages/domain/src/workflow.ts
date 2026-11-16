@@ -26,9 +26,9 @@ export function costForTokens(endpoints: EndpointInfo[], endpoint: EndpointId, i
   return (inputTokens * ep.priceIn + outputTokens * ep.priceOut) / 1e6;
 }
 
-/** The best current report: the highest lowest-field Macro-F1 (cost breaks a tie). */
+/** The best current report: the highest Macro-F1 (cost breaks a tie). */
 export function bestReport(s: Pick<ProjectState, 'reports'>, passingOnly = false) {
-  return [...s.reports.filter(r => !r.archivedNow && (!passingOnly || r.passed))].sort((a, b) => b.metrics.lowestField.macroF1 - a.metrics.lowestField.macroF1 || a.metrics.costPer1000 - b.metrics.costPer1000)[0] ?? null;
+  return [...s.reports.filter(r => !r.archivedNow && (!passingOnly || r.passed))].sort((a, b) => b.metrics.macroF1 - a.metrics.macroF1 || a.metrics.costPer1000 - b.metrics.costPer1000)[0] ?? null;
 }
 
 /** What a button on an AI Suggestion card does; the page maps each to its own action. */
@@ -61,11 +61,9 @@ const card = (template: AiSuggestion['template'], title: Msg, text: Msg, actions
 });
 
 /** Gold-labeled eval examples per value, for the rare-value check. */
-export function goldValueCounts(s: Pick<ProjectState, 'examples' | 'gold' | 'setup'>): {field: string; value: string; count: number}[] {
-  const out: {field: string; value: string; count: number}[] = [];
+export function goldValueCounts(s: Pick<ProjectState, 'examples' | 'gold' | 'setup'>): {value: string; count: number}[] {
   const labeled = s.examples.filter(e => e.split === 'eval' && !!s.gold[e.id]);
-  for (const f of s.setup?.schema?.fields ?? []) for (const v of f.values) out.push({field: f.name, value: v.name, count: labeled.filter(e => (s.gold[e.id]!.answer[f.name] ?? []).includes(v.name)).length});
-  return out;
+  return (s.setup?.schema?.values ?? []).map(v => ({value: v.name, count: labeled.filter(e => s.gold[e.id]!.answer === v.name).length}));
 }
 
 /** T1: values with too few gold-labeled examples to score fairly; null when none (or no gold yet). */
@@ -143,7 +141,7 @@ export function aiSuggestion(s: ProjectState, x: SuggestionInput = {}): AiSugges
     return card(
       'T6',
       msg('Use {version} as your final prompt', {version: label(passing.promptVersionId)}),
-      msg('All fields meet your thresholds (lowest field Macro-F1 {score}).', {score: passing.metrics.lowestField.macroF1.toFixed(2)}),
+      msg('It meets your thresholds (Macro-F1 {score}).', {score: passing.metrics.macroF1.toFixed(2)}),
       ['improve', 'copy_prompt', 'finish'],
       passing.promptVersionId,
     );
@@ -169,18 +167,12 @@ export function aiSuggestion(s: ProjectState, x: SuggestionInput = {}): AiSugges
   }
 
   const mu = best.metrics.mixUps[0];
-  const confusion: Msg | '' = !mu
-    ? ''
-    : mu.kind === 'confused'
-      ? msg('; top confusion is {gold} -> {predicted}', {gold: mu.gold ?? '', predicted: mu.predicted ?? ''})
-      : mu.kind === 'extra'
-        ? msg('; {value} is often added when it does not apply', {value: mu.predicted ?? ''})
-        : msg('; {value} is often missed', {value: mu.gold ?? ''});
-  const lw = best.metrics.lowestField;
-  // The lowest field can be at the bar while another check fails: name that check then.
+  const confusion: Msg | '' = mu ? msg('; top confusion is {gold} -> {predicted}', {gold: mu.gold, predicted: mu.predicted}) : '';
+  const score = best.metrics.macroF1;
+  // Macro-F1 can be at the bar while another check fails: name that check then.
   const failing = judge(best.metrics, t, s.facts.goldEvalDone).checks.find(c => !c.met);
-  const why = lw.macroF1 < t.macroF1 || !failing ? msg('Current score is {score} (target {target})', {score: lw.macroF1.toFixed(2), target: t.macroF1.toFixed(2)}) : msg('{check} is {actual} (needs {need})', {check: failing.msg, actual: failing.actual, need: failing.need});
-  return card('T4', msg('Improve {version} to pass {field}', {version: label(best.promptVersionId), field: lw.field}), msg('{why}{confusion}.', {why, confusion}), ['improve', 'auto_optimise'], best.promptVersionId);
+  const why = score < t.macroF1 || !failing ? msg('Current score is {score} (target {target})', {score: score.toFixed(2), target: t.macroF1.toFixed(2)}) : msg('{check} is {actual} (needs {need})', {check: failing.msg, actual: failing.actual, need: failing.need});
+  return card('T4', msg('Improve {version} to pass', {version: label(best.promptVersionId)}), msg('{why}{confusion}.', {why, confusion}), ['improve', 'auto_optimise'], best.promptVersionId);
 }
 
 /**

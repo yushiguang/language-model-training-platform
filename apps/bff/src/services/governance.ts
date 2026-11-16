@@ -145,15 +145,15 @@ export async function restoreExamples(projectId: string, removalIds: string[]): 
  * Batch pruning (spec 1.0.0, 4.3): unlabeled examples down to `keep`, or the examples of an
  * over-represented gold value down to `keep`, at random but evenly from both halves.
  */
-export async function pruneDataset(projectId: string, mode: 'unlabeled' | 'downsample', keep: number, field?: string, value?: string): Promise<number> {
+export async function pruneDataset(projectId: string, mode: 'unlabeled' | 'downsample', keep: number, value?: string): Promise<number> {
   const state = await loadProjectState(projectId);
   if (!state) throw new Error('This project does not exist.');
   const evalEx = state.examples.filter(e => e.split === 'eval');
   let candidates: Example[];
   if (mode === 'unlabeled') candidates = evalEx.filter(e => !state.gold[e.id]);
   else {
-    if (!field || !value) throw new Error('Name the field and value to downsample.');
-    candidates = evalEx.filter(e => (state.gold[e.id]?.answer[field] ?? []).includes(value));
+    if (!value) throw new Error('Name the value to downsample.');
+    candidates = evalEx.filter(e => state.gold[e.id]?.answer === value);
   }
   const ids = pickToPrune(candidates, keep);
   if (!ids.length) return 0;

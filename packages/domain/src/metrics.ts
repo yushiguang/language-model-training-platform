@@ -1,5 +1,5 @@
 import {DEFAULT_SYSTEM_CONFIG, systemConfig} from './config.ts';
-import type {Answer, FieldMetrics, Metrics, MixUp, Msg, Schema, Thresholds, ValueMetrics} from '@tsp/contracts';
+import type {Answer, Metrics, MixUp, Msg, Schema, Thresholds, ValueMetrics} from '@tsp/contracts';
 import {fill, msg} from './i18n.ts';
 
 export interface Scored {
@@ -21,75 +21,57 @@ const f1 = (p: number, r: number) => (p + r === 0 ? 0 : (2 * p * r) / (p + r));
 const round = (x: number) => Math.round(x * 1000) / 1000;
 
 /**
- * Scores predictions against gold labels. Every value is scored one-vs-rest; a field's macro-F1
- * is the mean over values that appear in the gold labels or the predictions, so rare values
- * count as much as common ones. Invalid outputs and answers the safety filter stopped are left out
- * of every score (they are a format or platform event, not a labeling judgement) and counted
- * apart; `judge` keeps a version with too many invalid answers from passing.
+ * Scores predictions against gold labels. The project has one mutually-exclusive label, so every
+ * answer is one value. Each value is scored one-vs-rest; macro-F1 is the mean over values that
+ * appear in the gold labels or the predictions, so rare values count as much as common ones.
+ * Invalid outputs and answers the safety filter stopped are left out of every score (they are a
+ * format or platform event, not a labeling judgement) and counted apart; `judge` keeps a version
+ * with too many invalid answers from passing.
  */
 export function computeMetrics(schema: Schema, all: Scored[]): Metrics {
-  const items = all.filter(it => it.predicted && !it.filtered);
-  const fields: FieldMetrics[] = [];
-  const mixUps: MixUp[] = [];
-  for (const field of schema.fields) {
-    const values: ValueMetrics[] = [];
-    for (const v of field.values) {
-      let tp = 0;
-      let fp = 0;
-      let fn = 0;
-      for (const it of items) {
-        const g = (it.gold[field.name] ?? []).includes(v.name);
-        const p = (it.predicted?.[field.name] ?? []).includes(v.name);
-        if (g && p) tp++;
-        else if (p) fp++;
-        else if (g) fn++;
-      }
-      if (tp + fp + fn === 0) continue;
-      const precision = tp + fp ? tp / (tp + fp) : 0;
-      const recall = tp + fn ? tp / (tp + fn) : 0;
-      values.push({value: v.name, precision: round(precision), recall: round(recall), f1: round(f1(precision, recall)), support: tp + fn});
-    }
-    const macro = values.length ? values.reduce((s, v) => s + v.f1, 0) / values.length : 0;
-    const exact = items.filter(it => {
-      const g = [...(it.gold[field.name] ?? [])].sort().join('|');
-      const p = [...(it.predicted?.[field.name] ?? [])].sort().join('|');
-      return it.predicted && g === p;
-    }).length;
-    fields.push({field: field.name, kind: field.kind, macroF1: round(macro), accuracy: round(items.length ? exact / items.length : 0), values});
-
-    const bucket = new Map<string, MixUp>();
-    const add = (key: string, m: Omit<MixUp, 'count' | 'exampleIds'>, id: string) => {
-      const cur = bucket.get(key) ?? {...m, count: 0, exampleIds: []};
-      cur.count++;
-      cur.exampleIds.push(id);
-      bucket.set(key, cur);
-    };
+  const items = all.filter(it => it.predicted != null && !it.filtered);
+  const values: ValueMetrics[] = [];
+  for (const v of schema.values) {
+    let tp = 0;
+    let fp = 0;
+    let fn = 0;
     for (const it of items) {
-      if (!it.predicted) continue;
-      const g = it.gold[field.name] ?? [];
-      const p = it.predicted[field.name] ?? [];
-      if (field.kind === 'single') {
-        if (g[0] && p[0] && g[0] !== p[0]) add(`${g[0]}>${p[0]}`, {field: field.name, kind: 'confused', gold: g[0], predicted: p[0]}, it.exampleId);
-      } else {
-        for (const v of p) if (!g.includes(v)) add(`+${v}`, {field: field.name, kind: 'extra', gold: null, predicted: v}, it.exampleId);
-        for (const v of g) if (!p.includes(v)) add(`-${v}`, {field: field.name, kind: 'missed', gold: v, predicted: null}, it.exampleId);
-      }
+      const g = it.gold === v.name;
+      const p = it.predicted === v.name;
+      if (g && p) tp++;
+      else if (p) fp++;
+      else if (g) fn++;
     }
-    mixUps.push(...bucket.values());
+    if (tp + fp + fn === 0) continue;
+    const precision = tp + fp ? tp / (tp + fp) : 0;
+    const recall = tp + fn ? tp / (tp + fn) : 0;
+    values.push({value: v.name, precision: round(precision), recall: round(recall), f1: round(f1(precision, recall)), support: tp + fn});
   }
-  mixUps.sort((a, b) => b.count - a.count);
-  const lowestField = fields.reduce((lo, f) => (f.macroF1 < lo.macroF1 ? {field: f.field, macroF1: f.macroF1} : lo), {field: fields[0]?.field ?? '', macroF1: fields[0]?.macroF1 ?? 0});
+  const macro = values.length ? values.reduce((s, v) => s + v.f1, 0) / values.length : 0;
+  const right = items.filter(it => it.predicted === it.gold).length;
+
+  const bucket = new Map<string, MixUp>();
+  for (const it of items) {
+    if (it.predicted == null || it.predicted === it.gold) continue;
+    const key = `${it.gold}>${it.predicted}`;
+    const cur = bucket.get(key) ?? {gold: it.gold, predicted: it.predicted, count: 0, exampleIds: []};
+    cur.count++;
+    cur.exampleIds.push(it.exampleId);
+    bucket.set(key, cur);
+  }
+  const mixUps = [...bucket.values()].sort((a, b) => b.count - a.count);
   let lowestValue: Metrics['lowestValue'] = null;
-  for (const f of fields) for (const v of f.values) if (v.support > 0 && (!lowestValue || v.f1 < lowestValue.f1)) lowestValue = {field: f.field, value: v.value, f1: v.f1};
+  for (const v of values) if (v.support > 0 && (!lowestValue || v.f1 < lowestValue.f1)) lowestValue = {value: v.value, f1: v.f1};
   const filtered = all.filter(it => it.filtered).length;
-  const invalid = all.filter(it => !it.predicted && !it.filtered).length;
+  const invalid = all.filter(it => it.predicted == null && !it.filtered).length;
   const cost = all.reduce((s, it) => s + it.costUsd, 0);
   return {
     n: items.length,
     total: all.length,
     filtered,
-    fields,
-    lowestField,
+    macroF1: round(macro),
+    accuracy: round(items.length ? right / items.length : 0),
+    values,
     lowestValue,
     invalid,
     invalidRate: all.length ? invalid / all.length : 0,
@@ -118,9 +100,9 @@ const lab = (key: string, params?: Msg['params']) => ({label: fill(key, params),
 
 export function judge(m: Metrics, t: Thresholds, labeledCount: number): {passed: boolean; rough: boolean; checks: CheckLine[]} {
   const checks: CheckLine[] = [];
-  checks.push({...lab('Lowest field macro-F1'), actual: m.lowestField.macroF1.toFixed(2), need: `≥ ${t.macroF1.toFixed(2)}`, met: m.lowestField.macroF1 >= t.macroF1});
+  checks.push({...lab('Macro-F1'), actual: m.macroF1.toFixed(2), need: `≥ ${t.macroF1.toFixed(2)}`, met: m.macroF1 >= t.macroF1});
   if (t.valueF1 != null) checks.push({...lab('Lowest value F1'), actual: m.lowestValue ? m.lowestValue.f1.toFixed(2) : '–', need: `≥ ${t.valueF1.toFixed(2)}`, met: !m.lowestValue || m.lowestValue.f1 >= t.valueF1});
-  const values = m.fields.flatMap(f => f.values.map(v => ({...v, field: f.field})));
+  const values = m.values;
   const lowest = (k: 'precision' | 'recall') => (values.length ? Math.min(...values.map(v => v[k])) : 1);
   if (t.precision != null) checks.push({...lab('Lowest value precision'), actual: lowest('precision').toFixed(2), need: `≥ ${t.precision.toFixed(2)}`, met: lowest('precision') >= t.precision});
   if (t.recall != null) checks.push({...lab('Lowest value recall'), actual: lowest('recall').toFixed(2), need: `≥ ${t.recall.toFixed(2)}`, met: lowest('recall') >= t.recall});
@@ -128,11 +110,7 @@ export function judge(m: Metrics, t: Thresholds, labeledCount: number): {passed:
   // by giving unreadable answers on the hard examples.
   const cap = t.invalidRate ?? systemConfig().evaluation.invalidRateCap;
   checks.push({...lab('Invalid outputs'), actual: pct(m.invalidRate), need: `≤ ${pct(cap)}`, met: m.invalidRate <= cap});
-  if (t.accuracy != null) {
-    const singles = m.fields.filter(f => f.kind === 'single');
-    const lo = singles.length ? Math.min(...singles.map(f => f.accuracy)) : 1;
-    checks.push({...lab('Accuracy, single-select fields'), actual: lo.toFixed(2), need: `≥ ${t.accuracy.toFixed(2)}`, met: lo >= t.accuracy});
-  }
+  if (t.accuracy != null) checks.push({...lab('Accuracy'), actual: m.accuracy.toFixed(2), need: `≥ ${t.accuracy.toFixed(2)}`, met: m.accuracy >= t.accuracy});
   // Gold-labeled eval examples, not the dataset's size (review 2026-11-13): 90 sampled examples
   // with 4 gold labels are still a rough reading. The score itself rests on the held-out half.
   const rough = labeledCount < t.minEval;
@@ -142,7 +120,7 @@ export function judge(m: Metrics, t: Thresholds, labeledCount: number): {passed:
 
 export const pct = (x: number) => `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;
 
-/** Default (Setup, Evaluation settings): Macro-F1 of every field must reach 0.80 (UI design 2026-11-05). */
+/** Default (Setup, Evaluation settings): the label's macro-F1 must reach 0.80 (UI design 2026-11-05). */
 export const DEFAULT_THRESHOLDS: Thresholds = {mode: 'default', macroF1: DEFAULT_SYSTEM_CONFIG.evaluation.defaultMacroF1, valueF1: null, precision: null, recall: null, invalidRate: null, accuracy: null, minEval: DEFAULT_SYSTEM_CONFIG.dataset.minEvalRecommended};
 /** Custom starts from these: F1 on at 0.60, Precision and Recall off with 0.70 ready in their boxes. */
 export const CUSTOM_START = {valueF1: DEFAULT_SYSTEM_CONFIG.evaluation.customStartValueF1, precision: DEFAULT_SYSTEM_CONFIG.evaluation.customStartPrecision, recall: DEFAULT_SYSTEM_CONFIG.evaluation.customStartRecall};

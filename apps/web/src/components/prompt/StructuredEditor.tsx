@@ -2,19 +2,19 @@
 
 import {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {compilePrompt, diffWords, FEATURES, matchRuleGroup, nextRuleGroupId, withReasons, type MarkSeg} from '@tsp/domain';
-import type {FeatureSelection, RuleGroup, StructuredFieldPrompt, StructuredPrompt} from '@tsp/contracts';
-import {Badge, Button, Card, Cb, Code, Dialog, Empty, Hov, Icon, Seg, Table, useCopy} from '@/ui';
+import type {FeatureSelection, LabelValue, RuleGroup, Schema, StructuredPrompt} from '@tsp/contracts';
+import {Badge, Button, Card, Cb, Dialog, Empty, Hov, Icon, useCopy} from '@/ui';
 import {t} from '@/i18n';
 
 /**
  * The structured prompt editor (spec 1.0.0, 3.2 and 3.3), used on Prompt Design and in the prompt
  * editor. Four parts in authoring order (2026-11-16 refinements, 2.2): Persona & Task, Input
- * Features, Output Labels & Definitions (fields on the left, the picked field on the right), Rule
- * Groups (named by the user). The text the model reads is compiled from these parts, so there are
+ * Features, Output Labels & Definitions (the project's one label: its key, then one stacked card
+ * per value, like the rule groups; 2026-11-16), Rule Groups (named by the user). The text the model reads is compiled from these parts, so there are
  * no placeholders to write and no checks to fix.
  *
  * With `base` (the version being edited), changed wording shows its word-level marks under the
- * box it belongs to, features carry Added / Removed badges and rule groups New / Changed.
+ * box it belongs to, features carry Added / Removed badges, and values and rule groups New / Changed.
  */
 export function StructuredEditor({
   value,
@@ -35,29 +35,10 @@ export function StructuredEditor({
   reasons?: {text: string; reason: string}[];
   reasonPrefix?: string;
   featureTips?: Record<string, string>;
-  /** Fields carry a Draft badge while a helper's draft waits for approval. */
+  /** Values carry a Draft badge while a helper's draft waits for approval. */
   draft?: boolean;
 }) {
-  const [sel, setSel] = useState(0);
-  const at = Math.min(sel, Math.max(0, value.fields.length - 1));
-  const field = value.fields[at];
   const marks = (was: string | undefined, now: string) => (base && (was ?? '') !== now ? withReasons(diffWords(was ?? '', now), reasons ?? [], reasonPrefix) : undefined);
-  const setField = (f: StructuredFieldPrompt | null) => {
-    const fields = f ? value.fields.map((x, i) => (i === at ? f : x)) : value.fields.filter((_, i) => i !== at);
-    onChange({...value, fields});
-    if (!f) setSel(Math.max(0, at - 1));
-  };
-  const addField = () => {
-    const name = uniqueName(value.fields.map(f => f.name), 'new_field');
-    onChange({...value, fields: [...value.fields, {name, kind: 'single', values: [{name: '', definition: ''}, {name: '', definition: ''}]}]});
-    setSel(value.fields.length);
-  };
-  const baseField = base?.fields.find(f => f.name === field?.name);
-  const changed = (f: StructuredFieldPrompt) => {
-    if (!base) return false;
-    const was = base.fields.find(x => x.name === f.name);
-    return !was || JSON.stringify(was) !== JSON.stringify(f);
-  };
 
   return (
     <div className="col sp" style={{gap: 16}}>
@@ -71,39 +52,11 @@ export function StructuredEditor({
         <Features features={value.features} base={base?.features} onChange={readOnly ? undefined : features => onChange({...value, features})} tips={featureTips} />
       </Section>
 
-      <Section title={t('Output Labels & Definitions')} hint={t('Fields and values')} tip={t('Fields and values are what people label with, what the model must answer with, and what scores are counted on. Each definition tells the model when a value applies.')}>
-        {!value.fields.length ? (
-          <Card>
-            <Empty title={t('No label fields yet')} text={readOnly ? t('This prompt has no label fields.') : t('Describe your task in Ask AI, paste the prompt you use today, or add a field yourself.')}>
-              {!readOnly && <Button label={t('Add field')} icon="plus" onClick={addField} />}
-            </Empty>
-          </Card>
-        ) : (
-          <div className="grid-split sp-fields">
-            <Card title={t('Fields')}>
-              <nav className="vlist" aria-label={t('Fields')}>
-                {value.fields.map((f, i) => (
-                  <button key={i} type="button" className="vrow" aria-current={i === at} onClick={() => setSel(i)}>
-                    <Code>{f.name || t('unnamed')}</Code>
-                    <span>{draft ? <Badge text={t('Draft')} icon={false} /> : changed(f) && <Badge text={t('Changed')} tone="warn" icon={false} />}</span>
-                    <span className="t-3" style={{fontSize: 13}}>
-                      {f.kind === 'single' ? t('Single') : t('Multi')} · {f.values.length}
-                    </span>
-                  </button>
-                ))}
-              </nav>
-              {!readOnly && (
-                <div style={{margin: '4px -12px 0'}}>
-                  <Button label={t('Add field')} kind="ghost" icon="plus" onClick={addField} />
-                </div>
-              )}
-            </Card>
-            {field && <FieldEditor key={at} field={field} was={baseField} onChange={setField} readOnly={readOnly} marks={marks} />}
-          </div>
-        )}
+      <Section title={t('Output Labels & Definitions')} hint={t('One label and its values')} tip={t("The project's one label: every item gets exactly one of its values. The values are what people label with, what the model must answer with, and what scores are counted on. Each value's definition says when it applies and when it does not.")}>
+        <LabelEditor label={value.label} base={base?.label} readOnly={readOnly} draft={draft} marks={marks} onChange={label => onChange({...value, label})} />
       </Section>
 
-      <Section title={t('Rule Groups')} hint={t('Rules in groups you name')} tip={t('Name a group for each kind of rule, for example label priority or input handling. Tie-breaks between values go here too. Improve with AI and the Optimiser add their rules to these groups.')}>
+      <Section title={t('Rule Groups')} hint={t('Rules across values')} tip={t("Rules that span values, in groups you name: the order values are checked in, what wins when an item fits two values, and how to read the inputs. A value's own criteria belong in its definition.")}>
         <RuleGroups groups={value.ruleGroups} base={base?.ruleGroups} readOnly={readOnly} marks={marks} onChange={ruleGroups => onChange({...value, ruleGroups})} />
       </Section>
     </div>
@@ -174,12 +127,6 @@ function RuleGroups({groups, base, readOnly, marks, onChange}: {groups: RuleGrou
       )}
     </div>
   );
-}
-
-function uniqueName(names: string[], base: string) {
-  let n = base;
-  for (let i = 2; names.includes(n); i++) n = `${base}_${i}`;
-  return n;
 }
 
 /** One part of the prompt: its name, and one short line whose detail shows on hover. */
@@ -253,84 +200,93 @@ function Block({label, value, onChange, readOnly, placeholder, marks}: {label: s
   );
 }
 
-function FieldEditor({
-  field,
-  was,
-  onChange,
-  readOnly,
-  marks,
-}: {
-  field: StructuredFieldPrompt;
-  was?: StructuredFieldPrompt;
-  onChange: (f: StructuredFieldPrompt | null) => void;
-  readOnly?: boolean;
-  marks: (was: string | undefined, now: string) => MarkSeg[] | undefined;
-}) {
-  const multi = field.kind === 'multi';
-  const setVal = (i: number, patch: Partial<{name: string; definition: string}>) => onChange({...field, values: field.values.map((v, k) => (k === i ? {...v, ...patch} : v))});
+/** The value in `base` that `v` continues: the same name, else the value at the same place (a rename). */
+function baseValue(v: LabelValue, i: number, base: LabelValue[], values: LabelValue[]): LabelValue | undefined {
+  const named = base.find(x => x.name === v.name);
+  if (named) return named;
+  const at = base[i];
+  return at && !values.some(x => x.name === at.name) ? at : undefined;
+}
+
+/**
+ * Output Labels & Definitions (2026-11-16, 2.1): the label's key in a compact row, then one stacked
+ * card per value like the rule groups: the value's name in bold, its badge, move and remove, and a
+ * full-width box for its definition, which grows with it (criteria, exclusions, exemptions).
+ */
+function LabelEditor({label, base, readOnly, draft, marks, onChange}: {label: Schema; base?: Schema; readOnly?: boolean; draft?: boolean; marks: (was: string | undefined, now: string) => MarkSeg[] | undefined; onChange: (l: Schema) => void}) {
+  const values = label.values;
+  const setValues = (next: LabelValue[]) => onChange({...label, values: next});
+  const set = (i: number, patch: Partial<LabelValue>) => setValues(values.map((v, k) => (k === i ? {...v, ...patch} : v)));
+  const move = (i: number, by: number) => {
+    const next = [...values];
+    const [v] = next.splice(i, 1);
+    next.splice(i + by, 0, v);
+    setValues(next);
+  };
+  const add = () => setValues([...values, {name: '', definition: ''}]);
+  const kept = base ? values.map((v, i) => baseValue(v, i, base.values, values)) : [];
+  const removed = base?.values.filter(b => !kept.includes(b)) ?? [];
   return (
-    <Card className="sp-field">
-      <div className="row sp-field-h">
-        <input className="input mono" style={{width: 200}} value={field.name} readOnly={readOnly} aria-label={t('Field name')} onChange={e => onChange({...field, name: e.target.value.replace(/\s+/g, '_')})} />
-        {readOnly ? (
-          <Badge text={multi ? t('Multi-select · choose {min} to {max}', {min: field.min ?? 1, max: field.max ?? field.values.length}) : t('Single-select')} icon={false} />
-        ) : (
-          <>
-            <Seg
-              label={t('Type')}
-              value={field.kind}
-              options={[
-                {value: 'single', label: t('Single-select')},
-                {value: 'multi', label: t('Multi-select')},
-              ]}
-              onChange={k => {
-                const {min: _a, max: _b, ...rest} = field;
-                onChange(k === 'multi' ? {...rest, kind: 'multi', min: field.min ?? 1, max: field.max ?? Math.min(3, field.values.length)} : {...rest, kind: 'single'});
-              }}
-            />
-            {multi && (
-              <span className="row" style={{gap: 8}}>
-                <span className="t-2">{t('Choose')}</span>
-                <input className="input sm" style={{width: 56, padding: '0 12px'}} aria-label={t('At least')} value={field.min ?? 1} onChange={e => onChange({...field, min: parseInt(e.target.value) || 1})} />
-                <span className="t-2">{t('to')}</span>
-                <input className="input sm" style={{width: 56, padding: '0 12px'}} aria-label={t('At most')} value={field.max ?? field.values.length} onChange={e => onChange({...field, max: parseInt(e.target.value) || 1})} />
-              </span>
-            )}
-            <span className="grow" />
-            <Button label={t('Remove field')} kind="ghost" onClick={() => onChange(null)} />
-          </>
-        )}
-      </div>
-      <div style={{paddingTop: 8}} className="sp-values">
-        <Table
-          first={28}
-          actWidth={56}
-          cols={readOnly ? [{label: t('Value')}, {label: t('Definition')}] : [{label: t('Value')}, {label: t('Definition')}, {label: '', kind: 'act'}]}
-          rows={field.values.map((v, i) => ({
-            key: String(i),
-            cells: [
-              <input key="n" className="input sm" value={v.name} readOnly={readOnly} aria-label={t('Value')} onChange={e => setVal(i, {name: e.target.value})} />,
-              <div key="d" className="col" style={{gap: 4}}>
-                <Grow label={t('Definition')} value={v.definition} readOnly={readOnly} placeholder={t('When this value applies, and the nearest thing that does not count')} onChange={definition => setVal(i, {definition})} />
-                <Marks segs={marks(was?.values.find(x => x.name === v.name)?.definition, v.definition)} />
-              </div>,
-              ...(readOnly
-                ? []
-                : [
-                    <button key="x" type="button" className="icon-btn" aria-label={t('Remove value')} onClick={() => onChange({...field, values: field.values.filter((_, k) => k !== i)})}>
+    <div className="col" style={{gap: 12}}>
+      <Card className="sp-key">
+        <label className="row" style={{gap: 12}}>
+          <span className="field-l" style={{margin: 0}}>
+            <Hov text={t('Label name')} tip={t("The key of the model's answer, for example category. Gold labels and scores are tied to it.")} />
+          </span>
+          <input className="input sm mono" style={{width: 240}} value={label.name} readOnly={readOnly} placeholder={readOnly ? undefined : 'category'} onChange={e => onChange({...label, name: e.target.value.replace(/\s+/g, '_')})} />
+          {base && base.name !== label.name && <Badge text={t('Changed')} tone="warn" icon={false} />}
+        </label>
+      </Card>
+      {!values.length && (
+        <Card>
+          <Empty title={t('No values yet')} text={readOnly ? t('This prompt has no values.') : t('Describe your task in Ask AI, paste the prompt you use today, or add the values yourself.')}>
+            {!readOnly && <Button label={t('Add value')} icon="plus" onClick={add} />}
+          </Empty>
+        </Card>
+      )}
+      {values.map((v, i) => {
+        const was = kept[i];
+        const tag = draft ? <Badge text={t('Draft')} icon={false} /> : !base ? null : !was ? <Badge text={t('New')} tone="ok" icon={false} /> : was.name !== v.name || was.definition !== v.definition ? <Badge text={t('Changed')} tone="warn" icon={false} /> : null;
+        return (
+          <Card key={i} className="sp-group sp-value">
+            <section className="col" style={{gap: 8}} aria-label={v.name || t('Value')}>
+              <div className="row" style={{gap: 8}}>
+                <input className="input sp-group-t" value={v.name} readOnly={readOnly} placeholder={readOnly ? undefined : t('Value name')} aria-label={t('Value name')} onChange={e => set(i, {name: e.target.value})} />
+                {tag}
+                <span className="grow" />
+                {!readOnly && (
+                  <>
+                    <button type="button" className="icon-btn" aria-label={t('Move up')} title={t('Move up')} disabled={i === 0} onClick={() => move(i, -1)}>
+                      <Icon name="chev-up" />
+                    </button>
+                    <button type="button" className="icon-btn" aria-label={t('Move down')} title={t('Move down')} disabled={i === values.length - 1} onClick={() => move(i, 1)}>
+                      <Icon name="chev" />
+                    </button>
+                    <button type="button" className="icon-btn" aria-label={t('Remove value')} title={t('Remove value')} onClick={() => setValues(values.filter((_, k) => k !== i))}>
                       <Icon name="x" />
-                    </button>,
-                  ]),
-            ],
-          }))}
-        />
-      </div>
-      {!readOnly && (
-        <div style={{margin: '0 -12px'}}>
-          <Button label={t('Add value')} kind="ghost" icon="plus" onClick={() => onChange({...field, values: [...field.values, {name: '', definition: ''}]})} />
+                    </button>
+                  </>
+                )}
+              </div>
+              <Marks segs={was && was.name !== v.name ? marks(was.name, v.name) : undefined} />
+              <Grow className="input" label={t('Definition')} value={v.definition} readOnly={readOnly} placeholder={t('When this value applies and when it does not: one condition per line')} onChange={definition => set(i, {definition})} />
+              <Marks segs={base ? marks(was?.definition, v.definition) : undefined} />
+            </section>
+          </Card>
+        );
+      })}
+      {removed.map((v, i) => (
+        <div key={`gone-${i}`} className="row sp-group-gone">
+          <Badge text={t('Removed')} tone="err" icon={false} />
+          <del className="one">{v.name || t('Value')}</del>
+        </div>
+      ))}
+      {!readOnly && values.length > 0 && (
+        <div style={{margin: '-4px -12px 0'}}>
+          <Button label={t('Add value')} kind="ghost" icon="plus" onClick={add} />
         </div>
       )}
-    </Card>
+    </div>
   );
 }
 
@@ -393,7 +349,7 @@ export function FullPromptButton({prompt, onOpen, onCopy}: {prompt: StructuredPr
       <Button
         label={t('View full prompt')}
         icon="eye"
-        disabled={!prompt.fields.length}
+        disabled={!prompt.label.values.length}
         onClick={() => {
           setOpen(true);
           onOpen?.();

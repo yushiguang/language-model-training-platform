@@ -532,7 +532,11 @@ export function Field({label, children, width, off}: {label: ReactNode; children
  * rounded list under it, never the browser's own menu. Keyboard: Enter, Space or the arrows open
  * it; the arrows, Home and End move; Enter or Space picks; Escape or Tab closes.
  */
-export function Select<T extends string>({label, options, value, onChange, disabled}: {label: string; options: {value: T; label: string}[]; value: T; onChange: (v: T) => void; disabled?: boolean}) {
+/**
+ * A drop-down list (no native select anywhere, 2026-11-16). `size="sm"` is the compact one for a
+ * 32px bar: its label is read by screen readers only, and `width` sets its width.
+ */
+export function Select<T extends string>({label, options, value, onChange, disabled, size = 'md', width}: {label: string; options: {value: T; label: string}[]; value: T; onChange: (v: T) => void; disabled?: boolean; size?: 'md' | 'sm'; width?: number}) {
   const [at, setAt] = useState<{top: number; left: number; width: number} | null>(null);
   const [active, setActive] = useState(0);
   const btn = useRef<HTMLButtonElement>(null);
@@ -575,9 +579,10 @@ export function Select<T extends string>({label, options, value, onChange, disab
     else if (e.key === 'Escape') (e.preventDefault(), e.stopPropagation(), close());
     else if (e.key === 'Tab') close(false);
   };
+  const sm = size === 'sm';
   return (
-    <div className="field">
-      <span className="field-l" id={`${id}-l`}>
+    <div className={sm ? 'select-sm' : 'field'} style={width ? {width} : undefined}>
+      <span className={sm ? 'sr-only' : 'field-l'} id={`${id}-l`}>
         {label}
       </span>
       <span className="select">

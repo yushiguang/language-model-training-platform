@@ -65,7 +65,10 @@ Using 0.x showed four problems, and the 1.0.0 spec answers each:
   when the user asks.
 - **The eval set has two halves.** The optimiser and the helpers learn from one half. The score
   users see comes from the other, which stays hidden from every helper.
-- **Macro-F1 per field is the main score** (shown as "Score"), with a default pass mark of 0.80.
+- **One label per project.** Each project classifies one mutually exclusive label (one value per
+  item); projects are never mixed. A label that may not cover every item gets an "Other" or
+  "None" value.
+- **Macro-F1 of the label is the main score** (shown as "Score"), with a default pass mark of 0.80.
   Invalid answers are counted apart and capped at 1%. Small eval sets give a rough reading only;
   real ones hold 1,000 to 3,000 examples.
 - **Versions are never overwritten.** Prompt versions are numbered major.minor; an optimiser run
@@ -83,7 +86,7 @@ The UI uses plain words; design docs may use the precise ones.
 | In the UI | Precise term |
 | --- | --- |
 | Optimiser, Auto Optimise | GEPA (reflective prompt optimisation) |
-| Score | Macro-F1 of a field; the big number is the lowest field's |
+| Score | Macro-F1 of the project's label |
 | Helper (Assistant, Prompt helper, Scores helper) | Agent preset |
 | Gold label | Human ground-truth label |
 | Dry run | GEPA feedback minibatch |

@@ -72,21 +72,23 @@ let current = null;
   const ask = async (p, text) => {
     await p.locator('aside.chat, button.ask').first().waitFor();
     if (!(await p.locator('aside.chat').count())) await button(p, 'Ask AI').click();
-    // Spec 6.1: Shift+Enter adds a line; an Enter that ends an input method's composition never
-    // sends; Enter sends.
+    // 2026-11-16: Enter adds a line and Shift+Enter sends; a Shift+Enter that ends an input
+    // method's composition never sends.
     const before = await p.locator('aside.chat .msg-u').count();
     const box = p.locator('#chat-input');
     await box.fill(text);
-    await box.press('Shift+Enter');
-    if (!(await box.inputValue()).endsWith('\n')) throw new Error('Shift+Enter did not add a line');
-    await box.dispatchEvent('compositionstart');
     await box.press('Enter');
-    await box.dispatchEvent('compositionend');
-    await box.evaluate(el => el.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', keyCode: 229, isComposing: true, bubbles: true})));
     await p.waitForTimeout(150);
-    if ((await p.locator('aside.chat .msg-u').count()) !== before) throw new Error('Enter sent the message while composing');
+    if (!(await box.inputValue()).endsWith('\n')) throw new Error('Enter did not add a line');
+    if ((await p.locator('aside.chat .msg-u').count()) !== before) throw new Error('Enter sent the message');
+    await box.dispatchEvent('compositionstart');
+    await box.press('Shift+Enter');
+    await box.dispatchEvent('compositionend');
+    await box.evaluate(el => el.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', shiftKey: true, keyCode: 229, isComposing: true, bubbles: true})));
+    await p.waitForTimeout(150);
+    if ((await p.locator('aside.chat .msg-u').count()) !== before) throw new Error('Shift+Enter sent the message while composing');
     await box.fill(text);
-    await box.press('Enter');
+    await box.press('Shift+Enter');
     await p.locator('aside.chat .msg-u').nth(before).waitFor({timeout: 5000});
   };
 
@@ -153,7 +155,10 @@ let current = null;
   await lost.waitFor({timeout: 20000});
   const lostText = await lost.innerText();
   if (!/2 passages/.test(lostText) || !lostText.includes('my order is late') || !lostText.includes('Return JSON only.')) throw new Error(`the Not carried over list is wrong: ${lostText}`);
-  if ((await page.getByLabel('Field name').inputValue()) !== 'intent') throw new Error('the imported field is missing');
+  if ((await page.getByLabel('Label name').inputValue()) !== 'intent') throw new Error('the imported label is missing');
+  // 2026-11-16: the chat panel has no page tag and no helper lines.
+  if (await page.locator('aside.chat .ctx').count()) throw new Error('the chat still shows the page tag');
+  if (await page.locator('aside.chat').getByText(/Prompt helper answers|Helpers read your recent messages/).count()) throw new Error('the chat still shows the helper lines');
   // Approval is the page's button, with its attention halo; the chat never shows an Approve card.
   if (await page.locator('aside.chat').getByRole('button', {name: 'Approve', exact: true}).count()) throw new Error('the chat shows an Approve card');
   if (!(await approveBtn.evaluate(el => el.classList.contains('btn-cue')))) throw new Error('Approve has no attention halo while a draft waits');
@@ -165,7 +170,19 @@ let current = null;
   // The prompt for this project: drafted from a description, checked as full text, approved as v1
   await ask(page, 'Tag short videos by what the viewer gets from them: primary value, format and topics.');
   await page.getByText('AI draft', {exact: true}).waitFor({timeout: 20000});
-  await page.waitForFunction(() => document.querySelector('[aria-label="Field name"]')?.value === 'primary_value', null, {timeout: 10000});
+  await page.waitForFunction(() => [...document.querySelectorAll('section[aria-label="Output Labels & Definitions"] input.mono')].some(i => i.value === 'primary_value'), null, {timeout: 10000});
+  // Stacked value cards (2026-11-16, 2.1): one card per value; move, add and remove work.
+  const valueNames = () => page.locator('.sp-value input.sp-group-t').evaluateAll(els => els.map(e => e.value));
+  const names0 = await valueNames();
+  if (names0.length !== 4 || (await page.locator('.sp-fields, select').count())) throw new Error(`the values are not stacked cards: ${names0.join(', ')}`);
+  await page.locator('.sp-value').first().getByRole('button', {name: 'Move down'}).click();
+  const names1 = await valueNames();
+  if (names1[0] !== names0[1] || names1[1] !== names0[0]) throw new Error('Move down did not reorder the values');
+  await page.locator('.sp-value').nth(1).getByRole('button', {name: 'Move up'}).click();
+  await button(page.locator('section[aria-label="Output Labels & Definitions"]'), 'Add value').click();
+  if ((await page.locator('.sp-value').count()) !== 5) throw new Error('Add value did not add a card');
+  await page.locator('.sp-value').last().getByRole('button', {name: 'Remove value'}).click();
+  if ((await valueNames()).join() !== names0.join()) throw new Error('the values did not come back to the draft');
   // Long definitions are multi-line boxes, never clipped (spec 3.3)
   const clipped = await page.locator('textarea[aria-label="Definition"]').evaluateAll(els => els.filter(el => el.scrollHeight > el.clientHeight + 2).length);
   if (clipped) throw new Error(`${clipped} definitions are clipped`);
@@ -173,8 +190,8 @@ let current = null;
   await button(page, 'View full prompt').click();
   const full = page.getByRole('dialog');
   const fullText = await full.locator('pre').innerText();
-  if (!fullText.includes('{{Description}}') || !fullText.includes('Return one JSON object only') || !fullText.includes('<field name="primary_value" selection="single">')) throw new Error('the full prompt is not compiled from the parts');
-  if (!/^<persona_and_task>[\s\S]*<\/persona_and_task>\n\n<input_features>[\s\S]*<output_labels>[\s\S]*<output_format>[\s\S]*<\/output_format>$/.test(fullText)) throw new Error('the full prompt is not in XML sections');
+  if (!fullText.includes('{{Description}}') || !fullText.includes('Return one JSON object only') || !fullText.includes('<output_labels name="primary_value" selection="single">')) throw new Error('the full prompt is not compiled from the parts');
+  if (!/^<persona_and_task>[\s\S]*<\/persona_and_task>\n\n<input_features>[\s\S]*<output_labels [\s\S]*<output_format>[\s\S]*<\/output_format>$/.test(fullText)) throw new Error('the full prompt is not in XML sections');
   await shot(page, '1c-full-prompt');
   await button(full, 'Copy prompt').click();
   await button(full, 'Close').click();
@@ -209,8 +226,7 @@ let current = null;
       const id = (await page.locator('.media small').innerText()).trim();
       const answer = LABELS.get(id);
       if (!answer) throw new Error(`No bundled label for ${id}`);
-      for (const [field, values] of Object.entries(answer))
-        for (const v of values) await page.getByRole('group', {name: field}).getByRole('button', {name: v, exact: true}).click();
+      await page.getByRole('group', {name: 'primary_value'}).getByRole('button', {name: answer, exact: true}).click();
       if (i === 0) {
         await page.waitForTimeout(400);
         if (await page.getByText('Saved', {exact: true}).count()) throw new Error('a label saved before Save');
@@ -292,6 +308,10 @@ let current = null;
   for (let i = 0; i < 30 && !(await button(page, 'Review labels').count()) && !(await button(page, 'Improve with AI').count()); i++) await page.waitForTimeout(1000);
   if (await button(page, 'Review labels').count()) {
     log('suggestion:', (await suggestion()).replace(/\n/g, ' | '));
+    // 2026-11-16: the version card scores the label (Macro-F1) and lists every value.
+    const head = await page.locator('main .tbl thead').first().innerText();
+    if (!/Value[\s\S]*F1[\s\S]*Precision[\s\S]*Recall[\s\S]*Examples/.test(head)) throw new Error(`the version card is not per value: ${head}`);
+    if (await page.getByText('Lowest field macro-F1').count()) throw new Error('the version card still says lowest field');
     // R4-6: the version card says what the score rests on.
     log('left out:', await page.getByText(/^Scored on \d+ of \d+ examples/).first().innerText());
     await shot(page, '4b-disagree');
@@ -300,8 +320,14 @@ let current = null;
     const tab = page.getByRole('tab', {name: /^Mismatches/});
     await tab.waitFor();
     const before = +((await tab.innerText()).match(/(\d+)\s*$/) || [0, 0])[1];
-    await page.getByLabel('Compare with').waitFor();
-    log('mismatches:', before, '· compare with', await page.getByLabel('Compare with').locator('option:checked').innerText());
+    const cmp = page.locator('.select-sm .select-btn');
+    await cmp.waitFor();
+    if (await page.locator('select').count()) throw new Error('Gold Labels still uses a native select');
+    log('mismatches:', before, '· compare with', await cmp.innerText());
+    await cmp.click();
+    await page.locator('.select-pop [role=option]').first().waitFor();
+    await shot(page, '4c-compare-with');
+    await page.keyboard.press('Escape');
     const why = await page.locator('section.card', {hasText: 'Model answer'}).innerText();
     log('model answer card:', why.replace(/\n/g, ' | ').slice(0, 200));
     if (!/Model's reason|Not readable/.test(why)) throw new Error("the Model answer card shows no reason");
@@ -327,15 +353,15 @@ let current = null;
     await page.getByRole('button', {name: /^To review \d+$/}).click();
     if (before > 1) {
       // Take the model's answer by picking its chips (the shortcut button is gone, spec 5.3).
-      const picks = await page.locator('section.card', {hasText: 'Model answer'}).evaluate(card =>
-        [...card.querySelectorAll('.row')].map(r => [r.querySelector('.code')?.textContent?.trim(), [...r.querySelectorAll('.ch')].map(c => c.textContent.trim())]).filter(([f, v]) => f && v.length),
-      );
-      const ours = page.locator('section.card', {hasText: 'Your answer'});
-      for (const [field, values] of picks) {
-        const group = ours.getByRole('group', {name: field});
-        for (const b of await group.getByRole('button').all()) if ((await b.getAttribute('aria-pressed')) === 'true' && !values.includes((await b.innerText()).trim())) await b.click();
-        for (const v of values) if ((await group.getByRole('button', {name: v, exact: true}).getAttribute('aria-pressed')) !== 'true') await group.getByRole('button', {name: v, exact: true}).click();
+      const model = page.locator('section.card', {hasText: 'Model answer'});
+      if (await model.locator('.code').count()) throw new Error('the Model answer card still names a field');
+      // An invalid model answer has no value to take: move on to one that has.
+      for (let k = 0; k < 10 && !(await model.locator('.ch').count()); k++) {
+        await page.getByRole('button', {name: 'Next', exact: true}).click();
+        await page.waitForTimeout(400);
       }
+      const pick = (await model.locator('.ch').first().innerText()).trim();
+      await page.locator('section.card', {hasText: 'Your answer'}).getByRole('group', {name: 'primary_value'}).getByRole('button', {name: pick, exact: true}).click();
       await button(page, 'Save').click();
       await page.waitForFunction(n => +((document.querySelector('[role=tab][aria-selected=true]')?.textContent ?? '').match(/(\d+)\s*$/) || [0, 0])[1] === n - 2, before, {timeout: 10000});
     }
@@ -369,7 +395,7 @@ let current = null;
     if (!(await why.count())) throw new Error('the helper draft has no change with a reason');
     log('change reason:', await why.getAttribute('title'));
     // Improve with AI changes wording only: no warning about the label fields
-    if (await page.getByText(/This changes the label fields or values/).count()) throw new Error('Improve with AI changed the label fields');
+    if (await page.getByText(/This changes the label or its values/).count()) throw new Error('Improve with AI changed the label fields');
     if (!(await button(page, 'Save').evaluate(el => el.classList.contains('btn-cue')))) throw new Error('Save has no attention halo for a helper draft');
     await shot(page, '5a-improve-draft');
     if (!(await page.getByRole('button', {name: /^Save as v\d+$/}).count())) throw new Error('Save as vN (next major) is missing');
@@ -379,6 +405,7 @@ let current = null;
 
   // Auto Optimise until a version passes: the card then says to use it as the final prompt (T6)
   let optimised = false;
+  let starts = 0;
   for (let i = 0; i < 360; i++) {
     await page.waitForTimeout(1500);
     const text = await suggestion();
@@ -412,7 +439,8 @@ let current = null;
       log('start dialog:', (await dlg.innerText()).replace(/\n/g, ' | '));
       await shot(page, '5e-start-dialog');
       await dlg.getByRole('button', {name: 'Start', exact: true}).click();
-      log('auto optimise started');
+      if (++starts > 8) throw new Error(`no version passed after 8 Optimiser runs: ${text.replace(/\n/g, ' | ')}`);
+      log('auto optimise started:', text.replace(/\n/g, ' | ').slice(0, 200));
     }
   }
   await shot(page, '5-prompt-versions');
@@ -467,12 +495,12 @@ let current = null;
   await def.fill(`${before}, such as jokes`);
   await page.getByText('Unsaved changes', {exact: true}).waitFor();
   await page.locator('.sp-marks ins', {hasText: 'jokes'}).waitFor({timeout: 5000});
-  if (await page.getByText(/This changes the label fields or values/).count()) throw new Error('new wording was treated as a change to the labels');
+  if (await page.getByText(/This changes the label or its values/).count()) throw new Error('new wording was treated as a change to the labels');
   // A renamed value changes the labels: the page says what that costs before the save
-  const value = page.locator('input[aria-label="Value"]').first();
+  const value = page.locator('input[aria-label="Value name"]').first();
   const name = await value.inputValue();
   await value.fill(`${name} content`);
-  const warn = page.getByText(/This changes the label fields or values\. After you save, \d+ gold labels need a re-check/);
+  const warn = page.getByText(/This changes the label or its values\. After you save, \d+ gold labels need a re-check/);
   await warn.waitFor({timeout: 5000});
   log('label change warning:', await warn.innerText());
   await shot(page, '6b-prompt-edit-label-change');
@@ -487,6 +515,7 @@ let current = null;
   await page.goto(url('/dataset/'));
   await page.getByRole('heading', {name: 'Removed (1)'}).waitFor({timeout: 10000});
   await page.getByRole('heading', {name: 'Label balance'}).waitFor();
+  if (await page.locator('section.card', {hasText: 'Label balance'}).locator('.code').count()) throw new Error('Label balance still shows a field name');
   await shot(page, '2b-dataset-balance');
   await page.waitForFunction(() => +document.querySelector('[aria-label="Examples to add"]')?.value > 0, null, {timeout: 10000});
   await page.getByLabel('Examples to add').fill('5');
@@ -534,7 +563,7 @@ let current = null;
   await ask(page, 'Is the score good enough to pass?');
   await page.locator('aside.chat').getByText('Scores helper joined to answer').waitFor({timeout: 20000});
   await page.locator('aside.chat').getByText(/macro-F1/i).last().waitFor({timeout: 20000});
-  if (!(await page.locator('aside.chat .chat-who').innerText()).startsWith('Scores helper')) throw new Error('the helper that joined does not stay on the page');
+  if ((await page.locator('aside.chat .msg-a .agent-k b').last().innerText()) !== 'Scores helper') throw new Error('the helper that joined does not answer');
   log('scores helper:', (await page.locator('aside.chat .msg-a').last().innerText()).replace(/\n/g, ' ').slice(0, 160));
   await shot(page, '7-ask-ai');
 
@@ -615,7 +644,7 @@ let current = null;
   await zp.close();
 
   const facts = await page.evaluate(() => {
-    const docs = k => JSON.parse(localStorage.getItem('tsp-doc:' + k) || '[]').map(d => d.data);
+    const docs = k => JSON.parse(localStorage.getItem('tsp-doc-v2:' + k) || '[]').map(d => d.data);
     const project = docs('projects').find(p => p.name === 'Short-video tagging');
     const mine = k => docs(k).filter(d => d.projectId === project.id);
     const versions = mine('prompt_versions');
@@ -627,7 +656,7 @@ let current = null;
       settingsConfirmed: project.settingsConfirmed,
       approved: project.approvedNodes,
       versions: versions.length,
-      structured: versions.every(v => v.structured && v.structured.fields.length === 3 && typeof v.template === 'string'),
+      structured: versions.every(v => v.structured && v.structured.label?.values.length === 4 && typeof v.template === 'string'),
       schemaVersions: [...new Set(versions.map(v => v.schemaVersion))],
       reports: mine('eval_reports').length,
       proposals: mine('agent_proposals').map(p => `${p.kind}:${p.state}`),
@@ -635,7 +664,7 @@ let current = null;
       toolCalls: mine('audit_log').filter(a => a.action === 'agent.tool').map(a => a.data?.name),
       autoStarts: audit.filter(a => a === 'auto_start').length,
       actionLines: mine('chat_messages').filter(m => m.role === 'event' && m.event).length,
-      leftovers: ['training_sets', 'setup'].filter(k => localStorage.getItem('tsp-doc:' + k)),
+      leftovers: ['training_sets', 'setup'].filter(k => localStorage.getItem('tsp-doc-v2:' + k)),
       removals: mine('dataset_removals').map(r => `${r.reason}${r.restoredAt ? ':restored' : ''}`),
       comments: mine('label_comments').length,
       holdoutLocked: !!project.holdoutLocked,

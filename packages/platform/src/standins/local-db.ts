@@ -123,7 +123,16 @@ function applyPatch<T extends object>(current: T, patch: DocUpdatePatch<T>): T {
  * Supports all 11 filter operators, composite AND/OR filters, atomic `DocFieldValue`
  * updates, pagination, polling subscriptions, and batch writes.
  */
-export function localDocRuntime(prefix = 'tsp-doc'): DocRuntime {
+export function localDocRuntime(prefix = 'tsp-doc', dropPrefixes: string[] = []): DocRuntime {
+  // Records saved under an older storage shape are test data: they are removed, not migrated.
+  if (dropPrefixes.length && typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+    try {
+      const old = Object.keys(window.localStorage).filter(k => dropPrefixes.some(p => k.startsWith(`${p}:`)));
+      for (const k of old) window.localStorage.removeItem(k);
+    } catch {
+      // Storage may be blocked; nothing to clean then.
+    }
+  }
   const memory = new Map<string, StoredDoc<any>[]>();
   let nextSeq = 1;
 

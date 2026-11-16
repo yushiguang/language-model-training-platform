@@ -68,7 +68,7 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
   const fromParent = !readOnly && !dirty && version.madeBy === 'optimiser' && parent ? parent : undefined;
   const against = readOnly ? undefined : dirty ? base : fromParent?.structured;
   const reasons = dirty ? (fromHelper ? helperChanges : []) : fromParent ? [{text: version.change, reason: version.change}] : [];
-  // New field or value names change what gold labels mean (spec 3.1): say so before the save.
+  // A new key or new value names change what gold labels mean (spec 3.1): say so before the save.
   const signatureChanged = dirty && !sameSignature(signatureOf(draft), signatureOf(base));
   const goldCount = Object.keys(state.gold).length;
   const [tips, setTips] = useState<Record<string, string>>({});
@@ -97,7 +97,7 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
   const save = async (kind: 'minor' | 'major') => {
     const v = await createVersion({projectId: state.project.id, structured: draft, parentId: version.id, madeBy, change: change || structuredChangeSummary(base, draft), kind});
     // Saving is the user's start: the new version is scored right away, once scores can be made
-    // (enough gold labels, and Project Settings confirmed; spec 2.5). A change to the label fields
+    // (enough gold labels, and Project Settings confirmed; spec 2.5). A change to the label
     // or values leaves no gold labels to score on until they are re-checked.
     if (state.facts.settingsConfirmed && canScore(state.facts) && !signatureChanged) void scoreVersion({projectId: state.project.id, promptVersionId: v.id}).catch(() => undefined);
     await go(href('/prompt'));
@@ -139,7 +139,7 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
     <Frame head={<PageHead title={t('Prompt {version}', {version: versionLabel(version)})} back={{label: t('Prompt Tuning'), href: href('/prompt')}} actions={actions} />}>
       {signatureChanged && (
         <Banner
-          text={goldCount === 1 ? t('This changes the label fields or values. After you save, 1 gold label needs a re-check and earlier scores no longer count.') : goldCount ? t('This changes the label fields or values. After you save, {n} gold labels need a re-check and earlier scores no longer count.', {n: num(goldCount)}) : t('This changes the label fields or values. Earlier scores no longer count after you save.')}
+          text={goldCount === 1 ? t('This changes the label or its values. After you save, 1 gold label needs a re-check and earlier scores no longer count.') : goldCount ? t('This changes the label or its values. After you save, {n} gold labels need a re-check and earlier scores no longer count.', {n: num(goldCount)}) : t('This changes the label or its values. Earlier scores no longer count after you save.')}
           style={{margin: '0 0 16px'}}
         />
       )}
