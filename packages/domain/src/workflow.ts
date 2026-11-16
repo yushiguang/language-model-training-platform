@@ -63,7 +63,7 @@ const card = (template: AiSuggestion['template'], title: Msg, text: Msg, actions
 /** Gold-labeled eval examples per value, for the rare-value check. */
 export function goldValueCounts(s: Pick<ProjectState, 'examples' | 'gold' | 'setup'>): {value: string; count: number}[] {
   const labeled = s.examples.filter(e => e.split === 'eval' && !!s.gold[e.id]);
-  return (s.setup?.schema?.values ?? []).map(v => ({value: v.name, count: labeled.filter(e => s.gold[e.id]!.answer === v.name).length}));
+  return (s.setup?.schema?.values ?? []).map(v => ({value: v.name, count: labeled.filter(e => s.gold[e.id]!.answer.includes(v.name)).length}));
 }
 
 /** T1: values with too few gold-labeled examples to score fairly; null when none (or no gold yet). */
@@ -167,12 +167,37 @@ export function aiSuggestion(s: ProjectState, x: SuggestionInput = {}): AiSugges
   }
 
   const mu = best.metrics.mixUps[0];
-  const confusion: Msg | '' = mu ? msg('; top confusion is {gold} -> {predicted}', {gold: mu.gold, predicted: mu.predicted}) : '';
+  const confusion: Msg | '' = !mu
+    ? ''
+    : mu.kind === 'confused'
+      ? msg('; top confusion is {gold} -> {predicted}', {gold: mu.gold ?? '', predicted: mu.predicted ?? ''})
+      : mu.kind === 'extra'
+        ? msg('; {value} is often added when it does not apply', {value: mu.predicted ?? ''})
+        : msg('; {value} is often missed', {value: mu.gold ?? ''});
   const score = best.metrics.macroF1;
   // Macro-F1 can be at the bar while another check fails: name that check then.
   const failing = judge(best.metrics, t, s.facts.goldEvalDone).checks.find(c => !c.met);
   const why = score < t.macroF1 || !failing ? msg('Current score is {score} (target {target})', {score: score.toFixed(2), target: t.macroF1.toFixed(2)}) : msg('{check} is {actual} (needs {need})', {check: failing.msg, actual: failing.actual, need: failing.need});
   return card('T4', msg('Improve {version} to pass', {version: label(best.promptVersionId)}), msg('{why}{confusion}.', {why, confusion}), ['improve', 'auto_optimise'], best.promptVersionId);
+}
+
+/**
+ * The project as advice reads it while scores are out of date (resilience spec, 7): a version
+ * with no report for today's gold labels keeps its newest older one, so Improve with AI and Auto
+ * Optimise stay on offer. Shown scores keep using today's reports only.
+ */
+export function withNewestReports<S extends Pick<ProjectState, 'reports'>>(s: S): S {
+  const current = new Set(s.reports.filter(r => !r.archivedNow).map(r => `${r.promptVersionId}|${r.endpoint}`));
+  const newest = new Map<string, ProjectState['reports'][number]>();
+  for (const r of s.reports) {
+    const k = `${r.promptVersionId}|${r.endpoint}`;
+    if (!r.archivedNow || current.has(k)) continue;
+    const had = newest.get(k);
+    if (!had || r.createdAt > had.createdAt) newest.set(k, r);
+  }
+  if (!newest.size) return s;
+  const keep = new Set(newest.values());
+  return {...s, reports: s.reports.map(r => (keep.has(r) ? {...r, archivedNow: false} : r))};
 }
 
 /**

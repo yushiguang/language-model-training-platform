@@ -10,11 +10,19 @@ import {isImageKey} from './catalogue.ts';
  * and comparing a change with its parent in the dry run. The loop itself is in the bff.
  */
 
-/** Whether one answer matches the gold label. An invalid answer (null) never does. */
-export const isRight = (gold: Answer, predicted: Answer | null) => predicted != null && predicted === gold;
+/** True when the answer holds exactly the gold label's values. */
+export const isRight = (gold: Answer, predicted: Answer | null) => predicted != null && gold.length === predicted.length && gold.every(v => predicted.includes(v));
 
-/** One example's score: 1 when the answer matches the gold label, else 0. */
-export const exampleScore = (gold: Answer, predicted: Answer | null) => (isRight(gold, predicted) ? 1 : 0);
+/**
+ * One example's score in [0, 1]: the F1 of the answer's values against the gold label's. 1 on an
+ * exact match, 0 with no answer or nothing in common; a multi-select answer that gets some values
+ * right earns part (resilience spec, 1.2), so the Pareto front rewards partial progress.
+ */
+export const exampleScore = (gold: Answer, predicted: Answer | null) => {
+  if (!predicted || !predicted.length || !gold.length) return 0;
+  const common = predicted.filter(v => gold.includes(v)).length;
+  return (2 * common) / (gold.length + predicted.length);
+};
 
 /** Dry-run size: half of the optimiser half, at most 20 (D4, 2026-11-10). */
 export const dryRunSize = (optimiserHalf: number) => Math.min(systemConfig().optimiser.dryRunMaxExamples, Math.max(1, Math.floor(optimiserHalf / 2)));
@@ -173,15 +181,20 @@ export function pickDryRun(exampleIds: string[], size: number, focus: Set<string
 }
 
 /**
- * Compares a change with its parent on the dry-run examples. `better`: more examples right.
- * `tied` (acceptance R5-6): as many, but right on different examples, so the change may hold
- * something the parent lacks; it goes on to the full labeling without counting as progress.
+ * Compares a change with its parent on the dry-run examples, by the sum of example scores (exact
+ * matches on a single-select label; partial credit on a multi-select one). Resilience spec, 6: only
+ * a change that does worse than its parent is dropped (`regressed`); one that ties goes on to the
+ * full labeling, since a small sample often misses what a targeted change fixes. Whether it counts
+ * as progress is decided after the full labeling, on the optimiser half.
  */
-export function compareDryRun(parentId: string, items: {gold: Answer; candidate: Answer | null; parent: Answer | null}[]): DryRunResult & {better: boolean; tied: boolean} {
+export function compareDryRun(parentId: string, items: {gold: Answer; candidate: Answer | null; parent: Answer | null}[]): DryRunResult & {better: boolean; tied: boolean; regressed: boolean} {
   const passed = items.filter(i => isRight(i.gold, i.candidate)).length;
   const parentPassed = items.filter(i => isRight(i.gold, i.parent)).length;
-  const differs = items.some(i => isRight(i.gold, i.candidate) !== isRight(i.gold, i.parent));
-  return {examples: items.length, passed, parentPassed, parentId, better: passed > parentPassed, tied: passed === parentPassed && differs};
+  const sum = (k: 'candidate' | 'parent') => items.reduce((n, i) => n + exampleScore(i.gold, i[k]), 0);
+  const round3 = (x: number) => Math.round(x * 1000) / 1000;
+  const score = round3(sum('candidate'));
+  const parentScore = round3(sum('parent'));
+  return {examples: items.length, passed, parentPassed, score, parentScore, parentId, better: score > parentScore, tied: score === parentScore, regressed: score < parentScore};
 }
 
 /** What the Optimiser did with a version, for the versions list and the version card. */

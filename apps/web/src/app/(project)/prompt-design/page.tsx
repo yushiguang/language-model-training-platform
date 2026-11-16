@@ -129,7 +129,6 @@ function Approved({state, setPage}: {state: ProjectState; setPage: (p: PageConte
                 <Badge text={t('Approved as {version}', {version: versionLabel(v)})} tone="ok" />
               </span>
               <FullPromptButton prompt={v.structured} onOpen={() => track('full_prompt_opened', {})} onCopy={() => track('prompt_copied', {from: 'dialog'})} />
-              <Button label={t('Edit prompt')} href={href('/prompt/edit', {v: v.id})} />
               <Button label={t('Next: Eval Dataset')} kind="primary" className={state.project.approvedNodes.includes('prompt_design') ? undefined : 'btn-cue'} onClick={next} />
             </>
           }

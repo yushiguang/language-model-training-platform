@@ -105,8 +105,11 @@ export interface CloseProposalRequest {
 
 export interface GoldLine {
   externalId: string;
-  /** The value. Older files hold `{label: ["Value"]}`, which is still read when unambiguous. */
-  answer: string | Record<string, string[]>;
+  /**
+   * The value or values: `"Value"`, `["V1", "V2"]`, or `{label: "Value" | ["V1", "V2"]}` (the key
+   * may be any single key when that is unambiguous). Checked against the label by `readGoldAnswer`.
+   */
+  answer: string | string[] | Record<string, string | string[]>;
 }
 
 export interface UploadGoldRequest {
@@ -122,6 +125,10 @@ export interface GoldUploadResult {
 export interface DatasetUploadResult {
   snapshot?: DatasetSnapshot;
   error?: string;
+  /** Adding to a dataset: how many were added, already there, or could not be saved. */
+  added?: number;
+  duplicates?: number;
+  notSaved?: number;
 }
 
 /** Remove examples from the eval dataset (soft delete with a trail, spec 1.0.0, 4.4). */

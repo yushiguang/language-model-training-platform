@@ -9,6 +9,36 @@ import {loadProjectState} from './projects.ts';
  */
 
 /**
+ * Saves examples a few at a time, each on its own (resilience spec, 3.2): a write that fails is
+ * tried once more, then skipped, so one bad item never stops a sample, an upload or an append.
+ * Before a retry, and after the last failure, the example is looked up: a write that failed on
+ * the way back but was stored counts as saved and is not written twice. Returns the saved ones.
+ */
+export async function insertExamplesSettled(examples: Example[], parallel = 8): Promise<Example[]> {
+  const {catalog} = getApp();
+  const stored = async (id: string) => !!(await catalog.get('examples', id).catch(() => null));
+  const saveOne = async (e: Example) => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await catalog.insert('examples', e);
+        return true;
+      } catch {
+        if (await stored(e.id)) return true;
+      }
+    }
+    return false;
+  };
+  const saved: Example[] = [];
+  for (let i = 0; i < examples.length; i += parallel) {
+    const batch = examples.slice(i, i + parallel);
+    const ok = await Promise.all(batch.map(saveOne));
+    batch.forEach((e, k) => ok[k] && saved.push(e));
+  }
+  if (saved.length < examples.length) tm().event('examples_not_saved', {count: examples.length - saved.length});
+  return saved;
+}
+
+/**
  * Balances the halves by gold label while no helper has read an example (spec 1.0.0, 4.2). Once
  * the holdout is locked nothing moves. Called when Gold Labels is left and before the lock.
  * Once scoring has started nothing moves either: a score rests on its held-out half, and moving
@@ -51,7 +81,7 @@ export async function lockHoldout(projectId: string): Promise<void> {
  * skipped; existing examples, their halves and gold labels stay as they are. New examples take the
  * half that keeps the two even. Without a dataset yet it starts one.
  */
-export async function appendExamples(projectId: string, raws: RawExample[], source: DatasetSnapshot['source'], invalid = 0): Promise<{added: number; duplicates: number}> {
+export async function appendExamples(projectId: string, raws: RawExample[], source: DatasetSnapshot['source'], invalid = 0): Promise<{added: number; duplicates: number; notSaved: number}> {
   const {catalog, user} = getApp();
   const project = await catalog.get('projects', projectId);
   const snap = project?.snapshotId ? await catalog.get('dataset_snapshots', project.snapshotId) : null;
@@ -65,33 +95,41 @@ export async function appendExamples(projectId: string, raws: RawExample[], sour
     fresh.push(r);
   }
   const duplicates = raws.length - fresh.length;
+  let saved: Example[] = [];
   if (fresh.length) {
     const live = existing.filter(e => !e.removed);
     const added: Example[] = fresh.map(r => ({id: newId('ex'), snapshotId: snap.id, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: 'eval', optimiserHalf: false}));
     const {current: gold} = await (await import('./evaluation.ts')).latestGold(projectId, (await catalog.get('setup_versions', project.setupVersionId ?? ''))?.schemaVersion ?? 0);
     // The ones there keep their half (as if locked); only the new ones are placed.
-    const halves = assignEvalHalves(
-      [...live.map(e => ({...e, optimiserHalf: e.optimiserHalf as boolean | null})), ...added.map(e => ({...e, optimiserHalf: null}))],
-      Object.fromEntries(Object.entries(gold).map(([id, g]) => [id, g.answer])),
-      true,
-    );
+    const goldAnswers = Object.fromEntries(Object.entries(gold).map(([id, g]) => [id, g.answer]));
+    const place = (news: Example[]) => assignEvalHalves([...live.map(e => ({...e, optimiserHalf: e.optimiserHalf as boolean | null})), ...news.map(e => ({...e, optimiserHalf: null}))], goldAnswers, true);
+    const halves = place(added);
     for (const e of added) e.optimiserHalf = halves[e.id];
-    await catalog.insertMany('examples', added);
+    saved = await insertExamplesSettled(added);
+    if (!saved.length) throw new Error('None of the examples could be saved. Try again.');
+    if (saved.length < added.length) {
+      // Some were skipped: place the saved ones again so the halves stay even.
+      const again = place(saved);
+      const moved = saved.filter(e => again[e.id] !== e.optimiserHalf);
+      if (moved.length) await catalog.patchMany('examples', moved.map(e => ({id: e.id, patch: {optimiserHalf: again[e.id]}})));
+    }
     await catalog.patch('dataset_snapshots', snap.id, {
       counts: {
         rows: snap.counts.rows + fresh.length + invalid,
-        valid: snap.counts.valid + fresh.length,
+        valid: snap.counts.valid + saved.length,
         invalid: snap.counts.invalid + invalid,
-        video: snap.counts.video + fresh.filter(r => r.type === 'video').length,
-        photoText: snap.counts.photoText + fresh.filter(r => r.type === 'photo_text').length,
+        video: snap.counts.video + saved.filter(r => r.type === 'video').length,
+        photoText: snap.counts.photoText + saved.filter(r => r.type === 'photo_text').length,
+        ...(snap.counts.notSaved || saved.length < fresh.length ? {notSaved: (snap.counts.notSaved ?? 0) + fresh.length - saved.length} : {}),
       },
-      split: {eval: (snap.split?.eval ?? 0) + fresh.length, test: 0, train: 0},
+      split: {eval: (snap.split?.eval ?? 0) + saved.length, test: 0, train: 0},
     });
   }
-  await catalog.audit(projectId, (await user()).name, 'dataset.append', {source, added: fresh.length, duplicates});
-  tm().event('dataset_appended', {source, added: fresh.length, duplicates});
+  const notSaved = fresh.length - saved.length;
+  await catalog.audit(projectId, (await user()).name, 'dataset.append', {source, added: saved.length, duplicates, ...(notSaved ? {notSaved} : {})});
+  tm().event('dataset_appended', {source, added: saved.length, duplicates});
   emitChange();
-  return {added: fresh.length, duplicates};
+  return {added: saved.length, duplicates, notSaved};
 }
 
 /**
@@ -153,7 +191,7 @@ export async function pruneDataset(projectId: string, mode: 'unlabeled' | 'downs
   if (mode === 'unlabeled') candidates = evalEx.filter(e => !state.gold[e.id]);
   else {
     if (!value) throw new Error('Name the value to downsample.');
-    candidates = evalEx.filter(e => state.gold[e.id]?.answer === value);
+    candidates = evalEx.filter(e => !!state.gold[e.id]?.answer.includes(value));
   }
   const ids = pickToPrune(candidates, keep);
   if (!ids.length) return 0;

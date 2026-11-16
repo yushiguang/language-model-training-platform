@@ -1,5 +1,5 @@
 import type {EndpointId, EvalReport, Example, GoldLabel, LabelingTask, ModelSettings, Prediction, PromptVersion, SetupVersion, TaskPurpose} from '@tsp/contracts';
-import {toMap, computeMetrics, judge, newId, settingsHash, versionLabel, type Scored, msg} from '@tsp/domain';
+import {asAnswer, toMap, computeMetrics, judge, newId, settingsHash, versionLabel, type Scored, msg} from '@tsp/domain';
 import {emitChange, getApp, now} from './app.ts';
 import {postEvent} from './chat-events.ts';
 
@@ -8,7 +8,8 @@ export async function latestGold(projectId: string, schemaVersion: number) {
   const all = await getApp().catalog.find('gold_labels', {projectId}, 'createdAt');
   const current: Record<string, GoldLabel> = {};
   const stale: Record<string, GoldLabel> = {};
-  for (const g of all) (g.schemaVersion === schemaVersion ? current : stale)[g.exampleId] = g;
+  // Answers stored as a plain string earlier on 2026-11-16 read as a one-item list.
+  for (const g of all) (g.schemaVersion === schemaVersion ? current : stale)[g.exampleId] = {...g, answer: asAnswer(g.answer)};
   for (const id of Object.keys(current)) delete stale[id];
   return {current, stale};
 }

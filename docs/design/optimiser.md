@@ -40,8 +40,8 @@ ever called "Optimiser" and its button "Auto Optimise"; "GEPA" appears in design
 | Outcome | In the versions list | Report |
 | --- | --- | --- |
 | Did better in the dry run, then fully labeled | A normal minor version, tagged Optimiser | A full report, the same as a user's version |
-| Tied the dry run on different examples | Labeled in full and kept in the pool | A full report; counts as a wasted round |
-| Did worse in the dry run | A minor version with a Dropped tag in place of its score | A small report on the dry-run examples only |
+| Tied the dry run, or did better, but no gain on the optimiser half | Labeled in full and kept in the pool, with a "No gain" tag beside its score | A full report; counts as a wasted round |
+| Scored lower in the dry run | A minor version with a Dropped tag in place of its score | A small report on the dry-run examples only |
 | Failed the Checks or repeated an earlier change | Not a version (nothing was labeled) | One line in the run's history |
 
 ## How a run works (as built)
@@ -64,7 +64,9 @@ improves the prompt on the project's one labeling model, for up to the user's Ma
   a better minor of the same major exists); an agent's start uses the best scored version.
 - **Pool and parent.** The pool is the start version, the run's kept versions, and every other
   version with a current score on the model (2026-11-11), each scored per example on the optimiser
-  half of the eval set (1 when the answer matches the gold value, else 0). Round 1 always changes the start version (R5-7).
+  half of the eval set (the F1 of the answer's values against the gold label's: 1 on an exact
+  match, 0 with nothing in common, part for a multi-select answer that gets some values right).
+  Round 1 always changes the start version (R5-7).
   Later parents are drawn from the Pareto front (versions best on at least one example and not
   dominated), weighted by how many examples each is best on; the round keeps that count
   (`parentWins`) so the panel can say why. After every 2 kept versions, two front versions that
@@ -76,12 +78,13 @@ improves the prompt on the project's one labeling model, for up to the user's Ma
   `read_feature_info` → the editor's Checks run (a failing or repeated change is dropped,
   unlabeled) → the change is saved and **dry-run** on half of the optimiser half, at most 20
   examples, picked at random (review finding 7), up to half of them from the examples that hold
-  the parent's weakest value (in the gold label or the parent's answer) → it goes on only when it
-  gets more examples right than the parent on them (`compareDryRun`; since 2026-11-16 there is one
-  label, so no field weighting), or ties it while being right on different examples (R5-6:
-  `tied`, labeled in full and kept in the pool, but a wasted round; 2 ties in a row end the run) → it is labeled on the whole eval set (the dry run's
-  answers are reused) and scored on the held-out half. `setOptimiserRandom` fixes the random picks
-  in tests.
+  the parent's weakest value (in the gold label or the parent's answer) → it is dropped only when
+  its summed example scores are lower than the parent's on them (`compareDryRun`, `regressed`;
+  resilience spec 2026-11-16, 6); a tie (`tied`) or a better score goes on → it is labeled on the
+  whole eval set (the dry run's answers are reused) and scored on the held-out half for the
+  user → whether it is progress (`OptimiserRound.gain`) is its Macro-F1 on the optimiser half
+  against the parent's (`halfScore`), never the held-out half, which no helper or Optimiser step
+  reads. No gain is a wasted round. `setOptimiserRandom` fixes the random picks in tests.
 - **Confirming a pass** (decided 2026-11-10, review finding 6). A version that passes is not used
   yet: the held-out half is labeled a second time with the same version and settings (`pass: 2`
   in `ModelSettings`, so the answers are saved apart from the first labeling) and scored again
@@ -90,7 +93,7 @@ improves the prompt on the project's one labeling model, for up to the user's Ma
   Optimiser panel (`OptimiserRound.confirm`), and the run goes on.
 - **Ends** when a version passes and the pass is confirmed (the Prompt Tuning step is approved and
   the AI Suggestion card offers Copy prompt and Finish), at Max rounds, after 3 wasted rounds in a
-  row, on Stop, or when a step fails 3 times in a row: the run shows Failed with the step and the
+  row (no gain, dropped, failed the Checks or repeated), on Stop, or when a step fails 3 times in a row: the run shows Failed with the step and the
   error, and nothing else starts until the user presses Retry, which goes on from that step. A
   run whose page closed shows Paused with Resume.
 - **The record.** `OptimisationRun.history` holds every round (parent, change, outcome, dry-run

@@ -4,7 +4,7 @@ import {useGo} from '@/components/nav';
 import {useSearchParams} from 'next/navigation';
 import {Fragment, Suspense, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import type {Answer, Example, ExampleMedia, LabelComment, MismatchList, MismatchReview, RemovalReason} from '@tsp/contracts';
-import {FEATURES, featureText, gate, versionLabel} from '@tsp/domain';
+import {FEATURES, featureText, gate, inLabelOrder, labelBounds, sameAnswer, versionLabel} from '@tsp/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {useSettings} from '@/components/ProjectSettings';
@@ -158,11 +158,11 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   const item = onMismatch && ex && sub === 'open' ? mm?.items.find(x => x.exampleId === ex.id) : undefined;
   const done = onMismatch && ex && sub === 'done' ? mm?.reviewedItems.find(x => x.exampleId === ex.id) : undefined;
   const gold = ex ? state.gold[ex.id]?.answer : undefined;
-  const diff = !!onMismatch && gold != null && modelAnswer != null && gold !== modelAnswer;
+  const diff = !!onMismatch && gold != null && modelAnswer != null && !sameAnswer(gold, modelAnswer);
   const review = async (outcome: 'kept' | 'changed', note: string, answer?: Answer) => {
     if (!ex || !versionId) return;
     const at = new Date().toISOString();
-    const used = outcome === 'kept' ? 'kept' : answer && modelAnswer && answer === modelAnswer ? 'model' : 'other';
+    const used = outcome === 'kept' ? 'kept' : answer && modelAnswer && sameAnswer(answer, modelAnswer) ? 'model' : 'other';
     await reviewGold({projectId: state.project.id, exampleId: ex.id, promptVersionId: versionId, outcome, answer, note});
     // In To review the item leaves the list after the "Saved" beat (M4); in Reviewed it updates at once.
     if (sub === 'open') await beat();
@@ -448,21 +448,27 @@ function ExampleCard({ex, n, extra, onRemove}: {ex: Example; n: number; extra?: 
             src={media.playerUrl}
             title={t('Player for item {id}', {id: ex.externalId})}
             style={{position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0}}
-            allow="encrypted-media; picture-in-picture; fullscreen"
+            // Resilience spec, 4: the player's site sees only where the page comes from, never its
+            // path, and only over https; it may autoplay inside the tile.
+            referrerPolicy="strict-origin"
+            allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
             allowFullScreen
             loading="lazy"
           />
         ) : stills.length ? (
           <img key={stills[Math.min(picked, stills.length - 1)]} onLoad={e => e.currentTarget.classList.add('loaded')} src={stills[Math.min(picked, stills.length - 1)]} alt="" style={{position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain'}} />
         ) : (
-          <Icon name={ex.type === 'video' ? 'video' : 'image'} />
+          <span className="col" style={{alignItems: 'center', gap: 8}}>
+            <Icon name={ex.type === 'video' ? 'video' : 'image'} />
+            {media?.externalUrl && <OpenItem url={media.externalUrl} />}
+          </span>
         )}
         <small>
           {ex.externalId}
           {media?.durationSec ? ` · ${Math.round(media.durationSec)}s` : ''}
         </small>
       </div>
-      {(stills.length > 1 || media?.playerUrl) && (
+      {(stills.length > 1 || media?.playerUrl || (media?.externalUrl && stills.length)) && (
         <div className="row" style={{gap: 6, flexWrap: 'wrap', alignItems: 'center'}}>
           {media?.playerUrl && (
             <button type="button" className="opt" style={{border: '1px solid var(--border)', fontWeight: view === 'player' ? 600 : 400}} aria-label={t('Show the player')} onClick={() => setView('player')}>
@@ -474,7 +480,13 @@ function ExampleCard({ex, n, extra, onRemove}: {ex: Example; n: number; extra?: 
               <img src={u} alt="" style={{width: 44, height: 44, objectFit: 'cover', borderRadius: 6, display: 'block'}} />
             </button>
           ))}
-          <span className="small muted">{view === 'player' ? t('Stills from the item: click one to inspect it') : t('Still image: click Player to go back to the video')}</span>
+          {(stills.length > 1 || media?.playerUrl) && <span className="small muted">{view === 'player' ? t('Stills from the item: click one to inspect it') : t('Still image: click Player to go back to the video')}</span>}
+          {media?.externalUrl && (
+            <>
+              <span className="grow" />
+              <OpenItem url={media.externalUrl} />
+            </>
+          )}
         </div>
       )}
       <div className="kv">
@@ -591,10 +603,13 @@ function ModelAnswer({
         )
       ) : (
         <div className="col" style={{gap: 12}}>
-          <div className="row" style={{gap: 12}}>
-            <span className="ch" style={diff ? CHIP_DIFF : CHIP} title={schema.values.find(v => v.name === found.answer)?.definition}>
-              {found.answer}
-            </span>
+          <div className="row" style={{gap: 12, flexWrap: 'wrap'}}>
+            {found.answer.map(a => (
+              // On Mismatches a value the gold label does not hold is marked.
+              <span key={a} className="ch" style={diff && !state.gold[ex.id]?.answer.includes(a) ? CHIP_DIFF : CHIP} title={schema.values.find(v => v.name === a)?.definition}>
+                {a}
+              </span>
+            ))}
           </div>
           {why && found.reason && said(t("Model's reason"), found.reason, false)}
         </div>
@@ -633,8 +648,19 @@ function YourAnswer({
   const [answer, setAnswer] = useState<Answer | null>(saved?.answer ?? null);
   const [note, setNote] = useState('');
   const [beat, setBeat] = useState(false);
-  const complete = answer != null;
-  const changed = !saved || saved.answer !== answer;
+  const multi = schema.kind === 'multi';
+  const {min, max} = labelBounds(schema);
+  const complete = answer != null && answer.length >= Math.max(1, min) && answer.length <= max;
+  const changed = !saved || !sameAnswer(saved.answer, answer);
+  // Single select: a chip picks that value alone. Multi select: chips toggle, up to the most
+  // allowed; a value that stands alone ("None") clears the others, and any other clears it.
+  const toggle = (v: string) => {
+    if (!multi) return setAnswer([v]);
+    const cur = answer ?? [];
+    const alone = (x: string) => !!schema.values.find(y => y.name === x)?.exclusive;
+    const next = cur.includes(v) ? cur.filter(x => x !== v) : alone(v) ? [v] : [...cur.filter(x => !alone(x)), v];
+    setAnswer(next.length ? inLabelOrder(next, schema) : null);
+  };
   const hasNote = !!note.trim();
   const done = review?.done;
   // Save is on when there is something to record: a new or changed label, a comment, or (in To
@@ -696,16 +722,25 @@ function YourAnswer({
       }
     >
       <div className="col" style={{gap: 28}}>
-        <div className="chs" role="group" aria-label={schema.name}>
-          {schema.values.map(v => {
-            const on = answer === v.name;
-            return (
-              <button key={v.name} type="button" className="ch" aria-pressed={on} title={v.definition} onClick={() => setAnswer(v.name)}>
-                {on && <Icon name="check" />}
-                {v.name}
-              </button>
-            );
-          })}
+        <div className="col" style={{gap: 10}}>
+          {multi && (
+            <span className="t-3" style={{fontSize: 13}}>
+              {min === max ? t('Choose {n}', {n: max}) : t('Choose {min} to {max}', {min: Math.max(1, min), max})}
+            </span>
+          )}
+          <div className="chs" role="group" aria-label={schema.name}>
+            {schema.values.map(v => {
+              const on = !!answer?.includes(v.name);
+              // At the most allowed, other values wait until one is taken off (a value that stands alone still replaces them).
+              const full = multi && !on && !v.exclusive && (answer?.filter(x => !schema.values.find(y => y.name === x)?.exclusive).length ?? 0) >= max;
+              return (
+                <button key={v.name} type="button" className="ch" aria-pressed={on} title={v.definition} disabled={full} onClick={() => toggle(v.name)}>
+                  {on && <Icon name="check" />}
+                  {v.name}
+                </button>
+              );
+            })}
+          </div>
         </div>
         <div className="col" style={{gap: 8, paddingTop: 8}}>
           <span className="field-l">
@@ -737,5 +772,18 @@ function YourAnswer({
         </div>
       </div>
     </Card>
+  );
+}
+
+/**
+ * Opens the item on its own site in a new tab (resilience spec, 4): for when the player cannot be
+ * embedded, for example when the site blocks embedding or needs its own sign-in.
+ */
+function OpenItem({url}: {url: string}) {
+  return (
+    <a className="small" href={url} target="_blank" rel="noopener noreferrer" style={{display: 'inline-flex', alignItems: 'center', gap: 4}}>
+      {t('Open item')}
+      <Icon name="external" />
+    </a>
   );
 }

@@ -140,6 +140,13 @@ const PATHS: Record<string, ReactNode> = {
       <path d="M12 15V3" />
     </>
   ),
+  external: (
+    <>
+      <path d="M15 3h6v6" />
+      <path d="M10 14 21 3" />
+      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+    </>
+  ),
   stop: <rect x="6" y="6" width="12" height="12" rx="1.5" />,
   play: <path d="M6 4v16l14-8z" />,
   next: (
@@ -163,14 +170,14 @@ export function Icon({name, size, style}: {name: keyof typeof PATHS | string; si
  * A failed action (design: "Failed" rule): one red banner at the top of the content saying what
  * failed, with Retry. The user's edits stay where they are. One at a time; a new failure replaces it.
  */
-type ActionError = {text: string; retry?: () => void};
+type ActionError = {text: string; retry?: () => void | Promise<unknown>};
 let actionError: ActionError | null = null;
 const errorListeners = new Set<() => void>();
 const setActionError = (e: ActionError | null) => {
   actionError = e;
   errorListeners.forEach(fn => fn());
 };
-export const reportActionError = (text: string, retry?: () => void) => setActionError({text, retry});
+export const reportActionError = (text: string, retry?: () => void | Promise<unknown>) => setActionError({text, retry});
 export const clearActionError = () => setActionError(null);
 const subscribeErrors = (fn: () => void) => {
   errorListeners.add(fn);
@@ -190,22 +197,36 @@ export function ActionErrorBanner() {
       <Banner
         tone="err"
         text={e.text}
-        action={
-          e.retry ? (
-            <Button
-              label={t('Retry')}
-              kind="white"
-              size="sm"
-              onClick={() => {
-                const r = e.retry!;
-                clearActionError();
-                r();
-              }}
-            />
-          ) : undefined
-        }
+        action={e.retry ? <RetryButton key={e.text} e={e} /> : undefined}
       />
     </div>
+  );
+}
+
+/**
+ * Retry on the banner (resilience spec, 8): it spins while the action runs again, even when the
+ * button that failed is gone from the page by then. A new failure replaces the banner; when none
+ * comes, the banner goes.
+ */
+function RetryButton({e}: {e: ActionError}) {
+  const [busy, setBusy] = useState(false);
+  const run = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await e.retry!();
+      if (actionError === e) clearActionError();
+    } catch (err) {
+      console.warn(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button type="button" className={`btn btn-white btn-sm${busy ? ' pending' : ''}`} disabled={busy} aria-busy={busy || undefined} onClick={() => void run()}>
+      {busy && <Icon name="ring" />}
+      {t('Retry')}
+    </button>
   );
 }
 
@@ -308,8 +329,9 @@ export function Button({
     // A plain sentence from the backend ("Fix 2 errors in Checks first.") says why; anything else is a connection problem.
     const msg = e instanceof Error ? e.message : '';
     const why = /^[A-Z][^{}<>\n]{0,160}\.$/.test(msg) ? t(msg) : t('Check your connection and try again.');
+    // "{action} failed." reads right for any button label (resilience spec, 8).
     const what = label ?? ariaLabel;
-    reportActionError(what ? t("Couldn't {action}. {why}", {action: what.toLowerCase(), why}) : t("Couldn't do that. {why}", {why}), () => void click());
+    reportActionError(what ? t('{action} failed. {why}', {action: what, why}) : t("Couldn't do that. {why}", {why}), () => click());
   };
   return (
     <button type="button" className={cls} disabled={disabled || busy || (!!group?.pending && !busy)} aria-busy={busy || undefined} onClick={() => void click()} title={title} aria-label={ariaLabel}>

@@ -19,14 +19,15 @@ export interface Scored {
 
 const f1 = (p: number, r: number) => (p + r === 0 ? 0 : (2 * p * r) / (p + r));
 const round = (x: number) => Math.round(x * 1000) / 1000;
+const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every(v => b.includes(v));
 
 /**
- * Scores predictions against gold labels. The project has one mutually-exclusive label, so every
- * answer is one value. Each value is scored one-vs-rest; macro-F1 is the mean over values that
- * appear in the gold labels or the predictions, so rare values count as much as common ones.
- * Invalid outputs and answers the safety filter stopped are left out of every score (they are a
- * format or platform event, not a labeling judgement) and counted apart; `judge` keeps a version
- * with too many invalid answers from passing.
+ * Scores predictions against gold labels. The project has one label (single or multi select), so
+ * every answer is a set of its values. Each value is scored one-vs-rest; macro-F1 is the mean over
+ * values that appear in the gold labels or the predictions, so rare values count as much as common
+ * ones. Accuracy is the share of exact matches. Invalid outputs and answers the safety filter
+ * stopped are left out of every score (they are a format or platform event, not a labeling
+ * judgement) and counted apart; `judge` keeps a version with too many invalid answers from passing.
  */
 export function computeMetrics(schema: Schema, all: Scored[]): Metrics {
   const items = all.filter(it => it.predicted != null && !it.filtered);
@@ -36,8 +37,8 @@ export function computeMetrics(schema: Schema, all: Scored[]): Metrics {
     let fp = 0;
     let fn = 0;
     for (const it of items) {
-      const g = it.gold === v.name;
-      const p = it.predicted === v.name;
+      const g = it.gold.includes(v.name);
+      const p = it.predicted!.includes(v.name);
       if (g && p) tp++;
       else if (p) fp++;
       else if (g) fn++;
@@ -48,16 +49,26 @@ export function computeMetrics(schema: Schema, all: Scored[]): Metrics {
     values.push({value: v.name, precision: round(precision), recall: round(recall), f1: round(f1(precision, recall)), support: tp + fn});
   }
   const macro = values.length ? values.reduce((s, v) => s + v.f1, 0) / values.length : 0;
-  const right = items.filter(it => it.predicted === it.gold).length;
+  const right = items.filter(it => sameSet(it.gold, it.predicted!)).length;
 
+  // Single select: one value read as another. Multi select: values added or left out.
   const bucket = new Map<string, MixUp>();
-  for (const it of items) {
-    if (it.predicted == null || it.predicted === it.gold) continue;
-    const key = `${it.gold}>${it.predicted}`;
-    const cur = bucket.get(key) ?? {gold: it.gold, predicted: it.predicted, count: 0, exampleIds: []};
+  const add = (kind: MixUp['kind'], gold: string | null, predicted: string | null, id: string) => {
+    const key = `${kind}|${gold}>${predicted}`;
+    const cur = bucket.get(key) ?? {kind, gold, predicted, count: 0, exampleIds: []};
     cur.count++;
-    cur.exampleIds.push(it.exampleId);
+    cur.exampleIds.push(id);
     bucket.set(key, cur);
+  };
+  for (const it of items) {
+    const p = it.predicted!;
+    if (sameSet(it.gold, p)) continue;
+    if (schema.kind !== 'multi') {
+      add('confused', it.gold[0] ?? null, p[0] ?? null, it.exampleId);
+      continue;
+    }
+    for (const v of p) if (!it.gold.includes(v)) add('extra', null, v, it.exampleId);
+    for (const v of it.gold) if (!p.includes(v)) add('missed', v, null, it.exampleId);
   }
   const mixUps = [...bucket.values()].sort((a, b) => b.count - a.count);
   let lowestValue: Metrics['lowestValue'] = null;

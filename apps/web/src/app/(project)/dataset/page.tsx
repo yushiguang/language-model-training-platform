@@ -28,12 +28,12 @@ function Dataset({state}: {state: ProjectState}) {
     return (
       <Frame head={head}>
         <CenterProgress
-          title={task.kind === 'upload' ? t('Loading features for {n} items', {n: num(task.total)}) : t('Sampling {n} examples', {n: num(task.total)})}
+          title={task.saving ? t('Saving the examples') : task.kind === 'upload' ? t('Loading features for {n} items', {n: num(task.total)}) : t('Sampling {n} examples', {n: num(task.total)})}
           chip={task.kind === 'upload' && task.fileName ? <LinkChip text={task.fileName} /> : undefined}
           done={task.fetched}
           total={task.total}
           startedAt={task.startedAt}
-          onStop={() => stopSampleDataset(state.project.id)}
+          onStop={task.saving ? undefined : () => stopSampleDataset(state.project.id)}
         />
       </Frame>
     );
@@ -128,6 +128,11 @@ function Ready({state}: {state: ProjectState}) {
           <span className="t-3 one" style={{fontSize: 13}} title={snap.source === 'upload' ? snap.sourceName : undefined}>
             {t('{date} · {videos} videos · {photos} photo and text', {date: dateTime(snap.createdAt), videos: num(evalEx.filter(e => e.type === 'video').length), photos: num(evalEx.filter(e => e.type !== 'video').length)})}
           </span>
+          {!!snap.counts.notSaved && (
+            <span className="t-3" style={{fontSize: 13}}>
+              <Hov text={t('{n} could not be saved', {n: num(snap.counts.notSaved)})} tip={t('Saving these failed twice, so they were skipped. Add them again to try once more.')} />
+            </span>
+          )}
           {labeled > 0 && pending > 0 && <PruneUnlabeled state={state} pending={pending} />}
         </div>
       </Card>
@@ -151,7 +156,10 @@ function AddExamples({state}: {state: ProjectState}) {
     setNote(null);
     const res = await appendDatasetFile(state.project.id, f);
     if (res.error) setNote({text: t(res.error), err: true});
-    else if (res.added != null) setNote({text: res.duplicates ? t('Added {n}; {dup} already in the dataset were skipped.', {n: num(res.added), dup: num(res.duplicates)}) : t('Added {n}.', {n: num(res.added)})});
+    else if (res.added != null) {
+      const added = res.duplicates ? t('Added {n}; {dup} already in the dataset were skipped.', {n: num(res.added), dup: num(res.duplicates)}) : t('Added {n}.', {n: num(res.added)});
+      setNote({text: res.notSaved ? `${added} ${t('{n} could not be saved.', {n: num(res.notSaved)})}` : added});
+    }
     if (file.current) file.current.value = '';
   };
   return (
@@ -323,7 +331,7 @@ function RemovedCard({state}: {state: ProjectState}) {
           cells: [
             <One key="id" text={r.externalId} />,
             t(REASON[r.reason]),
-            <One key="g" text={r.gold ? Object.values(r.gold).flat().join(', ') : t('None')} className={r.gold ? undefined : 't-3'} />,
+            <One key="g" text={r.gold?.length ? r.gold.join(', ') : t('None')} className={r.gold?.length ? undefined : 't-3'} />,
             <span key="at" className="t-3"><Hov text={dateTime(r.removedAt)} tip={t('Removed by {name}', {name: r.removedBy})} /></span>,
             <Button key="r" label={t('Restore')} size="sm" kind="ghost" onClick={() => restoreExamples({projectId: state.project.id, removalIds: [r.id]})} />,
           ],

@@ -64,7 +64,7 @@ export const METRICS = {
   tsp_agent_parse_failures_total: {type: 'counter', help: "Answers that weren't the asked JSON", labels: ['agent', 'intent']},
   tsp_agent_proposals_total: {type: 'counter', help: 'Proposals by outcome', labels: ['agent', 'kind', 'outcome']},
   tsp_optimiser_runs_total: {type: 'counter', help: 'Optimiser runs by outcome', labels: ['slot', 'outcome']},
-  tsp_optimiser_candidates_total: {type: 'counter', help: 'Optimiser rounds by result (kept, tied, dropped after the dry run, failed the Checks, repeated)', labels: ['slot', 'result']},
+  tsp_optimiser_candidates_total: {type: 'counter', help: 'Optimiser rounds by result (kept with a gain, no_gain, dropped after the dry run, failed the Checks, repeated)', labels: ['slot', 'result']},
   tsp_optimiser_step_failures_total: {type: 'counter', help: 'Optimiser steps that errored (each try)', labels: ['step']},
   // catalog and storage
   tsp_catalog_operations_total: {type: 'counter', help: 'Catalog operations', labels: ['collection', 'op', 'outcome']},
@@ -106,7 +106,7 @@ export const LABEL_VALUES: Record<string, readonly string[]> = {
   task_purpose: ['eval', 'optimiser', 'test', 'training'],
   trigger: ['system', 'user'],
   state: ['queued', 'running', 'paused', 'needs_attention', 'done', 'stopped', 'failed'],
-  result: ['valid', 'invalid', 'filtered', 'failed', 'kept', 'rejected', 'placeholders_changed', 'dropped', 'checks', 'repeat'],
+  result: ['valid', 'invalid', 'filtered', 'failed', 'kept', 'no_gain', 'rejected', 'placeholders_changed', 'dropped', 'checks', 'repeat'],
   step: ['parent', 'reflect', 'merge', 'check', 'dry_run', 'full', 'report', 'confirm'],
   agent: ['front_desk', 'prompt_agent', 'evaluation_agent'],
   from: ['front_desk', 'prompt_agent', 'evaluation_agent'],
@@ -159,6 +159,8 @@ export interface EventProps {
   dataset_uploaded: {rows: Num; valid: Num; invalid: Num; video: Num; photo_text: Num};
   dataset_upload_failed: {reason: 'format' | 'empty' | 'too_large' | 'other'};
   dataset_appended: {source: 'sample' | 'upload'; added: Num; duplicates: Num};
+  /** Examples whose save failed twice and were skipped (resilience spec, 3.2). */
+  examples_not_saved: {count: Num};
   dataset_examples_removed: {reason: 'broken' | 'out_of_scope' | 'downsample' | 'excess_unlabeled'; count: Num; with_gold: Num};
   dataset_examples_restored: {count: Num};
   eval_halves_balanced: {moved: Num; locked: boolean};
@@ -229,6 +231,7 @@ export const EVENT_PROP_KEYS: {[E in EventName]: readonly (keyof EventProps[E] &
   dataset_uploaded: ['rows', 'valid', 'invalid', 'video', 'photo_text'],
   dataset_upload_failed: ['reason'],
   dataset_appended: ['source', 'added', 'duplicates'],
+  examples_not_saved: ['count'],
   dataset_examples_removed: ['reason', 'count', 'with_gold'],
   dataset_examples_restored: ['count'],
   eval_halves_balanced: ['moved', 'locked'],

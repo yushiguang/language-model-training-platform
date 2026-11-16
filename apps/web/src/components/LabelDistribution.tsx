@@ -11,7 +11,7 @@ export interface LabelCount {
 
 /** How many answers use each value of the label, most used first. */
 export function labelCounts(schema: Schema, answers: (Answer | null | undefined)[]): LabelCount[] {
-  return schema.values.map(v => ({name: v.name, n: answers.filter(a => a === v.name).length})).sort((a, b) => b.n - a.n);
+  return schema.values.map(v => ({name: v.name, n: answers.filter(a => !!a?.includes(v.name)).length})).sort((a, b) => b.n - a.n);
 }
 
 /**

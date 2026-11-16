@@ -81,9 +81,9 @@ per-tenant configuration, permission checks and a job queue (`RequestContext`,
 ## The structured prompt (1.0.0)
 
 A prompt version stores a `StructuredPrompt`: the persona and task (`taskSummary`), the input
-features, the project's one label (`label`: a key and its values, each with a definition; since
-2026-11-16 a project classifies exactly one mutually exclusive label and the model answers one
-plain string) and the rule groups (`ruleGroups`: a title and free-text rules each, named by the
+features, the project's one label (`label`: a key, single or multi select (`kind`, with `min` and
+`max` for multi), and its values, each with a definition, a value optionally `exclusive`; the
+model answers a list of values, one for single select) and the rule groups (`ruleGroups`: a title and free-text rules each, named by the
 user; they replace the per-field tie-break notes and the one general-rules box). Rules about one
 value belong in that value's definition; rule groups hold rules across values. This is the only thing people and
 helpers edit. The text sent to the model is compiled from it by `compilePrompt`
@@ -190,7 +190,9 @@ Both have their own design docs, which hold the design and the as-built detail:
 **Rebuild scores** (Evelyn, 2026-11-12: by hand only). A gold edit changes the evaluation context,
 so reports are archived and `ProjectState.scoresUpdating` is set ("Scores out of date" on Gold
 Labels and Prompt Tuning). Nothing rebuilds by itself: gold edits, changed settings and new code all
-move scores, and sensing each one is fragile. The Rebuild scores button on Prompt Tuning calls
+move scores, and sensing each one is fragile. The button is on only while scores are out of date,
+and while they are, Edit prompt, Improve with AI and Auto Optimise ask "Rebuild scores first?";
+the AI Suggestion reads each version's newest score (`withNewestReports`). The button calls
 `rebuildReports`, which gives every version of the current schema with a finished scoring a fresh
 report from saved answers (nothing labeled); a report it replaces is marked `archived` and hidden.
 `tick` builds only a version's first report. Saved answers on the whole eval set are kept in memory

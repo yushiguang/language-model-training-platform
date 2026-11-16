@@ -37,7 +37,6 @@ export interface SystemConfig {
     /** Tries of one step before the run fails. */
     stepRetries: number;
     wastedRoundsLimit: number;
-    consecutiveTiesLimit: number;
     /** A merge is tried after this many kept versions. */
     mergeEveryKept: number;
     dryRunMaxExamples: number;

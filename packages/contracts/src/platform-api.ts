@@ -389,7 +389,7 @@ export interface ExampleSource {
   /** Looks up examples by id, for chat attachments. Unknown ids are left out. */
   lookup(ids: string[]): Promise<RawExample[]>;
   /** Gold labels shipped with the prepared file, if any (for "Upload labels"). */
-  bundledLabels?(): Promise<{externalId: string; answer: string | Record<string, string[]>}[]>;
+  bundledLabels?(): Promise<{externalId: string; answer: string | string[] | Record<string, string | string[]>}[]>;
 }
 
 /**
@@ -411,6 +411,11 @@ export interface ExampleMedia {
   imageUrls: string[];
   /** Video length in seconds, when known. */
   durationSec?: number;
+  /**
+   * A page where a person can open the item in a new tab (resilience spec, 4), for when the player
+   * cannot be embedded: cross-site embedding blocked, rate-limited, or needing a top-level sign-in.
+   */
+  externalUrl?: string;
 }
 
 /** Media for examples. Every URL must load in the signed-in user's browser. */

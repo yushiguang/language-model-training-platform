@@ -51,16 +51,27 @@ async function answer(req: ChatRequest): Promise<ChatResult> {
   const rules = text.split('\n').filter(l => /\b(before|unless|never|only|check|if|always|prefer|when|not)\b/i.test(l)).length;
   const base = req.endpoint === 'A' ? 0.72 : 0.66;
   const q = Math.min(0.985, base + 0.035 * Math.max(0, rules - 2) + (text.includes('Return one JSON object only') ? 0.02 : 0));
-  const r = rng(`${req.endpoint}|${req.traceId}|${text.length}|${rules}|${req.temperature ?? 0}`);
+  // The draws depend on the example, not on the prompt's text: a prompt with more rules only turns
+  // wrong answers right, so the stand-in Optimiser's progress is not lost to a reshuffle.
+  const r = rng(`${req.endpoint}|${req.traceId}|${req.temperature ?? 0}`);
   const out: Record<string, unknown> = text.includes('"reason" key') ? {reason: 'Based on the description and what is shown.'} : {summary: 'A short post.', reasoning: 'Based on the description and what is shown.'};
   const key = labelAsked(text);
   if (key) {
     const values = valuesFor(text);
-    const truth = typeof truth0 === 'string' ? truth0 : undefined;
-    const gold = truth && values.includes(truth) ? truth : values[Math.floor(r() * values.length)];
+    const tag = text.match(/<output_labels [^>]*>/)?.[0] ?? '';
+    const multi = /selection="multi"/.test(tag);
+    const truth = (Array.isArray(truth0) ? truth0 : typeof truth0 === 'string' ? [truth0] : []).filter(v => values.includes(v));
+    const gold = truth[0] ?? values[Math.floor(r() * values.length)];
     const p = Math.max(0.3, q);
     const other = values.filter(v => v !== gold);
-    out[key] = r() < p || !other.length ? gold : CONFUSE[gold] && values.includes(CONFUSE[gold]) ? CONFUSE[gold] : other[Math.floor(r() * other.length)];
+    const pick = r() < p || !other.length ? gold : CONFUSE[gold] && values.includes(CONFUSE[gold]) ? CONFUSE[gold] : other[Math.floor(r() * other.length)];
+    if (!multi) out[key] = pick;
+    else {
+      // A multi-select answer: the picked value, sometimes with a second one, within max.
+      const max = Number(tag.match(/max="(\d+)"/)?.[1] ?? values.length);
+      const second = other.filter(v => v !== pick)[Math.floor(r() * Math.max(1, other.length - 1))];
+      out[key] = max > 1 && second && r() > p ? [pick, second] : [pick];
+    }
   }
   const json = r() < 0.006 ? JSON.stringify(out).slice(0, -8) : JSON.stringify(out);
   const inputTokens = Math.round(text.length / 4) + imageCount(req.messages) * 258;

@@ -71,7 +71,9 @@ export function sampleMedia(base = ''): MediaSource {
       const imageUrls = [...featureItems(ex.features.Frame), ...featureItems(ex.features.Images)].map(url);
       const cover = featureItems(ex.features.Cover)[0];
       if (!cover && !imageUrls.length) return null;
-      const m: ExampleMedia = {kind: ex.type === 'video' ? 'video' : 'images', imageUrls, ...(cover ? {coverUrl: url(cover)} : {})};
+      // The stand-in has no item page; its cover image opens in a new tab in its place.
+      const page = cover ? url(cover) : imageUrls[0];
+      const m: ExampleMedia = {kind: ex.type === 'video' ? 'video' : 'images', imageUrls, ...(cover ? {coverUrl: url(cover)} : {}), externalUrl: page};
       return m;
     },
   };

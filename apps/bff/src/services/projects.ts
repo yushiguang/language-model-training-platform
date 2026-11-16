@@ -1,5 +1,5 @@
 import {DocFieldValue, type GateApproval, type LabelComment, type NodeId, type Project, type ProjectState, type WorkflowFacts} from '@tsp/contracts';
-import {compareVersions, contextIdFor, gate, judge, newId, scoresUpdating, systemConfig} from '@tsp/domain';
+import {asAnswerOrNull, compareVersions, contextIdFor, gate, judge, newId, scoresUpdating, systemConfig} from '@tsp/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {getSamplingTask, stopSampleDataset} from './dataset.ts';
 import {cannotBuild, latestGold} from './evaluation.ts';
@@ -74,7 +74,7 @@ export async function loadProjectState(projectId: string): Promise<ProjectState 
   ]);
   // Removed examples stay in the store with their trail (spec 1.0.0, 4.4) and leave every count.
   const examples = allExamples.filter(e => !e.removed);
-  const removals = rawRemovals.filter(r => !r.restoredAt);
+  const removals = rawRemovals.filter(r => !r.restoredAt).map(r => (r.gold == null ? r : {...r, gold: asAnswerOrNull(r.gold)}));
   const comments: Record<string, LabelComment[]> = {};
   for (const c of rawComments) (comments[c.exampleId] ??= []).push(c);
   const versions = rawVersions.sort((a, b) => compareVersions(b, a));

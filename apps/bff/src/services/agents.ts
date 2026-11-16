@@ -14,7 +14,7 @@ import type {
   StartRequest,
   StructuredPrompt,
 } from '@tsp/contracts';
-import {agentName, answersForHelpers, isRight, newId, promptKeys, readStructured, rewordOnly, settingsHash, structuredEquals, tidyStructured, versionLabel, visibleToAgents, wrongExamples, toMap, msg} from '@tsp/domain';
+import {agentName, answersForHelpers, isRight, newId, promptKeys, readStructured, rewordOnly, settingsHash, structuredEquals, tidyStructured, versionLabel, visibleToAgents, wrongExamples, toMap, msg, msgText} from '@tsp/domain';
 import {loadProjectState} from './projects.ts';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {joinedMsg, postEvent} from './chat-events.ts';
@@ -353,8 +353,10 @@ export async function improveWithAi(projectId: string, versionId: string, locale
     await catalog.insert('agent_proposals', proposal);
     // One line: the reasons sit on the marks in the editor, so the chat does not repeat them.
     const n = out.changes.length;
-    const text = n ? `I made ${n} change${n === 1 ? '' : 's'} to ${versionLabel(v)}. Hover each mark to see why.` : `I have no new change for ${versionLabel(v)}.`;
-    await post(projectId, {role: 'agent', agent: 'prompt_agent', text, page: 'Edit prompt'});
+    // With its catalog key, so the line reads in the user's language (resilience spec, 8).
+    const version = versionLabel(v);
+    const line = n === 1 ? msg('I made 1 change to {version}. Hover each mark to see why.', {version}) : n ? msg('I made {n} changes to {version}. Hover each mark to see why.', {n, version}) : msg('I have no new change for {version}.', {version});
+    await post(projectId, {role: 'agent', agent: 'prompt_agent', text: msgText(line), msg: line, page: 'Edit prompt'});
     await postEvent(projectId, 'draft', 'prompt_agent', msg('put a draft on {page}', {page: 'Edit prompt'}), {path: '/prompt/edit', params: {v: v.id}});
     tm().counter('tsp_agent_proposals_total', {agent: 'prompt_agent', kind: 'prompt', outcome: 'shown'});
     tm().event('prompt_proposal_shown', {agent: 'prompt_agent', unmapped: 0});

@@ -7,13 +7,13 @@ import {localDocRuntime} from '@tsp/platform';
 import {createLabeling} from './labeling.ts';
 import {memoryLocks} from './locks.ts';
 
-const schema: Schema = {name: 'format', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]};
+const schema: Schema = {name: 'format', kind: 'single', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]};
 
 async function setup(n: number, prefix: string) {
   const db = localDocRuntime(prefix);
   const catalog = createCatalog(db);
   await catalog.insert('setup_versions', {id: 'sv_1', projectId: 'pr_1', number: 1, schemaVersion: 1, task: '', schema, thresholds: null, models: [], steps: {schema: true, evaluation: true, models: true}, createdAt: '', createdBy: ''});
-  const v = await catalog.createPromptVersion({projectId: 'pr_1', structured: {taskSummary: '', features: {video: [], photo_text: [], metadata: []}, label: {name: '', values: []}, ruleGroups: [], images: []}, template: 'Label {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
+  const v = await catalog.createPromptVersion({projectId: 'pr_1', structured: {taskSummary: '', features: {video: [], photo_text: [], metadata: []}, label: {name: '', kind: 'single', values: []}, ruleGroups: [], images: []}, template: 'Label {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
   const ids = Array.from({length: n}, (_, i) => `ex_${i}`);
   await catalog.insertMany('examples', ids.map((id, i) => ({id, snapshotId: 'ds_1', externalId: String(i), type: 'video' as const, title: '', features: toFeatures({Description: `post ${i}`}), split: 'train' as const, optimiserHalf: false})));
   return {db, catalog, v, ids};
@@ -142,7 +142,7 @@ test('tryTemplate labels a few examples with an unsaved template and saves nothi
   const examples = await catalog.findByIds('examples', ids);
   const rows = await labeling.tryTemplate({template: 'Draft {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], schema, settings: {endpoint: 'A', maxOutputTokens: 100, temperature: 0}, examples});
   assert.deepEqual(rows.map(r => r.exampleId), ids);
-  assert.ok(rows.every(r => r.answer === 'Vlog' && r.costUsd === 0.01));
+  assert.ok(rows.every(r => r.answer?.join() === 'Vlog' && r.costUsd === 0.01));
   assert.equal((await labeling.listTasks('pr_1')).length, 0);
   // Nothing saved under the version that exists either.
   assert.equal(Object.keys(await labeling.predictions(v.id, 'A', 'any')).length, 0);
@@ -297,6 +297,6 @@ test("every labeling prompt ends with the site's reason line, and the model's re
   assert.ok(asked.length === 2 && asked.every(a => a.startsWith('Label post') && a.endsWith(REASON_LINE)));
   const preds = await lab.predictions(v.id, 'A', t.settingsHash);
   assert.equal(preds['ex_0']?.reason, 'It shows a day out.');
-  assert.deepEqual(preds['ex_0']?.answer, 'Vlog');
+  assert.deepEqual(preds['ex_0']?.answer, ['Vlog']);
   assert.equal(preds['ex_1']?.reason, undefined);
 });

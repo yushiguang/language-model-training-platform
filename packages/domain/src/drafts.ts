@@ -1,13 +1,20 @@
 import type {MixUp, Schema, StructuredPrompt} from '@tsp/contracts';
 
 /**
- * A fix aimed at one mix-up, for the stand-in helpers (a real model writes its own): an exclusion
- * for the value the model chose wrongly, which goes into that value's definition (2026-11-16).
+ * A fix aimed at one mix-up, for the stand-in helpers (a real model writes its own). It goes into
+ * the definition of the value `fixTarget` names (2026-11-16): an exclusion for a value chosen
+ * wrongly (a confusion, or a value added on a multi-select label), or a reminder for a value left
+ * out.
  */
 export function ruleFor(m: MixUp, schema: Schema): string {
-  const def = (v: string) => schema.values.find(x => x.name === v)?.definition.split('\n')[0].replace(/^[-*\d.)\s]+/, '').trim() ?? '';
+  const def = (v: string | null) => (v == null ? '' : (schema.values.find(x => x.name === v)?.definition.split('\n')[0].replace(/^[-*\d.)\s]+/, '').trim() ?? ''));
+  if (m.kind === 'extra') return `- Leave ${m.predicted} out unless the post clearly shows it.`;
+  if (m.kind === 'missed') return `- Also choose ${m.gold} when the post shows it next to other values (${def(m.gold) || m.gold}).`;
   return `- Does not apply when the post fits ${m.gold} better (${def(m.gold) || m.gold}).`;
 }
+
+/** The value whose definition `ruleFor`'s line belongs in. */
+export const fixTarget = (m: MixUp): string => (m.kind === 'missed' ? m.gold : m.predicted) ?? '';
 
 /**
  * Adds one line to a value's definition (a criterion, exclusion or exemption, as a list item).
@@ -52,6 +59,7 @@ export const hasRule = (p: StructuredPrompt, rule: string) => p.ruleGroups.some(
 
 export const SAMPLE_SCHEMA: Schema = {
   name: 'primary_value',
+  kind: 'single',
   values: [
     {name: 'Entertainment', definition: 'fun, emotion or story; nothing usable left afterwards'},
     {name: 'Practical', definition: 'something the viewer can act on'},
@@ -68,7 +76,7 @@ export const SAMPLE_STRUCTURED: StructuredPrompt = {
     photo_text: ['Title', 'Description', 'OCR_Text', 'ASR', 'Creator_Nick_Name', 'Creator_Bio'],
     metadata: ['Country_Code', 'Language'],
   },
-  label: {name: SAMPLE_SCHEMA.name, values: SAMPLE_SCHEMA.values.map(v => ({...v}))},
+  label: {...SAMPLE_SCHEMA, values: SAMPLE_SCHEMA.values.map(v => ({...v}))},
   ruleGroups: [],
   images: [],
 };

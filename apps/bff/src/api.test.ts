@@ -8,7 +8,7 @@ import {createBffApi} from './api.ts';
 import {configureBff} from './services/app.ts';
 
 const endpoint: EndpointInfo = {id: 'A', name: 'Model A', description: '', badge: '', cost: 'Lower', speed: 'Faster', supportsTemperature: true, priceIn: 0, priceOut: 200};
-const structured = (rules = '') => ({taskSummary: 'Label this', features: {video: ['Description'], photo_text: [], metadata: []}, label: {name: 'format', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}, ruleGroups: rules ? [{id: 'rg1', title: 'Rules', content: rules}] : [], images: []});
+const structured = (rules = '') => ({taskSummary: 'Label this', features: {video: ['Description'], photo_text: [], metadata: []}, label: {name: 'format', kind: 'single' as const, values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}, ruleGroups: rules ? [{id: 'rg1', title: 'Rules', content: rules}] : [], images: []});
 
 /** A bff with one project: a schema, 4 eval examples with gold labels, and a fake model. */
 async function world(prefix: string, identity: Identity = {currentUser: async () => ({id: 'u_1', name: 'Tester'})}) {
@@ -23,10 +23,10 @@ async function world(prefix: string, identity: Identity = {currentUser: async ()
   const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks()});
   configureBff({catalog, labeling, gateway, agents: {} as AgentRuntimeContract, identity, files: {} as FileStore, examples: {} as ExampleSource, standIns: []});
   const projectId = `pr_${prefix}`;
-  await catalog.insert('setup_versions', {id: `sv_${prefix}`, projectId, number: 1, schemaVersion: 1, task: '', schema: {name: 'format', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}, thresholds: null, models: [{endpoint: 'A', maxOutputTokens: 150, temperature: null}], steps: {schema: true, evaluation: true, models: true}, createdAt: '', createdBy: ''});
+  await catalog.insert('setup_versions', {id: `sv_${prefix}`, projectId, number: 1, schemaVersion: 1, task: '', schema: {name: 'format', kind: 'single' as const, values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}, thresholds: null, models: [{endpoint: 'A', maxOutputTokens: 150, temperature: null}], steps: {schema: true, evaluation: true, models: true}, createdAt: '', createdBy: ''});
   await catalog.insert('dataset_snapshots', {id: `ds_${prefix}`, projectId, number: 1, source: 'sample', sourceName: 'test', createdAt: '', counts: {rows: 4, valid: 4, invalid: 0, video: 4, photoText: 0}, split: {eval: 4, test: 0, train: 0}});
   await catalog.insertMany('examples', Array.from({length: 4}, (_, i) => ({id: `ex_${prefix}_${i}`, snapshotId: `ds_${prefix}`, externalId: String(i), type: 'video' as const, title: '', features: {}, split: 'eval' as const, optimiserHalf: i % 2 === 0})));
-  for (let i = 0; i < 4; i++) await catalog.insert('gold_labels', {id: `gl_${prefix}_${i}`, projectId, exampleId: `ex_${prefix}_${i}`, schemaVersion: 1, answer: 'Vlog', source: 'labeled', revealed: false, createdAt: '', createdBy: 'Tester'});
+  for (let i = 0; i < 4; i++) await catalog.insert('gold_labels', {id: `gl_${prefix}_${i}`, projectId, exampleId: `ex_${prefix}_${i}`, schemaVersion: 1, answer: ['Vlog'], source: 'labeled', revealed: false, createdAt: '', createdBy: 'Tester'});
   await catalog.insert('projects', {id: projectId, name: 'p', createdAt: '', createdBy: '', kind: 'prompt_tuning', settingsConfirmed: true, setupVersionId: `sv_${prefix}`, snapshotId: `ds_${prefix}`, approvedNodes: []});
   return {api: createBffApi(), catalog, projectId};
 }

@@ -3,9 +3,21 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-16 (workflow resilience and single or multi select)
+
+- **The one label is single select or multi select.** A project still has one label and is never mixed with another; a multi-select label says how many values an answer holds (at least, at most). Answers are lists everywhere (`Answer = string[]`), one value long for single select. A value can be marked "Only on its own" (exclusive): a catch-all such as "None" is never chosen next to another value.
+- **Multi-select scores** count each value wherever it sits in the list (per-value F1, Macro-F1 over values); accuracy needs the exact set. Mix-ups name a value that was added when it did not apply, or missed. In the Optimiser an example scores the F1 of its values, so a partly right answer earns part.
+- **The approved Prompt Design page has no Edit prompt**; versions are edited from Prompt Tuning.
+- **Sampling and uploads keep their progress on screen until the dataset is saved** (a "Saving the examples" step with no Stop). One example that fails to save is tried once more, then skipped and counted as "could not be saved", apart from invalid rows; the halves are evened over the saved ones. Only a task that saved nothing fails.
+- **Gold Labels has an Open item link** to the item's own page for when the player cannot be embedded. The player gets only the site's origin, over https (`strict-origin`), and may autoplay.
+- **Nothing is scored by itself before Gold Labels is approved.**
+- **The Optimiser drops a change only when it scores lower in the dry run**; a tie goes on to full labeling (this replaces R5-6's tie handling, and the tie limit is gone). Whether a kept change is progress is judged on the optimiser half's Macro-F1, never the held-out half, which no helper or Optimiser step reads. A kept change with no gain shows "No gain" and counts as a wasted round.
+- **Rebuild scores is on only when scores are out of date.** The AI Suggestion stays while they are, read from each version's newest score, and Edit prompt, Improve with AI and Auto Optimise ask "Rebuild scores first?" (Cancel, Continue anyway, Rebuild scores).
+- **A failed action reads "{Action} failed. {why}"**, and the banner's Retry spins while the action runs again.
+
 ## 2026-11-16 (single-label projects and helper alignment)
 
-- **A project classifies exactly one label**, with mutually exclusive values, and the model answers one plain string. Projects are never mixed or merged, so there is no label combining and no multi-project merge; another label is another project.
+- **A project classifies exactly one label**, with mutually exclusive values, and the model answers one plain string (later the same day the label became single or multi select, and answers lists; see above). Projects are never mixed or merged, so there is no label combining and no multi-project merge; another label is another project.
 - **The Prompt helper suggests a catch-all value** ("Other" or "None") when the values may not cover every item, so every item can get one.
 - **Old projects are test data and start fresh**: the stored-data prefix changed and nothing is migrated. Old gold upload files (`{"name": ["value"]}`) still import.
 - **Value-specific rules go into the value's definition**; rule groups hold rules across values. A long pasted prompt is treated as an import whatever the user asked.
@@ -74,6 +86,8 @@ where it matters, why. The code follows these; change a line here when a decisio
   why a task waits.
 - **A tied dry run goes on** (R5-6): it may hold what the parent lacks, so it is labeled in full
   and joins the pool, but it is not progress (a wasted round; 2 ties in a row end the run).
+  Replaced on 2026-11-16: every tie goes on, progress is judged on the optimiser half, and there
+  is no tie limit.
 - **Round 1 changes the version the user started from** (R5-7); later rounds pick from the
   Pareto front, weighted by the examples each version wins, and the panel says which and why.
 - **Invalid and filtered answers are left out of scores** (acceptance R4-6). They are counted on

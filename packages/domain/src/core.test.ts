@@ -58,19 +58,19 @@ test('pages are found from the URL path, with or without a base path', () => {
 });
 
 test('macro-F1 and pass judgement', () => {
-  const schema: Schema = {name: 'f', values: [{name: 'a', definition: ''}, {name: 'b', definition: ''}]};
+  const schema: Schema = {name: 'f', kind: 'single', values: [{name: 'a', definition: ''}, {name: 'b', definition: ''}]};
   const items = [
-    {exampleId: '1', gold: 'a', predicted: 'a', costUsd: 0.001},
-    {exampleId: '2', gold: 'b', predicted: 'a', costUsd: 0.001},
-    {exampleId: '3', gold: 'b', predicted: 'b', costUsd: 0.001},
-    {exampleId: '4', gold: 'b', predicted: null, costUsd: 0.001},
+    {exampleId: '1', gold: ['a'], predicted: ['a'], costUsd: 0.001},
+    {exampleId: '2', gold: ['b'], predicted: ['a'], costUsd: 0.001},
+    {exampleId: '3', gold: ['b'], predicted: ['b'], costUsd: 0.001},
+    {exampleId: '4', gold: ['b'], predicted: null, costUsd: 0.001},
   ];
-  const m = computeMetrics(schema, [...items, {exampleId: '5', gold: 'a', predicted: null, filtered: true, costUsd: 0}]);
+  const m = computeMetrics(schema, [...items, {exampleId: '5', gold: ['a'], predicted: null, filtered: true, costUsd: 0}]);
   // R4-6: the invalid (4) and filtered (5) answers are left out. a: p=0.5 r=1 f1=0.667; b: p=1 r=1/2 f1=0.667
   assert.equal(m.macroF1, 0.667);
   assert.equal(m.accuracy, 0.667);
   assert.deepEqual(m.lowestValue, {value: 'a', f1: 0.667});
-  assert.deepEqual(m.mixUps, [{gold: 'b', predicted: 'a', count: 1, exampleIds: ['2']}]);
+  assert.deepEqual(m.mixUps, [{kind: 'confused', gold: 'b', predicted: 'a', count: 1, exampleIds: ['2']}]);
   assert.equal(judge(m, DEFAULT_THRESHOLDS, 30).checks[0].label, 'Macro-F1');
   assert.deepEqual([m.n, m.total, m.invalid, m.filtered, m.invalidRate], [3, 5, 1, 1, 0.2]);
   assert.equal(m.mixUps[0].count, 1);
@@ -113,22 +113,53 @@ test('[Image N] without prompt image N is an error, so deleting an image used in
   assert.equal(checkTemplate(t, sel, {images: [...one, ...one]}).errors.length, 0);
 });
 
-test('an answer is exactly one value of the label; a one-item list is read as that value', async () => {
+test('a single-select answer is exactly one value of the label; a one-item list is read as that value', async () => {
   const {parseOutput} = await import('./labels.ts');
-  const schema: Schema = {name: 'topic', values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}]};
-  assert.equal(parseOutput('{"reason": "x", "topic": "Food"}', schema).answer, 'Food');
-  assert.equal(parseOutput('{"topic": ["Travel", "Travel"]}', schema).answer, 'Travel');
+  const schema: Schema = {name: 'topic', kind: 'single', values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}]};
+  assert.deepEqual(parseOutput('{"reason": "x", "topic": "Food"}', schema).answer, ['Food']);
+  assert.deepEqual(parseOutput('{"topic": ["Travel"]}', schema).answer, ['Travel']);
+  assert.equal(parseOutput('{"topic": ["Travel", "Travel"]}', schema).reason, 'topic lists a value twice');
   assert.equal(parseOutput('{"topic": ["Food", "Travel"]}', schema).reason, 'topic needs exactly one value');
   assert.equal(parseOutput('{"topic": "Games"}', schema).reason, '"Games" isn\'t a value of topic');
   assert.equal(parseOutput('{"other": "Food"}', schema).answer, null);
 });
 
-test('gold labels from upload files: the value, or an older file\'s one-item list', async () => {
+test('a multi-select answer is a list within the bounds, in label order, with an exclusive value on its own', async () => {
+  const {parseOutput, sameAnswer} = await import('./labels.ts');
+  const schema: Schema = {name: 'tags', kind: 'multi', min: 1, max: 2, values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}, {name: 'Pets', definition: ''}, {name: 'None', definition: '', exclusive: true}]};
+  assert.deepEqual(parseOutput('{"tags": ["Travel", "Food"]}', schema).answer, ['Food', 'Travel']);
+  assert.deepEqual(parseOutput('{"tags": "Pets"}', schema).answer, ['Pets']);
+  assert.deepEqual(parseOutput('{"tags": ["None"]}', schema).answer, ['None']);
+  assert.equal(parseOutput('{"tags": []}', schema).reason, 'tags needs 1 to 2 values');
+  assert.equal(parseOutput('{"tags": ["Food", "Travel", "Pets"]}', schema).reason, 'tags needs 1 to 2 values');
+  assert.equal(parseOutput('{"tags": ["Food", "None"]}', schema).reason, '"None" must be the only value of tags');
+  assert.equal(sameAnswer(['Travel', 'Food'], ['Food', 'Travel']), true);
+  assert.equal(sameAnswer(['Food'], ['Food', 'Travel']), false);
+});
+
+test('multi-select scores: a value counts wherever it is in the list; accuracy needs the exact set', () => {
+  const schema: Schema = {name: 'tags', kind: 'multi', min: 1, max: 2, values: [{name: 'a', definition: ''}, {name: 'b', definition: ''}]};
+  const m = computeMetrics(schema, [
+    {exampleId: '1', gold: ['a', 'b'], predicted: ['a', 'b'], costUsd: 0},
+    {exampleId: '2', gold: ['a'], predicted: ['a', 'b'], costUsd: 0},
+    {exampleId: '3', gold: ['a', 'b'], predicted: ['a'], costUsd: 0},
+  ]);
+  // a: all right (f1 1); b: tp 1, fp 1, fn 1 (f1 0.5). Exact sets: 1 of 3.
+  assert.equal(m.macroF1, 0.75);
+  assert.equal(m.accuracy, 0.333);
+  assert.deepEqual(m.mixUps.map(x => [x.kind, x.gold, x.predicted, x.exampleIds]), [
+    ['extra', null, 'b', ['2']],
+    ['missed', 'b', null, ['3']],
+  ]);
+});
+
+test('gold labels from upload files: the value, a list, or an older file\'s one-item list', async () => {
   const {readGoldAnswer} = await import('./labels.ts');
-  const schema: Schema = {name: 'topic', values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}]};
-  assert.equal(readGoldAnswer('Food', schema), 'Food');
-  assert.equal(readGoldAnswer({topic: ['Travel']}, schema), 'Travel');
-  assert.equal(readGoldAnswer({primary: ['Food']}, schema), 'Food');
+  const schema: Schema = {name: 'topic', kind: 'single', values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}]};
+  assert.deepEqual(readGoldAnswer('Food', schema), ['Food']);
+  assert.deepEqual(readGoldAnswer({topic: ['Travel']}, schema), ['Travel']);
+  assert.deepEqual(readGoldAnswer({primary: ['Food']}, schema), ['Food']);
+  assert.deepEqual(readGoldAnswer({tags: ['Travel', 'Food', 'Food']}, {...schema, name: 'tags', kind: 'multi', max: 2}), ['Food', 'Travel']);
   assert.equal(readGoldAnswer({a: ['Food'], b: ['Travel']}, schema), null);
   assert.equal(readGoldAnswer({topic: ['Food', 'Travel']}, schema), null);
   assert.equal(readGoldAnswer('Games', schema), null);

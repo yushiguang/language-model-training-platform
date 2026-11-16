@@ -54,7 +54,7 @@ export interface DueStart {
  * resuming scoring a closed page left. `tick` starts all of it. The Optimiser never starts here.
  *
  * Nothing starts by itself (spec 1.0.0, 2.5) until the eval dataset exists, enough of it has gold
- * labels to score (`canScore`), and the user has confirmed Project Settings. Prompt Design makes
+ * labels to score (`canScore`), the user has confirmed Project Settings and approved Gold Labels. Prompt Design makes
  * v1 before any of that, so v1 waits here. A click on Score is the user's own start and is not
  * held back by this.
  */
@@ -62,7 +62,9 @@ export function dueStarts(state: ProjectState): DueStart[] {
   const out: DueStart[] = [];
   const setup = state.setup;
   if (!setup?.schema) return out;
-  if (!state.facts.settingsConfirmed || !canScore(state.facts)) return out;
+  // Resilience spec, 5: scoring waits until Gold Labels is approved, so labeling the first gold
+  // labels never starts paid work behind the user's back.
+  if (!state.facts.settingsConfirmed || !canScore(state.facts) || !state.project.approvedNodes?.includes('gold')) return out;
   const models = setup.models.map(m => m.endpoint);
 
   for (const r of state.runs) {

@@ -3,7 +3,7 @@
 import {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {compilePrompt, diffWords, FEATURES, matchRuleGroup, nextRuleGroupId, withReasons, type MarkSeg} from '@tsp/domain';
 import type {FeatureSelection, LabelValue, RuleGroup, Schema, StructuredPrompt} from '@tsp/contracts';
-import {Badge, Button, Card, Cb, Dialog, Empty, Hov, Icon, useCopy} from '@/ui';
+import {Badge, Button, Card, Cb, Dialog, Empty, Hov, Icon, Seg, useCopy} from '@/ui';
 import {t} from '@/i18n';
 
 /**
@@ -52,7 +52,7 @@ export function StructuredEditor({
         <Features features={value.features} base={base?.features} onChange={readOnly ? undefined : features => onChange({...value, features})} tips={featureTips} />
       </Section>
 
-      <Section title={t('Output Labels & Definitions')} hint={t('One label and its values')} tip={t("The project's one label: every item gets exactly one of its values. The values are what people label with, what the model must answer with, and what scores are counted on. Each value's definition says when it applies and when it does not.")}>
+      <Section title={t('Output Labels & Definitions')} hint={t('One label and its values')} tip={t("The project's one label: every item gets one of its values (single select) or several (multi select). The values are what people label with, what the model must answer with, and what scores are counted on. Each value's definition says when it applies and when it does not.")}>
         <LabelEditor label={value.label} base={base?.label} readOnly={readOnly} draft={draft} marks={marks} onChange={label => onChange({...value, label})} />
       </Section>
 
@@ -215,6 +215,8 @@ function baseValue(v: LabelValue, i: number, base: LabelValue[], values: LabelVa
  */
 function LabelEditor({label, base, readOnly, draft, marks, onChange}: {label: Schema; base?: Schema; readOnly?: boolean; draft?: boolean; marks: (was: string | undefined, now: string) => MarkSeg[] | undefined; onChange: (l: Schema) => void}) {
   const values = label.values;
+  const multi = label.kind === 'multi';
+  const kindChanged = !!base && ((base.kind ?? 'single') !== (label.kind ?? 'single') || (multi && ((base.min ?? 1) !== (label.min ?? 1) || (base.max ?? base.values.length) !== (label.max ?? values.length))));
   const setValues = (next: LabelValue[]) => onChange({...label, values: next});
   const set = (i: number, patch: Partial<LabelValue>) => setValues(values.map((v, k) => (k === i ? {...v, ...patch} : v)));
   const move = (i: number, by: number) => {
@@ -229,13 +231,43 @@ function LabelEditor({label, base, readOnly, draft, marks, onChange}: {label: Sc
   return (
     <div className="col" style={{gap: 12}}>
       <Card className="sp-key">
-        <label className="row" style={{gap: 12}}>
-          <span className="field-l" style={{margin: 0}}>
-            <Hov text={t('Label name')} tip={t("The key of the model's answer, for example category. Gold labels and scores are tied to it.")} />
-          </span>
-          <input className="input sm mono" style={{width: 240}} value={label.name} readOnly={readOnly} placeholder={readOnly ? undefined : 'category'} onChange={e => onChange({...label, name: e.target.value.replace(/\s+/g, '_')})} />
-          {base && base.name !== label.name && <Badge text={t('Changed')} tone="warn" icon={false} />}
-        </label>
+        <div className="row" style={{gap: 12, flexWrap: 'wrap'}}>
+          <label className="row" style={{gap: 12}}>
+            <span className="field-l" style={{margin: 0}}>
+              <Hov text={t('Label name')} tip={t("The key of the model's answer, for example category. Gold labels and scores are tied to it.")} />
+            </span>
+            <input className="input sm mono" style={{width: 240}} value={label.name} readOnly={readOnly} placeholder={readOnly ? undefined : 'category'} onChange={e => onChange({...label, name: e.target.value.replace(/\s+/g, '_')})} />
+            {base && base.name !== label.name && <Badge text={t('Changed')} tone="warn" icon={false} />}
+          </label>
+          <span className="grow" />
+          {readOnly ? (
+            <Badge text={multi ? t('Multi-select · choose {min} to {max}', {min: label.min ?? 1, max: label.max ?? values.length}) : t('Single-select')} icon={false} />
+          ) : (
+            <>
+              <Seg
+                label={t('Selection')}
+                value={multi ? 'multi' : 'single'}
+                options={[
+                  {value: 'single', label: t('Single-select')},
+                  {value: 'multi', label: t('Multi-select')},
+                ]}
+                onChange={k => {
+                  const {min: _a, max: _b, ...rest} = label;
+                  onChange(k === 'multi' ? {...rest, kind: 'multi', min: label.min ?? 1, max: label.max ?? Math.max(1, Math.min(3, values.length))} : {...rest, kind: 'single', values: values.map(({exclusive: _e, ...v}) => v)});
+                }}
+              />
+              {multi && (
+                <span className="row" style={{gap: 8}}>
+                  <span className="t-2">{t('Choose')}</span>
+                  <input className="input sm" style={{width: 56, padding: '0 12px'}} inputMode="numeric" aria-label={t('At least')} value={label.min ?? 1} onChange={e => onChange({...label, min: parseInt(e.target.value) || 1})} />
+                  <span className="t-2">{t('to')}</span>
+                  <input className="input sm" style={{width: 56, padding: '0 12px'}} inputMode="numeric" aria-label={t('At most')} value={label.max ?? values.length} onChange={e => onChange({...label, max: parseInt(e.target.value) || 1})} />
+                </span>
+              )}
+            </>
+          )}
+          {base && !draft && kindChanged && <Badge text={t('Changed')} tone="warn" icon={false} />}
+        </div>
       </Card>
       {!values.length && (
         <Card>
@@ -246,7 +278,7 @@ function LabelEditor({label, base, readOnly, draft, marks, onChange}: {label: Sc
       )}
       {values.map((v, i) => {
         const was = kept[i];
-        const tag = draft ? <Badge text={t('Draft')} icon={false} /> : !base ? null : !was ? <Badge text={t('New')} tone="ok" icon={false} /> : was.name !== v.name || was.definition !== v.definition ? <Badge text={t('Changed')} tone="warn" icon={false} /> : null;
+        const tag = draft ? <Badge text={t('Draft')} icon={false} /> : !base ? null : !was ? <Badge text={t('New')} tone="ok" icon={false} /> : was.name !== v.name || was.definition !== v.definition || (multi && !!was.exclusive !== !!v.exclusive) ? <Badge text={t('Changed')} tone="warn" icon={false} /> : null;
         return (
           <Card key={i} className="sp-group sp-value">
             <section className="col" style={{gap: 8}} aria-label={v.name || t('Value')}>
@@ -271,6 +303,14 @@ function LabelEditor({label, base, readOnly, draft, marks, onChange}: {label: Sc
               <Marks segs={was && was.name !== v.name ? marks(was.name, v.name) : undefined} />
               <Grow className="input" label={t('Definition')} value={v.definition} readOnly={readOnly} placeholder={t('When this value applies and when it does not: one condition per line')} onChange={definition => set(i, {definition})} />
               <Marks segs={base ? marks(was?.definition, v.definition) : undefined} />
+              {multi && (!readOnly || v.exclusive) && (
+                <span className="row" style={{gap: 8, fontSize: 13}}>
+                  <Cb state={v.exclusive ? 'on' : 'off'} label={t('Only on its own')} onToggle={readOnly ? undefined : () => set(i, {exclusive: !v.exclusive || undefined})} />
+                  <span className="t-2">
+                    <Hov text={t('Only on its own')} tip={t('An answer with this value holds no other value, for example None')} />
+                  </span>
+                </span>
+              )}
             </section>
           </Card>
         );

@@ -18,7 +18,7 @@ import {
   type TelemetryPort,
   type TryTemplateRow,
 } from '@tsp/contracts';
-import {hashString, parseOutput, REASON_LINE, renderPrompt, settingsHash, type Part, systemConfig} from '@tsp/domain';
+import {asAnswerOrNull, hashString, parseOutput, REASON_LINE, renderPrompt, settingsHash, type Part, systemConfig} from '@tsp/domain';
 import {DocRepo, newId} from '@tsp/platform';
 import {browserLocks, type TaskLocks} from './locks.ts';
 
@@ -91,7 +91,11 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
   async function allPredictions(promptVersionId: string, endpoint: EndpointId, hash: string): Promise<Map<string, Prediction[]>> {
     const rows = await repo.find<Prediction>(PREDICTIONS, {promptVersionId, endpoint, settingsHash: hash}, 'createdAt');
     const out = new Map<string, Prediction[]>();
-    for (const p of rows) out.set(p.exampleId, [...(out.get(p.exampleId) ?? []), p]);
+    // Answers stored as a plain string earlier on 2026-11-16 read as a one-item list.
+    for (const p0 of rows) {
+      const p = {...p0, answer: asAnswerOrNull(p0.answer)};
+      out.set(p.exampleId, [...(out.get(p.exampleId) ?? []), p]);
+    }
     return out;
   }
 

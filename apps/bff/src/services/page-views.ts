@@ -1,7 +1,7 @@
 import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@tsp/contracts';
 import {agentStart, isStartTool} from './starts.ts';
 import {reportProblem} from './problems.ts';
-import {aiSuggestion, featureItems, featureText, labelBalance, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, normalizeStructured, matchRuleGroup, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap} from '@tsp/domain';
+import {aiSuggestion, featureItems, featureText, labelBalance, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, normalizeStructured, matchRuleGroup, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap, sameAnswer} from '@tsp/domain';
 import {getApp} from './app.ts';
 import {lockHoldout} from './governance.ts';
 import {mismatches} from './mismatches.ts';
@@ -140,7 +140,7 @@ function reportView(state: ProjectState, v: PromptVersion | undefined, model: En
       invalidRate: r2(r.metrics.invalidRate),
       checks: t ? judge(r.metrics, t, nEval).checks : null,
       // Scored on the held-out half, so mix-ups go as counts only: no example ids (finding 3).
-      topMixUps: r.metrics.mixUps.slice(0, 5).map(m => ({gold: m.gold, predicted: m.predicted, count: m.count})),
+      topMixUps: r.metrics.mixUps.slice(0, 5).map(m => ({kind: m.kind ?? 'confused', gold: m.gold, predicted: m.predicted, count: m.count})),
     },
     thresholds: t,
     trend,
@@ -326,7 +326,7 @@ async function mismatchSummary(projectId: string, state: ProjectState, v: Prompt
     reviewed: m.reviewed,
     // Counts only (review finding 2): which side is right is the people's call on Gold Labels.
     accuracy: r ? r2(r.metrics.accuracy) : null,
-    topMixUps: r ? r.metrics.mixUps.slice(0, 5).map(x => ({gold: x.gold, predicted: x.predicted, count: x.count})) : [],
+    topMixUps: r ? r.metrics.mixUps.slice(0, 5).map(x => ({kind: x.kind ?? 'confused', gold: x.gold, predicted: x.predicted, count: x.count})) : [],
     note: 'Counts only. Never say which side is right: people decide on the Mismatches tab of Gold Labels.',
   };
 }
@@ -385,7 +385,7 @@ export function agentTools(projectId: string): AgentToolHost {
           const rows = state.examples
             .filter(e => e.split === 'eval' && visibleToAgents(e) && preds.has(e.id))
             .map(e => ({e, p: preds.get(e.id)!, g: state.gold[e.id]?.answer ?? null}))
-            .filter(({p, g}) => !args.mixedUpOnly || !p.answer || (g != null && g !== p.answer));
+            .filter(({p, g}) => !args.mixedUpOnly || !p.answer || (g != null && !sameAnswer(g, p.answer)));
           return {version: versionLabel(v), model: modelName(state, settings.endpoint), note: HIDDEN_NOTE, rows: rows.slice(0, limitOf(args.limit, 20, 10)).map(({e, p, g}) => ({id: e.externalId, title: e.title, model: p.answer, ...(p.reason ? {reason: p.reason} : {}), invalid: p.invalidReason, gold: g})), matching: rows.length};
         }
         case 'check_prompt': {

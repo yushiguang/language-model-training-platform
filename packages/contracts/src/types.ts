@@ -4,6 +4,8 @@
  */
 
 export type ExampleType = 'video' | 'photo_text';
+/** How many values an answer may hold (2026-11-16 resilience spec, 1): one, or min..max. */
+export type LabelKind = 'single' | 'multi';
 export type FeatureGroup = ExampleType | 'metadata';
 export type Split = 'eval' | 'test' | 'train';
 export type EndpointId = 'A' | 'B';
@@ -16,27 +18,44 @@ export interface LabelValue {
    * sub-cases, exclusions and exemptions. Multi-line: lists and paragraphs.
    */
   definition: string;
+  /**
+   * Multi-select only: this value stands alone, so an answer holding it holds nothing else (for
+   * example a catch-all "None"). Ignored on a single-select label.
+   */
+  exclusive?: boolean;
 }
 
 /**
- * The project's one mutually-exclusive label (2026-11-16, single-label projects): its key in the
- * model's JSON answer and its values (at least 2). Every answer is exactly one value. There is no
- * separate policy text: each value's definition and the rule groups carry the rules.
+ * The project's one label (2026-11-16, single-label projects): its key in the model's JSON answer
+ * and its values (at least 2). A single-select label takes exactly one value per answer; a
+ * multi-select label takes `min` to `max` values from the same list (resilience spec, 1). Unrelated
+ * dimensions are separate projects. There is no separate policy text: each value's definition and
+ * the rule groups carry the rules.
  */
 export interface Schema {
-  /** The JSON key for this project's label, e.g. "category". */
+  /** The JSON key for this project's label, e.g. "category" or "topics". */
   name: string;
+  kind: LabelKind;
+  /** Multi-select only: the fewest and most values an answer may hold (defaults 1 and all). */
+  min?: number;
+  max?: number;
   values: LabelValue[];
 }
 
 /**
- * What an answer may hold: the label's key and its value names in order. No wording.
+ * What an answer may hold: the label's key, its kind and bounds, its value names in order and which
+ * of them stand alone. No wording.
  * `schemaVersion` bumps only when this changes, so refining a definition never touches gold labels
  * or scores.
  */
 export interface LabelSignature {
   name: string;
+  kind: LabelKind;
+  min?: number;
+  max?: number;
   values: string[];
+  /** Multi-select values that stand alone. Missing when there are none. */
+  exclusive?: string[];
 }
 
 /**
@@ -59,15 +78,19 @@ export interface StructuredPrompt {
   /** One or two sentences: what is being classified and why. */
   taskSummary: string;
   features: FeatureSelection;
-  /** The project's single mutually-exclusive label: its key and its values with definitions. */
+  /** The project's one label: its key, single or multi select, and its values with definitions. */
   label: Schema;
   /** The rules, in the user's own named groups, in order. Empty on a new prompt. */
   ruleGroups: RuleGroup[];
   images: PromptImage[];
 }
 
-/** One answer: the chosen value of the project's label (2026-11-16: a plain string). */
-export type Answer = string;
+/**
+ * One answer: the chosen values of the project's label, in label order. One item on a single-select
+ * label, `min` to `max` unique items on a multi-select one (resilience spec, 1). Answers stored as a
+ * plain string earlier on 2026-11-16 are read through `asAnswer`.
+ */
+export type Answer = string[];
 
 export interface Thresholds {
   mode: 'default' | 'custom';
@@ -225,7 +248,11 @@ export interface DatasetSnapshot {
   source: 'sample' | 'upload';
   sourceName: string;
   createdAt: string;
-  counts: {rows: number; valid: number; invalid: number; video: number; photoText: number};
+  /**
+   * `notSaved`: valid examples whose save failed twice and were skipped (resilience spec, 3.2),
+   * counted apart from `invalid` rows; `valid` counts only the saved ones.
+   */
+  counts: {rows: number; valid: number; invalid: number; video: number; photoText: number; notSaved?: number};
   split: {eval: number; test: number; train: number} | null;
 }
 
@@ -368,10 +395,15 @@ export interface ValueMetrics {
   support: number;
 }
 
-/** A model answer that differs from the gold label: always a confusion of two values. */
+/**
+ * Where a model answer differs from the gold label. Single-select: `confused`, one value read as
+ * another. Multi-select: `extra` (a value the gold label lacks, `gold` null) and `missed` (a gold
+ * value the answer lacks, `predicted` null).
+ */
 export interface MixUp {
-  gold: string;
-  predicted: string;
+  kind: 'confused' | 'extra' | 'missed';
+  gold: string | null;
+  predicted: string | null;
   count: number;
   exampleIds: string[];
 }
@@ -419,8 +451,15 @@ export interface EvalReport {
  */
 export interface DryRunResult {
   examples: number;
+  /** Exact matches. */
   passed: number;
   parentPassed: number;
+  /**
+   * Sums of example scores (resilience spec, 6): exact matches on a single-select label, partial
+   * credit on a multi-select one. What the dry run compares. Missing on rounds made before.
+   */
+  score?: number;
+  parentScore?: number;
   parentId: string;
 }
 
@@ -442,10 +481,16 @@ export interface OptimiserRound {
   passed: boolean;
   dryRun: DryRunResult | null;
   /**
-   * The dry run tied with the parent (acceptance R5-6): as many examples right, but different
-   * examples. The change is labeled in full and kept in the pool, but does not count as progress.
+   * The dry run tied with the parent: the same dry-run score. Since the resilience spec (6) a tie
+   * goes on to the full labeling like a better change, and `gain` says whether it was progress.
    */
   tied?: boolean;
+  /**
+   * Kept versions (resilience spec, 6): whether it beat its parent's macro-F1 on the optimiser half
+   * after the full labeling. Only a gain resets the run's count of wasted rounds. The held-out half
+   * never steers the run. Missing on rounds made before.
+   */
+  gain?: boolean;
   /**
    * Why this parent (R5-7): on how many optimiser-half examples it is the best version. null: round
    * 1, which always starts from the version the user picked. Missing on rounds made before.
@@ -658,6 +703,8 @@ export interface SamplingTask {
   startedAt: string;
   state: 'running' | 'done' | 'stopped' | 'failed';
   error: string | null;
+  /** All items are in; the examples are being saved (resilience spec, 3.1). Stop is gone by then. */
+  saving?: boolean;
 }
 
 

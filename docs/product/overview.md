@@ -65,8 +65,9 @@ Using 0.x showed four problems, and the 1.0.0 spec answers each:
   when the user asks.
 - **The eval set has two halves.** The optimiser and the helpers learn from one half. The score
   users see comes from the other, which stays hidden from every helper.
-- **One label per project.** Each project classifies one mutually exclusive label (one value per
-  item); projects are never mixed. A label that may not cover every item gets an "Other" or
+- **One label per project.** Each project classifies one label, single select (one value per
+  item) or multi select (several, between a set fewest and most; a catch-all such as "None" stands
+  on its own); projects are never mixed. A label that may not cover every item gets an "Other" or
   "None" value.
 - **Macro-F1 of the label is the main score** (shown as "Score"), with a default pass mark of 0.80.
   Invalid answers are counted apart and capped at 1%. Small eval sets give a rough reading only;

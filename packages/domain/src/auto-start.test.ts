@@ -6,7 +6,7 @@ import {autoSpendUsd, dueStarts} from './auto-start.ts';
 const version = {id: 'pv_1', template: 'Label {{Title}}', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user', createdAt: '2026-11-04T00:00:00Z', schemaVersion: 1} as unknown as ProjectState['versions'][number];
 const state = (over: Partial<ProjectState> = {}): ProjectState =>
   ({
-    project: {id: 'pr_1'},
+    project: {id: 'pr_1', approvedNodes: ['prompt_design', 'dataset', 'gold']},
     setup: {schema: {fields: []}, models: [{endpoint: 'A', maxOutputTokens: 512, temperature: 0}], thresholds: null},
     snapshot: {split: {eval: 2, test: 0, train: 0}},
     examples: [
@@ -52,6 +52,12 @@ test('nothing starts by itself before settings are confirmed and enough gold lab
   assert.deepEqual(dueStarts(state({facts: {...facts, goldEvalDone: 1, goldHalves: {optimiser: 1, heldOut: 0}}})), []);
   assert.deepEqual(dueStarts(state({facts: {...facts, goldHalves: {optimiser: 3, heldOut: 1}}})), []);
   assert.equal(dueStarts(state()).length, 1);
+});
+
+test('nothing is scored by itself until Gold Labels is approved, however many gold labels exist', () => {
+  const s = state();
+  assert.deepEqual(dueStarts({...s, project: {...s.project, approvedNodes: ['prompt_design', 'dataset']}}), []);
+  assert.equal(dueStarts(s).length, 1);
 });
 
 test('the Optimiser is never due by itself, and its labeling waits for Retry', () => {

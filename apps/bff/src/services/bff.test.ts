@@ -14,7 +14,7 @@ import {agentStart} from './starts.ts';
 import {tick} from './work.ts';
 import {compilePrompt, DEFAULT_THRESHOLDS, versionLabel} from '@tsp/domain';
 
-const schema: Schema = {name: 'format', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]};
+const schema: Schema = {name: 'format', kind: 'single', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]};
 /** Output price only, so every estimate is 150 tokens x $200/M = $0.03 per example. */
 const endpoint: EndpointInfo = {id: 'A', name: 'Model A', description: '', badge: '', cost: 'Lower', speed: 'Faster', supportsTemperature: true, priceIn: 0, priceOut: 200};
 const EVAL = 10;
@@ -22,7 +22,7 @@ const EVAL = 10;
 /** The prompt's rules as one text, and a prompt with one rule group holding that text. */
 const rulesOf = (p: StructuredPrompt) => p.ruleGroups.map(g => g.content).join('\n');
 const withRules = (p: StructuredPrompt, rules: string): StructuredPrompt => ({...p, ruleGroups: rules ? [{id: 'rg1', title: 'Rules', content: rules}] : []});
-const sp = (rules = ''): StructuredPrompt => ({taskSummary: 'Label this', features: {video: ['Description'], photo_text: [], metadata: []}, label: {name: schema.name, values: schema.values.map(v => ({...v}))}, ruleGroups: rules ? [{id: 'rg1', title: 'Rules', content: rules}] : [], images: []});
+const sp = (rules = ''): StructuredPrompt => ({taskSummary: 'Label this', features: {video: ['Description'], photo_text: [], metadata: []}, label: {name: schema.name, kind: 'single', values: schema.values.map(v => ({...v}))}, ruleGroups: rules ? [{id: 'rg1', title: 'Rules', content: rules}] : [], images: []});
 
 /** A bff over the real catalog and labeling apps, with a fake model that costs `perCall` per example. */
 interface WorldOpts {
@@ -37,6 +37,7 @@ interface WorldOpts {
   agents?: AgentRuntimeContract;
   /** Project Settings confirmed (default true). */
   confirmed?: boolean;
+  goldApproved?: boolean;
   /** Where problem reports go (none: reports cannot be sent). */
   tickets?: TicketPort;
 }
@@ -81,9 +82,9 @@ async function world(prefix: string, opts: WorldOpts = {}) {
   const gold = opts.gold === undefined ? () => 'Vlog' : opts.gold;
   if (gold) {
     for (let i = 0; i < EVAL; i++)
-      await catalog.insert('gold_labels', {id: `gl_${prefix}_${i}`, projectId, exampleId: `ex_${prefix}_${i}`, schemaVersion: 1, answer: gold(String(i)), source: 'labeled', revealed: false, createdAt: '', createdBy: 'Tester'});
+      await catalog.insert('gold_labels', {id: `gl_${prefix}_${i}`, projectId, exampleId: `ex_${prefix}_${i}`, schemaVersion: 1, answer: [gold(String(i))], source: 'labeled', revealed: false, createdAt: '', createdBy: 'Tester'});
   }
-  await catalog.insert('projects', {id: projectId, name: 'p', createdAt: '', createdBy: '', kind: 'prompt_tuning', settingsConfirmed: opts.confirmed ?? true, setupVersionId: `sv_${prefix}`, snapshotId: `ds_${prefix}`, approvedNodes: []});
+  await catalog.insert('projects', {id: projectId, name: 'p', createdAt: '', createdBy: '', kind: 'prompt_tuning', settingsConfirmed: opts.confirmed ?? true, setupVersionId: `sv_${prefix}`, snapshotId: `ds_${prefix}`, approvedNodes: opts.goldApproved === false ? [] : ['prompt_design', 'dataset', 'gold']});
   const newVersion = (rules = '') => {
     const structured = sp(rules);
     return catalog.createPromptVersion({projectId, structured, template: compilePrompt(structured), features: structured.features, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
@@ -329,7 +330,7 @@ test('Auto Optimise: dry run, full labeling, stops when a version passes; versio
   assert.ok(s.reports.some(r => r.promptVersionId === run.history[1].versionId && r.passed));
 });
 
-test('Auto Optimise: a change that is no better in the dry run is dropped, unlabeled; 3 in a row end the run', async () => {
+test('Auto Optimise: a tie in the dry run goes on to full labeling; 3 with no gain on the optimiser half end the run', async () => {
   const agents = ruleAgent();
   agents.reflectPrompt = async input => ({prompt: withRules(input.prompt, `${rulesOf(input.prompt)}\nNOTE ${Math.random()}`.trim()), change: 'a note'});
   const w = await world('b21', {agents, answer: ruled, macroF1: 0.99, gold: goldOf});
@@ -339,10 +340,30 @@ test('Auto Optimise: a change that is no better in the dry run is dropped, unlab
   const s = await w.state();
   const run = s.optimisation[0];
   assert.equal(run.stopReason, 'no_new_ideas');
+  assert.deepEqual(run.history.map(h => [h.outcome, h.gain, h.tied]), [
+    ['kept', false, true],
+    ['kept', false, true],
+    ['kept', false, true],
+  ]);
+  assert.equal(s.reports.length, 4, 'each tied change is scored on the whole eval set');
+});
+
+test('Auto Optimise: a change that scores lower in the dry run is dropped, unlabeled', async () => {
+  const agents = ruleAgent();
+  // A rule the fake model reads as "answer Vlog everywhere": worse than the start version.
+  agents.reflectPrompt = async input => ({prompt: withRules(input.prompt, `${rulesOf(input.prompt)}\nWORSE ${Math.random()}`.trim()), change: 'a worse rule'});
+  const gold = (id: string) => (Number(id) % 2 ? 'Tutorial' : 'Vlog');
+  const worse = (id: string, _n: number, prompt: string) => JSON.stringify({format: prompt.includes('WORSE') ? 'Vlog' : Number(id) < 6 ? gold(id) : 'Tutorial'});
+  const w = await world('b21b', {agents, answer: worse, macroF1: 0.999, gold});
+  await w.newVersion();
+  const {startOptimiser} = await import('./work.ts');
+  await startOptimiser(w.projectId, 10);
+  const s = await w.state();
+  const run = s.optimisation[0];
+  assert.equal(run.stopReason, 'no_new_ideas');
   assert.deepEqual(run.history.map(h => h.outcome), ['dropped', 'dropped', 'dropped']);
+  assert.ok(run.history.every(h => h.dryRun!.score! < h.dryRun!.parentScore!));
   assert.equal(s.reports.length, 1, 'only the start version is scored');
-  // Each dropped change was labeled on the dry-run examples only.
-  assert.equal(w.calls.n, EVAL + 3 * 2);
 });
 
 test('Auto Optimise: a step that fails 3 times fails the run with the step named; Retry goes on', async () => {
@@ -467,12 +488,12 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
   m = await mismatches(w.projectId, v1);
   assert.deepEqual(m.items.map(x => x.exampleId), [5, 6, 7, 0, 1, 2, 3, 4].map(id), 'examples wrong in both versions come first');
   await reviewGold(w.projectId, id(5), best.id, 'kept');
-  await reviewGold(w.projectId, id(6), best.id, 'changed', 'Vlog');
+  await reviewGold(w.projectId, id(6), best.id, 'changed', ['Vlog']);
   m = await mismatches(w.projectId);
   assert.deepEqual(m.items.map(x => x.exampleId), [id(7)]);
   assert.equal(m.reviewed, 2);
   const after = await w.state();
-  assert.deepEqual(after.gold[id(6)]!.answer, 'Vlog');
+  assert.deepEqual(after.gold[id(6)]!.answer, ['Vlog']);
   assert.equal(after.gold[id(5)]!.id, s.gold[id(5)]!.id, 'keeping a label saves no new label');
   const log = await w.catalog.find('audit_log', {projectId: w.projectId, action: 'gold.review'});
   assert.deepEqual(log.map(l => (l.data as {outcome: string}).outcome).sort(), ['changed', 'kept']);
@@ -506,7 +527,7 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
   assert.deepEqual(cs.map(c => c.text), ['Its own words', 'Looked again']);
 
   // R5-4, R5-5: a gold change archives the reports; they are rebuilt from saved answers in one go.
-  await reviewGold(w.projectId, id(7), best.id, 'changed', 'Vlog');
+  await reviewGold(w.projectId, id(7), best.id, 'changed', ['Vlog']);
   let st = await w.state();
   assert.equal(st.scoresUpdating, true);
   assert.equal(st.reports.filter(r => !r.archivedNow).length, 0);
@@ -646,7 +667,7 @@ test('appending examples keeps every score current: new ones are pending, and ex
   const raws = Array.from({length: 6}, (_, i) => ({externalId: `new-${i}`, type: 'video' as const, title: '', features: {}}));
   // One id is already in the dataset: it is skipped.
   const r = await appendExamples(w.projectId, [...raws, {externalId: '0', type: 'video', title: '', features: {}}], 'upload');
-  assert.deepEqual(r, {added: 6, duplicates: 1});
+  assert.deepEqual(r, {added: 6, duplicates: 1, notSaved: 0});
   const s = await w.state();
   assert.equal(s.examples.length, EVAL + 6);
   for (const e of before.examples) assert.equal(s.examples.find(x => x.id === e.id)?.optimiserHalf, halves[e.id], 'no existing example moves');
@@ -655,7 +676,7 @@ test('appending examples keeps every score current: new ones are pending, and ex
   assert.equal(s.examples.filter(e => !s.gold[e.id]).length, 6, 'six examples wait for gold labels');
   // A gold label on a new example does make the score stale (Rebuild scores brings it back).
   const {saveGold} = await import('./dataset.ts');
-  await saveGold(w.projectId, s.examples.find(e => e.externalId === 'new-0')!.id, 1, 'Vlog', false);
+  await saveGold(w.projectId, s.examples.find(e => e.externalId === 'new-0')!.id, 1, ['Vlog'], false);
   assert.equal((await w.state()).reports[0].archivedNow, true);
 });
 
@@ -669,7 +690,7 @@ test('removing examples leaves a trail with half and gold label, moves no other 
   let s = await w.state();
   assert.equal(s.examples.length, EVAL - 1);
   assert.equal(s.removals.length, 1);
-  assert.deepEqual({half: s.removals[0].half, gold: s.removals[0].gold, reason: s.removals[0].reason, by: s.removals[0].removedBy}, {half: target.optimiserHalf ? 'optimiser' : 'held_out', gold: 'Vlog', reason: 'broken', by: 'Tester'});
+  assert.deepEqual({half: s.removals[0].half, gold: s.removals[0].gold, reason: s.removals[0].reason, by: s.removals[0].removedBy}, {half: target.optimiserHalf ? 'optimiser' : 'held_out', gold: ['Vlog'], reason: 'broken', by: 'Tester'});
   for (const e of s.examples) assert.equal(e.optimiserHalf, halves[e.id]);
   await restoreExamples(w.projectId, [s.removals[0].id]);
   s = await w.state();
@@ -699,7 +720,7 @@ test('halves: balanced by gold label until a helper reads examples, then locked;
   const locked = Object.fromEntries(s.examples.map(e => [e.id, e.optimiserHalf]));
   // New gold labels after the lock move nothing.
   const {saveGold} = await import('./dataset.ts');
-  await saveGold(w.projectId, s.examples.find(e => e.externalId === '5')!.id, 1, 'Tutorial', false);
+  await saveGold(w.projectId, s.examples.find(e => e.externalId === '5')!.id, 1, ['Tutorial'], false);
   assert.equal(await balanceHalves(w.projectId), 0);
   await appendExamples(w.projectId, [{externalId: 'n1', type: 'video', title: '', features: {}}], 'sample');
   s = await w.state();
@@ -809,4 +830,49 @@ test('problem report (1.1.0): without a ticket port the helper is told to send t
   const w = await world('pb2');
   const res = (await reportProblem(w.projectId, 'front_desk', {summary: 'x'})) as {error: string};
   assert.match(res.error, /cannot be sent/);
+});
+
+test('sampling: the progress stays on until the dataset is saved; a save that fails twice is skipped and counted apart, and the halves stay even', async () => {
+  const w = await world('b-sample', {gold: null});
+  const {getApp} = await import('./app.ts');
+  const {startSampleDataset, getSamplingTask, appendSample} = await import('./dataset.ts');
+  const app = getApp();
+  const raws = Array.from({length: 10}, (_, i) => ({externalId: `s${i}`, type: 'video' as const, title: '', features: {}}));
+  const tries = new Map<string, number>();
+  const during: (boolean | undefined)[] = [];
+  let failAll = false;
+  const insert = app.catalog.insert.bind(app.catalog);
+  Object.assign(app, {
+    examples: {available: async () => 20, lookup: async () => [], sample: async (n: number) => raws.slice(0, n)},
+    catalog: Object.assign(Object.create(app.catalog), {
+      insert: async (kind: string, rec: {externalId: string}) => {
+        if (kind === 'examples') {
+          during.push(getSamplingTask(w.projectId)?.saving);
+          const n = (tries.get(rec.externalId) ?? 0) + 1;
+          tries.set(rec.externalId, n);
+          if (failAll || rec.externalId === 's3' || (rec.externalId === 's5' && n === 1)) throw new Error('write failed');
+        }
+        return insert(kind as never, rec as never);
+      },
+    }),
+  });
+  const snap = (await startSampleDataset(w.projectId, 10))!;
+  assert.ok(during.length === 12 && during.every(Boolean), 'the page shows saving, never the empty start, while examples are saved');
+  assert.equal(getSamplingTask(w.projectId), null);
+  assert.deepEqual([snap.counts.rows, snap.counts.valid, snap.counts.invalid, snap.counts.notSaved], [10, 9, 0, 1]);
+  assert.equal(tries.get('s5'), 2, 'a failed write is tried once more');
+  const saved = await app.catalog.find('examples', {snapshotId: snap.id});
+  assert.equal(saved.length, 9);
+  const opt = saved.filter(e => e.optimiserHalf).length;
+  assert.ok(Math.abs(2 * opt - saved.length) <= 1, 'the halves are even over the saved examples');
+  // Nothing saved fails the task, and no dataset is made.
+  failAll = true;
+  await assert.rejects(startSampleDataset(w.projectId, 3), /None of the examples could be saved/);
+  assert.equal(getSamplingTask(w.projectId), null);
+  assert.equal((await app.catalog.get('projects', w.projectId))!.snapshotId, snap.id);
+  // Adding: the same rules.
+  failAll = false;
+  raws.push(...Array.from({length: 4}, (_, i) => ({externalId: `a${i}`, type: 'video' as const, title: '', features: {}})));
+  raws.splice(3, 1);
+  assert.equal(await appendSample(w.projectId, 4), 4);
 });

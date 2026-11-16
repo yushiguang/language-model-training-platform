@@ -72,9 +72,11 @@ Since 1.0.0 each feature on a `RawExample` is a `FeatureValue` (`packages/contra
 `ExampleSource` adapter that still returns plain strings can wrap them with `toFeatures` from
 `@tsp/domain`; prompts read features only through `featureText` and `featureItems`.
 
-Since 2026-11-16 a project has one label (`Schema {name, values}`) and an answer is a plain string
-(`Answer = string`). Bundled labels and gold upload files may give the answer as `"Practical"` or
-in the older shape `{"primary_value": ["Practical"]}`; `readGoldAnswer` reads both. The stand-in
+Since 2026-11-16 a project has one label, single or multi select (`Schema {name, kind, min?, max?,
+values}`, a value may be `exclusive`), and an answer is a list of its values in label order
+(`Answer = string[]`, one value long for single select). Bundled labels and gold upload files may
+give the answer as `"Practical"`, `["Practical", "Food"]` or `{"primary_value": ...}` with either;
+`readGoldAnswer` reads all of them and checks the label's bounds. The stand-in
 store keeps documents under the `tsp-doc-v2` prefix and drops the older `tsp-doc` keys, so
 projects made before this change start fresh (they were test data).
 
@@ -87,7 +89,10 @@ Gold Labels. Playback is an embedded player page, never a direct video file:
    `playerUrl` the Gold Labels page loads in an iframe (the item's official embed player, or a
    fallback viewer when the item is no longer publicly playable — the adapter may probe
    availability first), a `coverUrl`, still `imageUrls` (key frames, or a photo-and-text post's
-   images) and `durationSec` when known; return `null` when the item has no media. Set `media`
+   images) and `durationSec` when known, and an `externalUrl` where a person can open the item in
+   a new tab (Gold Labels shows "Open item" with it, for when the site will not embed); return
+   `null` when the item has no media. The iframe sends `referrerPolicy="strict-origin"` and
+   allows `autoplay; encrypted-media; picture-in-picture; fullscreen`. Set `media`
    on the `Platform` object and drop `'media'` from `standIns`.
 2. If the real interface needs more than this (signed URLs that expire, several renditions,
    access checks), ask for a contract change (next section) instead of working around the type.

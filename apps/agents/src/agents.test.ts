@@ -149,14 +149,14 @@ test('with progress, the turn reports the live line, the streamed reply and each
 const optPrompt: StructuredPrompt = {
   taskSummary: 'Label the post.',
   features: {video: ['Description'], photo_text: [], metadata: []},
-  label: {name: 'format', values: [{name: 'Vlog', definition: 'a day in a life'}, {name: 'Clip', definition: 'a cut from a longer video'}]},
+  label: {name: 'format', kind: 'single', values: [{name: 'Vlog', definition: 'a day in a life'}, {name: 'Clip', definition: 'a cut from a longer video'}]},
   ruleGroups: [],
   images: [],
 };
 /** All the prompt's rules as one text: the rule groups and the definitions. */
 const rules = (p: StructuredPrompt) => [...p.ruleGroups.map(g => g.content), ...p.label.values.map(v => v.definition)].join('\n');
 const withRules = (content: string): StructuredPrompt => ({...optPrompt, ruleGroups: [{id: 'rg1', title: 'Label priority', content}]});
-const mix = {gold: 'Clip', predicted: 'Vlog', count: 5, exampleIds: []};
+const mix = {kind: 'confused' as const, gold: 'Clip', predicted: 'Vlog', count: 5, exampleIds: []};
 
 test('the Optimiser may read feature descriptions before its change, through the tool host', async () => {
   const llm = scriptedAgent();
@@ -192,7 +192,7 @@ test('merge keeps the rules of both versions', async () => {
 });
 
 test('a helper that renames a value or the key is overruled: the Optimiser changes wording only', async () => {
-  const answer = {prompt: {...optPrompt, taskSummary: 'New task.', label: {name: 'kind', values: [{name: 'Daily vlog', definition: 'x'}, {name: 'Clip', definition: 'sharper'}, {name: 'Extra', definition: ''}]}}, change: 'c'};
+  const answer = {prompt: {...optPrompt, taskSummary: 'New task.', label: {name: 'kind', kind: 'single', values: [{name: 'Daily vlog', definition: 'x'}, {name: 'Clip', definition: 'sharper'}, {name: 'Extra', definition: ''}]}}, change: 'c'};
   const llm = {chat: async () => JSON.stringify(answer)} as unknown as Parameters<typeof runAgentTurn>[1];
   const out = await reflectPrompt({prompt: optPrompt, triedChanges: [], mixUps: [], macroF1: 0.5, lowestValue: null}, llm);
   assert.equal(out.prompt.taskSummary, 'New task.');
@@ -275,7 +275,7 @@ test('an answer with a question, or with the same prompt, proposes nothing', asy
 test('the Optimiser and Improve with AI get the wrong examples', async () => {
   const seen: string[] = [];
   const llm = {chat: async (msgs: {content: string}[]) => (seen.push(msgs.at(-1)!.content), JSON.stringify({prompt: optPrompt, change: 'x', changes: [], reply: ''}))} as unknown as Parameters<typeof runAgentTurn>[1];
-  const examples = [{externalId: 'ex-7', features: {Title: 'cooking'}, gold: 'Clip', predicted: 'Vlog'}];
+  const examples = [{externalId: 'ex-7', features: {Title: 'cooking'}, gold: ['Clip'], predicted: ['Vlog']}];
   await reflectPrompt({prompt: optPrompt, triedChanges: [], mixUps: [], macroF1: 0.5, lowestValue: null, examples}, llm);
   await draftImprovement({version: 'v2', prompt: optPrompt, mixUps: [], macroF1: 0.5, lowestValue: null, mistakes: 1, examples}, llm);
   assert.equal(seen.filter(c => c.includes('"ex-7"')).length, 2);
@@ -374,11 +374,15 @@ test('Improve with AI answers in Chinese when the user reads the site in Chinese
   assert.doesNotMatch(systems[1], /Simplified Chinese/);
 });
 
-test('the helpers know the single-label rules: definitions hold one value, rule groups span values, both item types get features', () => {
+test('the helpers know the one-label rules: definitions hold one value, rule groups span values, both item types get features', () => {
   for (const p of ['prompt_agent', 'optimiser'] as const) {
     const text = systemPrompt(p);
-    assert.doesNotMatch(text, /"fields"|lowest field|single-select|multi-select|definition is one line/i, p);
+    assert.doesNotMatch(text, /"fields"|lowest field|definition is one line/i, p);
   }
+  // Single or multi select on the one label (resilience spec, 1).
+  assert.match(systemPrompt('prompt_agent'), /"kind" is "single" when each item gets one value and "multi"/);
+  assert.match(systemPrompt('prompt_agent'), /"exclusive": true/);
+  assert.match(systemPrompt('optimiser'), /single or multi select/);
   assert.match(systemPrompt('prompt_agent'), /Never put a value's own criteria into a rule group/);
   assert.match(systemPrompt('prompt_agent'), /tick the matching evidence features in BOTH groups/);
   assert.match(systemPrompt('prompt_agent'), /"Other" or "None"/);

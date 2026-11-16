@@ -9,7 +9,6 @@ export const DEFAULT_SYSTEM_CONFIG: SystemConfig = {
     maxRoundsCap: 50,
     stepRetries: 3,
     wastedRoundsLimit: 3,
-    consecutiveTiesLimit: 2,
     mergeEveryKept: 2,
     dryRunMaxExamples: 20,
     briefWrongExamples: 8,

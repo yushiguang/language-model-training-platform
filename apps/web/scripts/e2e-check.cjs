@@ -183,6 +183,20 @@ let current = null;
   if ((await page.locator('.sp-value').count()) !== 5) throw new Error('Add value did not add a card');
   await page.locator('.sp-value').last().getByRole('button', {name: 'Remove value'}).click();
   if ((await valueNames()).join() !== names0.join()) throw new Error('the values did not come back to the draft');
+  // Resilience spec, 1: the one label is single or multi select; multi asks how many, and a value
+  // can be marked to stand on its own (a catch-all such as None).
+  const selection = page.getByRole('group', {name: 'Selection'});
+  await selection.getByRole('button', {name: 'Multi-select', exact: true}).click();
+  await page.getByLabel('At most', {exact: true}).waitFor({timeout: 5000});
+  if ((await page.getByRole('checkbox', {name: 'Only on its own'}).count()) !== 4) throw new Error('multi-select has no "Only on its own" per value');
+  await page.getByRole('checkbox', {name: 'Only on its own'}).last().click();
+  await button(page, 'View full prompt').click();
+  const multiText = await page.getByRole('dialog').locator('pre').innerText();
+  if (!/<output_labels name="primary_value" selection="multi" min="1" max="3">/.test(multiText) || !multiText.includes('exclusive="true"')) throw new Error('the full prompt does not ask for a multi-select answer');
+  await button(page.getByRole('dialog'), 'Close').click();
+  await shot(page, '1b2-multi-select');
+  await selection.getByRole('button', {name: 'Single-select', exact: true}).click();
+  if (await page.getByRole('checkbox', {name: 'Only on its own'}).count()) throw new Error('single-select still shows "Only on its own"');
   // Long definitions are multi-line boxes, never clipped (spec 3.3)
   const clipped = await page.locator('textarea[aria-label="Definition"]').evaluateAll(els => els.filter(el => el.scrollHeight > el.clientHeight + 2).length);
   if (clipped) throw new Error(`${clipped} definitions are clipped`);
@@ -197,6 +211,8 @@ let current = null;
   await button(full, 'Close').click();
   await approveBtn.click();
   await page.getByText('Approved as v1', {exact: true}).waitFor({timeout: 10000});
+  // Resilience spec, 2: an approved prompt is edited on Prompt Tuning, not here.
+  if (await page.locator('main').getByRole('link', {name: 'Edit prompt', exact: true}).count()) throw new Error('the approved Prompt Design still has Edit prompt');
   // The helper says what comes next (spec 6.2)
   await page.locator('aside.chat').getByText(/v1 is saved\. Next, click "Next: Eval Dataset" at the top right/).waitFor({timeout: 10000});
   await shot(page, '1d-prompt-approved');
@@ -372,9 +388,22 @@ let current = null;
     if (before > 1) {
       await page.getByText('Scores out of date', {exact: true}).first().waitFor({timeout: 5000});
       await shot(page, '4e-scores-out-of-date');
-      await button(page, 'Rebuild scores').click();
+      // Resilience spec, 7: the advice stays, and its actions ask to rebuild first.
+      const act = (await button(page, 'Improve with AI').count()) ? 'Improve with AI' : (await button(page, 'Auto Optimise').count()) ? 'Auto Optimise' : null;
+      if (act) {
+        await button(page, act).first().click();
+        const dlg = page.getByRole('dialog');
+        await dlg.getByText('Rebuild scores first?', {exact: true}).waitFor({timeout: 5000});
+        await shot(page, '4f-rebuild-first');
+        await button(dlg, 'Rebuild scores').click();
+        await dlg.waitFor({state: 'detached', timeout: 10000});
+      } else {
+        log('no advice action while scores were out of date');
+        await button(page, 'Rebuild scores').click();
+      }
       await page.getByText('Scores out of date', {exact: true}).first().waitFor({state: 'detached', timeout: 10000});
-      log('scores rebuilt by hand');
+      if (!(await button(page, 'Rebuild scores').isDisabled())) throw new Error('Rebuild scores is on with scores up to date');
+      log('scores rebuilt by hand', act ? `(asked from ${act})` : '');
     }
   }
 

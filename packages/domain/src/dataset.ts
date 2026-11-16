@@ -29,10 +29,11 @@ export function assignEvalHalves(examples: HalfInput[], gold: Record<string, Ans
   for (const e of fixed) out[e.id] = e.optimiserHalf!;
   const free = examples.filter(e => !(e.id in out));
 
-  // Exact per-value stratification: every labeled example has exactly one value (single-label projects).
-  const stratum = (e: HalfInput) => gold[e.id] ?? '';
+  // Each labeled example by its rarest gold value, counted over every labeled example (exact
+  // per-value stratification on a single-select label).
   const valueCount = new Map<string, number>();
-  for (const e of examples) if (gold[e.id]) valueCount.set(gold[e.id]!, (valueCount.get(gold[e.id]!) ?? 0) + 1);
+  for (const e of examples) for (const v of gold[e.id] ?? []) valueCount.set(v, (valueCount.get(v) ?? 0) + 1);
+  const stratum = (e: HalfInput) => [...(gold[e.id] ?? [])].sort((x, y) => valueCount.get(x)! - valueCount.get(y)! || (x < y ? -1 : 1))[0] ?? '';
 
   const total = {opt: 0, held: 0};
   const per = new Map<string, {opt: number; held: number}>();
@@ -96,7 +97,7 @@ export function labelBalance(schema: Schema, examples: Pick<Example, 'id' | 'opt
     labeled: labeled.length,
     unlabeled: examples.length - labeled.length,
     values: schema.values.map(v => {
-        const has = labeled.filter(e => gold[e.id]!.answer === v.name);
+        const has = labeled.filter(e => gold[e.id]!.answer.includes(v.name));
         const optimiser = has.filter(e => e.optimiserHalf).length;
         const heldOut = has.length - optimiser;
         return {

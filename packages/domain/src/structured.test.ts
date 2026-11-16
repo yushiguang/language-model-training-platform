@@ -42,7 +42,24 @@ test('compilePrompt: a feature line is left out for a type that does not load it
 test('compilePrompt: the output it asks for is what parseOutput reads', () => {
   const p = prompt();
   const got = parseOutput('{"reason": "r", "primary_value": "Practical"}', schemaOf(p));
-  assert.equal(got.answer, 'Practical');
+  assert.deepEqual(got.answer, ['Practical']);
+});
+
+test('compilePrompt: a multi-select label asks for a list within its bounds, and an exclusive value on its own', () => {
+  const p = prompt();
+  p.label = {...p.label, kind: 'multi', min: 1, max: 2, values: [...p.label.values, {name: 'None', definition: 'nothing fits', exclusive: true}]};
+  const text = compilePrompt(p);
+  assert.match(text, /<output_labels name="primary_value" selection="multi" min="1" max="2">/);
+  assert.match(text, /<label value="None" exclusive="true">/);
+  assert.match(text, /a list of 1 to 2 allowed values from <output_labels>, each at most once:\n\{"primary_value": \["Entertainment" \| /);
+  assert.match(text, /A value marked exclusive="true" is always the only value in the list\./);
+  assert.deepEqual(parseOutput('{"primary_value": ["Practical", "Entertainment"]}', schemaOf(p)).answer, ['Entertainment', 'Practical']);
+  assert.deepEqual(checkStructured(p), []);
+  p.label.max = 9;
+  assert.deepEqual(checkStructured(p).map(i => i.message), ['The most values must be between 1 and 5']);
+  // Switching selection changes what answers are allowed, so it is a new signature.
+  assert.ok(!sameSignature(signatureOf(prompt()), signatureOf(p)));
+  assert.equal(structuredChangeSummary({...p, label: {...p.label, max: 2}}, p), 'Changed selection');
 });
 
 test('signature: wording changes keep it, the key and value names change it', () => {
@@ -68,12 +85,12 @@ test('checkStructured: names what stops a save', () => {
   p.features = {video: [], photo_text: [], metadata: []};
   assert.deepEqual(checkStructured(p).map(i => i.message), ['Tick at least one input feature', 'The value Entertainment is there twice']);
   const q = prompt();
-  q.label = {name: ' ', values: [{name: 'Only', definition: ''}]};
+  q.label = {name: ' ', kind: 'single', values: [{name: 'Only', definition: ''}]};
   assert.deepEqual(checkStructured(q).map(i => i.message), ['Name the label', 'The label needs at least 2 values']);
 });
 
 test('a new prompt starts with nothing ticked and no rules (2026-11-16 refinements, 2.1)', () => {
-  assert.deepEqual(emptyStructuredPrompt(), {taskSummary: '', features: {video: [], photo_text: [], metadata: []}, label: {name: '', values: []}, ruleGroups: [], images: []});
+  assert.deepEqual(emptyStructuredPrompt(), {taskSummary: '', features: {video: [], photo_text: [], metadata: []}, label: {name: '', kind: 'single', values: []}, ruleGroups: [], images: []});
 });
 
 test('compilePrompt: no rules section without rules; names are escaped in attributes', () => {
@@ -120,7 +137,7 @@ test('a rewording keeps the key and value names; a model that writes a list of f
   assert.deepEqual(signatureOf(next), signatureOf(base));
   assert.equal(next.label.values.find(v => v.name === 'Practical')?.definition, 'sharper');
   const old = readStructured({fields: [{name: 'kind', values: ['A', {name: 'B', definition: 'b'}]}, {name: 'other', values: ['x', 'y']}]});
-  assert.deepEqual(old?.label, {name: 'kind', values: [{name: 'A', definition: ''}, {name: 'B', definition: 'b'}]});
+  assert.deepEqual(old?.label, {name: 'kind', kind: 'single', values: [{name: 'A', definition: ''}, {name: 'B', definition: 'b'}]});
 });
 
 test('a prompt saved before single-label projects reads with its first field as the label and its notes as rule groups', () => {
@@ -140,6 +157,6 @@ test('a prompt saved before single-label projects reads with its first field as 
     {id: 'rg2', title: 'format rules', content: 'Clip beats Vlog.'},
   ]);
   assert.ok(!('generalRules' in now) && !('fields' in now));
-  assert.deepEqual(signatureOf(now), {name: 'primary_value', values: SAMPLE_SCHEMA.values.map(v => v.name)});
+  assert.deepEqual(signatureOf(now), {name: 'primary_value', kind: 'single', values: SAMPLE_SCHEMA.values.map(v => v.name)});
   assert.match(compilePrompt(old), /<rule_group name="format rules">\nClip beats Vlog\./);
 });

@@ -10,13 +10,15 @@ import {checkStructured, msg, compilePrompt, compareDryRun, rewordOnly, sameSign
  *     win on different examples (after every 2 kept versions);
  *  2. ask the agent runtime for one change (it may read feature descriptions);
  *  3. run the editor's Checks; a failing or repeated change is dropped with no labeling;
- *  4. save it as the next minor of the run's major (v4.1, v4.2…) and dry-run it on 10 examples
- *     of the optimiser half (the parent's answers are known); drop it unless it passes more.
- *     A tie (as many examples right, but different ones) goes on but is not progress (R5-6);
- *  5. label it on the whole eval set (the dry run's answers are reused) and build its report.
+ *  4. save it as the next minor of the run's major (v4.1, v4.2…) and dry-run it on examples of
+ *     the optimiser half (the parent's answers are known); drop it only when it does worse than
+ *     the parent (resilience spec, 6): a tie goes on;
+ *  5. label it on the whole eval set (the dry run's answers are reused) and build its report; it
+ *     is progress only when it beats its parent's macro-F1 on the optimiser half (never judged on
+ *     the held-out half, which no helper or Optimiser step may read).
  * Stops when a version passes (the host then does what follows in the workflow), at the round limit,
- * after 3 wasted rounds in a row (ties count), after 2 ties in a row, on Stop, or when a step
- * fails 3 times (Failed, with Retry). Round 1 always starts from the version the user picked
+ * after 3 wasted rounds in a row (no gain, dropped, failed the Checks or repeated), on Stop, or
+ * when a step fails 3 times (Failed, with Retry). Round 1 always starts from the version the user picked
  * (R5-7); later rounds pick a parent from the Pareto front, weighted by the examples it wins.
  */
 
@@ -247,13 +249,9 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
     const settled = run.history.filter(h => h.outcome !== 'running' && h.outcome !== 'failed' && h.outcome !== 'stopped');
     let wasted = 0;
     for (const h of [...settled].reverse()) {
-      if (h.outcome === 'kept' && !h.tied) break;
+      // A kept round is progress when it gained; rounds before `gain` existed count when not tied.
+      if (h.outcome === 'kept' && (h.gain ?? !h.tied)) break;
       wasted++;
-    }
-    let ties = 0;
-    for (const h of [...settled].reverse()) {
-      if (!h.tied) break;
-      ties++;
     }
     let keptSinceMerge = 0;
     for (const h of [...settled].reverse()) {
@@ -336,7 +334,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
             run.stopReason = 'max_rounds';
             break;
           }
-          if (wasted >= systemConfig().optimiser.wastedRoundsLimit || ties >= systemConfig().optimiser.consecutiveTiesLimit) {
+          if (wasted >= systemConfig().optimiser.wastedRoundsLimit) {
             run.stopReason = 'no_new_ideas';
             break;
           }
@@ -408,7 +406,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
           const weak = pm.lowestValue;
           // The weakest value's score suffers from both sides: examples that have it, and examples
           // the parent wrongly gave it.
-          const has = (a: Answer | null | undefined) => !!weak && a === weak.value;
+          const has = (a: Answer | null | undefined) => !!weak && !!a?.includes(weak.value);
           const focus = new Set(half.filter(id => has(state.gold[id]!.answer) || has(parentAnswers.get(id)?.answer)));
           const ids = pickDryRun(
             half.filter(id => parentAnswers.has(id)),
@@ -425,8 +423,8 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
               ids.filter(id => !mine.get(id)?.filtered && !parentAnswers.get(id)?.filtered).map(id => ({gold: state.gold[id]!.answer, candidate: mine.get(id)?.answer ?? null, parent: parentAnswers.get(id)?.answer ?? null})),
             );
           });
-          const {better, tied, ...dryRun} = result;
-          if (!better && !tied) {
+          const {better: _better, tied, regressed, ...dryRun} = result;
+          if (regressed) {
             wasted++;
             tm.counter('tsp_optimiser_candidates_total', {slot: endpoint, result: 'dropped'});
             await putRound({...round, outcome: 'dropped', dryRun, step: undefined});
@@ -453,17 +451,15 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
             return host.confirmScore({projectId, promptVersionId: cand.id, endpoint});
           });
         }
-        // A tie is kept in the pool but is not progress (R5-6).
-        if (round.tied) {
-          wasted++;
-          ties++;
-        } else {
-          wasted = 0;
-          ties = 0;
-        }
+        // Progress is judged on the optimiser half (resilience spec, 6, with the held-out half kept
+        // out of the run's choices): the change must beat its parent's macro-F1 there.
+        const [mine, theirs] = await Promise.all([host.halfScore({projectId, promptVersionId: cand.id, endpoint}), host.halfScore({projectId, promptVersionId: parent.id, endpoint})]);
+        const gain = mine.macroF1 > theirs.macroF1;
+        if (gain) wasted = 0;
+        else wasted++;
         keptSinceMerge = round.kind === 'merge' ? 0 : keptSinceMerge + 1;
-        tm.counter('tsp_optimiser_candidates_total', {slot: endpoint, result: round.tied ? 'tied' : 'kept'});
-        await putRound({...round, outcome: 'kept', score: s.report.metrics.macroF1, passed: s.passed, confirm, step: undefined});
+        tm.counter('tsp_optimiser_candidates_total', {slot: endpoint, result: gain ? 'kept' : 'no_gain'});
+        await putRound({...round, outcome: 'kept', score: s.report.metrics.macroF1, passed: s.passed, confirm, gain, step: undefined});
         if (s.passed && confirm?.passed) {
           passedVersion = cand;
           run.stopReason = 'passes';

@@ -5,7 +5,7 @@ import {localDocRuntime} from '@tsp/platform';
 import {LABEL_VALUES} from '@tsp/contracts';
 import {catalogKinds, createCatalog} from './catalog.ts';
 
-const base = {projectId: 'pr_1', structured: {taskSummary: '', features: {video: [], photo_text: [], metadata: []}, label: {name: '', values: []}, ruleGroups: [], images: []}, template: 't', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user' as const, change: '', schemaVersion: 1};
+const base = {projectId: 'pr_1', structured: {taskSummary: '', features: {video: [], photo_text: [], metadata: []}, label: {name: '', kind: 'single' as const, values: []}, ruleGroups: [], images: []}, template: 't', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user' as const, change: '', schemaVersion: 1};
 
 test('catalog numbers prompt versions from what is stored: minors under the parent, majors after the highest', async () => {
   const c = createCatalog(localDocRuntime('cat-1'));

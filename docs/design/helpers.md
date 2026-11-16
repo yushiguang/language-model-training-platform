@@ -58,8 +58,11 @@ the one on the page. Improve with AI reads the same wrong examples as the Optimi
 what comes next ("v1 is saved. Next, click ..."). When the user pastes an existing prompt (intent
 `import_prompt`), the helper sorts it into the parts and returns every passage that has no place,
 word for word, as `unmapped`; the page lists them under "Not carried over". Improve with AI and the
-Optimiser may change wording only: the runtime keeps the label and value names of the version they
-started from (`rewordOnly`). A criterion, exclusion or exemption for one value goes into that
+Optimiser may change wording only: the runtime keeps the label, its single or multi select and
+bounds, the exclusive marks and the value names of the version they started from (`rewordOnly`).
+The Prompt helper sets single or multi select from the task (one value per item when the values
+exclude each other, several when an item can have more than one) and asks when it is unclear; on
+a multi-select label it marks a catch-all such as "None" as exclusive. A criterion, exclusion or exemption for one value goes into that
 value's definition (a one-line definition becomes a list); rules that compare values or apply to
 all of them go into the user's rule groups, which keep their ids and titles. An import keeps each
 rules section of the pasted prompt as its own group, under its heading, and moves a section named

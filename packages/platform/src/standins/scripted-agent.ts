@@ -6,7 +6,7 @@ import {
   type LlmStreamChunk,
   type ModelMessage,
 } from '@tsp/contracts';
-import {SAMPLE_STRUCTURED, addRule, addToDefinition, hasRule, nextRuleGroupId, ruleFor, schemaOf} from '@tsp/domain';
+import {SAMPLE_STRUCTURED, addRule, addToDefinition, fixTarget, hasRule, nextRuleGroupId, ruleFor, schemaOf} from '@tsp/domain';
 import type {LabelValue, MixUp, RuleGroup, Schema, StructuredPrompt} from '@tsp/contracts';
 
 /**
@@ -64,7 +64,7 @@ function promptAgentStart(r: Req) {
   if (res?.already) return {reply: res.already};
   if (s.name === 'try_prompt') {
     const rows = (res?.rows ?? []) as {gold: unknown; model: unknown}[];
-    const same = rows.filter(x => x.gold && x.gold === x.model).length;
+    const same = rows.filter(x => x.gold && JSON.stringify(x.gold) === JSON.stringify(x.model)).length;
     return {reply: `I tried it on ${rows.length} eval examples (nothing saved): ${same} of ${rows.filter(x => x.gold).length} match the gold labels.`};
   }
   return {reply: `Started. ${res?.note ?? ''}`.trim()};
@@ -121,7 +121,7 @@ export function parseRawPrompt(raw: string, base: StructuredPrompt): {structured
     if (sec.kind === 'rules') group(sec.title, sec.lines);
     if (sec.kind === 'field') {
       if (sec.values.length >= 2 && !label) {
-        label = {name: sec.name, values: sec.values};
+        label = {name: sec.name, kind: 'single', values: sec.values};
         group(CHOOSING, sec.extra);
       } else if (!sec.values.length && sec.extra.length) loose.push({title: sec.title, heading: sec.heading, lines: sec.extra});
       else unmapped.push([sec.heading, ...sec.values.map(v => `- ${v.name}: ${v.definition}`), ...sec.extra].join('\n'));
@@ -205,6 +205,12 @@ function promptAgent(r: Req) {
     values.splice(Math.max(0, values.length - (/^(other|none)$/i.test(values.at(-1)?.name ?? '') ? 1 : 0)), 0, {name: add[1], definition: '[say when this value applies]'});
     return {reply: `I added the value ${add[1]} in a draft. This changes the labels, so gold labels given before will need a quick re-check.`, prompt, change: `Added the value ${add[1]}`};
   }
+  // "make it multi-select" / "single-select": the label's kind (changes the labels).
+  const kind = /\bmulti[- ]?select\b|\bseveral values\b|\bmore than one value\b/i.test(t) ? 'multi' : /\bsingle[- ]?select\b|\bone value only\b/i.test(t) ? 'single' : null;
+  if (kind && kind !== prompt.label.kind) {
+    prompt.label = kind === 'multi' ? {...prompt.label, kind, min: 1, max: Math.min(3, prompt.label.values.length)} : {name: prompt.label.name, kind, values: prompt.label.values.map(({exclusive: _e, ...v}) => v)};
+    return {reply: `I made the label ${kind === 'multi' ? 'multi-select (1 to ' + prompt.label.max + ' values)' : 'single-select'} in a draft. This changes the labels, so gold labels given before will need a quick re-check.`, prompt, change: kind === 'multi' ? 'Made the label multi-select' : 'Made the label single-select'};
+  }
   const rename = t.match(/rename ["“]?([^"”]+?)["”]? to ["“]?([^"”]+?)["”]?$/i);
   if (rename) {
     for (const v of prompt.label.values) if (v.name.toLowerCase() === rename[1].toLowerCase()) v.name = rename[2];
@@ -239,7 +245,7 @@ function evaluationAgent(r: Req) {
       `${rep.version} on ${rep.model} has a Macro-F1 of ${Number(rep.macroF1).toFixed(2)}.`,
       verdict,
       lv ? `The weakest value is ${lv.value} at ${lv.f1.toFixed(2)}.` : '',
-      mix ? `The most common mix-up: ${mix.gold} labeled as ${mix.predicted}, ${mix.count} time${mix.count === 1 ? '' : 's'}.` : '',
+      mix ? `The most common mix-up: ${mixLine(mix)}.` : '',
       fromView?.advice?.nextStep ? `Next step: ${fromView.advice.nextStep}.` : '',
     ]
       .filter(Boolean)
@@ -255,9 +261,9 @@ function reflect(r: Req) {
   const prompt = r.context.prompt as StructuredPrompt;
   for (const m of mixUps) {
     const rule = ruleFor(m, schemaOf(prompt));
-    const change = `${m.predicted}: ${rule.replace(/^- /, '')}`;
+    const change = `${fixTarget(m)}: ${rule.replace(/^- /, '')}`;
     if (hasRule(prompt, rule) || tried.includes(change)) continue;
-    return {prompt: addToDefinition(prompt, m.predicted, rule), change};
+    return {prompt: addToDefinition(prompt, fixTarget(m), rule), change};
   }
   return {prompt: hasRule(prompt, FALLBACK_RULE) ? prompt : addRule(prompt, GENERAL, FALLBACK_RULE), change: FALLBACK_RULE};
 }
@@ -290,7 +296,12 @@ function merge(r: Req) {
 }
 
 /** What a mix-up looks like in a reason line. */
-const mixLine = (m: MixUp) => `${m.count} ${m.gold} example${m.count === 1 ? ' was' : 's were'} read as ${m.predicted}`;
+const mixLine = (m: MixUp) => {
+  const n = `${m.count} example${m.count === 1 ? '' : 's'}`;
+  if (m.kind === 'extra') return `${m.predicted} was added to ${n} where it does not apply`;
+  if (m.kind === 'missed') return `${m.gold} was left out of ${n}`;
+  return `${m.count} ${m.gold} example${m.count === 1 ? ' was' : 's were'} read as ${m.predicted}`;
+};
 
 /** Improve with AI: up to 3 rules from the top mix-ups, each with its reason. */
 function improve(r: Req) {
@@ -301,7 +312,7 @@ function improve(r: Req) {
     if (changes.length >= 3) break;
     const rule = ruleFor(m, schemaOf(prompt));
     if (hasRule(prompt, rule)) continue;
-    prompt = addToDefinition(prompt, m.predicted, rule);
+    prompt = addToDefinition(prompt, fixTarget(m), rule);
     changes.push({text: rule, reason: mixLine(m)});
   }
   if (!changes.length && !hasRule(prompt, FALLBACK_RULE)) {

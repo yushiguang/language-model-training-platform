@@ -96,6 +96,17 @@ Known limits of the language switch:
 | Dataset, Label balance | One list of values, no label-name pill | — |
 | Ask AI | No page tag, no "Prompt helper answers" and no "Helpers read your recent messages"; Shift+Enter sends, Enter adds a line | — |
 
+## 2026-11-16 workflow resilience and single or multi select, built from the spec
+
+| Screen | What was built | To decide |
+| --- | --- | --- |
+| Output Labels & Definitions | Beside the Label name: a Single-select / Multi-select switch, and for multi "Choose [1] to [3]"; each value card gets "Only on its own" (with a hover) for multi; read-only shows a "Multi-select · choose 1 to 3" tag | Whether the switch belongs in Project Settings instead |
+| Gold Labels | Multi select: chips toggle, "Choose 1 to 3" hint, chips lock when full, an exclusive value clears the others; an "Open item" link under the media (and in the empty tile) | — |
+| Prompt Design (approved) | No Edit prompt button | — |
+| Eval Dataset | "Saving the examples" at full progress with no Stop until the dataset is saved; "N could not be saved" (hover) on the dataset line | — |
+| Prompt Tuning | Rebuild scores is greyed while scores are up to date; the AI Suggestion stays when they are out of date; "Rebuild scores first?" dialog; Optimiser rounds with no gain show a "No gain" tag | — |
+| Failure banner | "{Action} failed. {why}"; Retry spins | — |
+
 ## Still different from the canvas
 
 | Where | Canvas | Code | Why |

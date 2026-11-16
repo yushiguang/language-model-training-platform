@@ -3,7 +3,7 @@
 import {useGo} from '@/components/nav';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode} from 'react';
 import type {Answer, LabelingRun, MismatchList, OptimisationRun, OptimiserRound, PageContext, PromptVersion} from '@tsp/contracts';
-import {aiSuggestion, canScore, compilePrompt, dryRunSize, optimiserVersions, stepMsg, versionLabel, systemConfig, type SuggestionAction} from '@tsp/domain';
+import {aiSuggestion, canScore, compilePrompt, dryRunSize, optimiserVersions, stepMsg, versionLabel, systemConfig, withNewestReports, type SuggestionAction} from '@tsp/domain';
 import {Frame, ProjectPage, useOpenAskAi} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {ScoreChart} from '@/components/prompt/ScoreChart';
@@ -218,9 +218,10 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
     </Card>
   );
 
-  // No advice from scores that are out of date (Rebuild scores first).
-  // A dropped version gets one too: it says which version to go back to (spec 6.3).
-  const advice = !running && !showPanel && !state.scoresUpdating ? <Advice state={state} selId={sel.id} onStarted={() => setSel(null)} onSwitch={id => choose(id)} /> : null;
+  // With scores out of date the advice stays, read from the newest scores, and its actions ask
+  // "Rebuild scores first?" (resilience spec, 7). A dropped version gets one too: it says which
+  // version to go back to (spec 6.3).
+  const advice = !running && !showPanel ? <Advice state={state} selId={sel.id} onStarted={() => setSel(null)} onSwitch={id => choose(id)} /> : null;
   return (
     <Frame
       head={
@@ -235,7 +236,13 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
                   <Hov text={t('Scores out of date')} tip={t(OOD_TIP)} />
                 </span>
               )}
-              <Button label={t('Rebuild scores')} disabled={running} title={running ? t('Wait until the running work ends') : undefined} onClick={() => rebuildReports(state.project.id)} />
+              {/* Resilience spec, 7: on only when there is something to rebuild. */}
+              <Button
+                label={t('Rebuild scores')}
+                disabled={running || !state.scoresUpdating}
+                title={running ? t('Wait until the running work ends') : !state.scoresUpdating ? t('Scores are up to date') : undefined}
+                onClick={() => rebuildReports(state.project.id)}
+              />
             </>
           }
         />
@@ -362,7 +369,10 @@ function droppedWhy(state: ProjectState, v: PromptVersion, r: OptimiserRound): s
   const d = r.dryRun;
   if (!d) return t('The Optimiser dropped this change before scoring it');
   const parent = state.versions.find(x => x.id === d.parentId);
-  return t('In the dry run {version} got {n} of {of} examples fully right and {parent} got {parentN}. It was no better, so it was not scored on the eval set', {version: versionLabel(v), n: d.passed, of: d.examples, parent: parent ? versionLabel(parent) : t('the version it changed'), parentN: d.parentPassed});
+  const vars = {version: versionLabel(v), n: d.passed, of: d.examples, parent: parent ? versionLabel(parent) : t('the version it changed'), parentN: d.parentPassed};
+  // Since 2026-11-16 only a change that scores lower is dropped (resilience spec, 6).
+  if (d.score != null) return t('In the dry run {version} got {n} of {of} examples fully right and {parent} got {parentN}. It scored lower, so it was not scored on the eval set', vars);
+  return t('In the dry run {version} got {n} of {of} examples fully right and {parent} got {parentN}. It was no better, so it was not scored on the eval set', vars);
 }
 
 const ROUND_RESULT: Record<OptimiserRound['outcome'], {text: string; tone?: 'run' | 'err'} | null> = {
@@ -466,8 +476,16 @@ function OptimiserPanel({state, run, box, onShow}: {state: ProjectState; run: Op
               <Hov text={t('Not confirmed')} tip={t('The second labeling of the held-out half scored {score}, below the bar', {score: r.confirm.score.toFixed(2)})} />
             </span>
           </span>
-        ) : r.score != null && r.tied ? (
-          // R5-6: a tie is labeled in full but is not progress.
+        ) : r.score != null && r.gain === false ? (
+          // Resilience spec, 6: labeled in full, but no better than its parent on the optimiser half.
+          <span key="r" className="row" style={{gap: 8, justifyContent: 'center'}}>
+            <Score v={r.score} ok={r.passed} />
+            <span className="badge b-gray">
+              <Hov text={t('No gain')} tip={t('Labeled in full, but it did not beat {version} on the examples the Optimiser learns from', {version: label(r.parentId) ?? t('its parent')})} />
+            </span>
+          </span>
+        ) : r.score != null && r.gain == null && r.tied ? (
+          // A round from before 2026-11-16 (R5-6): a tie was labeled in full but was not progress.
           <span key="r" className="row" style={{gap: 8, justifyContent: 'center'}}>
             <Score v={r.score} ok={r.passed} />
             <span className="badge b-gray">
@@ -560,7 +578,7 @@ function DroppedCard({state, v, round, box}: {state: ProjectState; v: PromptVers
           </span>
         </div>
         <div style={{marginLeft: 'auto', display: 'flex', gap: 8, paddingBottom: 8}}>
-          <Button label={t('Edit prompt')} kind="ghost" href={href('/prompt/edit', {v: v.id})} />
+          <EditPromptButton state={state} v={v} />
           <Button label={t('View prompt')} href={href('/prompt/edit', {v: v.id, view: '1'})} />
         </div>
       </div>
@@ -631,7 +649,7 @@ function NoGoldCard({state, v, box}: {state: ProjectState; v: PromptVersion; box
           {t('Created {time}', {time: dateTime(v.createdAt)})}
         </span>
         <div style={{marginLeft: 'auto', display: 'flex', gap: 8}}>
-          <Button label={t('Edit prompt')} kind="ghost" href={href('/prompt/edit', {v: v.id})} />
+          <EditPromptButton state={state} v={v} />
           <Button label={t('View prompt')} href={href('/prompt/edit', {v: v.id, view: '1'})} />
         </div>
       </div>
@@ -667,7 +685,7 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
   };
   const actions = (
     <div style={{marginLeft: 'auto', display: 'flex', gap: 8, paddingBottom: rep ? 8 : 0}}>
-      <Button label={t('Edit prompt')} kind="ghost" href={href('/prompt/edit', {v: v.id})} />
+      <EditPromptButton state={state} v={v} />
       <Button label={t('View prompt')} href={href('/prompt/edit', {v: v.id, view: '1'})} />
     </div>
   );
@@ -769,7 +787,9 @@ function Advice({state, selId, onStarted, onSwitch}: {state: ProjectState; selId
       live = false;
     };
   }, [state.project.id, scored, state.contextId, state.reports.length, state.optimisation[0]?.state]); // eslint-disable-line react-hooks/exhaustive-deps
-  const a = aiSuggestion(state, {selectedId: selId, mismatches: mm ? {open: mm.items.length, wrongEverywhere: mm.wrongEverywhere, reviewedAll: mm.reviewedAll} : null});
+  const view = state.scoresUpdating ? withNewestReports(state) : state;
+  const rebuildFirst = useRebuildFirst(state);
+  const a = aiSuggestion(view, {selectedId: selId, mismatches: mm ? {open: mm.items.length, wrongEverywhere: mm.wrongEverywhere, reviewedAll: mm.reviewedAll} : null});
   const [copied, copy] = useCopy();
   const latest = state.versions[0];
   const openAskAi = useOpenAskAi();
@@ -811,10 +831,10 @@ function Advice({state, selId, onStarted, onSwitch}: {state: ProjectState; selId
     // Paid work: the first start confirms Project Settings (spec 2.3).
     if (!(await settings.confirmed())) return;
     const sel = state.versions.find(v => v.id === selId) ?? latest;
-    const selScore = versionScore(state, sel.id)?.score ?? null;
+    const selScore = versionScore(view, sel.id)?.score ?? null;
     const best = state.versions
       .filter(v => v.major === sel.major && v.schemaVersion === sel.schemaVersion)
-      .map(v => ({v, s: versionScore(state, v.id)?.score}))
+      .map(v => ({v, s: versionScore(view, v.id)?.score}))
       .filter(x => x.s != null)
       .sort((x, y) => y.s! - x.s!)[0];
     const better = best && best.v.id !== sel.id && (selScore == null || best.s! > selScore);
@@ -840,9 +860,9 @@ function Advice({state, selId, onStarted, onSwitch}: {state: ProjectState; selId
       case 'review_labels':
         return <Button key={act} label={t('Review labels')} kind={kind} onClick={() => go(href('/gold', {tab: 'mismatches'}))} />;
       case 'auto_optimise':
-        return <Button key={act} label={t('Auto Optimise')} kind={kind} onClick={auto} />;
+        return <Button key={act} label={t('Auto Optimise')} kind={kind} onClick={() => rebuildFirst.ask(auto)} />;
       case 'improve':
-        return <Button key={act} label={t('Improve with AI')} kind={kind} onClick={() => improve(a.versionId!)} />;
+        return <Button key={act} label={t('Improve with AI')} kind={kind} onClick={() => rebuildFirst.ask(() => improve(a.versionId!))} />;
       case 'switch':
         return <Button key={act} label={target ? t('Switch to {version}', {version: versionLabel(target)}) : t('Switch to it')} kind={kind} onClick={() => void (a.versionId && onSwitch(a.versionId))} />;
       case 'copy_prompt':
@@ -867,6 +887,7 @@ function Advice({state, selId, onStarted, onSwitch}: {state: ProjectState; selId
   return (
     <section className="card ai" aria-label={t('AI Suggestion')}>
       <Suggestion title={title} text={text} actions={acts} />
+      {rebuildFirst.dialog}
       {ask && (
         <Dialog
           title={t('Auto Optimise')}
@@ -900,5 +921,60 @@ function Advice({state, selId, onStarted, onSwitch}: {state: ProjectState; selId
         </Dialog>
       )}
     </section>
+  );
+}
+
+/**
+ * "Rebuild scores first?" (resilience spec, 7): while scores are out of date and nothing runs,
+ * Edit prompt, Improve with AI and Auto Optimise ask first, so edits and optimisation work from
+ * the latest gold labels. Continue anyway goes ahead on the older scores.
+ */
+function useRebuildFirst(state: ProjectState) {
+  const [then, setThen] = useState<{run: () => void | Promise<unknown>} | null>(null);
+  const running = state.runs.some(r => r.state === 'running') || state.optimisation.some(o => o.state === 'running');
+  const stale = !!state.scoresUpdating && !running;
+  const ask = (run: () => void | Promise<unknown>): void | Promise<unknown> => (stale ? setThen({run}) : run());
+  const dialog = then && (
+    <Dialog
+      title={t('Rebuild scores first?')}
+      text={t('Gold labels changed since these scores were made. Rebuild scores first so editing and optimisation use your latest labels.')}
+      onClose={() => setThen(null)}
+      actions={
+        <>
+          <Button label={t('Cancel')} onClick={() => setThen(null)} />
+          <Button
+            label={t('Continue anyway')}
+            onClick={() => {
+              setThen(null);
+              return then.run();
+            }}
+          />
+          <Button
+            label={t('Rebuild scores')}
+            kind="primary"
+            onClick={async () => {
+              await rebuildReports(state.project.id);
+              setThen(null);
+            }}
+          />
+        </>
+      }
+    />
+  );
+  return {stale, ask, dialog};
+}
+
+/** Edit prompt on a version card: a link, or a button that asks "Rebuild scores first?". */
+function EditPromptButton({state, v}: {state: ProjectState; v: PromptVersion}) {
+  const {href} = useProject();
+  const go = useGo();
+  const rebuildFirst = useRebuildFirst(state);
+  const to = href('/prompt/edit', {v: v.id});
+  if (!rebuildFirst.stale) return <Button label={t('Edit prompt')} kind="ghost" href={to} />;
+  return (
+    <>
+      <Button label={t('Edit prompt')} kind="ghost" onClick={() => rebuildFirst.ask(() => go(to))} />
+      {rebuildFirst.dialog}
+    </>
   );
 }

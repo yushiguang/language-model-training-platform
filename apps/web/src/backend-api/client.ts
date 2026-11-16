@@ -32,7 +32,7 @@ export interface BffClient extends BffContract {
   prepareChatAttachment(file: File): Promise<ChatAttachment>;
   uploadDatasetFile(projectId: string, file: File): Promise<DatasetUploadResult>;
   /** Adds the file's examples to the eval dataset there (spec 1.0.0, 4.3). */
-  appendDatasetFile(projectId: string, file: File): Promise<DatasetUploadResult & {added?: number; duplicates?: number}>;
+  appendDatasetFile(projectId: string, file: File): Promise<DatasetUploadResult>;
   /** JSONL lines of {externalId, answer}; lines that are not JSON are skipped. */
   uploadGoldFile(projectId: string, file: File): Promise<GoldUploadResult>;
 
