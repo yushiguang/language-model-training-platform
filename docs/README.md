@@ -87,6 +87,10 @@ Sprint follows [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MINOR.PA
 - [`specs/2026-11-14-v1.1.0-creator-languages-problem-reports-spec.md`](specs/2026-11-14-v1.1.0-creator-languages-problem-reports-spec.md):
   **Sprint `v1.1.0`**: who created each project, rename in Project Settings, English and Chinese
   with a switch under the avatar, and problem reports any helper can file as a ticket.
+- [`specs/2026-11-16-acceptance-refinements-spec.md`](specs/2026-11-16-acceptance-refinements-spec.md):
+  **Acceptance pass refinements**: auth session readiness & sign-out, bold avatar/project badges,
+  empty initial features, `Prompt Design` section order (`Persona & Task` first), custom
+  `RuleGroup[]` with XML compilation, and the `Project Settings` dialog redesign.
 
 ## Keeping the portfolio in shape
 
