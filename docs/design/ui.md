@@ -100,7 +100,7 @@ its Rules board.
 | Page title | Every page; names the page or the object on it | A line under the title explaining the page |
 | Card title | Every card; names its one job | A description line under the card title |
 | Field label | Every input, above it; names the data | Helper text under the input |
-| Hover detail | Definitions, rules, limits, why something is disabled; dashed underline | The same detail in a visible paragraph. From 1.0.0 the Project Settings default panel is the exception: each setting shows its explanation as a one-line subtitle, no hover |
+| Hover detail | Definitions, rules, limits, why something is disabled; dashed underline | The same detail in a visible paragraph. Project Settings shows no explanations at all: the checks are listed by name only, with no hover (2026-11-16) |
 | AI Suggestion text | One bold headline (what the agent found) and one grey line (what to do) | Agent explanations outside its card; a third line |
 | Long text | Interface text (titles, labels, buttons, table cells): one line, cut with …, full text on hover. From 1.0.0, text the user wrote and reads to work (label definitions, rules, comments, chat messages) wraps in full | Wrapping interface text onto a second line; cutting a definition the user has to read |
 | Empty state | One line saying what to do, plus the button that does it | Instructions, tips or lists of steps |
@@ -195,7 +195,7 @@ audit behind these rules is [the UI motion spec](../specs/2026-11-12-ui-motion-a
 | Eval Dataset | Empty, sampling or loading, ready (Examples, Label balance, Removed) | No split: every example is used for scoring. Add from file or Add sampled at any time; Remove unlabeled, Downsample and Restore; under 20 examples a banner says scores are rough |
 | Gold Labels | Eval set (To label, Labeled), Mismatches (To review, Reviewed) | Save in Your answer on both tabs (no autosave); comments listed above "Add a comment"; Remove example on the example card; every feature row shows its whole text |
 | Prompt Tuning | Versions with scores, the fixed AI Suggestion card, the Optimiser panel; the prompt editor (same structured parts, change marks under each changed box) | Ends with Copy prompt and Finish |
-| (dialog) | Project Settings: Name, Evaluation (Default / Custom switch beside the heading, the checks below), Labeling model, each set apart by a line | Opens from Settings in the top island, and once before the first paid run (no intro line). Explanations are subtitles, not hovers. The Model list is the site's own dropdown, not the browser's |
+| (dialog) | Project Settings: Name, Evaluation (Default / Custom switch beside the heading, the checks below), Labeling model, each set apart by a line | Opens from Settings in the top island, and once before the first paid run (no intro line). The checks show their names only, with no explanation line and no line between them (2026-11-16). The Model list is the site's own dropdown, not the browser's |
 
 Setup and Training Set are removed; batch labeling becomes its own project kind later.
 

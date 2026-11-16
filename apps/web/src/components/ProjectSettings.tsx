@@ -55,12 +55,12 @@ export function SettingsProvider({state, children}: {state: ProjectState | null;
 
 type Mode = 'default' | 'custom';
 type Check = 'macroF1' | 'valueF1' | 'precision' | 'recall';
-/** The checks of the pass rule (names and lines are catalog keys). */
-const CHECKS: {key: Check; name: string; sub: string}[] = [
-  {key: 'macroF1', name: 'Macro-F1', sub: 'Per field. Every value counts the same, so rare values matter.'},
-  {key: 'valueF1', name: 'Value F1', sub: 'Per value. No single value may fall below this.'},
-  {key: 'precision', name: 'Precision', sub: "Per value. How often the model's pick is right."},
-  {key: 'recall', name: 'Recall', sub: 'Per value. How many of the true cases the model finds.'},
+/** The checks of the pass rule (names are catalog keys). Names only, no explanation line (2026-11-16). */
+const CHECKS: {key: Check; name: string}[] = [
+  {key: 'macroF1', name: 'Macro-F1'},
+  {key: 'valueF1', name: 'Value F1'},
+  {key: 'precision', name: 'Precision'},
+  {key: 'recall', name: 'Recall'},
 ];
 
 function SettingsDialog({state, first, onDone}: {state: ProjectState; first: boolean; onDone: (saved: boolean) => void}) {
@@ -101,10 +101,7 @@ function SettingsDialog({state, first, onDone}: {state: ProjectState; first: boo
     return {
       key: c.key,
       cells: [
-        <span key="n">
-          <b>{t(c.name)}</b>
-          <span className="set-sub">{t(c.sub)}</span>
-        </span>,
+        <b key="n">{t(c.name)}</b>,
         <Switch key="s" label={t('{check} on', {check: t(c.name)})} on={isOn} locked={!custom || c.key === 'macroF1'} onChange={v => setOn({...on, [c.key]: v})} />,
         <input
           key="v"
@@ -124,10 +121,7 @@ function SettingsDialog({state, first, onDone}: {state: ProjectState; first: boo
   const invalid = {
     key: 'invalid',
     cells: [
-      <span key="n">
-        <b>{t('Invalid outputs')}</b>
-        <span className="set-sub">{t('Answers the site could not read as labels. Always checked.')}</span>
-      </span>,
+      <b key="n">{t('Invalid outputs')}</b>,
       <Switch key="s" label={t('{check} on', {check: t('Invalid outputs')})} on locked />,
       <input key="v" className="input sm" style={{width: 72, textAlign: 'center', padding: '0 8px'}} aria-label={t('Invalid outputs limit')} disabled value={cap} readOnly />,
     ],

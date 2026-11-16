@@ -101,8 +101,7 @@ textarea.input.grow-box:not(.sm) { min-height: 36px; padding: 7px 12px; }
 .full-prompt { margin: 0; max-height: 56vh; overflow: auto; padding: 16px; border: 1px solid var(--border); border-radius: var(--r-el); background: var(--bg-muted); font-family: var(--mono); font-size: 13px; line-height: 22px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .unmapped { margin: 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--r-el); background: var(--bg-muted); font-family: var(--mono); font-size: 13px; line-height: 20px; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* Project Settings dialog (spec 2.3): each check's meaning is a plain line under its name. */
-.set-sub { display: block; font-size: 12px; line-height: 16px; color: var(--text-3); font-weight: 400; white-space: normal; }
-.set-checks .tbl td { height: auto; padding-top: 8px; padding-bottom: 8px; }
+.set-checks .tbl td { height: 48px; border-bottom: 0; } /* no line between checks (2026-11-16) */
 .opt.tall { height: auto; padding: 10px 16px; align-items: flex-start; }
 .opt.tall .radio { margin-top: 2px; flex: none; }
 .dlg h3 { margin: 0; font-size: 14px; line-height: 20px; font-weight: 600; }

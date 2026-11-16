@@ -261,7 +261,9 @@ let current = null;
   if (await set.locator('select').count()) throw new Error('Project Settings still uses a native select');
   if (!(await set.locator('.set-sec-h').filter({hasText: 'Evaluation'}).getByRole('group', {name: 'Pass rule'}).count())) throw new Error('the Default/Custom switch is not beside the Evaluation heading');
   if ((await set.locator('section.set-sec').count()) !== 3) throw new Error('Project Settings does not have three sections');
-  if (!(await set.getByText('Per field. Every value counts the same, so rare values matter.').count())) throw new Error('a check has no plain subtitle');
+  // 2026-11-16: the checks show their names only, with no line between them.
+  if (await set.locator('.set-checks .set-sub').count()) throw new Error('a check still has an explanation line');
+  if ((await set.locator('.set-checks .tbl td').first().evaluate(el => getComputedStyle(el).borderBottomWidth)) !== '0px') throw new Error('the checks still have lines between them');
   if (await set.locator('.hov').count()) throw new Error('Project Settings still uses hover text');
   await shot(page, '3b-project-settings');
   const passRule = set.getByRole('group', {name: 'Pass rule'});

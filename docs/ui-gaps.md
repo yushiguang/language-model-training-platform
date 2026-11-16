@@ -81,7 +81,7 @@ Known limits of the language switch:
 | Rule Groups | A card per group: a title box, the rules in a growing box, Move up / Move down / Remove; Add rule group below; against a base version, New and Changed badges, word marks under the title and the rules, and removed groups listed struck through | Whether to drag to reorder instead of the arrows |
 | Field editor | The Tie-break rules box is gone | — |
 | View full prompt | The compiled text in XML-style sections | — |
-| Project Settings | Name, Evaluation and Labeling model, each set off by a line and space; Default / Custom switch beside the Evaluation heading; no intro line, no model description | — |
+| Project Settings | Name, Evaluation and Labeling model, each set off by a line and space; Default / Custom switch beside the Evaluation heading; no intro line, no model description; the checks by name only, with no explanation line and no line between them | — |
 | Model dropdown | The site's own list under the button (rounded, like the avatar menu), keyboard-driven | Use it for every dropdown added later |
 | Avatar and project logo | Letters in bold (700) and a touch larger (14 px) | — |
 | Sign-in | The usual spinner until the user is known; "We could not confirm who you are" with Retry when nobody is signed in; Sign out at the bottom of the avatar menu when the platform supports it | The sign-in error page is not on the canvas |

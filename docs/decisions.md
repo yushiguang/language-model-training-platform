@@ -10,7 +10,7 @@ where it matters, why. The code follows these; change a line here when a decisio
 - **The prompt reads in authoring order**: Persona & Task, Input Features, Output Labels & Definitions, Rule Groups.
 - **Rules live in groups the user names**, replacing the per-field tie-break box and the one general-rules box, because real prompts organise their rules by topic, with paragraphs and nested bullets. An import keeps each rules section as its own group.
 - **The compiled prompt uses XML-style sections**, for clear boundaries and so that item text cannot pass for an instruction.
-- **Project Settings is three sections set apart by a line**; Default/Custom is a switch beside the Evaluation heading; no intro line and no model description; the Model list is the site's own dropdown.
+- **Project Settings is three sections set apart by a line**; Default/Custom is a switch beside the Evaluation heading; no intro line and no model description; the checks show their names only, with no explanation line and no line between rows; the Model list is the site's own dropdown.
 
 ## 2026-11-14 (1.1.0: creator, languages, problem reports)
 
