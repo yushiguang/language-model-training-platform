@@ -97,6 +97,12 @@ Sprint follows [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MINOR.PA
   vertical value cards in `Output Labels & Definitions`, custom `<Select>` on `Compare with`,
   `Shift+Enter` chat send shortcut, and full agent routing / multi-line definition / multimodal
   feature prompt alignment.
+- [`specs/2026-11-16-workflow-resilience-and-multiselect-spec.md`](specs/2026-11-16-workflow-resilience-and-multiselect-spec.md):
+  **Workflow resilience, single-label multi-select, and rebuild guard**: restore `single | multi`
+  selection on the project's single label, keep sampling progress mounted through persistence with
+  per-example failure skipping, add `ExampleMedia.externalUrl` & iframe `referrerPolicy="origin"`,
+  gate auto-scoring on `gold` approval, pass dry-run ties through to full evaluation, and advise
+  `Rebuild scores` before editing or optimising when scores are out of date.
 
 ## Keeping the portfolio in shape
 
