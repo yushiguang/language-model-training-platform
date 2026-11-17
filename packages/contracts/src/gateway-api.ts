@@ -1,4 +1,4 @@
-import type {AgentModel, ModelMessage, ModelTier} from './platform-api.ts';
+import type {AgentModel, ModelCapabilities, ModelMessage, ModelTier, ReasoningEffort, ResponseFormat} from './platform-api.ts';
 import type {EndpointId, EndpointInfo} from './types.ts';
 
 /**
@@ -10,7 +10,6 @@ import type {EndpointId, EndpointInfo} from './types.ts';
  */
 
 export type EndpointPurpose = 'chat' | 'labeling';
-export type {ModelTier};
 
 export interface EndpointConfig {
   /** Registry id of the endpoint (one registration per endpoint across all tenants). */
@@ -31,6 +30,8 @@ export interface EndpointConfig {
   priceIn: number;
   priceOut: number;
   supportsTemperature: boolean;
+  /** Chat endpoints: the model's capabilities, from its registry entry. */
+  capabilities?: ModelCapabilities;
   active: boolean;
   /** True while QPM/TPM are made-up defaults rather than registered values. */
   assumed: boolean;
@@ -38,7 +39,10 @@ export interface EndpointConfig {
 
 export interface CallUsage {
   inputTokens: number;
+  /** Reasoning tokens not included. */
   outputTokens: number;
+  /** Tokens the model spent reasoning (billed at the output price); 0 when none. */
+  reasoningTokens?: number;
   costUsd: number;
 }
 
@@ -49,6 +53,12 @@ export interface LabelCallRequest {
   temperature: number | null;
   /** Opaque trace id (the example's external id). Never sent to the model. */
   traceId?: string;
+  /** How hard a reasoning model thinks; left out, the model's default. */
+  reasoningEffort?: ReasoningEffort;
+  /** What shape the answer must take; left out, plain text. */
+  responseFormat?: ResponseFormat;
+  /** The most one try may take, in ms; a try that takes longer is retried as timed out. */
+  timeoutMs?: number;
   /**
    * Lets the caller stop the call with `cancel(requestId)`. Several calls may share one id (a
    * labeling run): a cancel stops them all. No signal crosses the contract (spec 4.1).

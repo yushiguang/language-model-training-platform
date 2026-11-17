@@ -41,7 +41,34 @@ const abortableSleep = (ms: number, signal?: AbortSignal) =>
 const textOfMessages = (messages: ModelMessage[]) =>
   messages.flatMap(m => (typeof m.content === 'string' ? [{type: 'text' as const, text: m.content}] : m.content.map(p => (p.type === 'text' ? {type: 'text' as const, text: p.text} : {type: 'image' as const}))));
 
-const costOf = (ep: EndpointConfig, inputTokens: number, outputTokens: number) => (inputTokens * ep.priceIn + outputTokens * ep.priceOut) / 1e6;
+/** Reasoning tokens are billed at the output price. */
+const costOf = (ep: EndpointConfig, inputTokens: number, outputTokens: number, reasoningTokens = 0) => (inputTokens * ep.priceIn + (outputTokens + reasoningTokens) * ep.priceOut) / 1e6;
+
+/**
+ * One try with its own signal: aborted with the caller's, or after `timeoutMs`. A try that runs
+ * out of time rejects as `timeout` (retried like a busy reply), even when the model service
+ * ignores the signal.
+ */
+async function withTimeout<T>(ep: EndpointConfig, timeoutMs: number | undefined, outer: AbortSignal | undefined, fn: (signal?: AbortSignal) => Promise<T>): Promise<T> {
+  if (!timeoutMs) return fn(outer);
+  const ctrl = new AbortController();
+  const onAbort = () => ctrl.abort(outer?.reason);
+  if (outer?.aborted) onAbort();
+  outer?.addEventListener('abort', onAbort, {once: true});
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new LlmCallError('timeout', `${ep.model} took longer than ${timeoutMs} ms.`));
+      ctrl.abort();
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([fn(ctrl.signal), timedOut]);
+  } finally {
+    clearTimeout(timer);
+    outer?.removeEventListener('abort', onAbort);
+  }
+}
 
 /**
  * The llm-gateway: every model call in the platform goes through here.
@@ -106,7 +133,7 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
   };
 
   /** Runs one call under the endpoint's limiter, retrying busy or broken replies. */
-  async function call<T>(ep: EndpointConfig, estimate: number, signal: AbortSignal | undefined, fn: () => Promise<{value: T; tokens?: number}>): Promise<{value: T; attempts: number}> {
+  async function call<T>(ep: EndpointConfig, estimate: number, signal: AbortSignal | undefined, fn: (signal?: AbortSignal) => Promise<{value: T; tokens?: number}>, timeoutMs?: number): Promise<{value: T; attempts: number}> {
     const purpose = ep.purpose;
     const started = Date.now();
     const done = (outcome: string) => {
@@ -133,7 +160,7 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
       sample(ep, limiter);
       const sent = Date.now();
       try {
-        const {value, tokens} = await fn();
+        const {value, tokens} = await withTimeout(ep, timeoutMs, signal, fn);
         permit.release(tokens);
         tm.counter('sprint_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose, outcome: 'ok'});
         tm.histogram('sprint_llm_request_duration_seconds', (Date.now() - sent) / 1000, {endpoint: ep.id, model: ep.model, purpose});
@@ -178,7 +205,19 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
     tm.counter('sprint_llm_tokens_total', {...l, kind: 'input'}, input);
     tm.counter('sprint_llm_tokens_total', {...l, kind: 'output'}, output);
     if (reasoning) tm.counter('sprint_llm_tokens_total', {...l, kind: 'reasoning'}, reasoning);
-    tm.counter('sprint_llm_cost_usd_total', l, costOf(ep, input, output));
+    tm.counter('sprint_llm_cost_usd_total', l, costOf(ep, input, output, reasoning));
+  };
+
+  /**
+   * The options as the chat endpoint's model can take them: a reasoning effort it does not list is
+   * dropped; native tools on a model without them are refused.
+   */
+  const fitOptions = (ep: EndpointConfig, o: AgentChatOptions): AgentChatOptions => {
+    const caps = ep.capabilities;
+    if (o.tools?.length && caps && !caps.tools) throw new LlmCallError('rejected', `${ep.model} cannot call tools natively.`);
+    const {reasoningEffort, ...rest} = o;
+    const effort = reasoningEffort && (!caps || caps.reasoningEffort.includes(reasoningEffort)) ? {reasoningEffort} : {};
+    return {...rest, ...effort, model: ep.model};
   };
 
   const chatEndpointFor = (model?: string): EndpointConfig => {
@@ -193,12 +232,20 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
 
   async function complete(messages: ModelMessage[], o: AgentChatOptions = {}): Promise<AgentCompletionResult> {
     const ep = chatEndpointFor(o.model);
+    const fitted = fitOptions(ep, o);
     const estimate = estimateTokens(textOfMessages(messages)) + (o.maxOutputTokens ?? opts.defaultChatOutputTokens ?? 2000);
-    const {value} = await call(ep, estimate, o.signal, async () => {
-      const r = await platform.agent.complete(messages, {...o, model: ep.model});
-      if (r.usage) usage(ep, r.usage.inputTokens, r.usage.outputTokens);
-      return {value: r, tokens: r.usage ? r.usage.inputTokens + r.usage.outputTokens : undefined};
-    });
+    const {value} = await call(
+      ep,
+      estimate,
+      o.signal,
+      async signal => {
+        const r = await platform.agent.complete(messages, {...fitted, signal});
+        const u = r.usage;
+        if (u) usage(ep, u.inputTokens, u.outputTokens, u.reasoningTokens ?? 0);
+        return {value: r, tokens: u ? u.inputTokens + u.outputTokens + (u.reasoningTokens ?? 0) : undefined};
+      },
+      o.timeoutMs,
+    );
     return value;
   }
 
@@ -212,6 +259,8 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
       // back it is not, so nothing is shown twice. The slot's tokens are corrected to what the
       // stream returned (about 4 characters a token; streams carry no usage).
       const ep = chatEndpointFor(o.model);
+      // Native tools are for `complete`; a stream carries text and thinking only.
+      const fitted = fitOptions(ep, {...o, tools: undefined});
       const limiter = limiterFor(ep);
       const estimate = estimateTokens(textOfMessages(messages)) + (o.maxOutputTokens ?? opts.defaultChatOutputTokens ?? 2000);
       const input = estimateTokens(textOfMessages(messages));
@@ -220,7 +269,7 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
         let chars = 0;
         let started = false;
         try {
-          for await (const chunk of platform.agent.chatStream(messages, {...o, model: ep.model})) {
+          for await (const chunk of platform.agent.chatStream(messages, fitted)) {
             started = true;
             if (chunk.type === 'delta') chars += chunk.text.length;
             if (chunk.type === 'thinking') chars += chunk.thinking.length;
@@ -258,25 +307,36 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
       const ep = registry.find(e => e.purpose === 'labeling' && e.slot === req.slot);
       if (!ep) throw new LlmCallError('rejected', `No labeling endpoint is registered for Model ${req.slot}.`);
       const estimate = estimateTokens(textOfMessages(req.messages)) + req.maxOutputTokens;
-      const {value, attempts} = await stoppable(req.requestId, signal =>
-        call(ep, estimate, signal, async () => {
-          const r = await platform.models.chat({
-            endpoint: req.slot,
-            messages: req.messages,
-            maxOutputTokens: req.maxOutputTokens,
-            temperature: req.temperature,
-            traceId: req.traceId,
-            signal,
-          });
-          usage(ep, r.inputTokens, r.outputTokens);
-          return {value: r, tokens: r.inputTokens + r.outputTokens};
-        }),
+      const {value, attempts} = await stoppable(req.requestId, outer =>
+        call(
+          ep,
+          estimate,
+          outer,
+          async signal => {
+            const r = await platform.models.chat({
+              endpoint: req.slot,
+              messages: req.messages,
+              maxOutputTokens: req.maxOutputTokens,
+              temperature: req.temperature,
+              traceId: req.traceId,
+              ...(req.reasoningEffort ? {reasoningEffort: req.reasoningEffort} : {}),
+              ...(req.responseFormat ? {responseFormat: req.responseFormat} : {}),
+              ...(req.timeoutMs ? {timeoutMs: req.timeoutMs} : {}),
+              signal,
+            });
+            usage(ep, r.inputTokens, r.outputTokens, r.reasoningTokens ?? 0);
+            return {value: r, tokens: r.inputTokens + r.outputTokens + (r.reasoningTokens ?? 0)};
+          },
+          req.timeoutMs,
+        ),
       );
+      const reasoningTokens = value.reasoningTokens ?? 0;
       return {
         text: value.text,
         inputTokens: value.inputTokens,
         outputTokens: value.outputTokens,
-        costUsd: costOf(ep, value.inputTokens, value.outputTokens),
+        reasoningTokens,
+        costUsd: costOf(ep, value.inputTokens, value.outputTokens, reasoningTokens),
         endpointId: ep.id,
         attempts,
       };

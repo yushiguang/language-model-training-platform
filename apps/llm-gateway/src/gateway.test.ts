@@ -251,3 +251,48 @@ test('model registry (spec 5): opaque ids; no model, an unknown or an inactive o
   assert.deepEqual(allowed.slot, ['labeling-main']);
   assert.ok(allowed.model.includes('m-think-07'));
 });
+
+test('request fields (spec 5): reasoning tokens count toward cost and TPM; a try past its timeout is retried as timed out', async () => {
+  const seen: ChatRequest[] = [];
+  let tries = 0;
+  const gw = createGateway(
+    fakePlatform(async req => {
+      seen.push(req);
+      tries++;
+      // The first try never answers and ignores its signal: the gateway stops waiting anyway.
+      if (tries === 1) return new Promise<ChatResult>(() => {});
+      return {text: 'ok', inputTokens: 100, outputTokens: 50, reasoningTokens: 200};
+    }),
+    {sleep: noWait},
+  );
+  const r = await gw.label({slot: 'B', messages: msg, maxOutputTokens: 10, temperature: null, reasoningEffort: 'low', responseFormat: {type: 'json_object'}, timeoutMs: 20});
+  assert.equal(r.attempts, 2);
+  assert.equal(r.reasoningTokens, 200);
+  // Endpoint B: $0.5 in, $2 out per million; reasoning at the output price.
+  assert.ok(Math.abs(r.costUsd - (100 * 0.5 + 250 * 2) / 1e6) < 1e-12);
+  assert.equal(seen[1].reasoningEffort, 'low');
+  assert.deepEqual(seen[1].responseFormat, {type: 'json_object'});
+  assert.equal(seen[1].timeoutMs, 20);
+});
+
+test('request fields (spec 5): a reasoning effort the model does not list is dropped; native tools on a model without them are refused', async () => {
+  const asked: Parameters<Platform['agent']['complete']>[1][] = [];
+  const p = fakePlatform(async () => ({text: '', inputTokens: 0, outputTokens: 0}));
+  p.agent.models = () => [
+    {...STAND_IN_MODELS[0], id: 'thinker', capabilities: {...STAND_IN_MODELS[0].capabilities, reasoningEffort: ['high'], tools: true}},
+    {...STAND_IN_MODELS[2], id: 'plain', tier: 'fast', capabilities: {...STAND_IN_MODELS[2].capabilities, reasoningEffort: [], tools: false}},
+  ];
+  p.agent.complete = async (_m, o) => {
+    asked.push(o);
+    return {text: 'done', model: String(o?.model), usage: {inputTokens: 1, outputTokens: 1, reasoningTokens: 3}, toolCalls: o?.tools ? [{id: 'c1', name: o.tools[0].name, arguments: '{}'}] : undefined};
+  };
+  const agent = createGateway(p, {sleep: noWait}).agentModel();
+  await agent.complete(msg, {model: 'thinker', reasoningEffort: 'high'});
+  await agent.complete(msg, {model: 'plain', reasoningEffort: 'high'});
+  assert.equal(asked[0]?.reasoningEffort, 'high');
+  assert.equal(asked[1]?.reasoningEffort, undefined);
+  const tool = {name: 'get_report', description: 'a report', parameters: {type: 'object', properties: {}}};
+  const withTools = await agent.complete(msg, {model: 'thinker', tools: [tool]});
+  assert.deepEqual(withTools.toolCalls, [{id: 'c1', name: 'get_report', arguments: '{}'}]);
+  await assert.rejects(agent.complete(msg, {model: 'plain', tools: [tool]}), (e: Error) => e instanceof LlmCallError && e.kind === 'rejected');
+});

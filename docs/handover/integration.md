@@ -85,6 +85,13 @@ timeout errors. It needs one `EndpointConfig` per registered endpoint:
   the registry uses), and `purpose: 'chat'` per agent model (`model` = its registry id). Chat and
   labeling never share an endpoint or a quota. The gateway registers these ids as the allowed
   values of the `endpoint`, `model` and `slot` telemetry labels at startup.
+- Requests may carry `reasoningEffort`, `responseFormat` (text, one JSON object, or JSON to a
+  schema) and `timeoutMs`; agent calls may also carry native `tools` (answers then hold
+  `toolCalls`). Pass them on to the model service. Return `reasoningTokens` apart from
+  `outputTokens`: they count toward TPM and are billed at the output price, so cost is never
+  estimated from characters. The gateway drops a reasoning effort the model's registry entry does
+  not list, refuses tools on a model without them, and retries a try that runs past `timeoutMs` as
+  timed out even if the service ignores the abort.
 - `qpm`, `tpm`: the registered limits. TPM counts input, output and reasoning tokens.
 - `maxConcurrency`: our own cap on calls in flight (start with 8 for reasoning models).
 - `assumed: false`.

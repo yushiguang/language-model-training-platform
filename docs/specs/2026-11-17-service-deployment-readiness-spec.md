@@ -380,6 +380,9 @@ Each item is its own `Contract change:` pull request.
    and `AVAILABLE_LLM_MODELS` removed; `LlmModelInfo` is a registry entry (opaque id,
    capabilities, prices, `active`) from `AgentModel.models()`, with `STAND_IN_MODELS` in
    `@sprint/platform`; `EndpointId` is `string`; the `slot` label values come from the gateway.
+   **Request fields built** on branch `feat/model-request-fields` (additive): `reasoningEffort`,
+   `responseFormat`, `timeoutMs` (enforced per try by the gateway), native `tools` with
+   `toolCalls`, and `reasoningTokens` in results, cost and TPM.
 5. Section 6 fixtures and tool context: golden agent fixtures published as data, `AgentToolCall`
    carrying its context. Proof: the reference implementation passes them; they are the
    acceptance bar for any reimplementation.

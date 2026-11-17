@@ -256,6 +256,32 @@ export type LlmStreamChunk =
   | {type: 'done'; createdAt: string}
   | {type: 'error'; message: string};
 
+/**
+ * A tool the model may call natively (spec 5), as an alternative to the JSON-in-the-answer tool
+ * protocol the agents use today. Only for models whose registry entry says `capabilities.tools`.
+ */
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  /** The arguments, as a JSON Schema object. */
+  parameters: Record<string, unknown>;
+}
+
+/** A native tool call the model asked for. */
+export interface ToolCall {
+  /** The model's id for the call, to send its result back under. */
+  id: string;
+  name: string;
+  /** The arguments as the model wrote them (JSON text); the caller parses and checks them. */
+  arguments: string;
+}
+
+/**
+ * What shape the answer must take: plain text, one JSON object, or JSON matching a schema.
+ * A model service that cannot hold the answer to a schema may treat `json_schema` as `json_object`.
+ */
+export type ResponseFormat = {type: 'text'} | {type: 'json_object'} | {type: 'json_schema'; name: string; schema: Record<string, unknown>};
+
 export interface ChatRequest {
   /** The labeling endpoint's id, as `LabelingModels.endpoints()` lists it. */
   endpoint: EndpointId;
@@ -264,6 +290,15 @@ export interface ChatRequest {
   temperature: number | null;
   /** Opaque trace id (the example id). Real adapters may log it; they must not send it to the model. */
   traceId?: string;
+  /** How hard a reasoning model thinks; left out, the model's default. */
+  reasoningEffort?: ReasoningEffort;
+  /** What shape the answer must take; left out, plain text. */
+  responseFormat?: ResponseFormat;
+  /**
+   * The most this call may take, in ms. The adapter may pass it on (an HTTP timeout); the gateway
+   * also stops waiting after it and counts the call as timed out (retried like a busy reply).
+   */
+  timeoutMs?: number;
   signal?: AbortSignal;
 }
 
@@ -271,7 +306,10 @@ export interface ChatResult {
   text: string;
   thinking?: string;
   inputTokens: number;
+  /** Tokens of the answer, reasoning tokens not included. */
   outputTokens: number;
+  /** Tokens the model spent reasoning, billed at the output price. Left out when none. */
+  reasoningTokens?: number;
 }
 
 export interface LabelingModels {
@@ -288,10 +326,24 @@ export interface AgentChatOptions {
    * none, falls back to an active reasoning model, then to any active model (the gateway decides).
    */
   model?: string;
-  /** When true, instructs the model to respond with a single valid JSON object. */
+  /** When true, instructs the model to respond with a single valid JSON object (`responseFormat` json_object). */
   json?: boolean;
+  /** What shape the answer must take; wins over `json`. */
+  responseFormat?: ResponseFormat;
   /** Optional cap on output tokens. */
   maxOutputTokens?: number;
+  /**
+   * How hard a reasoning model thinks. Dropped when the model's registry entry does not list the
+   * level, so a preset never fails because its model changed.
+   */
+  reasoningEffort?: ReasoningEffort;
+  /**
+   * Native tools (`complete` only). The answer's `toolCalls` holds the calls the model asked for.
+   * Refused (`rejected`) on a model whose registry entry has no `capabilities.tools`.
+   */
+  tools?: ToolDefinition[];
+  /** The most this call may take, in ms; see `ChatRequest.timeoutMs`. A stream passes it to the model service only. */
+  timeoutMs?: number;
   signal?: AbortSignal;
 }
 
@@ -304,8 +356,13 @@ export interface AgentCompletionResult {
   stopReason?: string;
   usage?: {
     inputTokens: number;
+    /** Reasoning tokens not included. */
     outputTokens: number;
+    /** Tokens the model spent reasoning, billed at the output price. */
+    reasoningTokens?: number;
   };
+  /** The native tool calls the model asked for, when `tools` were given. */
+  toolCalls?: ToolCall[];
 }
 
 export interface AgentModel {

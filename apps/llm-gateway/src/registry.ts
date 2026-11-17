@@ -50,6 +50,7 @@ export function buildRegistry(platform: Pick<Platform, 'models' | 'agent' | 'end
       priceIn: m.priceIn,
       priceOut: m.priceOut,
       supportsTemperature: m.capabilities.temperature,
+      capabilities: m.capabilities,
       active: m.active && l.qpm > 0,
       assumed: true,
     });

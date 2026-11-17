@@ -239,7 +239,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           invalidReason: parsed.reason,
           ...(parsed.note ? {reason: parsed.note} : {}),
           costUsd: res.costUsd,
-          tokens: res.inputTokens + res.outputTokens,
+          tokens: res.inputTokens + res.outputTokens + (res.reasoningTokens ?? 0),
           createdAt: now(),
         };
         await repo.insert(PREDICTIONS, pred);
