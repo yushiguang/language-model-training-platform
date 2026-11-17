@@ -73,7 +73,10 @@ async function answer(req: ChatRequest): Promise<ChatResult> {
       out[key] = max > 1 && second && r() > p ? [pick, second] : [pick];
     }
   }
-  const json = r() < 0.006 ? JSON.stringify(out).slice(0, -8) : JSON.stringify(out);
+  // A broken reply is not tied to the example: a version that reads differently draws it afresh, so
+  // the same few examples are not invalid in every version (which no prompt could fix).
+  const broken = rng(`${req.endpoint}|${req.traceId}|${text.length}`)() < 0.006;
+  const json = broken ? JSON.stringify(out).slice(0, -8) : JSON.stringify(out);
   const inputTokens = Math.round(text.length / 4) + imageCount(req.messages) * 258;
   return {text: json, inputTokens, outputTokens: Math.round(json.length / 4)};
 }
