@@ -48,6 +48,8 @@ docs (`docs/architecture.md`, `docs/design/`, `docs/decisions.md`) in the pull r
 - **Check before asking for review:** `npm run check` and `npm run build`; for changes to labeling,
   the workflow, the bff or pages, also the browser check (`node apps/web/scripts/e2e-check.cjs`
   against a served build); for changes to what a package exports, `npm run check:packages`.
+- **Keep the roadmap current.** `ROADMAP.md` lists what is in progress and what comes next;
+  update it in the pull request that starts, finishes or reorders an item.
 - **Keep the docs true.** Update the living docs in the same pull request when behaviour,
   architecture or a product rule changes. Record why in `docs/decisions.md`.
 - The rules for the code itself (boundaries, languages, telemetry) are in `AGENTS.md`.
