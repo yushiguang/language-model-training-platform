@@ -764,6 +764,31 @@ export interface ProjectState {
    * within the caps (from `auto_spend` audit records).
    */
   otherAutoSpendUsd?: number;
+  /**
+   * The project's revision when this state was read (review G9): read before anything else, so a
+   * write during the read gives a newer one. See `ProjectStatus.revision`.
+   */
+  revision?: string;
+}
+
+/**
+ * The light read of a project (review G9): what changes while work runs, without the dataset,
+ * gold labels, versions or reports. A client on a server polls it and reads the whole
+ * `ProjectState` again only when `revision` is not the one it holds.
+ */
+export interface ProjectStatus {
+  projectId: string;
+  /**
+   * Changes with every saved change to the project (dataset, gold labels, versions, reports, runs,
+   * chat). An opaque value: compare it for equality only.
+   */
+  revision: string;
+  /** Sampling or upload in progress, as on the Dataset page. */
+  samplingTask: SamplingTask | null;
+  /** Eval and optimiser labeling, with their counts. */
+  runs: LabelingRun[];
+  /** Optimiser runs, without their rounds. */
+  optimisation: Omit<OptimisationRun, 'history'>[];
 }
 
 

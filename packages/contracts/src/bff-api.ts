@@ -20,6 +20,7 @@ import type {
   Project,
   MismatchList,
   ProjectState,
+  ProjectStatus,
   PromptVersion,
   RemovalReason,
   Schema,
@@ -225,6 +226,11 @@ export interface BffContract {
   createProject(name: string): Promise<Project>;
   getProject(id: string): Promise<Project | null>;
   loadProjectState(projectId: string): Promise<ProjectState | null>;
+  /**
+   * The light read (review G9): the project's revision and its running work, without examples or
+   * reports. Null for a project that does not exist (or is being deleted).
+   */
+  projectStatus(projectId: string): Promise<ProjectStatus | null>;
   approveNode(projectId: string, node: NodeId): Promise<void>;
   /** One check of what should be running in a project (keyed starts, safe to call often). */
   tick(req: TickRequest): Promise<void>;

@@ -1,4 +1,4 @@
-import {DocFieldValue, type GateApproval, type Job, type JobOutcome, type LabelComment, type NodeId, type Project, type ProjectState, type WorkflowFacts} from '@sprint/contracts';
+import {DocFieldValue, type GateApproval, type Job, type JobOutcome, type LabelComment, type NodeId, type Project, type ProjectState, type ProjectStatus, type WorkflowFacts} from '@sprint/contracts';
 import {asAnswerOrNull, compareVersions, contextIdFor, gate, judge, newId, scoresUpdating, systemConfig} from '@sprint/domain';
 import {now, type Scope} from './app.ts';
 import {getSamplingTask} from './dataset.ts';
@@ -25,7 +25,7 @@ export async function createProject(w: Scope, name: string): Promise<Project> {
   await catalog.audit(p.id, u.name, 'project.create', {name});
   w.tm.setContext({projectId: p.id});
   w.tm.event('project_created', {});
-  w.emitChange();
+  w.emitChange(p.id);
   return p;
 }
 
@@ -45,7 +45,7 @@ export async function renameProject(w: Scope, projectId: string, name: string): 
   await catalog.patch('projects', projectId, {name: next});
   await catalog.audit(projectId, (await user()).name, 'project.rename', {from: p.name, to: next});
   w.tm.event('project_renamed', {});
-  w.emitChange();
+  w.emitChange(projectId);
   return next;
 }
 
@@ -56,6 +56,8 @@ export async function getProject(w: Scope, id: string): Promise<Project | null> 
 
 export async function loadProjectState(w: Scope, projectId: string): Promise<ProjectState | null> {
   const {catalog, labeling, gateway} = w;
+  // First: a write during this read gives a newer revision, so the client reads again.
+  const revision = await w.revisionOf(projectId);
   const project = await getProject(w, projectId);
   if (!project) return null;
   const [setup, snapshot] = await Promise.all([
@@ -121,8 +123,30 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
     removals,
     comments,
     otherAutoSpendUsd: autoSpend.reduce((n, a) => n + Number((a.data as {costUsd?: number}).costUsd ?? 0), 0),
+    revision,
   };
   return {...out, scoresUpdating: scoresUpdating(out, w.local.cannotBuild)};
+}
+
+/**
+ * The light read (review G9): the revision and the running work only, so a client polls this and
+ * reads the whole state again when the revision moved. Never reads examples, gold labels or reports.
+ */
+export async function projectStatus(w: Scope, projectId: string): Promise<ProjectStatus | null> {
+  const revision = await w.revisionOf(projectId);
+  if (!(await getProject(w, projectId))) return null;
+  const [tasks, optimisation, samplingTask] = await Promise.all([
+    w.labeling.listTasks(projectId),
+    w.catalog.find('optimisation_runs', {projectId}, 'startedAt desc'),
+    getSamplingTask(w, projectId),
+  ]);
+  return {
+    projectId,
+    revision,
+    samplingTask,
+    runs: tasks.filter(x => x.purpose === 'eval' || x.purpose === 'optimiser').map(runView),
+    optimisation: optimisation.map(({history: _history, ...o}) => o),
+  };
 }
 
 /** Next step: checks the gate, then records who approved it. */
@@ -150,7 +174,7 @@ export async function approveNode(w: Scope, projectId: string, node: NodeId): Pr
   if (project && node === 'prompt') {
     w.tm.event('project_finished', {minutes_since_created: Math.round((Date.now() - Date.parse(project.createdAt)) / 60000), total_cost_usd: Number(state.runs.reduce((n, r) => n + r.costUsd, 0).toFixed(4)), versions: state.versions.length, gold_labels: Object.keys(state.gold).length});
   }
-  w.emitChange();
+  w.emitChange(projectId);
 }
 
 
@@ -167,7 +191,7 @@ export async function deleteProject(w: Scope, projectId: string): Promise<void> 
   await catalog.audit(null, (await user()).name, 'project.deleted', {projectId});
   w.tm.event('project_deleted', {versions: state.versions.length, examples: state.examples.length, gold_labels: Object.keys(state.gold).length});
   await w.jobs.enqueue(w.ctx, {kind: 'project.delete', projectId, args: {}, idempotencyKey: `delete:${projectId}`});
-  w.emitChange();
+  w.emitChange(projectId);
 }
 
 /**
@@ -181,6 +205,6 @@ export async function runDelete(w: Scope, job: Job): Promise<JobOutcome> {
   await w.optimiser?.deleteProject(projectId);
   await w.labeling.deleteProject(projectId);
   await w.catalog.deleteProject(projectId);
-  w.emitChange();
+  w.emitChange(projectId);
   return {state: 'done'};
 }

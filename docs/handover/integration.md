@@ -230,6 +230,11 @@ Background work is jobs (`docs/architecture.md`, "Background work is jobs"). A s
 - runs a cron job that calls `jobs.sweep()` (expired leases back to the queue) and
   `workflow.sweep()` (due work for every project), as the pages' tick does in the browser.
 
+A browser talking to a server polls `projectStatus(projectId)` (no examples or reports in it) and
+calls `loadProjectState` again only when its `revision` is not the one it holds, or listens on the
+`changes` event where the server streams it. Revisions live in `Platform.sharedState`, so it must
+be shared by every bff and worker unit.
+
 Until the agent service (spec 6) lands, an Ask AI turn's progress stays with the instance that
 started it. See "Known limits" in `docs/architecture.md`.
 

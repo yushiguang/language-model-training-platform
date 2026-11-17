@@ -57,7 +57,7 @@ export async function balanceHalves(w: Scope, projectId: string): Promise<number
   if (moved.length) {
     await catalog.patchMany('examples', moved.map(e => ({id: e.id, patch: {optimiserHalf: halves[e.id]}})));
     await catalog.audit(projectId, 'system', 'dataset.halves', {moved: moved.length});
-    w.emitChange();
+    w.emitChange(projectId);
   }
   w.tm.event('eval_halves_balanced', {moved: moved.length, locked: false});
   return moved.length;
@@ -128,7 +128,7 @@ export async function appendExamples(w: Scope, projectId: string, raws: RawExamp
   const notSaved = fresh.length - saved.length;
   await catalog.audit(projectId, (await user()).name, 'dataset.append', {source, added: saved.length, duplicates, ...(notSaved ? {notSaved} : {})});
   w.tm.event('dataset_appended', {source, added: saved.length, duplicates});
-  w.emitChange();
+  w.emitChange(projectId);
   return {added: saved.length, duplicates, notSaved};
 }
 
@@ -162,7 +162,7 @@ export async function removeExamples(w: Scope, projectId: string, exampleIds: st
   await catalog.patchMany('examples', targets.map(e => ({id: e.id, patch: {removed: true}})));
   await catalog.audit(projectId, who, 'dataset.remove', {reason, count: records.length, withGold: records.filter(r => r.gold).length});
   w.tm.event('dataset_examples_removed', {reason, count: records.length, with_gold: records.filter(r => r.gold).length});
-  w.emitChange();
+  w.emitChange(projectId);
   return records.length;
 }
 
@@ -176,7 +176,7 @@ export async function restoreExamples(w: Scope, projectId: string, removalIds: s
   await catalog.patchMany('examples', removals.map(r => ({id: r.exampleId, patch: {removed: false}})));
   await catalog.audit(projectId, (await user()).name, 'dataset.restore', {count: removals.length});
   w.tm.event('dataset_examples_restored', {count: removals.length});
-  w.emitChange();
+  w.emitChange(projectId);
 }
 
 /**
@@ -210,6 +210,6 @@ export async function addComment(w: Scope, projectId: string, exampleId: string,
   const c: LabelComment = {id: newId('lc'), projectId, exampleId, authorId: u.id, authorName: u.name, text: body, promptVersionId, createdAt: now()};
   await catalog.insert('label_comments', c);
   w.tm.event('label_comment_added', {where: promptVersionId ? 'mismatch' : 'eval', chars: body.length});
-  w.emitChange();
+  w.emitChange(projectId);
   return c;
 }

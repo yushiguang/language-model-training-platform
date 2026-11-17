@@ -159,7 +159,7 @@ export async function buildReport(w: Scope,
   await catalog.insert('eval_reports', report);
   // Rebuild scores (2026-11-12): the new report replaces the one for the same context.
   for (const old of existing) await catalog.patch('eval_reports', old.id, {archived: true});
-  w.emitChange();
+  w.emitChange(projectId);
   return report;
 }
 

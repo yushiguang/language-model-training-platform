@@ -71,6 +71,16 @@ Since 1.0.0 phase 1 every service contract is written so it maps one to one to a
   with an optional `idempotencyKey`: the same key never starts the same work twice.
 - Live updates are not methods: a client listens on an `EventStreamPort` (in-process the
   services' bus, over HTTP Server-Sent Events or polling).
+- **Revisions (review G9).** Every change to a project gives it a new revision, kept in shared
+  state so every replica sees it (`emitChange(projectId)`; labeling and the Optimiser report their
+  writes with the project). It is a fresh random id, not a count: shared state has no atomic
+  increment, so two replicas counting at once could write the same number and hide a change.
+  Writes to one project within 200 ms give one revision (a labeling run does not write it per
+  example); a read in the same instance writes a waiting one first. `ProjectState.revision` is read
+  before the rest of the state. `projectStatus(projectId)` is the light read a remote client polls:
+  the revision, sampling, labeling runs with their counts and Optimiser runs without their rounds,
+  never examples, gold labels or reports; it reads the whole state again only when the revision
+  moved.
 - `apps/bff/src/api.ts` (`createBffApi`) is the bff as its contract, and
   `apps/workflow/src/workflow.ts` (`createWorkflow`) the workflow as its own. Services inside the
   workflow still pass records to each other.

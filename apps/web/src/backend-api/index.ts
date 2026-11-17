@@ -45,6 +45,7 @@ export const {
   createProject,
   getProject,
   loadProjectState,
+  projectStatus,
   approveNode,
   tick,
   deleteProject,

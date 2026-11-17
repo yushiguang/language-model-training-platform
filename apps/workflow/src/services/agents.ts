@@ -82,7 +82,7 @@ export async function chatHistory(w: Scope, projectId: string): Promise<ChatMess
 async function post(w: Scope, projectId: string, m: Omit<ChatMessage, 'id' | 'projectId' | 'createdAt'>): Promise<ChatMessage> {
   const msg: ChatMessage = {id: newId('cm'), projectId, createdAt: now(), ...m};
   await w.catalog.insert('chat_messages', msg);
-  w.emitChange();
+  w.emitChange(projectId);
   return msg;
 }
 
@@ -252,7 +252,7 @@ export async function sendUserMessage(
       };
       await catalog.insert('agent_proposals', proposal);
       await postEvent(w, projectId, 'draft', proposal.agent, msg('put a draft on {page}', {page: newest ? 'Edit prompt' : 'Prompt Design'}), draftLink(page, newest?.id ?? null, baseVersionId));
-      w.emitChange();
+      w.emitChange(projectId);
       return proposal;
     }
     return null;
@@ -261,7 +261,7 @@ export async function sendUserMessage(
     await liveWrites;
     w.tm.counter('sprint_agent_turns_total', {agent: entry, page: pageId, outcome});
     w.tm.histogram('sprint_agent_turn_duration_seconds', (Date.now() - started) / 1000, {agent: entry});
-    w.emitChange();
+    w.emitChange(projectId);
   }
 }
 
@@ -314,7 +314,7 @@ export async function closeProposal(w: Scope, p: AgentProposal, state: 'approved
   if (state === 'discarded') await postEvent(w, p.projectId, 'discarded', 'user', msg('discarded the draft'));
   w.tm.counter('sprint_agent_proposals_total', {agent: p.agent, kind: 'prompt', outcome: state});
   w.tm.event(state === 'approved' ? 'prompt_proposal_approved' : 'prompt_proposal_discarded', state === 'approved' ? {agent: p.agent, edited_before_approve: false} : {agent: p.agent});
-  w.emitChange();
+  w.emitChange(p.projectId);
 }
 
 /**
@@ -375,6 +375,6 @@ export async function improveWithAi(w: Scope, projectId: string, versionId: stri
   } finally {
     await setLive(w, projectId, null);
     w.tm.counter('sprint_agent_turns_total', {agent: 'prompt_agent', page: 'prompt', outcome});
-    w.emitChange();
+    w.emitChange(projectId);
   }
 }

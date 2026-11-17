@@ -85,6 +85,7 @@ export function createBffApi(deps: BffDeps): BffContract {
     createProject: pass('createProject'),
     getProject: pass('getProject'),
     loadProjectState: pass('loadProjectState'),
+    projectStatus: pass('projectStatus'),
     approveNode: pass('approveNode'),
     deleteProject: pass('deleteProject'),
     renameProject: pass('renameProject'),

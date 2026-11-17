@@ -18,7 +18,7 @@ export async function postEvent(w: Scope, projectId: string, event: ChatEvent, a
   const line = msg(`{who} ${said.key}`, {...said.params, who: who(actor)});
   const m: ChatMessage = {id: newId('cm'), projectId, createdAt: now(), role: 'event', agent: null, event, text: msgText(line), msg: line, page: '', ...(link ? {link} : {})};
   await w.catalog.insert('chat_messages', m);
-  w.emitChange();
+  w.emitChange(projectId);
 }
 
 /** "<helper> joined to answer", as a line any language can show. */

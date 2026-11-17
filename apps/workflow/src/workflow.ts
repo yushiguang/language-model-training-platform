@@ -20,15 +20,18 @@ import {workflowExecutors} from './services/executors.ts';
  *
  * A factory with no module-level state: each `createWorkflow` is its own instance, and who acts
  * comes from the context of each call. Short-lived state every instance must see sits behind
- * `deps.sharedState`; what cannot be serialised (progress callbacks, a running sample's Stop)
- * stays with the instance until the job module (spec 3) and the agent service (spec 6) take it.
+ * `deps.sharedState`, and so do the projects' revisions (review G9); what cannot be serialised (a
+ * running turn's progress handlers) stays with the instance until the agent service (spec 6).
  */
 export interface Workflow {
   api: WorkflowContract;
   /** `changes` and `agent_live`, data-free: a listener reads again through the contract. */
   events: EventStreamPort;
-  /** Some record changed outside the workflow (labeling, the Optimiser): tells the listeners. */
-  changed(): void;
+  /**
+   * Some record changed outside the workflow (labeling, the Optimiser): tells the listeners and,
+   * with the project, gives it a new revision.
+   */
+  changed(projectId?: string): void;
   /** For the agent runtime: the helpers' tools on a project, run as the user whose turn it is. */
   agentTools(projectId: string): AgentToolHost;
   /** For the agent runtime: where a turn's progress goes. */
@@ -80,6 +83,7 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     createProject: (ctx, name) => projects.createProject(at(ctx), name),
     getProject: (ctx, id) => projects.getProject(at(ctx), id),
     loadProjectState: (ctx, projectId) => projects.loadProjectState(at(ctx), projectId),
+    projectStatus: (ctx, projectId) => projects.projectStatus(at(ctx), projectId),
     approveNode: (ctx, projectId, node) => projects.approveNode(at(ctx), projectId, node),
     deleteProject: (ctx, r) => projects.deleteProject(at(ctx), r.projectId),
     renameProject: (ctx, r) => projects.renameProject(at(ctx), r.projectId, r.name),
@@ -160,7 +164,7 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     events: {
       subscribe: (topic: EventTopic, listener: () => void) => (topic === 'changes' ? inst.onChange(listener) : inst.onLive(listener)),
     },
-    changed: () => inst.emitChange(),
+    changed: projectId => inst.emitChange(projectId ?? null),
     agentTools: projectId => agentTools(inst, projectId),
     agentProgress: agents.agentProgress(inst),
     // The Optimiser's loop is not a person's call: it runs as the Optimiser.

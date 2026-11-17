@@ -69,7 +69,7 @@ export async function scoreVersion(w: Scope, projectId: string, version: PromptV
     });
     if (id) runIds.push(id);
   }
-  w.emitChange();
+  w.emitChange(projectId);
   return {runIds};
 }
 
@@ -180,7 +180,7 @@ export async function startOptimiser(w: Scope, projectId: string, maxRounds = sy
 
 const queueRun = async (w: Scope, projectId: string, runId: string) => {
   await w.jobs.enqueue(w.ctx, {kind: 'optimiser.run', projectId, args: {runId}, idempotencyKey: `optimiser:${projectId}`});
-  w.emitChange();
+  w.emitChange(projectId);
 };
 
 /** A run of this project, or an error a client can show. */

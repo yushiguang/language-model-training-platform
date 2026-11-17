@@ -47,6 +47,11 @@ export interface WorkflowDeps {
    * second driver (review G8).
    */
   tickFromPages?: boolean;
+  /**
+   * Writes to one project within this window give one new revision (review G9; default 200 ms),
+   * so a labeling run does not write the revision once per example.
+   */
+  revisionCoalesceMs?: number;
 }
 
 /** Built after the workflow, since they call back into it (`connect`). */
@@ -60,8 +65,14 @@ export interface Instance extends WorkflowDeps, Connected {
   locks: WorkLocks;
   tm: TelemetryPort;
   shared: SharedStatePort;
-  /** Some record changed: the `changes` event. Events carry no data; listeners read again. */
-  emitChange(): void;
+  /**
+   * Some record of `projectId` changed (null: of no single project, such as the project list):
+   * the `changes` event, and a new revision of the project (review G9). Events carry no data;
+   * listeners read again.
+   */
+  emitChange(projectId: string | null): void;
+  /** The project's revision as last written; a write still waiting in this instance is written first. */
+  revisionOf(projectId: string): Promise<string>;
   /** A running turn moved on: the `agent_live` event. */
   emitLive(): void;
   onChange(fn: () => void): () => void;
@@ -95,13 +106,18 @@ export function createInstance(deps: WorkflowDeps): Instance & {connect(c: Conne
   const changeListeners = new Set<() => void>();
   const liveListeners = new Set<() => void>();
   const starting = new Set<string>();
+  const revisions = projectRevisions(deps.sharedState, deps.revisionCoalesceMs ?? 200);
   const inst: Instance & {connect(c: Connected): void} = {
     ...deps,
     agents: notConnected,
     locks: deps.locks ?? memoryWorkLocks(),
     tm: deps.telemetry ?? NO_TELEMETRY,
     shared: deps.sharedState,
-    emitChange: () => changeListeners.forEach(fn => fn()),
+    emitChange(projectId) {
+      if (projectId) revisions.bump(projectId);
+      changeListeners.forEach(fn => fn());
+    },
+    revisionOf: projectId => revisions.read(projectId),
     emitLive: () => liveListeners.forEach(fn => fn()),
     onChange(fn) {
       changeListeners.add(fn);
@@ -131,6 +147,39 @@ export function createInstance(deps: WorkflowDeps): Instance & {connect(c: Conne
   };
   return inst;
 }
+
+/**
+ * Per-project revisions (review G9), in shared state so every replica sees them. A revision is a
+ * new random id on every change, not a count: shared state has no atomic increment, so two
+ * replicas counting at once could both write the same number and a client would miss a change; two
+ * fresh ids never collide. Clients compare it for equality only. Bumps are coalesced per project.
+ */
+function projectRevisions(shared: SharedStatePort, coalesceMs: number) {
+  const pending = new Set<string>();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const key = (projectId: string) => `revision:${projectId}`;
+  const write = (projectId: string) => shared.set(key(projectId), newId('rev'), REVISION_TTL_MS).catch(() => undefined);
+  async function flush() {
+    timer = null;
+    const ids = [...pending];
+    pending.clear();
+    await Promise.all(ids.map(write));
+  }
+  return {
+    bump(projectId: string) {
+      pending.add(projectId);
+      timer ??= setTimeout(() => void flush(), coalesceMs);
+    },
+    async read(projectId: string): Promise<string> {
+      if (pending.delete(projectId)) await write(projectId);
+      // Expired or never written: a fixed value that differs from every written one.
+      return (await shared.get<string>(key(projectId))) ?? 'rev_none';
+    },
+  };
+}
+
+/** A revision outlives any page left open; after it expires, the next write starts a new one. */
+const REVISION_TTL_MS = 30 * 24 * 3600 * 1000;
 
 /** A context for work no person started by this call (the Optimiser's loop, a helper's tool with no turn). */
 export function systemContext(caller: string, from?: RequestContext): RequestContext {

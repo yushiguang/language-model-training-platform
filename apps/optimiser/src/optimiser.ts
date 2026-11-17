@@ -47,8 +47,8 @@ export interface OptimiserDeps {
   /** Keeps a second tab from running the same run; without it, only this runner is covered. */
   locks?: LockPort;
   telemetry?: TelemetryPort;
-  /** Called after every write, so open pages read again. */
-  onChange?: () => void;
+  /** Called after every write, with the run's project, so open pages read again. */
+  onChange?: (projectId: string) => void;
   /** The random picks (parent, dry-run examples). Tests pass a fixed one. */
   random?: () => number;
 }
@@ -137,7 +137,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
   const {catalog, labeling, agents, host} = deps;
   const locks = deps.locks ?? memoryLocks();
   const tm = deps.telemetry ?? NO_TELEMETRY;
-  const onChange = deps.onChange ?? (() => {});
+  const onChange = deps.onChange ?? ((_projectId: string) => {});
   const random = () => (deps.random ?? Math.random)();
   /** Runs this runner is working on, and whether it is starting one. */
   const active = new Map<string, {ctrl: AbortController; projectId: string}>();
@@ -200,7 +200,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       Object.assign(run, extra);
       const {id: _id, ...rest} = run;
       await catalog.patch('optimisation_runs', run.id, rest);
-      onChange();
+      onChange(run.projectId);
     };
     await save();
     tm.event('optimiser_started', {slot: endpoint, trigger: run.auto ? 'auto' : 'user', resumed: !!opts.resumed, max_rounds: run.maxRounds});
@@ -505,7 +505,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       if (open) return open;
       const run = await newRun(projectId, endpoint, rounds, {auto, startVersionId});
       if (!auto) await host.postEvent({projectId, event: 'start', actor: 'user', what: msg('started the Optimiser for up to {rounds} rounds', {rounds}), link: {path: '/prompt'}});
-      onChange();
+      onChange(projectId);
       return run;
     },
 

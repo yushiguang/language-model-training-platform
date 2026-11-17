@@ -32,8 +32,8 @@ export interface LabelingDeps {
    * signed URL made for this call (which may take a request, so it may return a Promise).
    */
   resolveUrl?: (url: string) => string | Promise<string>;
-  /** Called after every write, so open pages refresh. */
-  onChange?: () => void;
+  /** Called after every write, with the project written to when known, so open pages refresh. */
+  onChange?: (projectId?: string) => void;
   telemetry?: TelemetryPort;
 }
 
@@ -68,7 +68,7 @@ export const predictionId = (promptVersionId: string, endpoint: EndpointId, hash
 export function createLabeling(deps: LabelingDeps): LabelingContract {
   const repo = new DocRepo(deps.db);
   const locks = deps.locks ?? browserLocks();
-  const emit = () => deps.onChange?.();
+  const emit = (projectId?: string) => deps.onChange?.(projectId);
   const active = new Map<string, AbortController>();
   const tm = deps.telemetry ?? NO_TELEMETRY;
   const running = new Map<string, number>();
@@ -133,7 +133,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     const [version, setup] = await Promise.all([deps.catalog.get('prompt_versions', task.promptVersionId), deps.catalog.get('setup_versions', task.setupVersionId)]);
     if (!version || !setup?.schema) {
       await repo.patch<LabelingTask>(TASKS, taskId, {state: 'failed', error: 'The prompt version or schema of this task no longer exists.', finishedAt: now()});
-      emit();
+      emit(task.projectId);
       return getTask(taskId);
     }
     const schema = setup.schema;
@@ -165,7 +165,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       tokens: mine.reduce((n, p) => n + (p.tokens ?? 0), 0),
     };
     await repo.patch<LabelingTask>(TASKS, taskId, {...counts, failedExampleIds: [...failedSet], ...(task.relabelInvalid ? {relabelExampleIds: relabelIds} : {}), state: 'running', stopReason: null, error: null, startedAt: task.startedAt ?? now(), finishedAt: null});
-    emit();
+    emit(task.projectId);
 
     const examples = new Map((await deps.catalog.findByIds('examples', pending)).map(e => [e.id, e] as [string, Example]));
     const ctrl = new AbortController();
@@ -287,7 +287,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           await repo.patch<LabelingTask>(TASKS, taskId, {failed: DocFieldValue.increment(1), failedExampleIds: DocFieldValue.arrayUnion(exampleId), error: lastError});
         }
         stopReason = overLimit();
-        emit();
+        emit(task.projectId);
       }
     };
 
@@ -314,7 +314,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       error = null;
     }
     await repo.patch<LabelingTask>(TASKS, taskId, {state, stopReason, error, stopRequested: false, finishedAt: now()});
-    emit();
+    emit(task.projectId);
     tm.counter('sprint_labeling_tasks_ended_total', {task_purpose: purpose, state, reason: stopReason ?? 'none'});
     if (state === 'needs_attention') tm.event('run_needs_attention', {task_purpose: purpose, failed: counts.failed, total: task.total});
     tm.histogram('sprint_labeling_task_duration_seconds', (Date.now() - runStarted) / 1000, {task_purpose: purpose});
@@ -357,7 +357,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         finishedAt: null,
       };
       await repo.insert(TASKS, task);
-      emit();
+      emit(task.projectId);
       return task;
     },
 
@@ -395,7 +395,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         await repo.patch<LabelingTask>(TASKS, t.id, {state: 'paused', stopReason: 'closed'});
         changed = true;
       }
-      if (changed) emit();
+      if (changed) emit(projectId);
       return tasks;
     },
 
@@ -442,7 +442,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         await repo.deleteWhere(PREDICTIONS, {promptVersionId: t.promptVersionId, endpoint: t.endpoint, settingsHash: t.settingsHash});
       }
       await repo.deleteWhere(TASKS, {projectId});
-      emit();
+      emit(projectId);
     },
   };
 }

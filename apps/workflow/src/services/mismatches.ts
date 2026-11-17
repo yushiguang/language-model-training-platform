@@ -102,7 +102,7 @@ export async function rebuildReports(w: Scope, projectId: string): Promise<numbe
         seen.add(key);
         if (await buildReport(w, projectId, state.setup, v, r.endpoint, state.examples, state.gold, state.contextId, {replace: true})) built++;
       }
-      w.emitChange();
+      w.emitChange(projectId);
       return built;
     })) ?? 0
   );
@@ -186,7 +186,7 @@ export async function reviewGold(w: Scope, projectId: string, exampleId: string,
   // 1.0.0: the "Why" is a comment on the example (spec 5.4), kept with the version it was written on.
   if (text) await addComment(w, projectId, exampleId, text, versionId);
   w.tm.event('gold_mismatch_reviewed', {outcome, with_note: !!text});
-  w.emitChange();
+  w.emitChange(projectId);
 }
 
 export {withComments};

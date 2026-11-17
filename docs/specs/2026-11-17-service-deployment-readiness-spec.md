@@ -369,6 +369,9 @@ Each item is its own `Contract change:` pull request.
    `stopOptimiser` and `retryOptimiser` take the project id, and the workflow checks the record
    belongs to it. Review G8: `tick` only queues work; `tickFromPages: false` makes it a no-op for
    a server, which calls `Workflow.sweep()` from a cron job. Sampling progress is the job's.
+   **Review G9 built (2026-11-17)** on branch `feat/project-revision-status` (additive): a
+   per-project revision in shared state, a new random id per change, coalesced per 200 ms;
+   `ProjectState.revision`; `projectStatus(projectId)` on `BffContract` and `WorkflowContract`.
 4. Section 5 (model registry, endpoint id widening, limiter store port): breaking contract
    change, coordinated with the hosting platform's adapters per the handover guide. Proof:
    gateway tests over the shared-store limiter (concurrent instances never exceed an endpoint's

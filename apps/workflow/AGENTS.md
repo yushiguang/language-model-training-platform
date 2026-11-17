@@ -30,7 +30,9 @@ reads and writes through the catalog, starts labeling tasks, and asks the agent 
   (`getAgentLive` for the live turn).
 - A helper's tool runs as the user whose turn it is (`turn:{projectId}`), or as the helper with a
   system context when no turn runs. The Optimiser's host runs with a system context (`optimiser`).
-- `services/projects.ts`: `loadProjectState` (one read for a page), gates, approvals.
+- `services/projects.ts`: `loadProjectState` (one read for a page), `projectStatus` (the light
+  read, review G9), gates, approvals. `emitChange(projectId)` also gives the project a new
+  revision (`app.ts`, `projectRevisions`): pass the project whenever there is one.
 - `services/evaluation.ts`: `labelEvalSet` finds or creates the eval task for version + model +
   settings and runs it; `buildReport` scores the held-out half of the eval set.
 - `services/work.ts`: `drive` queues missing reports, then the paid work `dueStarts` lists, all of

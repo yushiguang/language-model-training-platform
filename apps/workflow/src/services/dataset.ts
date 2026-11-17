@@ -46,7 +46,7 @@ export async function stopSampleDataset(w: Scope, projectId: string): Promise<vo
   for (const job of await activeSamples(w, projectId)) await w.jobs.cancel(w.ctx, job.id);
   const loading = await w.shared.get<Loading>(loadingKey(projectId));
   if (loading) await w.shared.set(loadingKey(projectId), {...loading, stop: true}, LOADING_TTL_MS);
-  w.emitChange();
+  w.emitChange(projectId);
 }
 
 async function saveSnapshot(w: Scope, projectId: string, all: RawExample[], source: DatasetSnapshot['source'], sourceName: string, invalid = 0): Promise<DatasetSnapshot> {
@@ -93,7 +93,7 @@ async function saveSnapshot(w: Scope, projectId: string, all: RawExample[], sour
   await catalog.insert('dataset_snapshots', snap);
   await catalog.patch('projects', projectId, {snapshotId: snap.id});
   await catalog.audit(projectId, (await user()).name, 'dataset.create', {source, rows: raws.length, ...(notSaved ? {notSaved} : {})});
-  w.emitChange();
+  w.emitChange(projectId);
   return snap;
 }
 
@@ -102,7 +102,7 @@ async function queueSample(w: Scope, projectId: string, n: number, append: boole
   if (!(await w.catalog.get('projects', projectId))) throw new Error('This project does not exist.');
   await stopSampleDataset(w, projectId);
   const job = await w.jobs.enqueue(w.ctx, {kind: 'dataset.sample', projectId, args: {n, append}});
-  w.emitChange();
+  w.emitChange(projectId);
   return samplingView(job);
 }
 
@@ -129,12 +129,12 @@ export async function runSample(w: Scope, job: Job, ctl: JobControl): Promise<Jo
   // The progress lives on the job: every move is a change the Dataset page reads again.
   const progress = async (p: Parameters<JobControl['progress']>[0]) => {
     await ctl.progress(p);
-    w.emitChange();
+    w.emitChange(job.projectId);
   };
   try {
     return await sample(w, job, ctl, progress);
   } finally {
-    w.emitChange();
+    w.emitChange(job.projectId);
   }
 }
 
@@ -258,13 +258,13 @@ async function setLoading(w: Scope, projectId: string, task: SamplingTask): Prom
   const was = await w.shared.get<Loading>(loadingKey(projectId));
   if (was?.stop) return false;
   await w.shared.set(loadingKey(projectId), {task, stop: false}, LOADING_TTL_MS);
-  w.emitChange();
+  w.emitChange(projectId);
   return true;
 }
 
 async function endLoading(w: Scope, projectId: string): Promise<void> {
   await w.shared.delete(loadingKey(projectId));
-  w.emitChange();
+  w.emitChange(projectId);
 }
 
 /**
@@ -302,7 +302,7 @@ export async function saveGold(w: Scope, projectId: string, exampleId: string, s
     const ex = await catalog.get('examples', exampleId);
     w.tm.event('gold_label_saved', {split: ex?.split ?? 'unknown', revealed, seconds_on_example: 0, matches_model: null, was_recheck: false});
   }
-  w.emitChange();
+  w.emitChange(projectId);
   return g;
 }
 

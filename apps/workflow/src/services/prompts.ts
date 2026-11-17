@@ -59,7 +59,7 @@ export async function createVersion(w: Scope, projectId: string, v: NewVersion):
     lines_added: [...after].filter(l => !before.has(l)).length,
     lines_removed: v.parent ? [...before].filter(l => !after.has(l)).length : 0,
   });
-  w.emitChange();
+  w.emitChange(projectId);
   return version;
 }
 

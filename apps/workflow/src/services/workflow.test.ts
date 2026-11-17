@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, ClientDiagnostics, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission} from '@sprint/contracts';
+import type {AgentRuntimeContract, ClientDiagnostics, SharedStatePort, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission} from '@sprint/contracts';
 import {createCatalog} from '@sprint/catalog';
 import {createLabeling, labelingExecutor, memoryLocks} from '@sprint/labeling';
 import {createOptimiser, optimiserExecutor} from '@sprint/optimiser';
@@ -10,11 +10,12 @@ import {createInstance, systemContext} from './app.ts';
 import {optimiserHost} from './optimiser-host.ts';
 import {workflowExecutors} from './executors.ts';
 import {agentProgress} from './agents.ts';
-import {loadProjectState, renameProject} from './projects.ts';
+import {deleteProject, loadProjectState, projectStatus, renameProject} from './projects.ts';
+import {addComment} from './governance.ts';
 import {reportProblem} from './problems.ts';
 import {beginTurn, endTurn} from './turns.ts';
 import {agentStart} from './starts.ts';
-import {tick} from './work.ts';
+import {scoreVersion, tick} from './work.ts';
 import {compilePrompt, DEFAULT_THRESHOLDS, versionLabel} from '@sprint/domain';
 
 const schema: Schema = {name: 'format', kind: 'single', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]};
@@ -43,6 +44,7 @@ interface WorldOpts {
   goldApproved?: boolean;
   /** Where problem reports go (none: reports cannot be sent). */
   tickets?: TicketPort;
+  sharedState?: SharedStatePort;
 }
 
 async function world(prefix: string, opts: WorldOpts = {}) {
@@ -63,7 +65,8 @@ async function world(prefix: string, opts: WorldOpts = {}) {
       return {text: opts.answer?.(req.traceId ?? '', n, JSON.stringify(req.messages ?? '')) ?? '{"format": "Vlog"}', inputTokens: 0, outputTokens: 150, costUsd: opts.perCall ?? 0.03, endpointId: 'labeling-A', attempts: 1};
     },
   } as unknown as LlmGatewayContract;
-  const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks()});
+  // Labeling's writes reach the workflow's change events and revisions, as in the browser build.
+  const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks(), onChange: id => inst.emitChange(id ?? null)});
   const agents = opts.agents ?? ({} as AgentRuntimeContract);
   // Background work runs through the job module, in this process, as in the browser build.
   const jobs = createJobs({store: memoryJobStore()});
@@ -77,7 +80,7 @@ async function world(prefix: string, opts: WorldOpts = {}) {
     standIns: [],
     tickets: opts.tickets,
     appVersion: '1.1.0-test',
-    sharedState: memorySharedState(),
+    sharedState: opts.sharedState ?? memorySharedState(),
   });
   const optimiser = createOptimiser({catalog, labeling, agents, host: optimiserHost(inst.scope(systemContext('optimiser'))), onChange: inst.emitChange, random: () => optimiserRandom()});
   inst.connect({agents, optimiser});
@@ -910,4 +913,59 @@ test('sampling: a job whose progress stays on until the dataset is saved; a save
   await appendSample(w.ws, w.projectId, 4);
   await w.jobs.idle();
   assert.equal((await app.catalog.find('examples', {snapshotId: snap.id})).length, 13);
+});
+
+test('revision (G9): every change gives a new one, a burst of writes writes it once, and the light read carries the running work', async () => {
+  const base = memorySharedState();
+  const writes: string[] = [];
+  const shared: SharedStatePort = {
+    get: k => base.get(k),
+    set: async (k, v, ttl) => {
+      if (k.startsWith('revision:')) writes.push(k);
+      await base.set(k, v, ttl);
+    },
+    delete: k => base.delete(k),
+  };
+  const w = await world('g9', {sharedState: shared});
+  const s0 = (await projectStatus(w.ws, w.projectId))!;
+  assert.equal(s0.revision, (await w.state()).revision, 'nothing changed between the two reads');
+  assert.deepEqual(s0.runs, []);
+  assert.equal(s0.samplingTask, null);
+
+  // Five writes in a row: one new revision, written once.
+  for (let i = 0; i < 5; i++) await addComment(w.ws, w.projectId, `ex_g9_${i}`, `note ${i}`);
+  await new Promise(r => setTimeout(r, 300));
+  assert.deepEqual(writes, [`revision:${w.projectId}`]);
+  const s1 = (await projectStatus(w.ws, w.projectId))!;
+  assert.notEqual(s1.revision, s0.revision);
+
+  // A read right after a write in this instance sees the new revision at once.
+  await addComment(w.ws, w.projectId, 'ex_g9_0', 'again');
+  const s2 = (await projectStatus(w.ws, w.projectId))!;
+  assert.notEqual(s2.revision, s1.revision);
+
+  // Scoring: the light read shows the run and its counts, never the dataset.
+  const v = await w.newVersion();
+  await scoreVersion(w.ws, w.projectId, v);
+  await w.jobs.idle();
+  const s3 = (await projectStatus(w.ws, w.projectId))!;
+  assert.equal(s3.runs.length, 1);
+  assert.equal(s3.runs[0].state, 'done');
+  assert.equal(s3.runs[0].done, EVAL);
+  assert.notEqual(s3.revision, s2.revision);
+  assert.deepEqual(Object.keys(s3).sort(), ['optimisation', 'projectId', 'revision', 'runs', 'samplingTask']);
+  assert.equal((await w.state()).revision, s3.revision);
+
+  // Another project's revision does not move with this one's writes.
+  const other = await w.catalog.get('projects', w.projectId);
+  await w.catalog.insert('projects', {...other!, id: 'pr_g9_other'});
+  const o1 = (await projectStatus(w.ws, 'pr_g9_other'))!.revision;
+  await addComment(w.ws, w.projectId, 'ex_g9_1', 'one more');
+  assert.equal((await projectStatus(w.ws, 'pr_g9_other'))!.revision, o1);
+
+  // A project being deleted, or one that never existed, has no status.
+  await deleteProject(w.ws, w.projectId);
+  assert.equal(await projectStatus(w.ws, w.projectId), null);
+  assert.equal(await projectStatus(w.ws, 'pr_none'), null);
+  await w.jobs.idle();
 });

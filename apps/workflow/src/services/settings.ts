@@ -62,7 +62,7 @@ export async function saveSettings(w: Scope, projectId: string, s: ProjectSettin
   await catalog.audit(projectId, (await user()).name, 'settings.save', {mode: thresholds.mode, endpoint: model.endpoint});
   w.tm.event('settings_saved', {mode: thresholds.mode, first_confirm: !settingsConfirmed});
   w.tm.event('thresholds_saved', {mode: thresholds.mode, changed: ''});
-  w.emitChange();
+  w.emitChange(projectId);
 }
 
 /**

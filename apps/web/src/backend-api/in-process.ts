@@ -32,7 +32,7 @@ const telemetry = createTelemetry({
 });
 const gateway = createGateway(platform, {telemetry});
 const catalog = createCatalog(platform.db, {telemetry});
-const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: () => workflow.changed(), telemetry});
+const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: projectId => workflow.changed(projectId), telemetry});
 /**
  * Background work (scoring, reports, sampling, Optimiser runs, deleting a project) runs as jobs.
  * In the browser this page is the runner: jobs start as soon as they are queued, kept in the
@@ -44,7 +44,7 @@ const jobs = createJobs({store: platform.jobStore ?? memoryJobStore(), telemetry
 const workflow = createWorkflow({jobs: jobs.api, catalog, labeling, gateway, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, tickets: platform.tickets, appVersion: APP_VERSION, standIns: platform.standIns, telemetry, locks: browserLocks(), sharedState: platform.sharedState ?? memorySharedState()});
 /** The helpers, built once with their model, the project tools and where live progress goes. */
 const agentRuntime = createAgentRuntime({llm: gateway.agentModel(), tools: projectId => workflow.agentTools(projectId), progress: workflow.agentProgress});
-const optimiser = createOptimiser({catalog, labeling, agents: agentRuntime, host: workflow.optimiserHost, locks: browserLocks(), telemetry, onChange: () => workflow.changed()});
+const optimiser = createOptimiser({catalog, labeling, agents: agentRuntime, host: workflow.optimiserHost, locks: browserLocks(), telemetry, onChange: projectId => workflow.changed(projectId)});
 workflow.connect({agents: agentRuntime, optimiser});
 // Executors tell open pages when their records change, as before; a job's own life does not, so a
 // job that changes nothing never makes the pages read again (and tick again).
