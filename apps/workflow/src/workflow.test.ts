@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, AgentTurnInput, CallerUser, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, PageContext, RequestContext, TicketSubmission, WorkflowContract} from '@sprint/contracts';
+import type {AgentRuntimeContract, AgentTurnInput, CallerUser, DocumentSource, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, PageContext, RequestContext, TicketSubmission, WorkflowContract} from '@sprint/contracts';
 import {createCatalog} from '@sprint/catalog';
 import {createLabeling, memoryLocks} from '@sprint/labeling';
 import {localDocRuntime, loopback, memorySharedState} from '@sprint/platform';
@@ -20,7 +20,7 @@ const ctxOf = (user: CallerUser): RequestContext => ({requestId: `rq_${++n}`, us
 const page = (agent: PageContext['agent'] = 'front_desk'): PageContext => ({label: 'Projects', agent, intent: 'answer', context: {}, where: {page: 'projects', params: {}}});
 
 /** A workflow over the real catalog and labeling, with a fake model and the given helpers. */
-function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) => AgentRuntimeContract) {
+function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) => AgentRuntimeContract, documents?: DocumentSource) {
   const db = localDocRuntime(prefix);
   const catalog = createCatalog(db);
   const gateway = {
@@ -40,6 +40,7 @@ function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) =
     examples: {} as ExampleSource,
     standIns: [],
     sharedState: memorySharedState(),
+    ...(documents ? {documents} : {}),
     tickets: {submit: async t => (tickets.push(t), {ticketId: `T-${tickets.length}`})},
   });
   wf.connect({agents: agents(wf)});
@@ -118,6 +119,25 @@ test("two users in one process: a problem-report draft and a live turn belong to
   assert.deepEqual(await textsOf(ctxOf(bob), b.id), ['bob: it broke', 'bob: yes, send it']);
   // With no turn running, a helper's tool still runs (as the helper, with a system context).
   await wf.agentTools(a.id).call({agent: 'prompt_agent', name: 'get_project_summary', args: {}});
+});
+
+test("two users in one process: a helper reads a linked document as the person it answers (gap G3)", async () => {
+  const readers: string[] = [];
+  const {api} = world(
+    'wf-docs',
+    w => ({
+      ...noHelpers(),
+      async runTurn(input: AgentTurnInput) {
+        await w.agentTools(input.workspace.projectId).call({agent: 'front_desk', name: 'read_doc', args: {url: 'https://docs.example/guide'}});
+        return {invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
+      },
+    }),
+    {read: async (ctx, url) => (readers.push(`${ctx.user.name}:${url}`), {title: 'Guide', text: 'Label carefully.'})},
+  );
+  const a = await api.createProject(ctxOf(alice), 'A');
+  const b = await api.createProject(ctxOf(bob), 'B');
+  await Promise.all([api.sendUserMessage(ctxOf(alice), {projectId: a.id, text: 'read this', page: page()}), api.sendUserMessage(ctxOf(bob), {projectId: b.id, text: 'read this', page: page()})]);
+  assert.deepEqual(readers.sort(), ['Alice:https://docs.example/guide', 'Bob:https://docs.example/guide']);
 });
 
 test('two workflows in one process share nothing: each is its own instance', async () => {

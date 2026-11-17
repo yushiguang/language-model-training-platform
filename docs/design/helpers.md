@@ -78,7 +78,8 @@ real items carry absolute URLs.
 
 **Document links.** Helpers read a document link the user pastes with the `read_doc` tool
 (front desk, Prompt helper). The workflow reads it through `Platform.documents`
-(`DocumentSource`, `packages/contracts/src/platform-api.ts`); the text is cut at 20,000
+(`DocumentSource`, `packages/contracts/src/platform-api.ts`) as the person the helper answers
+(the turn's request context); the text is cut at 20,000
 characters. The public build's stand-in (`noDocuments`) opens nothing, so the helper says the
 link can't be opened here and asks for the pasted text. The internal build plugs in the real
 document service (docs/handover/integration.md, "Document links").

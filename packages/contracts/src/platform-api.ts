@@ -452,8 +452,12 @@ export interface LinkedDocument {
  * docs/handover/integration.md, "Document links".
  */
 export interface DocumentSource {
-  /** The document at `url` as the signed-in user may see it; null when it cannot be read. */
-  read(url: string): Promise<LinkedDocument | null>;
+  /**
+   * The document at `url` as the caller (`ctx.user`) may see it; null when it cannot be read.
+   * The context is the Ask AI turn's, so a helper reads with the rights of the person it answers,
+   * never with a service account (deployment readiness review, gap G3).
+   */
+  read(ctx: RequestContext, url: string): Promise<LinkedDocument | null>;
 }
 
 // ---------------------------------------------------------------------------------------------

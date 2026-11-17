@@ -336,6 +336,11 @@ Each item is its own `Contract change:` pull request.
    Platform ports keep `signal` (review gap G6). `ExampleSource.sample` keeps its progress
    callback and signal until sampling runs as a job (Section 3), so the Dataset page keeps its
    progress meanwhile.
+   **Review gap G3 built (2026-11-17)** on branch `feat/caller-documents`:
+   `DocumentSource.read(ctx, url)` reads a linked document as the person the helper answers.
+   Gap G4 (`createUpload`) is not built: no page uploads a binary file today (chat takes text
+   and document links, decided 2026-11-06; datasets and gold labels go as text), so there is
+   nothing for it to serve yet. It comes back with the first page that uploads an image.
 3. Section 3 (job module, enqueue-and-return commands, persisted sampling state, bulk
    asynchronous deletion, the light status read of Section 7): additive job contract plus the
    breaking command-semantics change. Proof: job lifecycle tests (lease expiry, resume, cancel,

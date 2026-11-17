@@ -405,7 +405,7 @@ export function agentTools(inst: Instance, projectId: string): AgentToolHost {
         case 'read_doc': {
           const url = typeof args.url === 'string' ? args.url.trim() : '';
           if (!/^https?:\/\//.test(url)) throw new Error('Give the link to read.');
-          const doc = await w.documents?.read(url);
+          const doc = await w.documents?.read(w.ctx, url);
           if (!doc) return {error: 'This link cannot be opened here. Ask the user to paste the text.'};
           const MAX = systemConfig().agent.maxDocChars;
           return {title: doc.title, text: doc.text.length > MAX ? `${doc.text.slice(0, MAX)}… (cut)` : doc.text};
