@@ -165,6 +165,34 @@ test('a try is stopped by its request id: the calls carry the id, and cancel rea
   assert.deepEqual(cancelled, ['rq_try']);
 });
 
+test('image URLs may be resolved asynchronously (a signed URL per call), and every call gets its own (spec 4.5)', async () => {
+  const {db, catalog, v, ids} = await setup(2, 'signed-urls');
+  const seen: string[] = [];
+  let signed = 0;
+  const resolveUrl = async (url: string) => {
+    await new Promise(r => setTimeout(r, 1));
+    return `https://files.example/${url}?sig=${++signed}`;
+  };
+  const gateway = fakeGateway(async req => {
+    for (const m of req.messages) for (const c of m.content as {type: string; url?: string}[]) if (c.type === 'image') seen.push(c.url!);
+    return '{"format": ["Vlog"]}';
+  });
+  const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks(), resolveUrl});
+  const images = [{url: 'logo.png', name: 'logo.png', size: 1}];
+  const examples = await catalog.findByIds('examples', ids);
+  const rows = await labeling.tryTemplate({template: 'Draft {{Description}} [Image 1]', features: {video: ['Description'], photo_text: [], metadata: []}, images, schema, settings: {endpoint: 'A', maxOutputTokens: 100, temperature: 0}, examples});
+  assert.ok(rows.every(r => r.error === null && r.answer?.join() === 'Vlog'));
+  assert.equal(seen.length, 2);
+  assert.ok(seen.every(u => /^https:\/\/files\.example\/logo\.png\?sig=\d$/.test(u)));
+  assert.equal(new Set(seen).size, 2, 'each call signs its own URL');
+  // A saved run resolves the same way.
+  await catalog.patch('prompt_versions', v.id, {template: 'Label {{Description}} [Image 1]', images});
+  const task = await labeling.createTask(input(ids, v));
+  await labeling.runTask(task.id);
+  assert.equal(seen.length, 4);
+  assert.ok(seen.slice(2).every(u => u.startsWith('https://files.example/logo.png?sig=')));
+});
+
 test('relabelInvalid: an example whose only answer is invalid is labeled once more, and the valid answer wins', async () => {
   const {db, catalog, v, ids} = await setup(4, 'lab-relabel');
   const seen = new Map<string, number>();

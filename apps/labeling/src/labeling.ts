@@ -27,8 +27,11 @@ export interface LabelingDeps {
   catalog: CatalogContract;
   gateway: LlmGatewayContract;
   locks?: TaskLocks;
-  /** Turns relative image URLs into ones the model can fetch. */
-  resolveUrl?: (url: string) => string;
+  /**
+   * Turns a stored image URL into one the model can fetch: a relative URL made absolute, or a
+   * signed URL made for this call (which may take a request, so it may return a Promise).
+   */
+  resolveUrl?: (url: string) => string | Promise<string>;
   /** Called after every write, so open pages refresh. */
   onChange?: () => void;
   telemetry?: TelemetryPort;
@@ -47,8 +50,9 @@ type ExecOptions = RunOptions & {retry?: boolean};
 /** The site's own last line of every labeling prompt: asks the model for its short reason. */
 const withReason = (parts: Part[]): Part[] => [...parts, {type: 'text', text: `\n\n${REASON_LINE}`}];
 
-export function toMessages(parts: Part[], resolveUrl: (u: string) => string = u => u): ModelMessage[] {
-  const content: ContentPart[] = parts.map(p => (p.type === 'text' ? {type: 'text', text: p.text} : {type: 'image', url: resolveUrl(p.url)}));
+/** The prompt as the model's message; each image URL is resolved for this call, all at once. */
+export async function toMessages(parts: Part[], resolveUrl: (u: string) => string | Promise<string> = u => u): Promise<ModelMessage[]> {
+  const content: ContentPart[] = await Promise.all(parts.map(async (p): Promise<ContentPart> => (p.type === 'text' ? {type: 'text', text: p.text} : {type: 'image', url: await resolveUrl(p.url)})));
   return [{role: 'user', content}];
 }
 
@@ -207,7 +211,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         const res = await deps.gateway
           .label({
             slot: task.endpoint,
-            messages: toMessages(parts, deps.resolveUrl),
+            messages: await toMessages(parts, deps.resolveUrl),
             maxOutputTokens: task.settings.maxOutputTokens,
             temperature: task.settings.temperature,
             traceId: ex.externalId,
@@ -406,7 +410,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
             const parts = withReason(renderPrompt(input.template, ex, input.features, input.images));
             const res = await deps.gateway.label({
               slot: input.settings.endpoint,
-              messages: toMessages(parts, deps.resolveUrl),
+              messages: await toMessages(parts, deps.resolveUrl),
               maxOutputTokens: input.settings.maxOutputTokens,
               temperature: input.settings.temperature,
               traceId: ex.externalId,

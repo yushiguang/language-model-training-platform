@@ -341,6 +341,13 @@ Each item is its own `Contract change:` pull request.
    Gap G4 (`createUpload`) is not built: no page uploads a binary file today (chat takes text
    and document links, decided 2026-11-06; datasets and gold labels go as text), so there is
    nothing for it to serve yet. It comes back with the first page that uploads an image.
+   **Items 4 and 5 built (2026-11-17)** on branch `build/client-switch-and-entry-points`:
+   `@sprint/client-impl` (set by `SPRINT_CLIENT_IMPL`, default the in-process client) in the web
+   tsconfig, `next.config.mjs` and the boundary checker, which also refuses a direct import of
+   the in-process module; every app's factory is its package entry point (they already were,
+   now listed in the handover guide); `LabelingDeps.resolveUrl` may return a Promise and both
+   call sites await it. Items 2, 3 and 6 need no code now (2: the lease port comes with the job
+   module; 3: events already carry no data; 6: the fixtures come with the Go agent runtime).
 3. Section 3 (job module, enqueue-and-return commands, persisted sampling state, bulk
    asynchronous deletion, the light status read of Section 7): additive job contract plus the
    breaking command-semantics change. Proof: job lifecycle tests (lease expiry, resume, cancel,

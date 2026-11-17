@@ -11,9 +11,10 @@ import type {AgentLive, BffContract, ChatAttachment, DatasetUploadResult, EventN
  *   plain JSON.
  * - Page telemetry.
  *
- * `in-process.ts` is the default client (every service runs in the page). A microservice
- * deployment adds an HTTP client with this same interface and exports it from `index.ts`; no page
- * changes, and no backend app is bundled into the browser.
+ * `in-process.ts` is the default client (every service runs in the page). A server deployment
+ * builds with SPRINT_CLIENT_IMPL naming its own module (an HTTP client) that exports `client` with
+ * this same interface; `index.ts` takes it through `@sprint/client-impl`. No page changes, and no
+ * backend app is bundled into the browser.
  */
 export interface BffClient extends BffContract {
   /** Some record changed (also in another tab): read again. */

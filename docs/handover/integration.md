@@ -38,7 +38,7 @@ The internal module exports `createPlatform()` returning the `Platform` object f
 | `models: LabelingModels` | One labeling call per example (`chat`, `chatStream`) on slot A or B; returns text and token usage. Throw `LlmCallError` (or an error with an HTTP `status`) so the gateway can tell busy from rejected; throw `LlmCallError('filtered', …)` when the endpoint's safety filter stops the answer (Prompt versions shows it as Filtered) | `simulatedModels` |
 | `agent: AgentModel` | Agent chat (`chat`, `complete` with usage and thinking, `chatStream`, `models()`) | `scriptedAgent` |
 | `identity: Identity` | The signed-in user (id, name, email, organization); `currentUser()` rejects when nobody is signed in, and the site then shows a sign-in error with Retry. Optional `signOut()` ends the single sign-on session: when it is there, the avatar menu shows Sign out and the page reloads after it (2026-11-16) | `localIdentity` (no sign-out) |
-| `files: FileStore` | Uploads for prompt images and chat attachments; returns a URL the model can fetch | `browserFiles` (data URLs) |
+| `files: FileStore` | Uploads for prompt images and chat attachments; returns a URL the model can fetch. When stored URLs must be signed per call, the composition root passes labeling a `resolveUrl` that returns a Promise (next section) | `browserFiles` (data URLs) |
 | `examples: ExampleSource` | The prepared examples file (50 to 100 examples with features) and id lookup | `sampleExamples` |
 | `media?: MediaSource` | The player page and still images of one example by item id, for people to look at on Gold Labels (see "Media") | `sampleMedia` (made-up pictures, no player) |
 | `endpoints?: EndpointConfig[]` | Registered endpoints with real limits (next section) | not set: assumed limits |
@@ -46,6 +46,34 @@ The internal module exports `createPlatform()` returning the `Platform` object f
 | `tickets?: TicketPort` | Files a problem report and returns its ticket id (see "Problem reports") | `localTickets` (`localStorage`, `sprint-tickets`); not set: helpers say reports cannot be sent |
 | `sharedState?: SharedStatePort` | Short-lived keys every server instance must see, with a TTL (`get`, `set(key, value, ttlMs)`, `delete`; values are plain JSON): the live Ask AI turn, the helper that keeps answering on a page, the running turn's caller and page, problem-report drafts. A shared store such as Redis in a server deployment | `memorySharedState` (a map in the page); not set: the composition root uses the same |
 | `standIns: string[]` | Names shown in the header while any stand-in is in use; empty in production | all |
+
+## The page client: `@sprint/client-impl`
+
+The pages call one `BffClient` (`apps/web/src/backend-api/client.ts`). `index.ts` takes it from
+`@sprint/client-impl`, the second build-time switch next to `@sprint/platform-impl`:
+
+- by default it is `apps/web/src/backend-api/in-process.ts`, where every service runs in the page;
+- a server deployment sets `SPRINT_CLIENT_IMPL` to its own module, relative to the repo root (for
+  example `SPRINT_CLIENT_IMPL=internal/http-client.ts npm run build`). The module exports
+  `client: BffClient`, usually an HTTP client of the server's bff. The in-process module is then
+  never imported, so no backend app is bundled into the static site.
+
+The boundary check allows only these two aliases in `next.config.mjs`, and refuses any file that
+imports the in-process client directly instead of through the alias.
+
+## Building the server's own composition
+
+Each module's factory is its package's entry point (`exports` `"."`), so a server composition
+imports it and wraps it without reaching into `src/` paths: `createGateway` (`@sprint/llm-gateway`),
+`createCatalog` (`@sprint/catalog`), `createLabeling` with `memoryLocks` and `browserLocks`
+(`@sprint/labeling`), `createAgentRuntime` (`@sprint/agents`), `createOptimiser`
+(`@sprint/optimiser`), `createWorkflow` and `systemContext` (`@sprint/workflow`), `createBffApi`
+(`@sprint/bff`), `createTelemetry` (`@sprint/telemetry`), and the stand-ins plus `loopback`
+(`@sprint/platform`). `in-process.ts` is the worked example of wiring them.
+
+`createLabeling`'s `resolveUrl` turns a stored image URL into one the model can fetch. It may
+return a Promise, so a server can sign a URL per call; every image of a prompt is resolved at once
+before the call.
 
 ## Endpoints and limits
 
@@ -187,7 +215,8 @@ takes the caller's `RequestContext` first on every method, and one call crosses 
 `RpcRequest {method, ctx, args}` and comes back as `RpcResponse` (`{result}` or
 `{error: {code, message}}`). In the browser the bff already calls it through `loopback`
 (`packages/platform/src/standins/loopback.ts`), which puts every call through JSON the same way,
-so a server only has to carry those envelopes. Give the server's workflow a shared
+so a server only has to carry those envelopes. The browser then calls the server through the
+module behind `@sprint/client-impl` (above). Give the server's workflow a shared
 `Platform.sharedState`, so every instance sees the same live turn and drafts. Until the job module
 (spec 3) and the agent service (spec 6) land, sampling and an Ask AI turn's progress stay with the
 instance that started them. See "Known limits" in `docs/architecture.md`.

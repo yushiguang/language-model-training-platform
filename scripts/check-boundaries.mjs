@@ -58,6 +58,7 @@ const ALIASES = {
   '@sprint/workflow': 'apps/workflow/src/index.ts',
   '@sprint/bff': 'apps/bff/src/index.ts',
   '@sprint/telemetry': 'apps/telemetry/src/index.ts',
+  '@sprint/client-impl': 'apps/web/src/backend-api/in-process.ts',
   '@/*': 'apps/web/src/*',
 };
 
@@ -144,12 +145,34 @@ for (const cfg of ['tsconfig.base.json', 'tsconfig.json', 'apps/web/tsconfig.jso
     }
   }
 }
+/**
+ * The build-time switches (deployment readiness spec, 4.4): the only aliases the web build may
+ * point elsewhere. `@sprint/platform-impl` = the platform adapters; `@sprint/client-impl` = the
+ * `BffClient` the pages call.
+ */
+const SWITCHES = ['@sprint/platform-impl', '@sprint/client-impl'];
 const nextConfig = readFileSync(path.join(root, 'apps/web/next.config.mjs'), 'utf8');
 const aliasBlock = /resolveAlias\s*:\s*\{([\s\S]*?)\}/.exec(nextConfig)?.[1] ?? '';
 for (const m of aliasBlock.matchAll(/['"]([^'"]+)['"]\s*:/g)) {
-  if (m[1] !== '@sprint/platform-impl') problems.push(`apps/web/next.config.mjs: resolveAlias "${m[1]}" is not allowed (only @sprint/platform-impl, the platform adapters)`);
+  if (!SWITCHES.includes(m[1])) problems.push(`apps/web/next.config.mjs: resolveAlias "${m[1]}" is not allowed (only ${SWITCHES.join(', ')})`);
 }
-if (/\balias\s*:/.test(nextConfig.replace(/resolveAlias/g, ''))) problems.push('apps/web/next.config.mjs: webpack aliases are not allowed; use turbopack.resolveAlias for @sprint/platform-impl only');
+if (/\balias\s*:/.test(nextConfig.replace(/resolveAlias/g, ''))) problems.push(`apps/web/next.config.mjs: webpack aliases are not allowed; use turbopack.resolveAlias for ${SWITCHES.join(', ')} only`);
+
+// The pages reach the backend through `@sprint/client-impl` only: no file imports the in-process
+// client itself, or a server build would still bundle every backend app into the site.
+const IN_PROCESS = 'apps/web/src/backend-api/in-process';
+const CLIENT_ENTRY = 'apps/web/src/backend-api/index.ts';
+for (const file of walk(path.join(root, 'apps/web'))) {
+  const rel = relOf(file);
+  const src = stripComments(readFileSync(file, 'utf8'));
+  const specs = new Set(PATTERNS.flatMap(re => [...src.matchAll(re)].map(m => m[1])));
+  for (const spec of specs) {
+    const target = spec.startsWith('.') ? relOf(path.resolve(path.dirname(file), spec)) : spec.startsWith('@/') ? 'apps/web/src/' + spec.slice(2) : null;
+    if (target && target.replace(/\.tsx?$/, '') === IN_PROCESS) problems.push(`${rel}: imports the in-process client directly; import it through @sprint/client-impl`);
+    if (spec === '@sprint/client-impl' && rel !== CLIENT_ENTRY) problems.push(`${rel}: only ${CLIENT_ENTRY} imports @sprint/client-impl; pages import @/backend-api`);
+  }
+}
+if (!/from\s*['"]@sprint\/client-impl['"]/.test(stripComments(readFileSync(path.join(root, CLIENT_ENTRY), 'utf8')))) problems.push(`${CLIENT_ENTRY}: must take the client from @sprint/client-impl`);
 
 if (problems.length) {
   console.error(`Boundary check failed (${problems.length}):\n  ${problems.join('\n  ')}`);

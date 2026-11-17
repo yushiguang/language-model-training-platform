@@ -16,6 +16,20 @@ const repoRoot = path.resolve(webDir, '../..');
  */
 const platformImpl = process.env.SPRINT_PLATFORM_IMPL || 'packages/platform/src/config.ts';
 
+/**
+ * `@sprint/client-impl` = the `BffClient` the pages call. Default: the in-process client (every
+ * service runs in the page). A server deployment sets SPRINT_CLIENT_IMPL to a module (relative to
+ * the repo root) that exports `client`, such as an HTTP client; the backend apps are then not
+ * bundled into the site.
+ */
+const clientImpl = process.env.SPRINT_CLIENT_IMPL || 'apps/web/src/backend-api/in-process.ts';
+
+/** A repo-root path as the bundler wants it: relative to this folder, starting with a dot. */
+const fromWeb = p => {
+  const rel = path.relative(webDir, path.resolve(repoRoot, p)).split(path.sep).join('/');
+  return rel.startsWith('.') ? rel : `./${rel}`;
+};
+
 export default {
   output: 'export',
   trailingSlash: true,
@@ -27,7 +41,8 @@ export default {
   turbopack: {
     root: repoRoot,
     resolveAlias: {
-      '@sprint/platform-impl': path.relative(webDir, path.resolve(repoRoot, platformImpl)),
+      '@sprint/platform-impl': fromWeb(platformImpl),
+      '@sprint/client-impl': fromWeb(clientImpl),
     },
   },
 };

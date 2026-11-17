@@ -89,8 +89,10 @@ Since 1.0.0 phase 1 every service contract is written so it maps one to one to a
 `apps/web/src/backend-api` has three files: `client.ts` (the `BffClient` interface pages use:
 the contract plus live listeners, file uploads and page telemetry), `in-process.ts` (the default
 client and composition root: every service runs in the page on `@sprint/platform-impl`) and
-`index.ts` (picks the client). A microservice deployment adds an HTTP client and exports it from
-`index.ts`; no page changes.
+`index.ts` (takes the client from `@sprint/client-impl`). That alias is a build-time switch like
+`@sprint/platform-impl`: the in-process client by default, or the module `SPRINT_CLIENT_IMPL`
+names, such as an HTTP client for a server deployment, which bundles no backend app. No page
+changes either way.
 
 ### One place for every tunable number
 

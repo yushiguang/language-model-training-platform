@@ -174,9 +174,10 @@ async function uploadAsset(file: File): Promise<{url: string}> {
 
 /**
  * The in-process client: every service runs in this page, on `@sprint/platform-impl` (the stand-ins
- * by default). The whole product can be accepted in a local browser this way.
+ * by default). The whole product can be accepted in a local browser this way. It is the default
+ * module behind `@sprint/client-impl`; any other client module exports `client` the same way.
  */
-export const inProcessClient: BffClient = {
+export const client: BffClient = {
   ...timedApi,
   // Each Ask AI message carries the browser's record, for a problem report (spec 1.1.0, 3.2).
   sendUserMessage: req => asked(req.projectId, () => timedApi.sendUserMessage({...req, client: req.client ?? snapshot()})),

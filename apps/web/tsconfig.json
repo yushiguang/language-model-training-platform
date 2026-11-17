@@ -44,6 +44,9 @@
       "@sprint/telemetry": [
         "../../apps/telemetry/src/index.ts"
       ],
+      "@sprint/client-impl": [
+        "./src/backend-api/in-process.ts"
+      ],
       "@/*": [
         "./src/*"
       ]

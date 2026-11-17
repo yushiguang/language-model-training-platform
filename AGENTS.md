@@ -47,10 +47,12 @@ changing, because apps only talk through the contracts in `@sprint/contracts`.
 | `apps/bff` | `@sprint/bff` | What pages call (`BffContract`): a thin adapter that builds each call's context and hands it to the workflow | contracts, domain |
 | `apps/telemetry` | `@sprint/telemetry` | Prometheus-style metrics and product events, sent to the platform's sink | contracts |
 | `apps/web` | `@sprint/web` | Next.js static site. Pages call `@/backend-api` only | contracts, domain, `@/backend-api`, `@/ui`, `@/components` |
-| `apps/web/src/backend-api` | | `client.ts`: the `BffClient` pages call. `in-process.ts`: the composition root, builds every app and wires them. `index.ts`: picks the client | anything |
+| `apps/web/src/backend-api` | | `client.ts`: the `BffClient` pages call. `in-process.ts`: the composition root, builds every app and wires them (the default `@sprint/client-impl`). `index.ts`: takes the client from `@sprint/client-impl` | anything |
 
-`@sprint/platform-impl` is the one injection point: it resolves to the stand-ins by default and to
-the internal adapters in the internal build. Only the composition root imports it.
+Two build-time switches, and no others: `@sprint/platform-impl` resolves to the stand-ins by
+default and to the internal adapters in the internal build (only the composition root imports
+it); `@sprint/client-impl` resolves to the in-process client by default and to an HTTP client in
+a server deployment (only `backend-api/index.ts` imports it).
 
 Per-folder guides: each app and package has its own `AGENTS.md`.
 
