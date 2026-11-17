@@ -112,7 +112,7 @@ Optimiser reads) and opens the prompt editor with a draft. It may propose severa
 once, wording only: the label and value names stay as they are. Added words are marked green and
 removed words struck through under each changed box; hovering a mark shows the helper's reason. Nothing is labeled until the user saves, and the draft
 never saves itself. A saved draft is the user's own version and is scored like any other
-(`improveWithAi` in `apps/bff/src/services/agents.ts`).
+(`improveWithAi` in `apps/workflow/src/services/agents.ts`).
 
 ## Still to come in 1.0.0
 

@@ -1,8 +1,9 @@
 import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@sprint/contracts';
 import {agentStart, isStartTool} from './starts.ts';
 import {reportProblem} from './problems.ts';
-import {aiSuggestion, featureItems, featureText, labelBalance, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, normalizeStructured, matchRuleGroup, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap, sameAnswer} from '@sprint/domain';
-import {getApp} from './app.ts';
+import {aiSuggestion, featureItems, featureText, labelBalance, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, normalizeStructured, matchRuleGroup, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap, sameAnswer, newId} from '@sprint/domain';
+import {systemContext, type Instance, type Scope} from './app.ts';
+import {currentTurn} from './turns.ts';
 import {lockHoldout} from './governance.ts';
 import {mismatches} from './mismatches.ts';
 import {loadProjectState} from './projects.ts';
@@ -217,14 +218,14 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
 
 export {pageFromPath};
 
-export async function getPageView(projectId: string, loc: PageLocation, unsaved: Record<string, unknown> = {}): Promise<PageView> {
-  const state = await loadProjectState(projectId);
+export async function getPageView(w: Scope, projectId: string, loc: PageLocation, unsaved: Record<string, unknown> = {}): Promise<PageView> {
+  const state = await loadProjectState(w, projectId);
   if (!state) return {page: loc.page, title: TITLES[loc.page], summary: 'The project was not found.', data: {}};
   const view = build(state, loc, unsaved);
   // Review finding 2: where the model disagrees with gold labels. Counts only; say which side is
   // right never (the user decides on Gold Labels' Mismatches tab).
   if (loc.page === 'gold' || loc.page === 'prompt') {
-    const m = await mismatches(projectId);
+    const m = await mismatches(w, projectId);
     if (m.versionId)
       view.data.mismatches = {
         comparedWith: m.versions.find(v => v.id === m.versionId)?.label,
@@ -315,8 +316,8 @@ function compareVersions(state: ProjectState, a: PromptVersion | undefined, b: P
   return {a: {version: versionLabel(a), change: a.change || null, scores: scores(a)}, b: {version: versionLabel(b), change: b.change || null, scores: scores(b)}, changedParts: changed, prompts: {a: sa, b: sb}};
 }
 
-async function mismatchSummary(projectId: string, state: ProjectState, v: PromptVersion | undefined) {
-  const m = await mismatches(projectId, v?.id ?? null);
+async function mismatchSummary(w: Scope, projectId: string, state: ProjectState, v: PromptVersion | undefined) {
+  const m = await mismatches(w, projectId, v?.id ?? null);
   const label = m.versions.find(x => x.id === m.versionId)?.label ?? null;
   const r = state.reports.find(x => x.promptVersionId === m.versionId && !x.archivedNow);
   return {
@@ -335,18 +336,21 @@ async function mismatchSummary(projectId: string, state: ProjectState, v: Prompt
  * The read tools, run as the signed-in user. Each call is written to the audit log. Errors come
  * back to the agent as messages it can act on.
  */
-export function agentTools(projectId: string): AgentToolHost {
+export function agentTools(inst: Instance, projectId: string): AgentToolHost {
   return {
     async call({agent, name, args}: AgentToolCall): Promise<unknown> {
-      const {catalog, labeling} = getApp();
+      // The tool runs as the user whose turn asked for it; with no turn, as the helper itself.
+      const turn = await currentTurn(inst, projectId);
+      const w = inst.scope(turn ? {...turn.ctx, requestId: newId('rq'), caller: `agent:${agent}`} : systemContext(`agent:${agent}`));
+      const {catalog, labeling} = w;
       await catalog.audit(projectId, `agent:${agent}`, 'agent.tool', {name, args});
       // The first read of examples fixes the halves for good (spec 1.0.0, 4.2).
-      if (READS_EXAMPLES.has(name)) await lockHoldout(projectId);
+      if (READS_EXAMPLES.has(name)) await lockHoldout(w, projectId);
       // Start-work tools spend money and start at once; they live in starts.ts.
-      if (isStartTool(name)) return agentStart(projectId, agent, name, args);
+      if (isStartTool(name)) return agentStart(w, projectId, agent, name, args);
       // A problem report: drafted first, sent only after the user agrees (spec 1.1.0, 3).
-      if (name === 'report_problem') return reportProblem(projectId, agent, args);
-      const state = await loadProjectState(projectId);
+      if (name === 'report_problem') return reportProblem(w, projectId, agent, args);
+      const state = await loadProjectState(w, projectId);
       if (!state) throw new Error('The project was not found.');
       switch (name) {
         case 'get_page_view': {
@@ -395,13 +399,13 @@ export function agentTools(projectId: string): AgentToolHost {
         }
         case 'read_feature_info': {
           const keys = Array.isArray(args.keys) ? args.keys.map(String).slice(0, 30) : [];
-          const info = (await getApp().featureInfo?.describe(keys)) ?? {};
+          const info = (await w.featureInfo?.describe(keys)) ?? {};
           return Object.fromEntries(keys.map(k => [k, info[k] ?? {description: 'No description yet.'}]));
         }
         case 'read_doc': {
           const url = typeof args.url === 'string' ? args.url.trim() : '';
           if (!/^https?:\/\//.test(url)) throw new Error('Give the link to read.');
-          const doc = await getApp().documents?.read(url);
+          const doc = await w.documents?.read(url);
           if (!doc) return {error: 'This link cannot be opened here. Ask the user to paste the text.'};
           const MAX = systemConfig().agent.maxDocChars;
           return {title: doc.title, text: doc.text.length > MAX ? `${doc.text.slice(0, MAX)}… (cut)` : doc.text};
@@ -420,7 +424,7 @@ export function agentTools(projectId: string): AgentToolHost {
         case 'compare_versions':
           return compareVersions(state, findVersion(state, args.a), findVersion(state, args.b), asModel(args.model, state));
         case 'get_mismatch_summary':
-          return mismatchSummary(projectId, state, findVersion(state, args.version));
+          return mismatchSummary(w, projectId, state, findVersion(state, args.version));
         default:
           throw new Error(`Unknown tool ${String(name)}.`);
       }

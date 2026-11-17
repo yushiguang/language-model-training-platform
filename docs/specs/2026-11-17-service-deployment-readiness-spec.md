@@ -315,6 +315,17 @@ Each item is its own `Contract change:` pull request.
    and shared short-lived state. No contract change except the additive `WorkflowContract`
    (with `RequestContext` from the start). Proof: full check suite and browser check unchanged,
    plus two-users-one-process tests.
+   **Status (2026-11-17): built** on branch `refactor/workflow-module`. `createWorkflow(deps)`
+   with no module-level state; every `WorkflowContract` method takes `ctx: RequestContext`
+   (fields: request id, user, tenant, locale, time zone, caller, deadline, app version, trace
+   parent); `SharedStatePort` (`Platform.sharedState`, stand-in `memorySharedState`) holds the
+   live turn, the sticky helper, the running turn's context and problem-report drafts; the bff
+   builds the context per call and keeps the idempotency cache in its closure. The web
+   composition root calls the workflow through a JSON `loopback`, so the browser check runs the
+   RPC-shaped path. Sampling and turn progress handlers stay instance-local until items 3 and 5.
+   Events stay data-free; the client reads the live turn again on `agent_live`. `BffClient`
+   lost its unused synchronous `answeringAgent` (pages never called it; `getAnsweringAgent`
+   stays).
 2. Section 4 items 1–5 (serialisable contracts, package entry points and the boundary-checker
    update, async URL resolution): each its own contract-change PR. Proof: a serialization
    round-trip test over every contract type, and `check:boundaries` passing with the new

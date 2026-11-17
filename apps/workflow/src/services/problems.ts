@@ -1,8 +1,9 @@
-import type {AgentPreset, ClientDiagnostics, Locale, PageContext, TicketSubmission} from '@sprint/contracts';
+import type {AgentPreset, TicketSubmission} from '@sprint/contracts';
 import {agentName, msg, systemConfig, versionLabel} from '@sprint/domain';
-import {getApp, now, tm} from './app.ts';
+import {now, type Scope} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {loadProjectState} from './projects.ts';
+import {currentTurn} from './turns.ts';
 
 /**
  * Problem reports (spec 1.1.0, 3). Any helper can call `report_problem`: first without `send` to
@@ -11,23 +12,6 @@ import {loadProjectState} from './projects.ts';
  * can never send in the turn it drafted. The browser's rolling record (`ClientDiagnostics`) and
  * the language arrive with the user's message and are kept for that turn only.
  */
-
-interface TurnContext {
-  page: PageContext;
-  locale: Locale;
-  client: ClientDiagnostics | null;
-}
-
-const turns = new Map<string, TurnContext>();
-
-/** What the running turn knows about the user's page, language and browser. */
-export function beginTurn(projectId: string, ctx: TurnContext): void {
-  turns.set(projectId, ctx);
-}
-
-export function endTurn(projectId: string): void {
-  turns.delete(projectId);
-}
 
 interface Fields {
   summary: string;
@@ -41,7 +25,9 @@ interface Draft extends Fields {
   includeContent: boolean;
 }
 
-const drafts = new Map<string, Draft>();
+/** The draft waits for the user's answer; one left unanswered is dropped after a day. */
+const DRAFT_TTL_MS = 24 * 3600_000;
+const draftKey = (projectId: string) => `report-draft:${projectId}`;
 
 const str = (x: unknown, max: number) => (typeof x === 'string' ? x.trim().slice(0, max) : '');
 
@@ -56,10 +42,10 @@ function readFields(args: Record<string, unknown>, base?: Fields): Fields {
 }
 
 /** The `report_problem` tool. Returns a draft to show the user, the ticket id, or an error to act on. */
-export async function reportProblem(projectId: string, agent: AgentPreset, args: Record<string, unknown>): Promise<unknown> {
-  const {tickets, catalog} = getApp();
+export async function reportProblem(w: Scope, projectId: string, agent: AgentPreset, args: Record<string, unknown>): Promise<unknown> {
+  const {tickets, catalog} = w;
   if (!tickets) return {error: 'Problem reports cannot be sent from this site. Tell the user to report it to their team directly.'};
-  const turn = turns.get(projectId) ?? null;
+  const turn = await currentTurn(w, projectId);
   const page = turn?.page.where?.page ?? 'other';
   const client = turn?.client ?? null;
 
@@ -67,8 +53,8 @@ export async function reportProblem(projectId: string, agent: AgentPreset, args:
     const fields = readFields(args);
     if (!fields.summary && !fields.actual) return {error: 'Give at least a one-line summary of what went wrong.'};
     const includeContent = args.includeContent === true;
-    drafts.set(projectId, {...fields, includeContent, createdAt: now()});
-    tm().event('problem_report_drafted', {page});
+    await w.shared.set<Draft>(draftKey(projectId), {...fields, includeContent, createdAt: now()}, DRAFT_TTL_MS);
+    w.tm.event('problem_report_drafted', {page});
     return {
       draft: fields,
       attached: [
@@ -83,18 +69,18 @@ export async function reportProblem(projectId: string, agent: AgentPreset, args:
     };
   }
 
-  const draft = drafts.get(projectId);
+  const draft = await w.shared.get<Draft>(draftKey(projectId));
   if (!draft) return {error: 'There is no draft to send. Draft the report first (without "send") and ask the user.'};
   const [lastUser] = await catalog.find('chat_messages', {projectId, role: 'user'}, 'createdAt desc');
   if (!lastUser || lastUser.createdAt <= draft.createdAt) return {error: 'The user has not answered yet. Ask whether to send the report, and wait for the answer.'};
 
-  const state = await loadProjectState(projectId);
+  const state = await loadProjectState(w, projectId);
   const includeContent = typeof args.includeContent === 'boolean' ? args.includeContent : draft.includeContent;
   const fields = readFields(args, draft);
   const params = {...(turn?.page.where?.params ?? {})};
   const version = state ? (state.versions.find(v => v.id === params.v) ?? state.versions[0]) : undefined;
   const events = (await catalog.find('chat_messages', {projectId, role: 'event'}, 'createdAt desc')).slice(0, systemConfig().reports.actionLines).reverse();
-  const user = await getApp().user();
+  const user = await w.user();
   const ticket: TicketSubmission = {
     ...fields,
     reporter: {id: user.id, name: user.name},
@@ -102,7 +88,7 @@ export async function reportProblem(projectId: string, agent: AgentPreset, args:
     filedBy: agentName(agent),
     createdAt: now(),
     where: {
-      appVersion: getApp().appVersion ?? 'unknown',
+      appVersion: w.appVersion ?? 'unknown',
       projectId,
       projectName: state?.project.name ?? null,
       page,
@@ -115,9 +101,9 @@ export async function reportProblem(projectId: string, agent: AgentPreset, args:
     content: includeContent && version ? {versionLabel: versionLabel(version), prompt: version.template} : null,
   };
   const {ticketId} = await tickets.submit(ticket);
-  drafts.delete(projectId);
+  await w.shared.delete(draftKey(projectId));
   await catalog.audit(projectId, user.name, 'problem.report', {ticketId});
-  await postEvent(projectId, 'report', 'user', msg('sent a problem report {ticket}', {ticket: ticketId}));
-  tm().event('problem_reported', {page, has_content: !!ticket.content, failed_calls: client?.failedCalls.length ?? 0, errors: client?.errors.length ?? 0});
+  await postEvent(w, projectId, 'report', 'user', msg('sent a problem report {ticket}', {ticket: ticketId}));
+  w.tm.event('problem_reported', {page, has_content: !!ticket.content, failed_calls: client?.failedCalls.length ?? 0, errors: client?.errors.length ?? 0});
   return {ticketId, note: 'Tell the user the ticket id in one line; the team picks the report up from there.'};
 }

@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, EndpointInfo, ExampleSource, FileStore, Identity, LabelCallResult, LlmGatewayContract} from '@sprint/contracts';
+import type {AgentRuntimeContract, EndpointInfo, ExampleSource, FileStore, Identity, LabelCallResult, LlmGatewayContract, RequestContext, WorkflowContract} from '@sprint/contracts';
 import {createCatalog} from '@sprint/catalog';
 import {createLabeling, memoryLocks} from '@sprint/labeling';
-import {localDocRuntime} from '@sprint/platform';
+import {localDocRuntime, loopback, memorySharedState} from '@sprint/platform';
+import {createWorkflow} from '@sprint/workflow';
 import {createBffApi} from './api.ts';
-import {configureBff} from './services/app.ts';
 
 const endpoint: EndpointInfo = {id: 'A', name: 'Model A', description: '', badge: '', cost: 'Lower', speed: 'Faster', supportsTemperature: true, priceIn: 0, priceOut: 200};
 const structured = (rules = '') => ({taskSummary: 'Label this', features: {video: ['Description'], photo_text: [], metadata: []}, label: {name: 'format', kind: 'single' as const, values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}, ruleGroups: rules ? [{id: 'rg1', title: 'Rules', content: rules}] : [], images: []});
 
-/** A bff with one project: a schema, 4 eval examples with gold labels, and a fake model. */
+/** A bff over a workflow (through the loopback) with one project: a schema, 4 eval examples with gold labels, and a fake model. */
 async function world(prefix: string, identity: Identity = {currentUser: async () => ({id: 'u_1', name: 'Tester'})}) {
   const db = localDocRuntime(prefix);
   const catalog = createCatalog(db);
@@ -21,14 +21,20 @@ async function world(prefix: string, identity: Identity = {currentUser: async ()
     label: async (): Promise<LabelCallResult> => ({text: '{"format": "Vlog"}', inputTokens: 0, outputTokens: 150, costUsd: 0.03, endpointId: 'labeling-A', attempts: 1}),
   } as unknown as LlmGatewayContract;
   const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks()});
-  configureBff({catalog, labeling, gateway, agents: {} as AgentRuntimeContract, identity, files: {} as FileStore, examples: {} as ExampleSource, standIns: []});
+  const wf = createWorkflow({catalog, labeling, gateway, files: {} as FileStore, examples: {} as ExampleSource, standIns: [], sharedState: memorySharedState()});
+  wf.connect({agents: {} as AgentRuntimeContract});
+  // Every context the workflow receives, in order.
+  const contexts: RequestContext[] = [];
+  const workflow = new Proxy(loopback(wf.api), {
+    get: (t, k) => (ctx: RequestContext, ...args: unknown[]) => (contexts.push(ctx), (t[k as keyof WorkflowContract] as (...a: unknown[]) => unknown)(ctx, ...args)),
+  });
   const projectId = `pr_${prefix}`;
   await catalog.insert('setup_versions', {id: `sv_${prefix}`, projectId, number: 1, schemaVersion: 1, task: '', schema: {name: 'format', kind: 'single' as const, values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}, thresholds: null, models: [{endpoint: 'A', maxOutputTokens: 150, temperature: null}], steps: {schema: true, evaluation: true, models: true}, createdAt: '', createdBy: ''});
   await catalog.insert('dataset_snapshots', {id: `ds_${prefix}`, projectId, number: 1, source: 'sample', sourceName: 'test', createdAt: '', counts: {rows: 4, valid: 4, invalid: 0, video: 4, photoText: 0}, split: {eval: 4, test: 0, train: 0}});
   await catalog.insertMany('examples', Array.from({length: 4}, (_, i) => ({id: `ex_${prefix}_${i}`, snapshotId: `ds_${prefix}`, externalId: String(i), type: 'video' as const, title: '', features: {}, split: 'eval' as const, optimiserHalf: i % 2 === 0})));
   for (let i = 0; i < 4; i++) await catalog.insert('gold_labels', {id: `gl_${prefix}_${i}`, projectId, exampleId: `ex_${prefix}_${i}`, schemaVersion: 1, answer: ['Vlog'], source: 'labeled', revealed: false, createdAt: '', createdBy: 'Tester'});
   await catalog.insert('projects', {id: projectId, name: 'p', createdAt: '', createdBy: '', kind: 'prompt_tuning', settingsConfirmed: true, setupVersionId: `sv_${prefix}`, snapshotId: `ds_${prefix}`, approvedNodes: []});
-  return {api: createBffApi(), catalog, projectId};
+  return {api: createBffApi({workflow, identity, appVersion: '9.9.9'}), catalog, projectId, contexts};
 }
 
 async function until(cond: () => Promise<boolean>, what: string) {
@@ -57,7 +63,7 @@ test('contract: a version is created and scored from ids alone, and the same key
 test('contract: ids of another project are refused', async () => {
   const one = await world('api2');
   const two = await world('api3');
-  // The second world's bff is the configured one; the first project's records are in another store.
+  // Each bff has its own workflow and store: the first project's records are not in the second's.
   await assert.rejects(two.api.scoreVersion({projectId: two.projectId, promptVersionId: 'pv_missing'}), /does not exist/);
   await assert.rejects(two.api.closeProposal({projectId: two.projectId, proposalId: 'ap_missing', decision: 'approved'}), /does not exist/);
   await assert.rejects(two.api.tick({projectId: one.projectId}).then(() => two.api.createVersion({projectId: one.projectId, structured: structured(), parentId: null, madeBy: 'user', change: '', kind: 'major'})), /does not exist/);
@@ -102,4 +108,28 @@ test('contract: Sign out is offered only when the platform can end the session (
   assert.deepEqual(JSON.parse(JSON.stringify(info)), info, 'plain JSON');
   await sso.api.signOut();
   assert.equal(out, 1);
+});
+
+test('contract: each call carries a context with its own request id, the signed-in user and the app version', async () => {
+  const {api, projectId, contexts} = await world('ctx1');
+  await api.loadProjectState(projectId);
+  await api.sendUserMessage({projectId, text: '', page: {label: 'x', agent: 'front_desk', intent: 'answer', context: {}}, locale: 'zh'}).catch(() => undefined);
+  assert.equal(contexts.length, 2);
+  assert.notEqual(contexts[0].requestId, contexts[1].requestId);
+  for (const c of contexts) assert.deepEqual([c.user, c.caller, c.appVersion], [{id: 'u_1', name: 'Tester'}, 'bff', '9.9.9']);
+  assert.equal(contexts[1].locale, 'zh', "a message carries the user's language");
+});
+
+test('contract: a failed sign-in check is asked again on the next call; a good one is kept', async () => {
+  let asked = 0;
+  const {api} = await world('ctx2', {
+    currentUser: async () => {
+      if (++asked === 1) throw new Error('not signed in');
+      return {id: 'u_2', name: 'Later'};
+    },
+  });
+  await assert.rejects(api.listProjects(), /not signed in/);
+  assert.deepEqual((await api.getRuntimeInfo()).user, {id: 'u_2', name: 'Later'});
+  await api.listProjects();
+  assert.equal(asked, 2);
 });

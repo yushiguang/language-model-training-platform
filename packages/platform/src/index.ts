@@ -9,3 +9,5 @@ export * from './standins/feature-info.ts';
 export * from './standins/documents.ts';
 export * from './standins/enterprise.ts';
 export * from './standins/tickets.ts';
+export * from './standins/shared-state.ts';
+export * from './standins/loopback.ts';

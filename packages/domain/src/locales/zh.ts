@@ -73,6 +73,7 @@ export const ZH: Readonly<Record<string, string>> = {
   "document links": "文档链接",
   "telemetry": "遥测",
   "problem reports": "问题报告",
+  "shared state": "共享状态",
   "Project Settings: the name, the pass rule and the labeling model": "项目设置：名称、通过规则和打标模型",
   "{name}: account and language": "{name}：账号和语言",
   "Account and language": "账号和语言",

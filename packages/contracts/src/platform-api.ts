@@ -460,11 +460,51 @@ export interface DocumentSource {
 // Enterprise extension ports (spec 1.0.0, section 7.1). All optional: the single-tenant stand-ins
 // in `@sprint/platform` allow everything and run jobs in the page.
 
-/** Who a service call is made for. Carried in request structs once services are split. */
+/** The person a call is made for, as the channel (the bff) authenticated them. */
+export interface CallerUser {
+  id: string;
+  name: string;
+  email?: string;
+}
+
+/**
+ * Who a service call is made for and how it travels (deployment readiness spec, 2). Every
+ * `WorkflowContract` method takes one as its first argument; the bff builds it from the
+ * authenticated request, one per call. It carries ids and the caller, never a copy of a project:
+ * a service loads the records itself, so they are never stale and a client cannot forge them.
+ * Product events are stamped from it (request, user, project, page, app version) so a user's
+ * actions can be followed across services; telemetry still carries ids and counts only.
+ */
 export interface RequestContext {
+  /** One id per call, passed on to every hop (logs, problem reports, traces). */
+  requestId: string;
+  user: CallerUser;
   tenantId?: string;
-  userId?: string;
-  requestId?: string;
+  /** The language the user reads the site in. */
+  locale?: Locale;
+  /** The user's IANA time zone, for times written in messages. */
+  timeZone?: string;
+  /** The service that makes the call (`bff`, `optimiser`, `worker`), for service-to-service auth. */
+  caller?: string;
+  /** Epoch milliseconds after which the caller has given up: every hop stops work past it. */
+  deadline?: number;
+  /** The site version the user has open, to spot a page older than the server. */
+  appVersion?: string;
+  /** The W3C `traceparent` of the call, when the hosting platform traces requests. */
+  traceParent?: string;
+}
+
+/**
+ * Short-lived state shared by every replica of a service (deployment readiness spec, 2): the
+ * running Ask AI turn's live line, the helper answering on a page, a problem-report draft, the
+ * turn's page and browser record. Values are plain JSON; each key expires after its TTL. A server
+ * deployment backs it with a key-value store with expiry; the browser build keeps it in memory.
+ */
+export interface SharedStatePort {
+  get<T>(key: string): Promise<T | null>;
+  /** Writes `value` under `key`; it is gone after `ttlMs`. */
+  set<T>(key: string, value: T, ttlMs: number): Promise<void>;
+  delete(key: string): Promise<void>;
 }
 
 /** Per-tenant overrides of the system configuration. */
@@ -534,6 +574,11 @@ export interface Platform {
   authorization?: AuthorizationPort;
   /** A job queue for background work. Optional: without it work runs in the open page. */
   jobs?: JobQueuePort;
+  /**
+   * Short-lived shared state with expiry. Optional: without it the workflow keeps it in the
+   * memory of its own process, which is right for the browser build and one server replica.
+   */
+  sharedState?: SharedStatePort;
   /**
    * Where problem reports go (spec 1.1.0, 3.3). Optional: without it the helpers say reports
    * cannot be sent here. See docs/handover/integration.md, "Problem reports".

@@ -44,6 +44,7 @@ The internal module exports `createPlatform()` returning the `Platform` object f
 | `endpoints?: EndpointConfig[]` | Registered endpoints with real limits (next section) | not set: assumed limits |
 | `telemetry?: TelemetrySink` | Takes product events (`pushEvents`, batches of `TelemetryEvent`) and metrics as Prometheus text (`pushMetrics`) and forwards them to the company's telemetry system. Must not throw; slow is fine (the app buffers) | `localTelemetrySink` (`localStorage`); not set: kept in memory only |
 | `tickets?: TicketPort` | Files a problem report and returns its ticket id (see "Problem reports") | `localTickets` (`localStorage`, `sprint-tickets`); not set: helpers say reports cannot be sent |
+| `sharedState?: SharedStatePort` | Short-lived keys every server instance must see, with a TTL (`get`, `set(key, value, ttlMs)`, `delete`; values are plain JSON): the live Ask AI turn, the helper that keeps answering on a page, the running turn's caller and page, problem-report drafts. A shared store such as Redis in a server deployment | `memorySharedState` (a map in the page); not set: the composition root uses the same |
 | `standIns: string[]` | Names shown in the header while any stand-in is in use; empty in production | all |
 
 ## Endpoints and limits
@@ -134,11 +135,11 @@ the bff passes it to `Platform.documents` and cuts the text at 20,000 characters
 
 Any helper can call `report_problem` when the user says something is wrong (spec 1.1.0, 3). The
 helper drafts first and shows the user what it would send; code refuses to send until the user
-has written again, so a report never goes without a yes. The bff then builds a
+has written again, so a report never goes without a yes. The workflow then builds a
 `TicketSubmission` (`packages/contracts/src/platform-api.ts`) and calls `Platform.tickets.submit`:
 
-- the user's account of it (summary, expected, actual, steps), the reporter, the language and the
-  helper that filed it;
+- the user's account of it (summary, expected, actual, steps), the reporter (the user whose Ask AI
+  turn it is, from that turn's request context), the language and the helper that filed it;
 - where: app version, project, page and its ids, the steps approved, the settings in short;
 - `diagnostics: ClientDiagnostics`: the browser's rolling record (path, browser, viewport, time
   zone, the last 10 pages, failed backend calls with their call ids, script errors), sent with
@@ -178,8 +179,16 @@ adapters, so:
 
 Each app already sits behind a contract. To move one out, implement its contract as an HTTP
 client and pass that to the composition root instead of the in-process app; callers do not change.
-The bff contract still needs a fully serialisable version first (planned); see "Known limits" in
-`docs/architecture.md`.
+
+The workflow is ready for this first: `WorkflowContract` (`packages/contracts/src/workflow-api.ts`)
+takes the caller's `RequestContext` first on every method, and one call crosses as
+`RpcRequest {method, ctx, args}` and comes back as `RpcResponse` (`{result}` or
+`{error: {code, message}}`). In the browser the bff already calls it through `loopback`
+(`packages/platform/src/standins/loopback.ts`), which puts every call through JSON the same way,
+so a server only has to carry those envelopes. Give the server's workflow a shared
+`Platform.sharedState`, so every instance sees the same live turn and drafts. Until the job module
+(spec 3) and the agent service (spec 6) land, sampling and an Ask AI turn's progress stay with the
+instance that started them. See "Known limits" in `docs/architecture.md`.
 
 ## Verify
 

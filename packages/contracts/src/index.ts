@@ -9,3 +9,4 @@ export * from './bff-api.ts';
 export * from './telemetry.ts';
 export * from './config.ts';
 export * from './optimiser-api.ts';
+export * from './workflow-api.ts';

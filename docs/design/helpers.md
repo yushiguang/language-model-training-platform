@@ -42,8 +42,8 @@ explain and propose; the user approves on the page.
 ## How it works (as built)
 
 Agents never read the DOM. When the user sends a message, the assistant panel says where the user
-is (path and URL parameters), and the bff builds that page's **page view** from the same saved data
-the page shows (`apps/bff/src/services/page-views.ts`). The view goes with every turn, together
+is (path and URL parameters), and the workflow builds that page's **page view** from the same saved data
+the page shows (`apps/workflow/src/services/page-views.ts`). The view goes with every turn, together
 with the page's unsaved edits. To see more, an agent calls **read tools** (other pages, versions,
 reports, examples, gold labels, predictions, prompt checks), like a coding agent reading files in
 a repo: up to 4 calls per turn, each one logged, nothing changed. Changes stay proposals the user
@@ -77,7 +77,7 @@ go to the helpers as image content parts after the text, for Improve with AI and
 real items carry absolute URLs.
 
 **Document links.** Helpers read a document link the user pastes with the `read_doc` tool
-(front desk, Prompt helper). The bff reads it through `Platform.documents`
+(front desk, Prompt helper). The workflow reads it through `Platform.documents`
 (`DocumentSource`, `packages/contracts/src/platform-api.ts`); the text is cut at 20,000
 characters. The public build's stand-in (`noDocuments`) opens nothing, so the helper says the
 link can't be opened here and asks for the pasted text. The internal build plugs in the real
@@ -114,7 +114,7 @@ example, repeating a tried change). No helper judges a gold label. The report vi
 `scoredOn` and `confirmed` (the Optimiser's second labeling of the held-out half: true, false, or
 null when there was none) for the Scores helper. The texts have not been tried on real models yet.
 
-Three **start tools** spend money (`apps/bff/src/services/starts.ts`): `try_prompt` (prompt
+Three **start tools** spend money (`apps/workflow/src/services/starts.ts`): `try_prompt` (prompt
 agent: up to 5 eval examples with an unsaved draft, nothing saved), `score_version` and
 `start_optimiser` (prompt and evaluation agents). They run at once, like every automatic start;
 the user stops them from the page.

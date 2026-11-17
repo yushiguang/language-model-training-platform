@@ -1,6 +1,6 @@
 import type {Answer, Example, ExampleBrief, MismatchList, MismatchReview, Prediction, ProjectState} from '@sprint/contracts';
 import {withComments, isRight, versionLabel, visibleToAgents, systemConfig, sameAnswer} from '@sprint/domain';
-import {emitChange, getApp, now, once, tm} from './app.ts';
+import {now, type Scope} from './app.ts';
 import {saveGold} from './dataset.ts';
 import {buildReport, predictionsFor} from './evaluation.ts';
 import {addComment} from './governance.ts';
@@ -31,8 +31,8 @@ const same = (a: Answer, b: Answer) => sameAnswer(a, b);
  * gold label and a version): the newest review of each pair. A review
  * lapses once the example's gold label changes after it.
  */
-async function standingReviews(projectId: string, state: ProjectState): Promise<Map<string, ReviewData & {earlier: ReviewData[]}>> {
-  const {catalog} = getApp();
+async function standingReviews(w: Scope, projectId: string, state: ProjectState): Promise<Map<string, ReviewData & {earlier: ReviewData[]}>> {
+  const {catalog} = w;
   const all = new Map<string, ReviewData[]>();
   for (const r of await catalog.find('audit_log', {projectId, action: GOLD_REVIEW})) {
     const d = r.data as unknown as ReviewData;
@@ -57,11 +57,11 @@ async function standingReviews(projectId: string, state: ProjectState): Promise<
  * means, not about one version's answer, so comments from every view are included. Notes saved
  * with a mismatch decision before 1.0.0 come first.
  */
-export async function labelComments(projectId: string, state: ProjectState): Promise<Map<string, string[]>> {
+export async function labelComments(w: Scope, projectId: string, state: ProjectState): Promise<Map<string, string[]>> {
   const visible = new Set(state.examples.filter(visibleToAgents).map(e => e.id));
   const out = new Map<string, string[]>();
   const add = (id: string, text: string) => out.set(id, [...(out.get(id) ?? []), text]);
-  for (const d of (await standingReviews(projectId, state)).values()) if (d.note && visible.has(d.exampleId)) add(d.exampleId, d.note);
+  for (const d of (await standingReviews(w, projectId, state)).values()) if (d.note && visible.has(d.exampleId)) add(d.exampleId, d.note);
   for (const [id, list] of Object.entries(state.comments)) if (visible.has(id)) for (const c of list) add(id, c.text);
   return out;
 }
@@ -71,14 +71,13 @@ export async function labelComments(projectId: string, state: ProjectState): Pro
  * for every eval example those answers never change (labeling again uses another pass), so they
  * are read once per page and reused for every gold edit. Partial sets are not kept.
  */
-const fullAnswers = new Map<string, Map<string, Prediction>>();
-async function answersOnEval(versionId: string, model: NonNullable<ProjectState['setup']>['models'][number], evalIds: string[]): Promise<Map<string, Prediction> | null> {
+async function answersOnEval(w: Scope, versionId: string, model: NonNullable<ProjectState['setup']>['models'][number], evalIds: string[]): Promise<Map<string, Prediction> | null> {
   const key = `${versionId}|${model.endpoint}|${JSON.stringify(model)}`;
-  const had = fullAnswers.get(key);
+  const had = w.local.fullAnswers.get(key);
   if (had && evalIds.every(id => had.has(id))) return had;
-  const p = await predictionsFor(versionId, model.endpoint, model);
+  const p = await predictionsFor(w, versionId, model.endpoint, model);
   if (!evalIds.every(id => p.has(id))) return null;
-  fullAnswers.set(key, p);
+  w.local.fullAnswers.set(key, p);
   return p;
 }
 
@@ -89,10 +88,10 @@ async function answersOnEval(versionId: string, model: NonNullable<ProjectState[
  * answers on the whole eval set gets a fresh report for today's gold labels and settings, from
  * saved answers only: nothing is labeled. Returns how many reports it built.
  */
-export async function rebuildReports(projectId: string): Promise<number> {
+export async function rebuildReports(w: Scope, projectId: string): Promise<number> {
   return (
-    (await once(`rebuild:${projectId}`, async () => {
-      const state = await loadProjectState(projectId);
+    (await w.once(`rebuild:${projectId}`, async () => {
+      const state = await loadProjectState(w, projectId);
       if (!state?.setup?.schema) return 0;
       let built = 0;
       const seen = new Set<string>();
@@ -101,9 +100,9 @@ export async function rebuildReports(projectId: string): Promise<number> {
         const v = state.versions.find(x => x.id === r.promptVersionId && x.schemaVersion === state.setup!.schemaVersion);
         if (!v || seen.has(key)) continue;
         seen.add(key);
-        if (await buildReport(projectId, state.setup, v, r.endpoint, state.examples, state.gold, state.contextId, {replace: true})) built++;
+        if (await buildReport(w, projectId, state.setup, v, r.endpoint, state.examples, state.gold, state.contextId, {replace: true})) built++;
       }
-      emitChange();
+      w.emitChange();
       return built;
     })) ?? 0
   );
@@ -117,20 +116,20 @@ export async function rebuildReports(projectId: string): Promise<number> {
  * leaves the picked version's To review list once it is kept or changed for that version, and
  * goes back when the review is reopened. Answers the safety filter stopped are not mismatches.
  */
-export async function mismatches(projectId: string, versionId?: string | null): Promise<MismatchList> {
-  const state = await loadProjectState(projectId);
+export async function mismatches(w: Scope, projectId: string, versionId?: string | null): Promise<MismatchList> {
+  const state = await loadProjectState(w, projectId);
   const empty: MismatchList = {versions: [], versionId: null, items: [], wrongEverywhere: 0, reviewed: 0, reviewedItems: [], reviewedAll: 0};
   const setup = state?.setup;
   const model = setup?.models[0];
   if (!state || !setup?.schema || !model) return empty;
   const evalEx = state.examples.filter(e => e.split === 'eval' && !!state.gold[e.id]);
   if (!evalEx.length) return empty;
-  const standing = await standingReviews(projectId, state);
+  const standing = await standingReviews(w, projectId, state);
   // Versions of the current schema with an answer for every eval example, newest first.
   const answers = new Map<string, Map<string, Prediction>>();
   const evalIds = evalEx.map(e => e.id);
   for (const v of state.versions.filter(x => x.schemaVersion === setup.schemaVersion)) {
-    const p = await answersOnEval(v.id, model, evalIds);
+    const p = await answersOnEval(w, v.id, model, evalIds);
     if (p) answers.set(v.id, new Map(evalEx.map(e => [e.id, p.get(e.id)!])));
   }
   if (!answers.size) return {...empty, reviewedAll: standing.size};
@@ -173,21 +172,21 @@ export async function mismatches(projectId: string, versionId?: string | null): 
  * recorded; a change saves a new gold label, and scores are rebuilt from saved answers, with
  * nothing labeled again.
  */
-export async function reviewGold(projectId: string, exampleId: string, versionId: string, outcome: 'kept' | 'changed', answer?: Answer, note?: string): Promise<void> {
-  const {catalog, user} = getApp();
-  const state = await loadProjectState(projectId);
+export async function reviewGold(w: Scope, projectId: string, exampleId: string, versionId: string, outcome: 'kept' | 'changed', answer?: Answer, note?: string): Promise<void> {
+  const {catalog, user} = w;
+  const state = await loadProjectState(w, projectId);
   const current = state?.gold[exampleId];
   const model = state?.setup?.models[0];
   if (!state?.setup || !current) throw new Error('This example has no gold label.');
-  const g = outcome === 'changed' && answer ? await saveGold(projectId, exampleId, state.setup.schemaVersion, answer, true) : current;
-  const theirs = model ? (await predictionsFor(versionId, model.endpoint, model)).get(exampleId)?.answer : null;
+  const g = outcome === 'changed' && answer ? await saveGold(w, projectId, exampleId, state.setup.schemaVersion, answer, true) : current;
+  const theirs = model ? (await predictionsFor(w, versionId, model.endpoint, model)).get(exampleId)?.answer : null;
   const text = note?.trim().slice(0, systemConfig().labeling.commentMaxChars) || undefined;
   const data: ReviewData = {exampleId, versionId, outcome, usedModel: outcome === 'changed' && !!theirs && !!answer && same(theirs, answer), goldId: g.id, previousGoldId: current.id, previousAnswer: current.answer, at: now()};
   await catalog.audit(projectId, (await user()).name, GOLD_REVIEW, data as unknown as Record<string, unknown>);
   // 1.0.0: the "Why" is a comment on the example (spec 5.4), kept with the version it was written on.
-  if (text) await addComment(projectId, exampleId, text, versionId);
-  tm().event('gold_mismatch_reviewed', {outcome, with_note: !!text});
-  emitChange();
+  if (text) await addComment(w, projectId, exampleId, text, versionId);
+  w.tm.event('gold_mismatch_reviewed', {outcome, with_note: !!text});
+  w.emitChange();
 }
 
 export {withComments};

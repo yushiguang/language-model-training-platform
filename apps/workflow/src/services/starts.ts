@@ -1,6 +1,6 @@
 import type {AgentPreset, ChatLink, EndpointId, Msg, ProjectState} from '@sprint/contracts';
 import {autoSpendUsd, canScore, compilePrompt, readStructured, evalEstimate, optimiserEstimate, versionLabel, visibleToAgents, systemConfig, msg} from '@sprint/domain';
-import {getApp, tm} from './app.ts';
+import type {Scope} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {asModel, findVersion, modelName} from './page-views.ts';
 import {loadProjectState} from './projects.ts';
@@ -25,7 +25,7 @@ interface Planned {
 }
 
 /** Checks the arguments and works out the label and cost of a start, without starting it. */
-function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown>): Planned {
+function plan(w: Scope, state: ProjectState, tool: StartTool, args: Record<string, unknown>): Planned {
   const projectId = state.project.id;
   const models = state.setup?.models ?? [];
   const pickModel = (): EndpointId => {
@@ -56,11 +56,11 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
         estimateUsd: evalEstimate(state, draft, endpoint, examples.length),
         run: async () => {
           const settings = models.find(m => m.endpoint === endpoint)!;
-          const rows = await getApp().labeling.tryTemplate({...draft, schema: state.setup!.schema!, settings, examples});
+          const rows = await w.labeling.tryTemplate({...draft, schema: state.setup!.schema!, settings, examples});
           const byId = new Map(examples.map(e => [e.id, e]));
           const costUsd = rows.reduce((a, r) => a + r.costUsd, 0);
           // No task is saved, so the try's spend is recorded here as automatic spend.
-          if (costUsd > 0) await getApp().catalog.audit(projectId, 'system', 'auto_spend', {what: 'try_prompt', costUsd});
+          if (costUsd > 0) await w.catalog.audit(projectId, 'system', 'auto_spend', {what: 'try_prompt', costUsd});
           return {
             model: modelName(state, endpoint),
             rows: rows.map(r => ({id: byId.get(r.exampleId)?.externalId, title: byId.get(r.exampleId)?.title, model: r.answer, invalid: r.invalidReason, error: r.error, gold: state.gold[r.exampleId]?.answer ?? null})),
@@ -81,7 +81,7 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
         link: {path: '/prompt'},
         estimateUsd: evalEstimate(state, v, endpoint),
         run: async () => {
-          void scoreVersion(projectId, v, endpoint, {auto: true});
+          void scoreVersion(w, projectId, v, endpoint, {auto: true});
           return {started: true, note: 'Scoring runs on the eval set; the report appears when it finishes.'};
         },
       };
@@ -95,7 +95,7 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
         link: {path: '/prompt'},
         estimateUsd: optimiserEstimate(state, endpoint, rounds),
         run: async () => {
-          void startOptimiser(projectId, rounds, undefined, {auto: true});
+          void startOptimiser(w, projectId, rounds, undefined, {auto: true});
           return {started: true, note: `The Optimiser tries up to ${rounds} changes; each one appears on Prompt versions, with its dry run or scores.`};
         },
       };
@@ -107,17 +107,17 @@ function plan(state: ProjectState, tool: StartTool, args: Record<string, unknown
  * Called by the agent tool host: runs the start at once, with no cost limit (the user stops it
  * from the page), and records it.
  */
-export async function agentStart(projectId: string, agent: AgentPreset, tool: StartTool, args: Record<string, unknown>): Promise<unknown> {
-  const state = await loadProjectState(projectId);
+export async function agentStart(w: Scope, projectId: string, agent: AgentPreset, tool: StartTool, args: Record<string, unknown>): Promise<unknown> {
+  const state = await loadProjectState(w, projectId);
   if (!state) throw new Error('The project was not found.');
-  const p = plan(state, tool, args);
+  const p = plan(w, state, tool, args);
   const spent = autoSpendUsd(state);
   const result = await p.run();
-  if (p.line) await postEvent(projectId, 'start', agent, p.line, p.link);
+  if (p.line) await postEvent(w, projectId, 'start', agent, p.line, p.link);
   if (p.estimateUsd > 0) {
-    await getApp().catalog.audit(projectId, `agent:${agent}`, 'auto_start', {what: tool, args, estimateUsd: p.estimateUsd, autoSpendUsd: spent});
-    tm().counter('sprint_auto_starts_total', {what: tool, decision: 'started'});
-    tm().event('auto_started', {what: tool, estimate_usd: p.estimateUsd, project_auto_spend_usd: spent});
+    await w.catalog.audit(projectId, `agent:${agent}`, 'auto_start', {what: tool, args, estimateUsd: p.estimateUsd, autoSpendUsd: spent});
+    w.tm.counter('sprint_auto_starts_total', {what: tool, decision: 'started'});
+    w.tm.event('auto_started', {what: tool, estimate_usd: p.estimateUsd, project_auto_spend_usd: spent});
   }
   return result;
 }

@@ -1,4 +1,4 @@
-import type {AgentLive, AgentPreset, BffContract, ChatAttachment, DatasetUploadResult, EventName, EventProps, GoldUploadResult, PageContext} from '@sprint/contracts';
+import type {AgentLive, BffContract, ChatAttachment, DatasetUploadResult, EventName, EventProps, GoldUploadResult} from '@sprint/contracts';
 
 /**
  * What the pages call (spec 1.0.0, section 7.3): the bff's contract, plus the few things that only
@@ -6,7 +6,7 @@ import type {AgentLive, AgentPreset, BffContract, ChatAttachment, DatasetUploadR
  *
  * - Live updates. Listeners and the current turn are read synchronously by the pages; a client
  *   keeps them up to date from its event stream (in-process: the services' own bus; HTTP:
- *   Server-Sent Events or polling, with `getAgentLive` and `getAnsweringAgent` to fill the cache).
+ *   Server-Sent Events or polling, with `getAgentLive` to fill the cache).
  * - Files. A browser `File` never crosses the contract: the client reads or uploads it and sends
  *   plain JSON.
  * - Page telemetry.
@@ -22,9 +22,8 @@ export interface BffClient extends BffContract {
   subscribeAgentLive(listener: () => void): () => void;
   /** The turn running now as last heard from the stream, if any. */
   agentLive(projectId: string): AgentLive | null;
+  /** A turn is running, or one this client asked for has not answered yet. */
   isAgentBusy(projectId: string): boolean;
-  /** Which helper answers the next message on this page, as last heard. */
-  answeringAgent(projectId: string, page: PageContext): AgentPreset;
 
   /** Uploads a prompt image or another asset and returns where it is served from. */
   uploadAsset(file: File): Promise<{url: string}>;

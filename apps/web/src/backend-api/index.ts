@@ -85,7 +85,6 @@ export const {
   subscribeAgentLive,
   agentLive,
   isAgentBusy,
-  answeringAgent,
   uploadAsset,
   prepareChatAttachment,
   uploadDatasetFile,

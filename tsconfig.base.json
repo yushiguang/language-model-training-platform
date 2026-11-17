@@ -24,6 +24,7 @@
       "@sprint/labeling": ["./apps/labeling/src/index.ts"],
       "@sprint/agents": ["./apps/agents/src/index.ts"],
       "@sprint/optimiser": ["./apps/optimiser/src/index.ts"],
+      "@sprint/workflow": ["./apps/workflow/src/index.ts"],
       "@sprint/bff": ["./apps/bff/src/index.ts"],
       "@sprint/telemetry": ["./apps/telemetry/src/index.ts"]
     }

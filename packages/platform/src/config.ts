@@ -8,6 +8,7 @@ import {scriptedAgent} from './standins/scripted-agent.ts';
 import {allowAll, singleTenantConfig} from './standins/enterprise.ts';
 import {browserFiles, localIdentity, localTelemetrySink} from './standins/local.ts';
 import {localTickets} from './standins/tickets.ts';
+import {memorySharedState} from './standins/shared-state.ts';
 
 /**
  * The default platform: browser/local stand-ins, so the public repository runs end to end without
@@ -32,7 +33,8 @@ export function createPlatform(): Platform {
     tenantConfig: singleTenantConfig(),
     authorization: allowAll(),
     tickets: localTickets(),
-    standIns: ['storage', 'labeling models', 'agent model', 'identity', 'files', 'examples', 'media', 'feature descriptions', 'document links', 'telemetry', 'problem reports'],
+    sharedState: memorySharedState(),
+    standIns: ['storage', 'labeling models', 'agent model', 'identity', 'files', 'examples', 'media', 'feature descriptions', 'document links', 'telemetry', 'problem reports', 'shared state'],
   };
 }
 

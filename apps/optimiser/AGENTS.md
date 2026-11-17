@@ -8,10 +8,10 @@ Auto Optimise: the GEPA loop ported to TypeScript (design: `docs/design/optimise
   asks the agent runtime for a change (or a merge), checks it, dry-runs it, labels the eval set,
   scores it, and confirms a pass on a second labeling of the held-out half.
 - It decides what to try. Saving a version, labeling examples and building a score are asked of
-  the project's owner through `OptimiserHost` (the bff implements it), so those rules live in
+  the project's owner through `OptimiserHost` (the workflow implements it), so those rules live in
   one place.
 - Limits (rounds, retries, dry-run size) come from `systemConfig().optimiser`.
 
 Rules: imports contracts and domain only. The catalog, labeling, the agent runtime, locks,
 telemetry and the host arrive through `createOptimiser`. Tests: the Auto Optimise tests in
-`apps/bff/src/services/bff.test.ts` run this loop over the real catalog and labeling apps.
+`apps/workflow/src/services/workflow.test.ts` run this loop over the real catalog and labeling apps.

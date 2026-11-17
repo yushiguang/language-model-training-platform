@@ -12,22 +12,37 @@ Code decides the next step; agents explain and propose, people approve.
 ```
 apps/web ──► apps/web/src/backend-api (the BffClient the pages call; in-process.ts is the composition root)
                  │ builds and wires:
-                 ├── apps/bff ──────────┬──► catalog      (product records)
-                 │   (what pages call)  ├──► labeling     (tasks, predictions) ──► llm-gateway
-                 │                      ├──► agents       (presets, runtime)   ──► llm-gateway
-                 │                      ├──► optimiser    (Auto Optimise runs) ──► catalog, labeling, agents
-                 │                      └──► llm-gateway  (endpoint list, agent model)
+                 ├── apps/bff (what pages call: builds each call's RequestContext)
+                 │     └──► apps/workflow (WorkflowContract, through a JSON loopback in-process)
+                 │            ├──► catalog      (product records)
+                 │            ├──► labeling     (tasks, predictions) ──► llm-gateway
+                 │            ├──► agents       (presets, runtime)   ──► llm-gateway
+                 │            ├──► optimiser    (Auto Optimise runs) ──► catalog, labeling, agents
+                 │            └──► llm-gateway  (endpoint list, agent model)
                  ├── telemetry (one port, given to every app above) ──► the platform's sink
                  └── @sprint/platform-impl (stand-ins, or the internal adapters)
-                       document store · labeling models · agent model · identity · files · examples · telemetry sink
+                       document store · labeling models · agent model · identity · files · examples · shared state · telemetry sink
 
 All apps depend only on packages/contracts (types, contracts) and packages/domain (pure rules).
 catalog and labeling also use packages/platform for DocRepo over the document store.
 ```
 
-Apps never import each other. The bff receives the other apps as contract objects through
-`configureBff()`; labeling receives the catalog and the gateway through `createLabeling()`. The
+Apps never import each other. The workflow receives the other apps as contract objects through
+`createWorkflow()` and `connect()`; the bff receives the workflow and the identity through
+`createBffApi()`; labeling receives the catalog and the gateway through `createLabeling()`. The
 composition root is the only place that knows which implementation sits behind each contract.
+
+**A thin bff, a stateless workflow (deployment readiness spec, 2).** The bff only finds out who
+the caller is, builds a `RequestContext` per call (request id, user, caller, language, time zone,
+app version) and keeps a repeated start from running twice. Everything a CLI or tool channel would
+also need is in `@sprint/workflow`, whose every method takes that context first. The workflow is a
+factory with no module-level state: who acts comes from the context of each call, never from a
+process-wide user, and short-lived state every instance must see (the live turn, the helper that
+answers, the running turn's context, problem-report drafts) sits behind `SharedStatePort` with a
+TTL (`Platform.sharedState`; the stand-in is a map in the page). In the browser the bff calls the
+workflow through `loopback` (`packages/platform`): context, arguments, results and errors go
+through JSON as they would over RPC, so the browser check proves the workflow can move behind RPC
+without the bff or the pages changing.
 
 | App | Owns | Contract |
 |---|---|---|
@@ -35,8 +50,9 @@ composition root is the only place that knows which implementation sits behind e
 | `labeling` | Collections `labeling_tasks`, `predictions`. Runs tasks | `LabelingContract` (`labeling-api.ts`) |
 | `catalog` | All product collections (`CatalogRecords` in `catalog-api.ts`). Assigns version numbers | `CatalogContract` |
 | `agents` | Agent presets and the turn/handoff logic. Stateless | `AgentRuntimeContract` (`agent-api.ts`) |
-| `optimiser` | The Auto Optimise loop and the `optimisation_runs` records. Asks the bff (through `OptimiserHost`) to save a version, label examples and build a score | `OptimiserContract` (`optimiser-api.ts`) |
-| `bff` | Nothing stored. Workflow, gates, when labeling starts, reports | `BffContract` (`bff-api.ts`) |
+| `optimiser` | The Auto Optimise loop and the `optimisation_runs` records. Asks the workflow (through `OptimiserHost`) to save a version, label examples and build a score | `OptimiserContract` (`optimiser-api.ts`) |
+| `workflow` | Nothing stored. Project state, gates, when labeling starts, reports, dataset governance, Ask AI turns, page views and agent tools | `WorkflowContract` (`workflow-api.ts`) |
+| `bff` | Nothing stored, no business decision. The caller's context per call, idempotency keys | `BffContract` (`bff-api.ts`) |
 | `telemetry` | Metrics (Prometheus style, `sprint_*`) and product events; sends them to `Platform.telemetry` | `TelemetryPort` (`telemetry.ts`) |
 | `web` | Pages and components | calls `@/backend-api` (`BffClient`) |
 
@@ -52,8 +68,9 @@ Since 1.0.0 phase 1 every service contract is written so it maps one to one to a
   with an optional `idempotencyKey`: the same key never starts the same work twice.
 - Live updates are not methods: a client listens on an `EventStreamPort` (in-process the
   services' bus, over HTTP Server-Sent Events or polling).
-- `apps/bff/src/api.ts` (`createBffApi`) is the bff as its contract. Services behind it still
-  pass records to each other.
+- `apps/bff/src/api.ts` (`createBffApi`) is the bff as its contract, and
+  `apps/workflow/src/workflow.ts` (`createWorkflow`) the workflow as its own. Services inside the
+  workflow still pass records to each other.
 - No callbacks or signals cross a contract (phase 3). The agent runtime is built once with
   `createAgentRuntime({llm, tools, progress})`: the model, a project's tools and an
   `AgentProgressPort` for Ask AI's live line are injected, so `runTurn`, `reflectPrompt` and
@@ -128,7 +145,7 @@ prompt saved with several fields reads its first field as the label.
 ## Labeling: tasks
 
 A labeling task runs one prompt version on one model (with fixed settings) over a list of
-examples and stores one prediction per example. The bff creates tasks for four reasons: scoring a
+examples and stores one prediction per example. The workflow creates tasks for four reasons: scoring a
 new version on the eval set (system), the Optimiser's dry runs, eval-set labeling and the second
 labeling that confirms a pass (system). All of
 them start by themselves (below).
@@ -183,7 +200,7 @@ Both have their own design docs, which hold the design and the as-built detail:
   `apps/optimiser/src/optimiser.ts`.
 - [design/helpers.md](design/helpers.md): the helpers in Ask AI (agent presets, page views, read
   and start tools, what they may never see). Presets and runtime in `apps/agents`, page views and
-  tools in `apps/bff/src/services/page-views.ts`.
+  tools in `apps/workflow/src/services/page-views.ts`.
 
 ## Scores, gold labels and what starts by itself
 
@@ -218,15 +235,15 @@ optimiser-half examples to the Optimiser and Improve with AI. Since 1.0.0 the "W
 `LabelComment` (below), and the helpers get every comment on an optimiser-half example as
 `ExampleBrief.comments`. A change saves a new gold label, so the evaluation context changes
 and reports are rebuilt from saved answers: nothing is labeled again
-(`apps/bff/src/services/mismatches.ts`). Prompt Tuning' AI Suggestion points to the tab right
+(`apps/workflow/src/services/mismatches.ts`). Prompt Tuning' AI Suggestion points to the tab right
 after the first score (before any review or Optimiser run) and when Auto Optimise ends without a
 pass; never while the Optimiser runs or after a pass. Helpers give the counts only, never which
 side is right.
 
-**The eval dataset changes (1.0.0, spec 4).** `apps/bff/src/services/governance.ts`:
+**The eval dataset changes (1.0.0, spec 4).** `apps/workflow/src/services/governance.ts`:
 
 - *Halves.* `assignEvalHalves` (`packages/domain/src/dataset.ts`) puts gold-labeled examples in
-  the two halves by their rarest value, so a rare value lands in both. The bff balances the halves
+  the two halves by their rarest value, so a rare value lands in both. The workflow balances the halves
   when Gold Labels is left (`approveNode('gold')`) and once more just before a helper or the
   Optimiser first reads examples (`lockHoldout`: the read tools that return examples, `try_prompt`,
   Improve with AI, Auto Optimise). From then on `Project.holdoutLocked` is set and no example ever
@@ -301,27 +318,29 @@ application `id` to the store's document id.
 | Gates between steps; Gold Labels is an ordinary step (R5-8) | `packages/domain/src/gates.ts` |
 | The recommended next step (the best score wins; cost only breaks a tie) | `packages/domain/src/workflow.ts` |
 | Agent prompts, handoffs (to known specialists only), read tools per preset | `apps/agents/src/presets.ts`, `apps/agents/src/runtime.ts` |
-| What an agent sees of each page (page views) and the read tools' implementation | `apps/bff/src/services/page-views.ts` |
+| What an agent sees of each page (page views) and the read tools' implementation | `apps/workflow/src/services/page-views.ts` |
 | No helper reads the held-out half (`visibleToAgents`) | `packages/domain/src/gepa.ts`, used in `page-views.ts`, `starts.ts`, `agents.ts` |
-| When labeling starts, reports scored on the held-out half of the eval set | `apps/bff/src/services/evaluation.ts`, `work.ts` |
+| When labeling starts, reports scored on the held-out half of the eval set | `apps/workflow/src/services/evaluation.ts`, `work.ts` |
 | Optimiser: Pareto front, parent, merge pair, dry-run pick and comparison | `packages/domain/src/gepa.ts` |
-| Confirming a pass (second labeling of the held-out half) | `confirmScore` in `apps/bff/src/services/evaluation.ts` |
-| Mismatches between saved answers and gold labels; keep or change | `apps/bff/src/services/mismatches.ts` |
+| Confirming a pass (second labeling of the held-out half) | `confirmScore` in `apps/workflow/src/services/evaluation.ts` |
+| Mismatches between saved answers and gold labels; keep or change | `apps/workflow/src/services/mismatches.ts` |
 | Halves, label balance and which examples a prune removes | `packages/domain/src/dataset.ts` |
-| Adding, removing, restoring and pruning examples; the holdout lock; comments | `apps/bff/src/services/governance.ts` |
+| Adding, removing, restoring and pruning examples; the holdout lock; comments | `apps/workflow/src/services/governance.ts` |
 | Optimiser loop: rounds, retries, Failed and Retry, the end of a run after a confirmed pass | `apps/optimiser/src/optimiser.ts` |
-| Improve with AI (a draft with marked changes, nothing labeled) | `improveWithAi` in `apps/bff/src/services/agents.ts` |
+| Improve with AI (a draft with marked changes, nothing labeled) | `improveWithAi` in `apps/workflow/src/services/agents.ts` |
 | The structured prompt: compiling to text, the label signature, wording-only changes | `packages/domain/src/structured.ts` |
 | The fixed AI Suggestion cards on Prompt Tuning (T1 to T6) | `aiSuggestion` in `packages/domain/src/workflow.ts` |
-| Project Settings (pass rule, labeling model) and their confirmation | `apps/bff/src/services/settings.ts` |
-| What starts without a click | `packages/domain/src/auto-start.ts`, `tick` in `apps/bff/src/services/work.ts` |
-| Agent start tools | `apps/bff/src/services/starts.ts` |
+| Project Settings (pass rule, labeling model) and their confirmation | `apps/workflow/src/services/settings.ts` |
+| What starts without a click | `packages/domain/src/auto-start.ts`, `tick` in `apps/workflow/src/services/work.ts` |
+| Agent start tools | `apps/workflow/src/services/starts.ts` |
 | Metric and event names, labels and props | `packages/contracts/src/telemetry.ts` |
 
 ## Known limits of this version
 
-- Services behind `createBffApi` still pass records to each other (only the contracts are plain
+- Services inside the workflow still pass records to each other (only the contracts are plain
   JSON).
-- Dataset sampling still runs in the page's memory.
+- Dataset sampling still runs in the memory of the workflow instance that started it, and so do
+  the progress handlers of running Ask AI turns, until the job module (spec 3) and the agent
+  service (spec 6) take them over.
 - The Optimiser loop holds a browser lock per project and model, so a second tab cannot run it
   twice; like labeling, it runs only while its page is open.

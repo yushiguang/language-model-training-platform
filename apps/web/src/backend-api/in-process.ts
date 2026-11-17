@@ -1,4 +1,4 @@
-import type {BffContract, ChatAttachment, GoldLine} from '@sprint/contracts';
+import type {AgentLive, BffContract, ChatAttachment, GoldLine} from '@sprint/contracts';
 import {configureSystem, systemConfig} from '@sprint/domain';
 import {createCatalog} from '@sprint/catalog';
 import {createTelemetry} from '@sprint/telemetry';
@@ -6,8 +6,10 @@ import {createGateway} from '@sprint/llm-gateway';
 import {browserLocks, createLabeling} from '@sprint/labeling';
 import {createAgentRuntime} from '@sprint/agents';
 import {createPlatform} from '@sprint/platform-impl';
+import {loopback, memorySharedState} from '@sprint/platform';
 import {createOptimiser} from '@sprint/optimiser';
-import {agentLive, agentProgress, agentTools, answeringAgent, bffEvents, configureBff, createBffApi, emitChange, isAgentBusy, onChange, optimiserHost} from '@sprint/bff';
+import {createWorkflow} from '@sprint/workflow';
+import {createBffApi} from '@sprint/bff';
 import type {BffClient} from './client';
 import {webTelemetry} from './web-telemetry';
 import {callFailed, callId, pageOpened, snapshot} from './diagnostics';
@@ -29,11 +31,20 @@ const telemetry = createTelemetry({
 });
 const gateway = createGateway(platform, {telemetry});
 const catalog = createCatalog(platform.db, {telemetry});
-const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: emitChange, telemetry});
+const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: () => workflow.changed(), telemetry});
+/** The application module, with no state of its own; short-lived shared state goes to the platform's store. */
+const workflow = createWorkflow({catalog, labeling, gateway, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, tickets: platform.tickets, appVersion: APP_VERSION, standIns: platform.standIns, telemetry, locks: browserLocks(), sharedState: platform.sharedState ?? memorySharedState()});
 /** The helpers, built once with their model, the project tools and where live progress goes. */
-const agentRuntime = createAgentRuntime({llm: gateway.agentModel(), tools: agentTools, progress: agentProgress});
-const optimiser = createOptimiser({catalog, labeling, agents: agentRuntime, host: optimiserHost(), locks: browserLocks(), telemetry, onChange: emitChange});
-configureBff({catalog, labeling, gateway, agents: agentRuntime, optimiser, identity: platform.identity, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, tickets: platform.tickets, appVersion: APP_VERSION, standIns: platform.standIns, telemetry, locks: browserLocks()});
+const agentRuntime = createAgentRuntime({llm: gateway.agentModel(), tools: projectId => workflow.agentTools(projectId), progress: workflow.agentProgress});
+const optimiser = createOptimiser({catalog, labeling, agents: agentRuntime, host: workflow.optimiserHost, locks: browserLocks(), telemetry, onChange: () => workflow.changed()});
+workflow.connect({agents: agentRuntime, optimiser});
+/**
+ * The bff calls the workflow through a loopback: every call's context, arguments, result and
+ * error go through JSON as they would over RPC, so the browser check proves the workflow can be
+ * moved behind RPC without the bff or the pages changing.
+ */
+const api = createBffApi({workflow: loopback(workflow.api), identity: platform.identity, appVersion: APP_VERSION, timeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone});
+const events = workflow.events;
 const web = webTelemetry(telemetry);
 void platform.identity.currentUser().then(u => telemetry.setContext({userId: u.id}));
 
@@ -74,9 +85,6 @@ function absoluteUrl(url: string): string {
   return new URL(url, location.origin + (process.env.NEXT_PUBLIC_BASE_PATH ?? '') + '/').toString();
 }
 
-const api = createBffApi();
-const events = bffEvents();
-
 /** Every contract method, counted and timed. */
 const timedApi = Object.fromEntries(Object.entries(api).map(([name, fn]) => [name, timed(name, fn as (...a: unknown[]) => unknown)])) as unknown as BffContract;
 
@@ -86,7 +94,8 @@ const timedApi = Object.fromEntries(Object.entries(api).map(([name, fn]) => [nam
  * with polling or Server-Sent Events.
  */
 function subscribeChanges(listener: () => void): () => void {
-  const off = onChange(listener);
+  const off = events.subscribe('changes', listener);
+  localChanges.add(listener);
   const fromOtherTab = () => {
     web.crossTab();
     listener();
@@ -94,6 +103,7 @@ function subscribeChanges(listener: () => void): () => void {
   tabs?.addEventListener('message', fromOtherTab);
   return () => {
     off();
+    localChanges.delete(listener);
     tabs?.removeEventListener('message', fromOtherTab);
   };
 }
@@ -104,13 +114,58 @@ function subscribeChanges(listener: () => void): () => void {
  */
 const tabs = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('sprint-changes') : null;
 let tabNotice: ReturnType<typeof setTimeout> | null = null;
-onChange(() => {
+events.subscribe('changes', () => {
   if (!tabs || tabNotice) return;
   tabNotice = setTimeout(() => {
     tabNotice = null;
     tabs.postMessage('changed');
   }, 200);
 });
+
+/** Pages that listen for changes this client makes itself (a turn it sent ended). */
+const localChanges = new Set<() => void>();
+
+/**
+ * Ask AI's live line, read synchronously by the page: the turn running now, per project, as last
+ * read through the contract. `agent_live` carries no data, so on each one the projects a page
+ * looks at are read again (`getAgentLive`); an older read never overwrites a newer one.
+ */
+const live = new Map<string, AgentLive | null>();
+const liveListeners = new Set<() => void>();
+const liveReads = new Map<string, number>();
+function readLive(projectId: string) {
+  const n = (liveReads.get(projectId) ?? 0) + 1;
+  liveReads.set(projectId, n);
+  void timedApi.getAgentLive(projectId).then(
+    l => {
+      if (liveReads.get(projectId) !== n) return;
+      live.set(projectId, l);
+      liveListeners.forEach(fn => fn());
+    },
+    () => undefined,
+  );
+}
+events.subscribe('agent_live', () => [...live.keys()].forEach(readLive));
+function agentLive(projectId: string): AgentLive | null {
+  if (!live.has(projectId)) {
+    live.set(projectId, null);
+    readLive(projectId);
+  }
+  return live.get(projectId) ?? null;
+}
+
+/** Turns this client has asked for that have not answered yet, per project: Ask AI is busy meanwhile. */
+const asking = new Map<string, number>();
+async function asked<T>(projectId: string, call: () => Promise<T>): Promise<T> {
+  asking.set(projectId, (asking.get(projectId) ?? 0) + 1);
+  try {
+    return await call();
+  } finally {
+    asking.set(projectId, (asking.get(projectId) ?? 1) - 1);
+    localChanges.forEach(fn => fn());
+  }
+}
+const isAgentBusy = (projectId: string) => (asking.get(projectId) ?? 0) > 0 || !!agentLive(projectId);
 
 async function uploadAsset(file: File): Promise<{url: string}> {
   telemetry.histogram('sprint_files_upload_bytes', file.size, {kind: file.type.startsWith('image/') ? 'image' : 'other'});
@@ -124,12 +179,15 @@ async function uploadAsset(file: File): Promise<{url: string}> {
 export const inProcessClient: BffClient = {
   ...timedApi,
   // Each Ask AI message carries the browser's record, for a problem report (spec 1.1.0, 3.2).
-  sendUserMessage: req => timedApi.sendUserMessage({...req, client: req.client ?? snapshot()}),
+  sendUserMessage: req => asked(req.projectId, () => timedApi.sendUserMessage({...req, client: req.client ?? snapshot()})),
+  improveWithAi: (projectId, versionId, locale) => asked(projectId, () => timedApi.improveWithAi(projectId, versionId, locale)),
   subscribeChanges,
-  subscribeAgentLive: listener => events.subscribe('agent_live', listener),
+  subscribeAgentLive(listener) {
+    liveListeners.add(listener);
+    return () => void liveListeners.delete(listener);
+  },
   agentLive,
   isAgentBusy,
-  answeringAgent,
   uploadAsset,
   async prepareChatAttachment(file): Promise<ChatAttachment> {
     if (file.type.startsWith('image/')) {

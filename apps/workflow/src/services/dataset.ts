@@ -1,20 +1,18 @@
 import type {Answer, DatasetSnapshot, DatasetUploadResult, Example, ExampleMedia, GoldLabel, RawExample, SamplingTask, Schema} from '@sprint/contracts';
 import {hashString, newId, readGoldAnswer, toFeatures} from '@sprint/domain';
-import {emitChange, getApp, now, tm} from './app.ts';
+import {now, type Scope} from './app.ts';
 import {appendExamples, insertExamplesSettled} from './governance.ts';
 
-const activeSampling = new Map<string, {task: SamplingTask; ctrl: AbortController}>();
-
-export function getSamplingTask(projectId: string): SamplingTask | null {
-  return activeSampling.get(projectId)?.task ?? null;
+export function getSamplingTask(w: Scope, projectId: string): SamplingTask | null {
+  return w.local.sampling.get(projectId)?.task ?? null;
 }
 
-export function stopSampleDataset(projectId: string): void {
-  const entry = activeSampling.get(projectId);
+export function stopSampleDataset(w: Scope, projectId: string): void {
+  const entry = w.local.sampling.get(projectId);
   if (entry) {
     entry.ctrl.abort();
-    activeSampling.delete(projectId);
-    emitChange();
+    w.local.sampling.delete(projectId);
+    w.emitChange();
   }
 }
 
@@ -22,20 +20,20 @@ export function stopSampleDataset(projectId: string): void {
  * Ends a sampling or loading task once its examples are saved (resilience spec, 3.1): the page
  * keeps its progress until the dataset is there, and never shows the empty start in between.
  */
-function release(projectId: string, task: SamplingTask): void {
-  if (activeSampling.get(projectId)?.task === task) activeSampling.delete(projectId);
-  emitChange();
+function release(w: Scope, projectId: string, task: SamplingTask): void {
+  if (w.local.sampling.get(projectId)?.task === task) w.local.sampling.delete(projectId);
+  w.emitChange();
 }
 
 /** Marks a task as saving: all items are in, and Stop is gone. */
-function saving(task: SamplingTask): void {
+function saving(w: Scope, task: SamplingTask): void {
   task.fetched = task.total;
   task.saving = true;
-  emitChange();
+  w.emitChange();
 }
 
-async function saveSnapshot(projectId: string, all: RawExample[], source: DatasetSnapshot['source'], sourceName: string, invalid = 0): Promise<DatasetSnapshot> {
-  const {catalog, user} = getApp();
+async function saveSnapshot(w: Scope, projectId: string, all: RawExample[], source: DatasetSnapshot['source'], sourceName: string, invalid = 0): Promise<DatasetSnapshot> {
+  const {catalog, user} = w;
   const prev = await catalog.find('dataset_snapshots', {projectId});
   const snapshotId = newId('ds');
   // Halves: the order is fixed by a hash of the ids, so the same dataset always halves the same
@@ -44,7 +42,7 @@ async function saveSnapshot(projectId: string, all: RawExample[], source: Datase
   const first = halves(all);
   const examples = all.map((r): Example => ({id: newId('ex'), snapshotId, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: 'eval', optimiserHalf: first.get(r.externalId)!}));
   // Each example is saved on its own; one that fails twice is skipped (resilience spec, 3.2).
-  const saved = await insertExamplesSettled(examples);
+  const saved = await insertExamplesSettled(w, examples);
   if (!saved.length) throw new Error('None of the examples could be saved. Try again.');
   const notSaved = examples.length - saved.length;
   if (notSaved) {
@@ -78,7 +76,7 @@ async function saveSnapshot(projectId: string, all: RawExample[], source: Datase
   await catalog.insert('dataset_snapshots', snap);
   await catalog.patch('projects', projectId, {snapshotId: snap.id});
   await catalog.audit(projectId, (await user()).name, 'dataset.create', {source, rows: raws.length, ...(notSaved ? {notSaved} : {})});
-  emitChange();
+  w.emitChange();
   return snap;
 }
 
@@ -86,18 +84,18 @@ async function saveSnapshot(projectId: string, all: RawExample[], source: Datase
  * Adds `n` sampled examples to the eval dataset (spec 1.0.0, 4.3), none of them already in it
  * (removed ones count as in it). Returns how many were added; 0 when stopped.
  */
-export async function appendSample(projectId: string, n: number): Promise<number> {
-  const {catalog} = getApp();
+export async function appendSample(w: Scope, projectId: string, n: number): Promise<number> {
+  const {catalog} = w;
   const project = await catalog.get('projects', projectId);
   const known = project?.snapshotId ? new Set((await catalog.find('examples', {snapshotId: project.snapshotId})).map(e => e.externalId)) : new Set<string>();
-  const got = await sampleTask(projectId, n, known.size);
+  const got = await sampleTask(w, projectId, n, known.size);
   if (!got) return 0;
   try {
-    saving(got.task);
+    saving(w, got.task);
     const fresh = got.raws.filter(r => !known.has(r.externalId)).slice(0, n);
-    return (await appendExamples(projectId, fresh, 'sample')).added;
+    return (await appendExamples(w, projectId, fresh, 'sample')).added;
   } finally {
-    release(projectId, got.task);
+    release(w, projectId, got.task);
   }
 }
 
@@ -106,24 +104,24 @@ export async function appendSample(projectId: string, n: number): Promise<number
  * dropped. On success the task stays on until the caller has saved the examples and calls
  * `release` (resilience spec, 3.1).
  */
-async function sampleTask(projectId: string, n: number, extra = 0): Promise<{raws: RawExample[]; task: SamplingTask} | null> {
-  stopSampleDataset(projectId);
+async function sampleTask(w: Scope, projectId: string, n: number, extra = 0): Promise<{raws: RawExample[]; task: SamplingTask} | null> {
+  stopSampleDataset(w, projectId);
   const ctrl = new AbortController();
   const task: SamplingTask = {id: newId('sm'), projectId, total: n, fetched: 0, startedAt: now(), state: 'running', error: null};
-  activeSampling.set(projectId, {task, ctrl});
-  tm().event('sample_started', {requested: n});
+  w.local.sampling.set(projectId, {task, ctrl});
+  w.tm.event('sample_started', {requested: n});
   const sampleStarted = Date.now();
-  const ended = (outcome: 'done' | 'stopped' | 'failed') => tm().event('sample_finished', {fetched: task.fetched, seconds: Math.round((Date.now() - sampleStarted) / 1000), outcome});
-  emitChange();
+  const ended = (outcome: 'done' | 'stopped' | 'failed') => w.tm.event('sample_finished', {fetched: task.fetched, seconds: Math.round((Date.now() - sampleStarted) / 1000), outcome});
+  w.emitChange();
   try {
-    const raws = await getApp().examples.sample(n + extra, fetched => ((task.fetched = Math.min(n, fetched)), emitChange()), ctrl.signal);
+    const raws = await w.examples.sample(n + extra, fetched => ((task.fetched = Math.min(n, fetched)), w.emitChange()), ctrl.signal);
     ended('done');
     // Stopped while the last page came in: nothing is saved.
     if (ctrl.signal.aborted) return null;
     return {raws, task};
   } catch (e) {
     ended((e as Error).name === 'AbortError' ? 'stopped' : 'failed');
-    release(projectId, task);
+    release(w, projectId, task);
     if ((e as Error).name === 'AbortError') return null;
     throw e;
   }
@@ -133,31 +131,31 @@ async function sampleTask(projectId: string, n: number, extra = 0): Promise<{raw
  * Starts a stateful sampling task inside the backend. Progress is pushed via state updates
  * rather than a client callback so the contract stays serialisable over HTTP.
  */
-export async function startSampleDataset(projectId: string, n: number): Promise<DatasetSnapshot | null> {
-  const got = await sampleTask(projectId, n);
+export async function startSampleDataset(w: Scope, projectId: string, n: number): Promise<DatasetSnapshot | null> {
+  const got = await sampleTask(w, projectId, n);
   if (!got) return null;
   try {
-    saving(got.task);
-    return await saveSnapshot(projectId, got.raws, 'sample', 'Sampled from the platform');
+    saving(w, got.task);
+    return await saveSnapshot(w, projectId, got.raws, 'sample', 'Sampled from the platform');
   } finally {
-    release(projectId, got.task);
+    release(w, projectId, got.task);
   }
 }
 
-export async function getSamplePoolSize(): Promise<number> {
-  return getApp().examples.available();
+export async function getSamplePoolSize(w: Scope): Promise<number> {
+  return w.examples.available();
 }
 
 /** The media of one example (Gold Labels), or null without a media source. */
-export async function exampleMedia(exampleId: string): Promise<ExampleMedia | null> {
-  const {catalog, media} = getApp();
+export async function exampleMedia(w: Scope, exampleId: string): Promise<ExampleMedia | null> {
+  const {catalog, media} = w;
   if (!media) return null;
   const ex = await catalog.get('examples', exampleId);
   return ex ? media.media(ex.externalId, ex.type) : null;
 }
 
-export function hasBundledGold(): boolean {
-  return typeof getApp().examples.bundledLabels === 'function';
+export function hasBundledGold(w: Scope): boolean {
+  return typeof w.examples.bundledLabels === 'function';
 }
 
 /**
@@ -165,7 +163,7 @@ export function hasBundledGold(): boolean {
  * header such as item_id is skipped), or JSONL of ids or full examples. The system then loads each
  * item's features, which the Dataset page shows as "Loading features for N items".
  */
-export async function uploadDatasetText(projectId: string, name: string, text: string, append = false): Promise<DatasetUploadResult> {
+export async function uploadDatasetText(w: Scope, projectId: string, name: string, text: string, append = false): Promise<DatasetUploadResult> {
   if (!/\.(csv|txt|jsonl|json)$/i.test(name)) {
     return {error: "This file can't be used. Upload a text or CSV file of item IDs."};
   }
@@ -208,7 +206,7 @@ export async function uploadDatasetText(projectId: string, name: string, text: s
   }
   let task: SamplingTask | null = null;
   if (ids.length) {
-    const found = await loadFeatures(projectId, name, ids);
+    const found = await loadFeatures(w, projectId, name, ids);
     if (!found) return {};
     task = found.task;
     invalid += ids.length - found.raws.length;
@@ -216,16 +214,16 @@ export async function uploadDatasetText(projectId: string, name: string, text: s
   }
   try {
     if (!raws.length) {
-      tm().event('dataset_upload_failed', {reason: 'empty'});
+      w.tm.event('dataset_upload_failed', {reason: 'empty'});
       return {error: 'No usable rows in this file.'};
     }
-    tm().event('dataset_uploaded', {rows: raws.length + invalid, valid: raws.length, invalid, video: raws.filter(r => r.type === 'video').length, photo_text: raws.filter(r => r.type !== 'video').length});
-    if (task) saving(task);
+    w.tm.event('dataset_uploaded', {rows: raws.length + invalid, valid: raws.length, invalid, video: raws.filter(r => r.type === 'video').length, photo_text: raws.filter(r => r.type !== 'video').length});
+    if (task) saving(w, task);
     // Adding to an eval dataset there (spec 1.0.0, 4.3) keeps every example, half and gold label.
-    if (append) return await appendExamples(projectId, raws, 'upload', invalid);
-    return {snapshot: await saveSnapshot(projectId, raws, 'upload', name, invalid)};
+    if (append) return await appendExamples(w, projectId, raws, 'upload', invalid);
+    return {snapshot: await saveSnapshot(w, projectId, raws, 'upload', name, invalid)};
   } finally {
-    if (task) release(projectId, task);
+    if (task) release(w, projectId, task);
   }
 }
 
@@ -233,39 +231,39 @@ export async function uploadDatasetText(projectId: string, name: string, text: s
  * Looks the IDs up in chunks, as a task the Dataset page shows with its progress and Stop. On
  * success the task stays on until the caller has saved the examples and calls `release`.
  */
-async function loadFeatures(projectId: string, fileName: string, ids: string[]): Promise<{raws: RawExample[]; task: SamplingTask} | null> {
-  stopSampleDataset(projectId);
+async function loadFeatures(w: Scope, projectId: string, fileName: string, ids: string[]): Promise<{raws: RawExample[]; task: SamplingTask} | null> {
+  stopSampleDataset(w, projectId);
   const ctrl = new AbortController();
   const task: SamplingTask = {id: newId('sm'), projectId, kind: 'upload', fileName, total: ids.length, fetched: 0, startedAt: now(), state: 'running', error: null};
-  activeSampling.set(projectId, {task, ctrl});
-  emitChange();
+  w.local.sampling.set(projectId, {task, ctrl});
+  w.emitChange();
   const out: RawExample[] = [];
   try {
     for (let i = 0; i < ids.length; i += 10) {
       if (ctrl.signal.aborted) {
-        release(projectId, task);
+        release(w, projectId, task);
         return null;
       }
-      out.push(...(await getApp().examples.lookup(ids.slice(i, i + 10))));
+      out.push(...(await w.examples.lookup(ids.slice(i, i + 10))));
       task.fetched = Math.min(ids.length, i + 10);
-      emitChange();
+      w.emitChange();
     }
     return {raws: out, task};
   } catch (e) {
-    release(projectId, task);
+    release(w, projectId, task);
     throw e;
   }
 }
 
-export async function saveGold(projectId: string, exampleId: string, schemaVersion: number, answer: Answer, revealed: boolean, source: GoldLabel['source'] = 'labeled'): Promise<GoldLabel> {
-  const {catalog, user} = getApp();
+export async function saveGold(w: Scope, projectId: string, exampleId: string, schemaVersion: number, answer: Answer, revealed: boolean, source: GoldLabel['source'] = 'labeled'): Promise<GoldLabel> {
+  const {catalog, user} = w;
   const g: GoldLabel = {id: newId('gl'), projectId, exampleId, schemaVersion, answer, source, revealed, createdAt: now(), createdBy: (await user()).name};
   await catalog.insert('gold_labels', g);
   if (source === 'labeled') {
     const ex = await catalog.get('examples', exampleId);
-    tm().event('gold_label_saved', {split: ex?.split ?? 'unknown', revealed, seconds_on_example: 0, matches_model: null, was_recheck: false});
+    w.tm.event('gold_label_saved', {split: ex?.split ?? 'unknown', revealed, seconds_on_example: 0, matches_model: null, was_recheck: false});
   }
-  emitChange();
+  w.emitChange();
   return g;
 }
 
@@ -273,7 +271,7 @@ export async function saveGold(projectId: string, exampleId: string, schemaVersi
  * Upload labels: JSONL lines of {externalId, answer}, or the labels bundled with the sample file.
  * `answer` is the value; older files with `{label: ["Value"]}` still import (2026-11-16).
  */
-export async function uploadGold(
+export async function uploadGold(w: Scope,
   projectId: string,
   schema: Schema,
   schemaVersion: number,
@@ -290,16 +288,16 @@ export async function uploadGold(
       skipped++;
       continue;
     }
-    await saveGold(projectId, ex.id, schemaVersion, answer, false, 'uploaded');
+    await saveGold(w, projectId, ex.id, schemaVersion, answer, false, 'uploaded');
     saved++;
   }
-  tm().event('gold_labels_uploaded', {source: 'file', saved, skipped});
+  w.tm.event('gold_labels_uploaded', {source: 'file', saved, skipped});
   return {saved, skipped};
 }
 
-export async function importBundledGold(projectId: string, schema: Schema, schemaVersion: number, examples: Example[]): Promise<{saved: number; skipped: number}> {
-  const bundled = getApp().examples.bundledLabels;
+export async function importBundledGold(w: Scope, projectId: string, schema: Schema, schemaVersion: number, examples: Example[]): Promise<{saved: number; skipped: number}> {
+  const bundled = w.examples.bundledLabels;
   if (!bundled) return {saved: 0, skipped: 0};
   const lines = await bundled();
-  return uploadGold(projectId, schema, schemaVersion, examples, lines);
+  return uploadGold(w, projectId, schema, schemaVersion, examples, lines);
 }
