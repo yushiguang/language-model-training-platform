@@ -1,4 +1,4 @@
-import type {AgentPreset, AgentToolName, LlmModelId, Locale} from '@sprint/contracts';
+import type {AgentPreset, AgentToolName, Locale} from '@sprint/contracts';
 import {agentName, translate} from '@sprint/domain';
 
 export {agentName};
@@ -7,16 +7,14 @@ export {agentName};
  * Agent presets = model selection + system prompt + what the agent may observe + the intents it
  * supports + the read tools it may call. Every preset uses the smartest model (decided 2026-11-04).
  *
- * Available runtime models (defined in `@sprint/contracts` `AVAILABLE_LLM_MODELS`; limits live in `@sprint/llm-gateway`):
- * - `'gpt-5.6-terra'`: highest-quality reasoning model
- * - `'gpt-5.6-luna'`: balanced quality and latency model
- * - `'gpt-5.4'`: fast, lower-cost model
- * - `'gpt-5.5'`: listed in SDK types (currently inactive on the gateway)
+ * A preset names its model by registry id (`AgentModel.models()`, supplied by the hosting
+ * platform; spec 5). An unknown or inactive id falls back in the gateway to an active reasoning
+ * model, so a registry without this id still answers. Limits live in `@sprint/llm-gateway`.
  */
 export interface Preset {
   name: string;
-  /** Which LLM model this agent uses by default when calling `llm.chat(messages, {model})`. */
-  model: LlmModelId;
+  /** The registry id of the model this agent asks for in `llm.chat(messages, {model})`. */
+  model: string;
   observes: string[];
   intents: Record<string, string>;
   /** Read tools this preset may call; the runtime refuses any other. */
@@ -245,7 +243,7 @@ In "merge" you get two prompts, "prompt" and "other.prompt", that each get right
 };
 
 export const systemPrompt = (p: AgentPreset | 'optimiser') => PRESETS[p].system;
-export const presetModel = (p: AgentPreset | 'optimiser'): LlmModelId => PRESETS[p].model;
+export const presetModel = (p: AgentPreset | 'optimiser'): string => PRESETS[p].model;
 
 /** Words the helpers use in Chinese, so their replies match the pages (spec 1.1.0, 2.3). */
 const ZH_TERMS = ['Prompt Design', 'Eval Dataset', 'Gold Labels', 'Prompt Tuning', 'Project Settings', 'Settings', 'Ask AI', 'Assistant', 'Prompt helper', 'Scores helper', 'Optimiser', 'Auto Optimise', 'Improve with AI', 'Mismatches', 'gold label', 'eval set', 'version', 'label', 'value', 'Copy prompt', 'Finish'];

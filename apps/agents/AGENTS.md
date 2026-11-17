@@ -47,12 +47,12 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
   - `llm.chat(messages, {model, json, maxOutputTokens, signal})`: returns plain text.
   - `llm.complete(messages, {model, json, maxOutputTokens, signal})`: returns `{text, thinking, model, stopReason, usage}` including reasoning traces.
   - `llm.chatStream(messages, {model, json, maxOutputTokens, signal})`: yields incremental `LlmStreamChunk` events (`delta`, `thinking`, `done`, `error`).
-  The full catalog of models supported by the runtime is exported from `@sprint/contracts` as
-  `AVAILABLE_LLM_MODELS` (and returned by `llm.models()`):
-  - `'gpt-5.6-terra'` (`reasoning` tier, active): highest-quality reasoning model for complex schema design, prompt drafting, and optimiser reflection.
-  - `'gpt-5.6-luna'` (`balanced` tier, active): balanced quality and latency model for multi-turn agent tasks and evaluation analysis.
-  - `'gpt-5.4'` (`fast` tier, active): fast, lower-cost model suitable for front-desk routing and quick turns.
-  - `'gpt-5.5'` (`balanced` tier, currently inactive on gateway; falls back to `'gpt-5.6-terra'`).
+  The models come from a registry the hosting platform supplies (`llm.models()`, deployment
+  readiness spec 5): each entry has an opaque id, a name, a tier, capabilities (vision, tools,
+  reasoning effort levels, context length, temperature), prices and an active flag. A preset
+  names its model by registry id; an unknown or inactive id falls back in the gateway to an
+  active reasoning model. The stand-in registry (`STAND_IN_MODELS` in `@sprint/platform`) lists
+  `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.4` and the inactive `gpt-5.5`.
   Every preset uses `'gpt-5.6-terra'` (decided 2026-11-04: chat needs the smartest model).
   Change a preset's model in `src/presets.ts` only with the product owner's agreement.
 - **English only**: Write all prompts, comments, and tests in English.

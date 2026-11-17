@@ -8,7 +8,11 @@ export type ExampleType = 'video' | 'photo_text';
 export type LabelKind = 'single' | 'multi';
 export type FeatureGroup = ExampleType | 'metadata';
 export type Split = 'eval' | 'test' | 'train';
-export type EndpointId = 'A' | 'B';
+/**
+ * A labeling endpoint's id, as the registry names it (deployment readiness spec, 5). Opaque: the
+ * stand-ins register `A` and `B`; a hosting platform registers its own.
+ */
+export type EndpointId = string;
 export type Actor = 'user' | 'prompt_agent' | 'optimiser' | 'system';
 
 export interface LabelValue {

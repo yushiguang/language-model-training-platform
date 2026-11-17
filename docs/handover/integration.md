@@ -35,8 +35,8 @@ The internal module exports `createPlatform()` returning the `Platform` object f
 | Field | What it must do | Stand-in |
 |---|---|---|
 | `db: DocRuntime` | Document collections: add, get, set, partial update with `DocFieldValue` (increment, arrayUnion, arrayRemove, delete), delete, find, query with filters and offset paging, polling subscribe, batch writes. `createdAt` is server time | `localDocRuntime('sprint-doc')` (`localStorage`) |
-| `models: LabelingModels` | One labeling call per example (`chat`, `chatStream`) on slot A or B; returns text and token usage. Throw `LlmCallError` (or an error with an HTTP `status`) so the gateway can tell busy from rejected; throw `LlmCallError('filtered', …)` when the endpoint's safety filter stops the answer (Prompt versions shows it as Filtered) | `simulatedModels` |
-| `agent: AgentModel` | Agent chat (`chat`, `complete` with usage and thinking, `chatStream`, `models()`) | `scriptedAgent` |
+| `models: LabelingModels` | One labeling call per example (`chat`, `chatStream`) on a labeling endpoint (`endpoints()` lists them; ids are opaque strings, the stand-ins use `A` and `B`); returns text and token usage. Throw `LlmCallError` (or an error with an HTTP `status`) so the gateway can tell busy from rejected; throw `LlmCallError('filtered', …)` when the endpoint's safety filter stops the answer (Prompt versions shows it as Filtered) | `simulatedModels` |
+| `agent: AgentModel` | Agent chat (`chat`, `complete` with usage and thinking, `chatStream`), and `models()`: the model registry (opaque ids, capabilities, prices, active flag; spec 5) | `scriptedAgent`, `STAND_IN_MODELS` |
 | `identity: Identity` | The signed-in user (id, name, email, organization); `currentUser()` rejects when nobody is signed in, and the site then shows a sign-in error with Retry. Optional `signOut()` ends the single sign-on session: when it is there, the avatar menu shows Sign out and the page reloads after it (2026-11-16) | `localIdentity` (no sign-out) |
 | `files: FileStore` | Uploads for prompt images and chat attachments; returns a URL the model can fetch. When stored URLs must be signed per call, the composition root passes labeling a `resolveUrl` that returns a Promise (next section) | `browserFiles` (data URLs) |
 | `examples: ExampleSource` | The prepared examples file (50 to 100 examples with features) and id lookup | `sampleExamples` |
@@ -81,8 +81,10 @@ before the call.
 The llm-gateway keeps every call under its endpoint's QPM and TPM, and retries busy, server and
 timeout errors. It needs one `EndpointConfig` per registered endpoint:
 
-- `purpose: 'labeling'` with `slot: 'A'` or `'B'` for the two labeling models, and
-  `purpose: 'chat'` per agent model. Chat and labeling never share an endpoint.
+- `purpose: 'labeling'` with `slot` set to the labeling endpoint's id (`EndpointId`, any string
+  the registry uses), and `purpose: 'chat'` per agent model (`model` = its registry id). Chat and
+  labeling never share an endpoint or a quota. The gateway registers these ids as the allowed
+  values of the `endpoint`, `model` and `slot` telemetry labels at startup.
 - `qpm`, `tpm`: the registered limits. TPM counts input, output and reasoning tokens.
 - `maxConcurrency`: our own cap on calls in flight (start with 8 for reasoning models).
 - `assumed: false`.

@@ -1,11 +1,11 @@
 import {
-  AVAILABLE_LLM_MODELS,
   type AgentChatOptions,
   type AgentCompletionResult,
   type AgentModel,
   type LlmStreamChunk,
   type ModelMessage,
 } from '@sprint/contracts';
+import {STAND_IN_MODELS} from './models.ts';
 import {SAMPLE_STRUCTURED, addRule, addToDefinition, fixTarget, hasRule, nextRuleGroupId, ruleFor, schemaOf} from '@sprint/domain';
 import type {LabelValue, MixUp, RuleGroup, Schema, StructuredPrompt} from '@sprint/contracts';
 
@@ -395,7 +395,7 @@ export function scriptedAgent(): AgentModel {
   };
 
   return {
-    models: () => AVAILABLE_LLM_MODELS,
+    models: () => STAND_IN_MODELS,
     chat: (messages: ModelMessage[], _opts?: AgentChatOptions) => runText(messages),
     async complete(messages: ModelMessage[], opts?: AgentChatOptions): Promise<AgentCompletionResult> {
       const text = await runText(messages);

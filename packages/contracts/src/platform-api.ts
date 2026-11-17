@@ -1,5 +1,5 @@
 import type {TelemetrySink} from './telemetry.ts';
-import type {ClientDiagnostics, EndpointInfo, FeatureValue, Locale, NodeId, PageId} from './types.ts';
+import type {ClientDiagnostics, EndpointId, EndpointInfo, FeatureValue, Locale, NodeId, PageId} from './types.ts';
 import type {EndpointConfig} from './gateway-api.ts';
 import type {DeepPartial, SystemConfig} from './config.ts';
 import type {JobStorePort} from './jobs-api.ts';
@@ -19,71 +19,46 @@ export type {EndpointInfo};
  */
 
 // ---------------------------------------------------------------------------------------------
-// Supported LLM models exposed to the Agent Runtime (`apps/agents`) and Labeling presets.
+// The model registry (deployment readiness spec, 5): the models the hosting platform serves to the
+// agent runtime (`apps/agents`) and the gateway's chat endpoints. Model ids are opaque strings the
+// registry defines; nothing in this repository lists them as a type.
 
-export type LlmModelId = 'gpt-5.4' | 'gpt-5.5' | 'gpt-5.6-luna' | 'gpt-5.6-terra';
+/** How hard a reasoning model thinks before it answers, where the model lets the caller choose. */
+export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
 
-export interface LlmModelInfo {
-  id: LlmModelId;
-  name: string;
-  tier: 'fast' | 'balanced' | 'reasoning';
-  description: string;
-  supportsTemperature: boolean;
-  /** USD per million input tokens (for cost estimation). */
-  priceIn: number;
-  /** USD per million output tokens (for cost estimation). */
-  priceOut: number;
-  /** True when the model is active on the runtime gateway. */
-  available: boolean;
+/** A model's speed and quality class, which the gateway's fallback and assumed limits use. */
+export type ModelTier = 'fast' | 'balanced' | 'reasoning';
+
+/** What a model can take and do. */
+export interface ModelCapabilities {
+  /** Takes images in a message. */
+  vision: boolean;
+  /** Calls tools natively (`AgentChatOptions.tools`). */
+  tools: boolean;
+  /** The reasoning effort levels it accepts; empty when it cannot be set. */
+  reasoningEffort: ReasoningEffort[];
+  /** The most tokens a call may hold, input and output together. */
+  contextTokens: number;
+  /** Takes a sampling temperature. */
+  temperature: boolean;
 }
 
-/**
- * Complete catalog of LLM models supported by the hosting runtime.
- * `apps/agents` can inspect this list (via `AVAILABLE_LLM_MODELS` or `llm.models()`) and choose
- * which model to pass in `llm.chat(messages, {model})` for each agent preset or reasoning step.
- */
-export const AVAILABLE_LLM_MODELS: LlmModelInfo[] = [
-  {
-    id: 'gpt-5.6-terra',
-    name: 'gpt-5.6-terra',
-    tier: 'reasoning',
-    description: 'Highest-quality reasoning model for schema design, prompt drafting, and optimiser reflection.',
-    supportsTemperature: false,
-    priceIn: 1.25,
-    priceOut: 5.0,
-    available: true,
-  },
-  {
-    id: 'gpt-5.6-luna',
-    name: 'gpt-5.6-luna',
-    tier: 'balanced',
-    description: 'Balanced quality and latency model for multi-turn agent tasks and evaluation analysis.',
-    supportsTemperature: false,
-    priceIn: 1.0,
-    priceOut: 4.0,
-    available: true,
-  },
-  {
-    id: 'gpt-5.4',
-    name: 'gpt-5.4',
-    tier: 'fast',
-    description: 'Fast, lower-cost model suitable for front-desk routing and high-volume labeling.',
-    supportsTemperature: false,
-    priceIn: 0.75,
-    priceOut: 3.0,
-    available: true,
-  },
-  {
-    id: 'gpt-5.5',
-    name: 'gpt-5.5',
-    tier: 'balanced',
-    description: 'SDK-listed model identifier (currently inactive on the gateway; prefer gpt-5.6-terra or gpt-5.6-luna).',
-    supportsTemperature: false,
-    priceIn: 1.1,
-    priceOut: 4.4,
-    available: false,
-  },
-];
+/** One model in the registry. */
+export interface LlmModelInfo {
+  /** The registry's opaque id; agent presets name a model by it. */
+  id: string;
+  /** Display name. */
+  name: string;
+  tier: ModelTier;
+  description: string;
+  capabilities: ModelCapabilities;
+  /** USD per million input tokens (for cost accounting). */
+  priceIn: number;
+  /** USD per million output tokens, reasoning tokens included. */
+  priceOut: number;
+  /** False while the platform does not serve it: calls fall back to another model. */
+  active: boolean;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Storage: a schemaless document-collection runtime supporting structured queries, atomic field
@@ -282,7 +257,8 @@ export type LlmStreamChunk =
   | {type: 'error'; message: string};
 
 export interface ChatRequest {
-  endpoint: 'A' | 'B';
+  /** The labeling endpoint's id, as `LabelingModels.endpoints()` lists it. */
+  endpoint: EndpointId;
   messages: ModelMessage[];
   maxOutputTokens: number;
   temperature: number | null;
@@ -308,10 +284,10 @@ export interface LabelingModels {
 
 export interface AgentChatOptions {
   /**
-   * Target model ID selected by the agent runtime (from `AVAILABLE_LLM_MODELS`).
-   * If omitted, the adapter uses its default active model (`gpt-5.4`).
+   * The registry id of the model to use (`AgentModel.models()`). An unknown or inactive id, or
+   * none, falls back to an active reasoning model, then to any active model (the gateway decides).
    */
-  model?: LlmModelId;
+  model?: string;
   /** When true, instructs the model to respond with a single valid JSON object. */
   json?: boolean;
   /** Optional cap on output tokens. */
@@ -333,7 +309,7 @@ export interface AgentCompletionResult {
 }
 
 export interface AgentModel {
-  /** Returns the catalog of LLM models supported by the runtime. */
+  /** The model registry the hosting platform supplies (spec 5). */
   models(): LlmModelInfo[];
   /** Returns the model's text. With json: true the model is asked for one JSON object. */
   chat(messages: ModelMessage[], opts?: AgentChatOptions): Promise<string>;

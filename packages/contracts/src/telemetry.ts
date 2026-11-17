@@ -120,14 +120,14 @@ export const LABEL_VALUES: Record<string, readonly string[]> = {
   intent: ['answer', 'follow_up', 'draft_prompt', 'import_prompt', 'revise_prompt', 'explain_version', 'explain_report', 'reflect', 'merge', 'improve'],
   tool: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions', 'check_prompt', 'read_feature_info', 'read_doc', 'get_project_summary', 'get_dataset_stats', 'search_examples', 'compare_versions', 'get_mismatch_summary', 'try_prompt', 'score_version', 'start_optimiser', 'report_problem'],
   page: ['projects', 'prompt_design', 'dataset', 'gold', 'prompt', 'prompt_edit', 'other'],
-  slot: ['A', 'B'],
   what: ['score', 'resume', 'optimiser', 'try_prompt', 'score_version', 'start_optimiser'],
   decision: ['started'],
   node: ['prompt_design', 'dataset', 'gold', 'prompt'],
   action: ['approve', 'refused', 'skip'],
   collection: ['projects', 'setup_versions', 'dataset_snapshots', 'examples', 'gold_labels', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'audit_log', 'dataset_removals', 'label_comments'],
-  // Filled at startup (see above).
+  // Filled at startup (see above): the gateway registers its endpoints, models and slots.
   endpoint: [],
+  slot: [],
   model: [],
   op: [],
   method: [],
@@ -140,7 +140,8 @@ export type Labels = Record<string, string | number | boolean>;
 
 type Id = string;
 type Num = number;
-type Slot = 'A' | 'B';
+/** A labeling endpoint id (`EndpointId`); the gateway registers the allowed values. */
+type Slot = string;
 
 /** Every product event and its props (beyond the envelope). Names are snake_case, past tense. */
 export interface EventProps {

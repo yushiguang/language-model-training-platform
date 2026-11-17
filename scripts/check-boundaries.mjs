@@ -29,7 +29,7 @@ const RULES = [
   {dir: 'packages/contracts/src', allow: []},
   {dir: 'packages/domain/src', allow: ['@sprint/contracts']},
   {dir: 'packages/platform/src', allow: ['@sprint/contracts', '@sprint/domain']},
-  {dir: 'apps/llm-gateway/src', allow: ['@sprint/contracts', '@sprint/domain']},
+  {dir: 'apps/llm-gateway/src', allow: ['@sprint/contracts', '@sprint/domain'], tests: ['@sprint/platform']},
   {dir: 'apps/catalog/src', allow: ['@sprint/contracts', '@sprint/domain', '@sprint/platform']},
   {dir: 'apps/labeling/src', allow: ['@sprint/contracts', '@sprint/domain', '@sprint/platform'], tests: ['@sprint/catalog']},
   {dir: 'apps/agents/src', allow: ['@sprint/contracts', '@sprint/domain'], tests: ['@sprint/platform']},

@@ -376,6 +376,10 @@ Each item is its own `Contract change:` pull request.
    change, coordinated with the hosting platform's adapters per the handover guide. Proof:
    gateway tests over the shared-store limiter (concurrent instances never exceed an endpoint's
    QPM/TPM, and a dead instance's in-flight slots expire), and the registry fallback tests.
+   **Registry built (2026-11-17)** on branch `refactor/model-registry` (breaking): `LlmModelId`
+   and `AVAILABLE_LLM_MODELS` removed; `LlmModelInfo` is a registry entry (opaque id,
+   capabilities, prices, `active`) from `AgentModel.models()`, with `STAND_IN_MODELS` in
+   `@sprint/platform`; `EndpointId` is `string`; the `slot` label values come from the gateway.
 5. Section 6 fixtures and tool context: golden agent fixtures published as data, `AgentToolCall`
    carrying its context. Proof: the reference implementation passes them; they are the
    acceptance bar for any reimplementation.

@@ -1,4 +1,4 @@
-import type {AgentModel, ModelMessage} from './platform-api.ts';
+import type {AgentModel, ModelMessage, ModelTier} from './platform-api.ts';
 import type {EndpointId, EndpointInfo} from './types.ts';
 
 /**
@@ -10,7 +10,7 @@ import type {EndpointId, EndpointInfo} from './types.ts';
  */
 
 export type EndpointPurpose = 'chat' | 'labeling';
-export type ModelTier = 'fast' | 'balanced' | 'reasoning';
+export type {ModelTier};
 
 export interface EndpointConfig {
   /** Registry id of the endpoint (one registration per endpoint across all tenants). */
@@ -19,7 +19,7 @@ export interface EndpointConfig {
   /** Model served by the endpoint, for example `gpt-5.4`. */
   model: string;
   tier: ModelTier;
-  /** Labeling endpoints only: the product slot it serves ("Model A" or "Model B"). */
+  /** Labeling endpoints only: the labeling endpoint id it serves (`EndpointInfo.id`). */
   slot?: EndpointId;
   /** Requests per minute allowed on this endpoint. */
   qpm: number;

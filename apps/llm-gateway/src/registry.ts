@@ -49,8 +49,8 @@ export function buildRegistry(platform: Pick<Platform, 'models' | 'agent' | 'end
       maxConcurrency: l.maxConcurrency,
       priceIn: m.priceIn,
       priceOut: m.priceOut,
-      supportsTemperature: m.supportsTemperature,
-      active: m.available && l.qpm > 0,
+      supportsTemperature: m.capabilities.temperature,
+      active: m.active && l.qpm > 0,
       assumed: true,
     });
   }

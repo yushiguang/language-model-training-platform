@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {AVAILABLE_LLM_MODELS, LlmCallError, type ChatRequest, type ChatResult, type EndpointInfo, type Platform} from '@sprint/contracts';
+import {LlmCallError, NO_TELEMETRY, type ChatRequest, type ChatResult, type EndpointInfo, type Platform} from '@sprint/contracts';
+import {STAND_IN_MODELS} from '@sprint/platform';
 import {createGateway} from './gateway.ts';
 import {EndpointLimiter} from './limiter.ts';
 import {buildRegistry} from './registry.ts';
@@ -14,7 +15,7 @@ function fakePlatform(chat: (req: ChatRequest) => Promise<ChatResult>, endpoints
   return {
     models: {endpoints: () => INFOS, chat, chatStream: async function* () {}},
     agent: {
-      models: () => AVAILABLE_LLM_MODELS,
+      models: () => STAND_IN_MODELS,
       chat: async () => 'ok',
       complete: async (_m, o) => ({text: `answered by ${o?.model}`, model: String(o?.model), usage: {inputTokens: 10, outputTokens: 5}}),
       chatStream: async function* () {},
@@ -226,4 +227,27 @@ test('cancel(requestId) stops every call under that id, before or after it start
   assert.equal((await other).text, 'ok');
   // A call that starts after its id was cancelled is stopped at once.
   await assert.rejects(gw.label(req), (e: Error) => e.name === 'AbortError');
+});
+
+test('model registry (spec 5): opaque ids; no model, an unknown or an inactive one falls back to an active reasoning model', async () => {
+  const p = fakePlatform(async req => ({text: `labeled on ${req.endpoint}`, inputTokens: 1, outputTokens: 1}));
+  const registry = [
+    {...STAND_IN_MODELS[2], id: 'm-fast-01', name: 'Fast'},
+    {...STAND_IN_MODELS[0], id: 'm-think-07', name: 'Thinker'},
+    {...STAND_IN_MODELS[1], id: 'm-off', name: 'Off', active: false},
+  ];
+  p.agent.models = () => registry;
+  // A labeling endpoint whose id is the registry's own, not a fixed slot letter.
+  p.models.endpoints = () => [{...INFOS[0], id: 'labeling-main'}];
+  const allowed: Record<string, readonly string[]> = {};
+  const telemetry = {...NO_TELEMETRY, allowLabelValues: (l: string, v: readonly string[]) => void (allowed[l] = v)};
+  const gw = createGateway(p, {sleep: noWait, telemetry});
+  const agent = gw.agentModel();
+  assert.equal((await agent.complete(msg, {model: 'm-fast-01'})).text, 'answered by m-fast-01');
+  assert.equal((await agent.complete(msg)).text, 'answered by m-think-07');
+  assert.equal((await agent.complete(msg, {model: 'm-off'})).text, 'answered by m-think-07');
+  assert.equal((await agent.complete(msg, {model: 'no-such-model'})).text, 'answered by m-think-07');
+  assert.equal((await gw.label({slot: 'labeling-main', messages: msg, maxOutputTokens: 10, temperature: null})).text, 'labeled on labeling-main');
+  assert.deepEqual(allowed.slot, ['labeling-main']);
+  assert.ok(allowed.model.includes('m-think-07'));
 });

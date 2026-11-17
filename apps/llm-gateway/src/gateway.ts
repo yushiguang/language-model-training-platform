@@ -53,6 +53,8 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
   // Endpoint ids and models are label values; only the registry's own may appear.
   tm.allowLabelValues('endpoint', registry.map(e => e.id));
   tm.allowLabelValues('model', registry.map(e => e.model));
+  // Labeling endpoint ids are the `slot` label of product events (spec 5: no fixed list).
+  tm.allowLabelValues('slot', platform.models.endpoints().map(e => e.id));
   for (const ep of registry)
     for (const [kind, v] of [['qpm', ep.qpm], ['tpm', ep.tpm], ['concurrency', ep.maxConcurrency]] as const) tm.gauge('sprint_llm_endpoint_limit', v, {endpoint: ep.id, kind, assumed: ep.assumed});
   const delays = opts.retryDelaysMs ?? systemConfig().gateway.retryDelaysMs;
@@ -181,9 +183,9 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
 
   const chatEndpointFor = (model?: string): EndpointConfig => {
     const chat = registry.filter(e => e.purpose === 'chat');
-    const wanted = chat.find(e => e.model === (model ?? 'gpt-5.4'));
+    const wanted = model ? chat.find(e => e.model === model) : undefined;
     if (wanted?.active) return wanted;
-    // An inactive or unknown model falls back to the reasoning endpoint, then to any active one.
+    // No model, or an inactive or unknown one: an active reasoning endpoint, then any active one.
     const fallback = chat.find(e => e.active && e.tier === 'reasoning') ?? chat.find(e => e.active);
     if (!fallback) throw new LlmCallError('rejected', 'No active chat endpoint is registered.');
     return fallback;
@@ -193,7 +195,7 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
     const ep = chatEndpointFor(o.model);
     const estimate = estimateTokens(textOfMessages(messages)) + (o.maxOutputTokens ?? opts.defaultChatOutputTokens ?? 2000);
     const {value} = await call(ep, estimate, o.signal, async () => {
-      const r = await platform.agent.complete(messages, {...o, model: ep.model as AgentChatOptions['model']});
+      const r = await platform.agent.complete(messages, {...o, model: ep.model});
       if (r.usage) usage(ep, r.usage.inputTokens, r.usage.outputTokens);
       return {value: r, tokens: r.usage ? r.usage.inputTokens + r.usage.outputTokens : undefined};
     });
@@ -218,7 +220,7 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
         let chars = 0;
         let started = false;
         try {
-          for await (const chunk of platform.agent.chatStream(messages, {...o, model: ep.model as AgentChatOptions['model']})) {
+          for await (const chunk of platform.agent.chatStream(messages, {...o, model: ep.model})) {
             started = true;
             if (chunk.type === 'delta') chars += chunk.text.length;
             if (chunk.type === 'thinking') chars += chunk.thinking.length;
