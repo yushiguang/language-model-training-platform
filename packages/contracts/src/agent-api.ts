@@ -195,7 +195,6 @@ export interface OptimiserReflectInput {
   examples?: ExampleBrief[];
   /** Merge only: the second version. */
   other?: {prompt: StructuredPrompt; change: string};
-  signal?: AbortSignal;
 }
 
 export interface OptimiserReflectOutput {
@@ -246,7 +245,7 @@ export interface AgentTurnRequest extends AgentTurnInput {
 }
 
 /** One Optimiser change (or merge), for a project; `requestId` lets the caller cancel it. */
-export interface OptimiserReflectRequest extends Omit<OptimiserReflectInput, 'signal'> {
+export interface OptimiserReflectRequest extends OptimiserReflectInput {
   projectId: string;
   requestId?: string;
 }

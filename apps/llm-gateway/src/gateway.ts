@@ -58,6 +58,33 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
   const delays = opts.retryDelaysMs ?? systemConfig().gateway.retryDelaysMs;
   const sleep = opts.sleep ?? abortableSleep;
   const limiters = new Map<string, EndpointLimiter>();
+  /**
+   * Labeling calls by request id (spec 4.1: a caller stops calls by id, never with a signal). The
+   * signal stays in this process. A cancel that arrives before its calls is kept for a while, so
+   * a call that starts after it is stopped too.
+   */
+  const running = new Map<string, Set<AbortController>>();
+  const cancelled = new Map<string, number>();
+  const CANCEL_KEPT_MS = 60_000;
+  const isCancelled = (id: string) => {
+    const at = cancelled.get(id);
+    if (at != null && Date.now() - at > CANCEL_KEPT_MS) cancelled.delete(id);
+    return cancelled.has(id);
+  };
+  async function stoppable<T>(requestId: string | undefined, fn: (signal?: AbortSignal) => Promise<T>): Promise<T> {
+    if (!requestId) return fn();
+    if (isCancelled(requestId)) throw new DOMException('Stopped', 'AbortError');
+    const ctrl = new AbortController();
+    const set = running.get(requestId) ?? new Set();
+    set.add(ctrl);
+    running.set(requestId, set);
+    try {
+      return await fn(ctrl.signal);
+    } finally {
+      set.delete(ctrl);
+      if (!set.size) running.delete(requestId);
+    }
+  }
   const limiterFor = (ep: EndpointConfig) => {
     let l = limiters.get(ep.id);
     if (!l) {
@@ -229,18 +256,20 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
       const ep = registry.find(e => e.purpose === 'labeling' && e.slot === req.slot);
       if (!ep) throw new LlmCallError('rejected', `No labeling endpoint is registered for Model ${req.slot}.`);
       const estimate = estimateTokens(textOfMessages(req.messages)) + req.maxOutputTokens;
-      const {value, attempts} = await call(ep, estimate, req.signal, async () => {
-        const r = await platform.models.chat({
-          endpoint: req.slot,
-          messages: req.messages,
-          maxOutputTokens: req.maxOutputTokens,
-          temperature: req.temperature,
-          traceId: req.traceId,
-          signal: req.signal,
-        });
-        usage(ep, r.inputTokens, r.outputTokens);
-        return {value: r, tokens: r.inputTokens + r.outputTokens};
-      });
+      const {value, attempts} = await stoppable(req.requestId, signal =>
+        call(ep, estimate, signal, async () => {
+          const r = await platform.models.chat({
+            endpoint: req.slot,
+            messages: req.messages,
+            maxOutputTokens: req.maxOutputTokens,
+            temperature: req.temperature,
+            traceId: req.traceId,
+            signal,
+          });
+          usage(ep, r.inputTokens, r.outputTokens);
+          return {value: r, tokens: r.inputTokens + r.outputTokens};
+        }),
+      );
       return {
         text: value.text,
         inputTokens: value.inputTokens,
@@ -249,6 +278,12 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
         endpointId: ep.id,
         attempts,
       };
+    },
+
+    async cancel(requestId) {
+      cancelled.set(requestId, Date.now());
+      if (cancelled.size > 1000) cancelled.delete(cancelled.keys().next().value!);
+      for (const ctrl of running.get(requestId) ?? []) ctrl.abort();
     },
 
     agentModel: () => agent,

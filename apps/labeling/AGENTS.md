@@ -19,6 +19,9 @@ example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts
     (every task runs with no cost limit), so this applies only to tasks saved before that.
   - Stop: aborts locally, or sets `stopRequested` and `stopRequestedAt`; the runner reads them on
     a 2 s timer and aborts calls in flight. A Stop pressed before the run started is ignored.
+    The run's model calls share one request id; aborting the run calls the gateway's
+    `cancel(runId)`, so no signal crosses the gateway contract. `tryTemplate` passes the caller's
+    `requestId`, and `cancel(requestId)` stops it.
   - `listTasks` reports a `running` task whose lock nobody holds as `paused` / `closed`.
   - `relabelInvalid` (the final run): an example whose only saved answer is invalid when the task
     first starts is labeled once more. The first run stores which ones in `relabelExampleIds`, so

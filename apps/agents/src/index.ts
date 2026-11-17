@@ -16,7 +16,7 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntimeContract
       const ctrl = new AbortController();
       if (requestId) running.set(requestId, ctrl);
       try {
-        return await reflectPrompt({...input, signal: ctrl.signal}, deps.llm, deps.tools(projectId));
+        return await reflectPrompt(input, deps.llm, deps.tools(projectId), ctrl.signal);
       } finally {
         if (requestId) running.delete(requestId);
       }

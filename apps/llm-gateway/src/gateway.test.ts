@@ -202,3 +202,28 @@ test('chatStream retries a 429 before the first chunk and slows the endpoint dow
   assert.deepEqual(out, ['hi']);
   assert.equal(tries, 2);
 });
+
+test('cancel(requestId) stops every call under that id, before or after it starts; other ids go on (spec 4.1)', async () => {
+  // A model call that ends only when its signal (kept inside the gateway) is aborted.
+  const gw = createGateway(
+    fakePlatform(
+      req =>
+        new Promise((resolve, reject) => {
+          if (req.traceId === 'other') return resolve({text: 'ok', inputTokens: 1, outputTokens: 1});
+          req.signal?.addEventListener('abort', () => reject(new DOMException('Stopped', 'AbortError')), {once: true});
+        }),
+    ),
+    {sleep: noWait},
+  );
+  const req = {slot: 'B' as const, messages: msg, maxOutputTokens: 10, temperature: null, requestId: 'run_1'};
+  const a = gw.label(req);
+  const b = gw.label(req);
+  const other = gw.label({...req, requestId: 'run_2', traceId: 'other'});
+  await new Promise(r => setTimeout(r, 5));
+  await gw.cancel('run_1');
+  await assert.rejects(a, (e: Error) => e.name === 'AbortError');
+  await assert.rejects(b, (e: Error) => e.name === 'AbortError');
+  assert.equal((await other).text, 'ok');
+  // A call that starts after its id was cancelled is stopped at once.
+  await assert.rejects(gw.label(req), (e: Error) => e.name === 'AbortError');
+});

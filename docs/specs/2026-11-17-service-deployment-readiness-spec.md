@@ -330,6 +330,12 @@ Each item is its own `Contract change:` pull request.
    update, async URL resolution): each its own contract-change PR. Proof: a serialization
    round-trip test over every contract type, and `check:boundaries` passing with the new
    client alias in place.
+   **Status (2026-11-17): item 1 built** on branch `refactor/no-signals-in-contracts`.
+   `LabelCallRequest`, `TryTemplateInput` and `OptimiserReflectInput` carry no signal; callers
+   pass a `requestId` and call `cancel(requestId)` on the gateway, labeling or the agent runtime.
+   Platform ports keep `signal` (review gap G6). `ExampleSource.sample` keeps its progress
+   callback and signal until sampling runs as a job (Section 3), so the Dataset page keeps its
+   progress meanwhile.
 3. Section 3 (job module, enqueue-and-return commands, persisted sampling state, bulk
    asynchronous deletion, the light status read of Section 7): additive job contract plus the
    breaking command-semantics change. Proof: job lifecycle tests (lease expiry, resume, cancel,

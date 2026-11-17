@@ -52,6 +52,7 @@ async function world(prefix: string, opts: WorldOpts = {}) {
     endpoints: () => [endpoint],
     labelingEndpoints: () => [endpoint],
     agentModel: () => ({}),
+    cancel: async () => {},
     async label(req: {traceId?: string; messages?: unknown}): Promise<LabelCallResult> {
       calls.n++;
       const n = (seen.get(req.traceId ?? '') ?? 0) + 1;

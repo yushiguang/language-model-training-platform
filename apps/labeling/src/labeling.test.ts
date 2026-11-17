@@ -26,6 +26,7 @@ function fakeGateway(answer: (req: LabelCallRequest) => Promise<string>, stats =
     agentModel: () => {
       throw new Error('not used');
     },
+    cancel: async () => {},
     async label(req): Promise<LabelCallResult> {
       stats.calls++;
       stats.inFlight++;
@@ -148,6 +149,22 @@ test('tryTemplate labels a few examples with an unsaved template and saves nothi
   assert.equal(Object.keys(await labeling.predictions(v.id, 'A', 'any')).length, 0);
 });
 
+test('a try is stopped by its request id: the calls carry the id, and cancel reaches the gateway (spec 4.1)', async () => {
+  const {db, catalog, ids} = await setup(2, 'try-cancel');
+  const withId: (string | undefined)[] = [];
+  const cancelled: string[] = [];
+  const gateway: LlmGatewayContract = {
+    ...fakeGateway(async req => (withId.push(req.requestId), '{"format": ["Vlog"]}')),
+    cancel: async id => void cancelled.push(id),
+  };
+  const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks()});
+  const examples = await catalog.findByIds('examples', ids);
+  await labeling.tryTemplate({template: 'Draft {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], schema, settings: {endpoint: 'A', maxOutputTokens: 100, temperature: 0}, examples, requestId: 'rq_try'});
+  assert.deepEqual(withId, ['rq_try', 'rq_try']);
+  await labeling.cancel('rq_try');
+  assert.deepEqual(cancelled, ['rq_try']);
+});
+
 test('relabelInvalid: an example whose only answer is invalid is labeled once more, and the valid answer wins', async () => {
   const {db, catalog, v, ids} = await setup(4, 'lab-relabel');
   const seen = new Map<string, number>();
@@ -210,14 +227,17 @@ test('two tasks for the same version, model and settings never pay twice for an 
 
 test('a Stop from another tab is seen during a long model call, and an old Stop is ignored', async () => {
   const {db, catalog, v, ids} = await setup(4, 'lab-stop');
-  // A call that only ends when it is aborted.
+  // A call that only ends when it is cancelled by its request id (no signal crosses the contract).
+  const open = new Map<string, (() => void)[]>();
   const gateway: LlmGatewayContract = {
     ...fakeGateway(async () => '{"format": "Vlog"}'),
     label: req =>
       new Promise((_, reject) => {
-        const open = setTimeout(() => reject(new Error('never stopped')), 10_000); // like an open request
-        req.signal?.addEventListener('abort', () => (clearTimeout(open), reject(new DOMException('Stopped', 'AbortError'))), {once: true});
+        const timer = setTimeout(() => reject(new Error('never stopped')), 10_000); // like an open request
+        const stop = () => (clearTimeout(timer), reject(new DOMException('Stopped', 'AbortError')));
+        open.set(req.requestId ?? '', [...(open.get(req.requestId ?? '') ?? []), stop]);
       }),
+    cancel: async id => (open.get(id) ?? []).forEach(stop => stop()),
   };
   const tab1 = createLabeling({db, catalog, gateway, locks: memoryLocks()});
   const tab2 = createLabeling({db, catalog, gateway, locks: memoryLocks()});

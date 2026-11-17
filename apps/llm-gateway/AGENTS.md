@@ -14,6 +14,9 @@ Contract: `LlmGatewayContract` in `packages/contracts/src/gateway-api.ts`.
   token count with real usage. Reasoning tokens count toward TPM. On a 429 the limiter slows down
   before the slot is given back (also on the last try), so no queued call goes out during the
   hold. `chatStream` retries the same way until its first chunk, never after.
+- Stopping: `label` takes an optional `requestId`; `cancel(requestId)` aborts every call under it
+  (a labeling run shares one id) and stops calls that start under it later (kept for 60 s). The
+  abort signal stays inside the gateway and goes to the platform's `ChatRequest`.
 
 Rules: stateless apart from the in-memory limiter; no storage; no knowledge of tasks or projects.
 Per-example failure handling belongs to labeling, not here. Imports: contracts, domain.

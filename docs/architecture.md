@@ -71,11 +71,17 @@ Since 1.0.0 phase 1 every service contract is written so it maps one to one to a
 - `apps/bff/src/api.ts` (`createBffApi`) is the bff as its contract, and
   `apps/workflow/src/workflow.ts` (`createWorkflow`) the workflow as its own. Services inside the
   workflow still pass records to each other.
-- No callbacks or signals cross a contract (phase 3). The agent runtime is built once with
-  `createAgentRuntime({llm, tools, progress})`: the model, a project's tools and an
-  `AgentProgressPort` for Ask AI's live line are injected, so `runTurn`, `reflectPrompt` and
-  `draftImprovement` take and return plain data. A run's Stop reaches a running change through
-  `cancel(requestId)`.
+- No callbacks or signals cross a service contract (phase 3, and deployment readiness spec 4.1).
+  The agent runtime is built once with `createAgentRuntime({llm, tools, progress})`: the model, a
+  project's tools and an `AgentProgressPort` for Ask AI's live line are injected, so `runTurn`,
+  `reflectPrompt` and `draftImprovement` take and return plain data. Work is stopped by id: the
+  caller passes a `requestId` and calls `cancel(requestId)` on the agent runtime (an Optimiser
+  change), the gateway (`label`; a labeling run gives all its calls one id, so Stop cancels them
+  together) or labeling (`tryTemplate`). Signals stay inside the process that owns the work.
+  Platform ports (`ChatRequest`, `AgentChatOptions`) keep their `signal`: they are called
+  in-process by the gateway and never cross our RPC, and without it a stopped call would keep its
+  request to the model open. `ExampleSource.sample` keeps its progress callback and signal until
+  sampling runs as a job (spec 3).
 - Example features are `FeatureValue {text?, items?}` (text, or a list such as image URLs), read
   with `featureText` and `featureItems` (`packages/domain/src/template.ts`). Files and older
   records with plain strings and arrays are read through `toFeatures`.

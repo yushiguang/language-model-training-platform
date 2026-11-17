@@ -380,7 +380,7 @@ async function withFeatureInfo(llm: AgentModel, preset: AgentPreset | 'optimiser
  * One Optimiser step: a change from the parent's mistakes (reflection), or a merge of two
  * versions that win on different examples. May tick or untick features, with the reason.
  */
-export async function reflectPrompt(input: OptimiserReflectInput, llm: AgentModel, tools?: AgentToolHost): Promise<OptimiserReflectOutput> {
+export async function reflectPrompt(input: OptimiserReflectInput, llm: AgentModel, tools?: AgentToolHost, signal?: AbortSignal): Promise<OptimiserReflectOutput> {
   const mode = input.mode ?? 'change';
   const raw = await withFeatureInfo(
     llm,
@@ -396,7 +396,7 @@ export async function reflectPrompt(input: OptimiserReflectInput, llm: AgentMode
       ...(input.other ? {other: input.other} : {}),
     },
     tools,
-    input.signal,
+    signal,
   );
   const out = parseJsonObject<{prompt?: unknown; change?: unknown}>(raw, {});
   // Wording only: the label key and value names stay the parent's, whatever the model wrote.

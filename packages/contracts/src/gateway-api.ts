@@ -49,7 +49,11 @@ export interface LabelCallRequest {
   temperature: number | null;
   /** Opaque trace id (the example's external id). Never sent to the model. */
   traceId?: string;
-  signal?: AbortSignal;
+  /**
+   * Lets the caller stop the call with `cancel(requestId)`. Several calls may share one id (a
+   * labeling run): a cancel stops them all. No signal crosses the contract (spec 4.1).
+   */
+  requestId?: string;
 }
 
 export interface LabelCallResult extends CallUsage {
@@ -66,6 +70,8 @@ export interface LlmGatewayContract {
   labelingEndpoints(): EndpointInfo[];
   /** One labeling call: waits for a QPM/TPM slot, retries busy or broken replies, returns usage. */
   label(req: LabelCallRequest): Promise<LabelCallResult>;
+  /** Stops the labeling calls running (or about to start) under this id; they reject as stopped. */
+  cancel(requestId: string): Promise<void>;
   /** An `AgentModel` whose calls go through the chat endpoints and their limiters. */
   agentModel(): AgentModel;
 }

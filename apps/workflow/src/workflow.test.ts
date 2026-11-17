@@ -27,6 +27,7 @@ function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) =
     endpoints: () => [endpoint],
     labelingEndpoints: () => [endpoint],
     agentModel: () => ({}),
+    cancel: async () => {},
     label: async (): Promise<LabelCallResult> => ({text: '{"format": "Vlog"}', inputTokens: 0, outputTokens: 150, costUsd: 0.03, endpointId: 'labeling-A', attempts: 1}),
   } as unknown as LlmGatewayContract;
   const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks()});

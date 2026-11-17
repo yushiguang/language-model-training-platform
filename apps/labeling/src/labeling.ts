@@ -166,6 +166,9 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     const examples = new Map((await deps.catalog.findByIds('examples', pending)).map(e => [e.id, e] as [string, Example]));
     const ctrl = new AbortController();
     active.set(taskId, ctrl);
+    // The run's model calls share one request id; a Stop cancels them at the gateway by id.
+    const runId = newId('lr');
+    ctrl.signal.addEventListener('abort', () => void Promise.resolve().then(() => deps.gateway.cancel(runId)).catch(() => undefined), {once: true});
     setRunning(purpose, 1);
     let stopReason: LabelingTask['stopReason'] = null;
     let inARow = 0;
@@ -208,7 +211,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
             maxOutputTokens: task.settings.maxOutputTokens,
             temperature: task.settings.temperature,
             traceId: ex.externalId,
-            signal: ctrl.signal,
+            requestId: runId,
           })
           .catch(e => {
             // The safety filter's answer is final: saved as a filtered example, not a failure.
@@ -407,7 +410,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
               maxOutputTokens: input.settings.maxOutputTokens,
               temperature: input.settings.temperature,
               traceId: ex.externalId,
-              signal: input.signal,
+              ...(input.requestId ? {requestId: input.requestId} : {}),
             });
             const parsed = parseOutput(res.text, input.schema);
             out.push({exampleId: ex.id, answer: parsed.answer, invalidReason: parsed.reason, costUsd: res.costUsd, error: null});
@@ -419,6 +422,8 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       const order = new Map(input.examples.map((e, i) => [e.id, i]));
       return out.sort((a, b) => order.get(a.exampleId)! - order.get(b.exampleId)!);
     },
+
+    cancel: requestId => deps.gateway.cancel(requestId),
 
     /** Deleting a project: its running tasks stop, then its tasks and their saved answers go. */
     async deleteProject(projectId: string) {
