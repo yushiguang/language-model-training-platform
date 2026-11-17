@@ -25,7 +25,7 @@ import type {
   Schema,
   SetupVersion,
   StructuredPrompt,
-} from '@tsp/contracts';
+} from '@sprint/contracts';
 import type {BffClient} from './client';
 import {inProcessClient} from './in-process';
 

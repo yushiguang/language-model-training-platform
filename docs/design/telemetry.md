@@ -17,11 +17,11 @@ changing the apps.
 
 ## Conventions
 
-- **Names.** Every metric starts with `tsp_`, then the app (`llm_`, `labeling_`, `agent_`,
+- **Names.** Every metric starts with `sprint_`, then the app (`llm_`, `labeling_`, `agent_`,
   `catalog_`, `bff_`, `web_`), then what is measured. Units are spelled out at the end in base
   units (`_seconds`, `_bytes`, `_usd`, `_ratio`); counters end in `_total`. Snake case only.
-  (`tsp` is the repo's first working name, "Training Set Platform"; the prefix stays through
-  1.0.0.)
+  (Renamed from `tsp_`, the repo's first working name, on 2026-11-17, before the metrics reached
+  the company's telemetry system.)
 - **Labels.** `app` and `env` are added by the port. Allowed values are listed per metric, and a
   value outside the list is reported as `other`. Never a label: project, user, example, version
   or session id, free text, or anything unbounded. Those go in events only.
@@ -46,7 +46,7 @@ server instances.
 
 - **Stand-in:** nothing leaves the browser. Metrics stay in memory (`render()` gives the
   Prometheus text), and the last 1,000 events are kept in local storage.
-- **Real adapter:** implemented behind `@tsp/platform-impl` as `Platform.telemetry`. A static
+- **Real adapter:** implemented behind `@sprint/platform-impl` as `Platform.telemetry`. A static
   site cannot be scraped, so the adapter pushes. Server-side apps, once they exist, can also
   serve `render()` for scraping. See [../handover/integration.md](../handover/integration.md).
 
@@ -68,5 +68,5 @@ analytics. Some moments go to both.
   to prune (section 1.3).
 
 Not built: an in-product usage dashboard, sampling, and alert rules. Good first alerts once real
-traffic exists: `tsp_llm_calls_total{outcome="gave_up"}` rising, and `tsp_llm_limiter_wait_seconds`
+traffic exists: `sprint_llm_calls_total{outcome="gave_up"}` rising, and `sprint_llm_limiter_wait_seconds`
 p95 above 60 s.

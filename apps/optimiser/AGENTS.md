@@ -1,4 +1,4 @@
-# optimiser (`@tsp/optimiser`)
+# optimiser (`@sprint/optimiser`)
 
 Auto Optimise: the GEPA loop ported to TypeScript (design: `docs/design/optimiser.md`). Implements
 `OptimiserContract` (`packages/contracts/src/optimiser-api.ts`): `startRun`, `stopRun`,

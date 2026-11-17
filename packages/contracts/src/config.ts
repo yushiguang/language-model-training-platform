@@ -1,6 +1,6 @@
 /**
  * Every tunable number of the system in one typed struct (spec 1.0.0, section 7.4). The defaults
- * live in `@tsp/domain` (`DEFAULT_SYSTEM_CONFIG`); a hosting adapter overrides any of them through
+ * live in `@sprint/domain` (`DEFAULT_SYSTEM_CONFIG`); a hosting adapter overrides any of them through
  * `Platform.config`, merged at startup. Plain JSON, so it maps 1:1 to an IDL struct.
  */
 export interface ModelLimits {

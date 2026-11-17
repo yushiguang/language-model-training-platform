@@ -17,9 +17,9 @@ import {
   type TaskState,
   type TelemetryPort,
   type TryTemplateRow,
-} from '@tsp/contracts';
-import {asAnswerOrNull, hashString, parseOutput, REASON_LINE, renderPrompt, settingsHash, type Part, systemConfig} from '@tsp/domain';
-import {DocRepo, newId} from '@tsp/platform';
+} from '@sprint/contracts';
+import {asAnswerOrNull, hashString, parseOutput, REASON_LINE, renderPrompt, settingsHash, type Part, systemConfig} from '@sprint/domain';
+import {DocRepo, newId} from '@sprint/platform';
 import {browserLocks, type TaskLocks} from './locks.ts';
 
 export interface LabelingDeps {
@@ -71,7 +71,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
   const stopPressed = new Map<string, number>();
   const setRunning = (purpose: string, d: number) => {
     running.set(purpose, (running.get(purpose) ?? 0) + d);
-    tm.gauge('tsp_labeling_tasks_running', running.get(purpose)!, {task_purpose: purpose});
+    tm.gauge('sprint_labeling_tasks_running', running.get(purpose)!, {task_purpose: purpose});
   };
   const defaultTrigger = (t: LabelingTask) => (t.purpose === 'eval' || t.purpose === 'optimiser' ? 'system' : 'user');
 
@@ -80,7 +80,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     const r = await locks.run(lockName(taskId), () => execute(taskId, trigger, opts));
     if (r === null) {
       const t = await getTask(taskId);
-      if (t) tm.counter('tsp_labeling_lock_conflicts_total', {task_purpose: t.purpose});
+      if (t) tm.counter('sprint_labeling_lock_conflicts_total', {task_purpose: t.purpose});
     }
     return r;
   }
@@ -121,8 +121,8 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     const task = found;
     const purpose = task.purpose;
     const how = trigger ?? defaultTrigger(task);
-    tm.counter('tsp_labeling_tasks_started_total', {task_purpose: purpose, trigger: how});
-    if (task.startedAt) tm.counter('tsp_labeling_resumes_total', {task_purpose: purpose, trigger: how});
+    tm.counter('sprint_labeling_tasks_started_total', {task_purpose: purpose, trigger: how});
+    if (task.startedAt) tm.counter('sprint_labeling_resumes_total', {task_purpose: purpose, trigger: how});
     const runStarted = Date.now();
     // A Stop pressed in another tab after this moment is for this run (older ones are ignored).
     const runStartedIso = now();
@@ -251,8 +251,8 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       });
       counts.done++;
       counts.costUsd += pred.costUsd;
-      tm.counter('tsp_labeling_examples_total', {task_purpose: purpose, result: pred.answer ? 'valid' : pred.filtered ? 'filtered' : 'invalid'});
-      if (paid) tm.counter('tsp_labeling_cost_usd_total', {task_purpose: purpose}, pred.costUsd);
+      tm.counter('sprint_labeling_examples_total', {task_purpose: purpose, result: pred.answer ? 'valid' : pred.filtered ? 'filtered' : 'invalid'});
+      if (paid) tm.counter('sprint_labeling_cost_usd_total', {task_purpose: purpose}, pred.costUsd);
       return true;
     };
 
@@ -270,10 +270,10 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
             continue;
           }
           inARow = 0;
-          tm.histogram('tsp_labeling_example_duration_seconds', (Date.now() - exStarted) / 1000, {task_purpose: purpose});
+          tm.histogram('sprint_labeling_example_duration_seconds', (Date.now() - exStarted) / 1000, {task_purpose: purpose});
         } catch (e) {
           if (errorKindOf(e) === 'aborted') break;
-          tm.counter('tsp_labeling_examples_total', {task_purpose: purpose, result: 'failed'});
+          tm.counter('sprint_labeling_examples_total', {task_purpose: purpose, result: 'failed'});
           inARow++;
           counts.failed++;
           lastError = (e as Error).message ?? String(e);
@@ -308,11 +308,11 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     }
     await repo.patch<LabelingTask>(TASKS, taskId, {state, stopReason, error, stopRequested: false, finishedAt: now()});
     emit();
-    tm.counter('tsp_labeling_tasks_ended_total', {task_purpose: purpose, state, reason: stopReason ?? 'none'});
+    tm.counter('sprint_labeling_tasks_ended_total', {task_purpose: purpose, state, reason: stopReason ?? 'none'});
     if (state === 'needs_attention') tm.event('run_needs_attention', {task_purpose: purpose, failed: counts.failed, total: task.total});
-    tm.histogram('tsp_labeling_task_duration_seconds', (Date.now() - runStarted) / 1000, {task_purpose: purpose});
+    tm.histogram('sprint_labeling_task_duration_seconds', (Date.now() - runStarted) / 1000, {task_purpose: purpose});
     const pressed = stopPressed.get(taskId);
-    if (state === 'stopped' && pressed) tm.histogram('tsp_labeling_stop_latency_seconds', (Date.now() - pressed) / 1000, {task_purpose: purpose});
+    if (state === 'stopped' && pressed) tm.histogram('sprint_labeling_stop_latency_seconds', (Date.now() - pressed) / 1000, {task_purpose: purpose});
     stopPressed.delete(taskId);
     return getTask(taskId);
   }

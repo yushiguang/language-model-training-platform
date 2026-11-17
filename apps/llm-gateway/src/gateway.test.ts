@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {AVAILABLE_LLM_MODELS, LlmCallError, type ChatRequest, type ChatResult, type EndpointInfo, type Platform} from '@tsp/contracts';
+import {AVAILABLE_LLM_MODELS, LlmCallError, type ChatRequest, type ChatResult, type EndpointInfo, type Platform} from '@sprint/contracts';
 import {createGateway} from './gateway.ts';
 import {EndpointLimiter} from './limiter.ts';
 import {buildRegistry} from './registry.ts';

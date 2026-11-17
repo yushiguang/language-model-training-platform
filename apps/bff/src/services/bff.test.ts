@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, ClientDiagnostics, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission} from '@tsp/contracts';
-import {createCatalog} from '@tsp/catalog';
-import {createLabeling, memoryLocks} from '@tsp/labeling';
-import {createOptimiser} from '@tsp/optimiser';
-import {DocRepo, localDocRuntime} from '@tsp/platform';
+import type {AgentRuntimeContract, ClientDiagnostics, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission} from '@sprint/contracts';
+import {createCatalog} from '@sprint/catalog';
+import {createLabeling, memoryLocks} from '@sprint/labeling';
+import {createOptimiser} from '@sprint/optimiser';
+import {DocRepo, localDocRuntime} from '@sprint/platform';
 import {configureBff, emitChange} from './app.ts';
 import {optimiserHost} from './optimiser-host.ts';
 import {agentProgress} from './agents.ts';
@@ -12,7 +12,7 @@ import {loadProjectState, renameProject} from './projects.ts';
 import {beginTurn, endTurn, reportProblem} from './problems.ts';
 import {agentStart} from './starts.ts';
 import {tick} from './work.ts';
-import {compilePrompt, DEFAULT_THRESHOLDS, versionLabel} from '@tsp/domain';
+import {compilePrompt, DEFAULT_THRESHOLDS, versionLabel} from '@sprint/domain';
 
 const schema: Schema = {name: 'format', kind: 'single', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]};
 /** Output price only, so every estimate is 150 tokens x $200/M = $0.03 per example. */

@@ -1,5 +1,5 @@
-import type {AgentPreset, AgentToolName, LlmModelId, Locale} from '@tsp/contracts';
-import {agentName, translate} from '@tsp/domain';
+import type {AgentPreset, AgentToolName, LlmModelId, Locale} from '@sprint/contracts';
+import {agentName, translate} from '@sprint/domain';
 
 export {agentName};
 
@@ -7,7 +7,7 @@ export {agentName};
  * Agent presets = model selection + system prompt + what the agent may observe + the intents it
  * supports + the read tools it may call. Every preset uses the smartest model (decided 2026-11-04).
  *
- * Available runtime models (defined in `@tsp/contracts` `AVAILABLE_LLM_MODELS`; limits live in `@tsp/llm-gateway`):
+ * Available runtime models (defined in `@sprint/contracts` `AVAILABLE_LLM_MODELS`; limits live in `@sprint/llm-gateway`):
  * - `'gpt-5.6-terra'`: highest-quality reasoning model
  * - `'gpt-5.6-luna'`: balanced quality and latency model
  * - `'gpt-5.4'`: fast, lower-cost model

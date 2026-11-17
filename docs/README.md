@@ -44,7 +44,7 @@ Sprint follows [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MINOR.PA
 - **`1.0.0` (first production release, the current target)**: structured Prompt Tuning workflow,
   Eval Dataset governance, IDL-ready DDD service boundaries, and production hosting readiness.
 - **After `1.0.0`**:
-  - `MAJOR`: breaking changes to `@tsp/contracts` service/platform interfaces or incompatible
+  - `MAJOR`: breaking changes to `@sprint/contracts` service/platform interfaces or incompatible
     stored document schemas.
   - `MINOR`: backwards-compatible capabilities, new agent tools, or additive contract fields.
   - `PATCH`: bug fixes, UI/motion refinements, and copy improvements.
@@ -59,7 +59,7 @@ Sprint follows [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MINOR.PA
 | `docs/architecture.md` and `docs/decisions.md` | All contributors and agents | **Living architecture and decision log**: how the system works today and why choices were made. | Update alongside code changes when architecture or product rules change. |
 | `docs/ui-gaps.md` | Design and frontend agents | **Design-system parity log**: open differences between the Unified UI canvas and `apps/web`. | Open items only. Closed items move to `docs/tmp/` or are deleted. |
 | `docs/specs/` | External Agent and reviewers | **Actionable release specifications**: self-contained feature, workflow, design-system and refactoring blueprints ready for implementation. | Purely contract- and product-oriented. When a spec is implemented, fold what lasts into the living docs and remove the spec. |
-| `docs/handover/integration.md` | Internal and External interface | **Platform adapter contract guide**: `@tsp/platform-impl` and transport seams, using `@tsp/contracts` interfaces only. | Interfaces and invariants only, never hosting-platform internals. |
+| `docs/handover/integration.md` | Internal and External interface | **Platform adapter contract guide**: `@sprint/platform-impl` and transport seams, using `@sprint/contracts` interfaces only. | Interfaces and invariants only, never hosting-platform internals. |
 | `docs/tmp/` | Whoever needs the trail | **One-time documents**: review reports, acceptance rounds, investigations, closed lists. | Dated file names. Never a source of truth. Delete when no longer needed. See [tmp/README.md](tmp/README.md). |
 | `/internal/` *(git-ignored)* | Internal team and Internal Agent | **Hosting-platform overlay and internal docs**: adapters, deployment topology, internal frameworks, multi-tenancy/auth integration, internal roadmaps. | Never committed to this repository. |
 
@@ -67,11 +67,11 @@ Sprint follows [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MINOR.PA
 
 1. **English only**: every file under `docs/` (and anywhere outside `/internal/`) is written in
    English. The translation catalogs in `packages/domain/src/locales/` are the one exception.
-2. **Interface-level boundary**: public docs may reference contracts in `@tsp/contracts`
+2. **Interface-level boundary**: public docs may reference contracts in `@sprint/contracts`
    (`Platform`, `BffContract`, service contracts, and extension ports) and public model slugs
    (`gpt-5.x`), never internal service names, internal frameworks, internal package scopes, or
    internal URLs.
-3. **Contract changes**: any specification in `docs/specs/` that alters `@tsp/contracts` must
+3. **Contract changes**: any specification in `docs/specs/` that alters `@sprint/contracts` must
    explicitly list additive vs. breaking changes so adapter owners can update `/internal/` in
    lockstep.
 

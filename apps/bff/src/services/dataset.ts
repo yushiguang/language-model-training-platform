@@ -1,5 +1,5 @@
-import type {Answer, DatasetSnapshot, DatasetUploadResult, Example, ExampleMedia, GoldLabel, RawExample, SamplingTask, Schema} from '@tsp/contracts';
-import {hashString, newId, readGoldAnswer, toFeatures} from '@tsp/domain';
+import type {Answer, DatasetSnapshot, DatasetUploadResult, Example, ExampleMedia, GoldLabel, RawExample, SamplingTask, Schema} from '@sprint/contracts';
+import {hashString, newId, readGoldAnswer, toFeatures} from '@sprint/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {appendExamples, insertExamplesSettled} from './governance.ts';
 

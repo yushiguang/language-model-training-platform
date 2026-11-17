@@ -18,15 +18,15 @@ Keep this repo free of internal product names, internal URLs, package scopes, ke
 | Registered endpoints with real QPM/TPM | no (only assumed defaults) | yes |
 | Build settings, deployment | documents them | yes |
 
-## Where the swap happens: `@tsp/platform-impl`
+## Where the swap happens: `@sprint/platform-impl`
 
-Only the composition root (`apps/web/src/backend-api/in-process.ts`) imports `@tsp/platform-impl`,
+Only the composition root (`apps/web/src/backend-api/in-process.ts`) imports `@sprint/platform-impl`,
 and only its `createPlatform(): Platform`. It resolves to:
 
 - the stand-ins, `packages/platform/src/config.ts`, by default (`tsconfig.base.json` paths and
   `apps/web/next.config.mjs`);
-- the internal module when the build sets `TSP_PLATFORM_IMPL` to its path, relative to the repo
-  root, for example `TSP_PLATFORM_IMPL=internal/platform.ts npm run build`. `/internal/` is
+- the internal module when the build sets `SPRINT_PLATFORM_IMPL` to its path, relative to the repo
+  root, for example `SPRINT_PLATFORM_IMPL=internal/platform.ts npm run build`. `/internal/` is
   ignored by git, so the overlay can sit there.
 
 The internal module exports `createPlatform()` returning the `Platform` object from
@@ -34,7 +34,7 @@ The internal module exports `createPlatform()` returning the `Platform` object f
 
 | Field | What it must do | Stand-in |
 |---|---|---|
-| `db: DocRuntime` | Document collections: add, get, set, partial update with `DocFieldValue` (increment, arrayUnion, arrayRemove, delete), delete, find, query with filters and offset paging, polling subscribe, batch writes. `createdAt` is server time | `localDocRuntime('tsp-doc-v2')` (`localStorage`) |
+| `db: DocRuntime` | Document collections: add, get, set, partial update with `DocFieldValue` (increment, arrayUnion, arrayRemove, delete), delete, find, query with filters and offset paging, polling subscribe, batch writes. `createdAt` is server time | `localDocRuntime('sprint-doc')` (`localStorage`) |
 | `models: LabelingModels` | One labeling call per example (`chat`, `chatStream`) on slot A or B; returns text and token usage. Throw `LlmCallError` (or an error with an HTTP `status`) so the gateway can tell busy from rejected; throw `LlmCallError('filtered', …)` when the endpoint's safety filter stops the answer (Prompt versions shows it as Filtered) | `simulatedModels` |
 | `agent: AgentModel` | Agent chat (`chat`, `complete` with usage and thinking, `chatStream`, `models()`) | `scriptedAgent` |
 | `identity: Identity` | The signed-in user (id, name, email, organization); `currentUser()` rejects when nobody is signed in, and the site then shows a sign-in error with Retry. Optional `signOut()` ends the single sign-on session: when it is there, the avatar menu shows Sign out and the page reloads after it (2026-11-16) | `localIdentity` (no sign-out) |
@@ -43,7 +43,7 @@ The internal module exports `createPlatform()` returning the `Platform` object f
 | `media?: MediaSource` | The player page and still images of one example by item id, for people to look at on Gold Labels (see "Media") | `sampleMedia` (made-up pictures, no player) |
 | `endpoints?: EndpointConfig[]` | Registered endpoints with real limits (next section) | not set: assumed limits |
 | `telemetry?: TelemetrySink` | Takes product events (`pushEvents`, batches of `TelemetryEvent`) and metrics as Prometheus text (`pushMetrics`) and forwards them to the company's telemetry system. Must not throw; slow is fine (the app buffers) | `localTelemetrySink` (`localStorage`); not set: kept in memory only |
-| `tickets?: TicketPort` | Files a problem report and returns its ticket id (see "Problem reports") | `localTickets` (`localStorage`, `tsp-tickets`); not set: helpers say reports cannot be sent |
+| `tickets?: TicketPort` | Files a problem report and returns its ticket id (see "Problem reports") | `localTickets` (`localStorage`, `sprint-tickets`); not set: helpers say reports cannot be sent |
 | `standIns: string[]` | Names shown in the header while any stand-in is in use; empty in production | all |
 
 ## Endpoints and limits
@@ -70,14 +70,14 @@ examples never go in this repo.
 Since 1.0.0 each feature on a `RawExample` is a `FeatureValue` (`packages/contracts/src/types.ts`):
 `{text}` for text features and `{items}` for lists such as image URLs, never a plain string. An
 `ExampleSource` adapter that still returns plain strings can wrap them with `toFeatures` from
-`@tsp/domain`; prompts read features only through `featureText` and `featureItems`.
+`@sprint/domain`; prompts read features only through `featureText` and `featureItems`.
 
 Since 2026-11-16 a project has one label, single or multi select (`Schema {name, kind, min?, max?,
 values}`, a value may be `exclusive`), and an answer is a list of its values in label order
 (`Answer = string[]`, one value long for single select). Bundled labels and gold upload files may
 give the answer as `"Practical"`, `["Practical", "Food"]` or `{"primary_value": ...}` with either;
 `readGoldAnswer` reads all of them and checks the label's bounds. The stand-in
-store keeps documents under the `tsp-doc-v2` prefix and drops the older `tsp-doc` keys, so
+store keeps documents under the `sprint-doc` prefix and drops the older `tsp-doc` and `tsp-doc-v2` keys, so
 projects made before this change start fresh (they were test data).
 
 ## Media

@@ -1,21 +1,21 @@
-import type {BffContract, ChatAttachment, GoldLine} from '@tsp/contracts';
-import {configureSystem, systemConfig} from '@tsp/domain';
-import {createCatalog} from '@tsp/catalog';
-import {createTelemetry} from '@tsp/telemetry';
-import {createGateway} from '@tsp/llm-gateway';
-import {browserLocks, createLabeling} from '@tsp/labeling';
-import {createAgentRuntime} from '@tsp/agents';
-import {createPlatform} from '@tsp/platform-impl';
-import {createOptimiser} from '@tsp/optimiser';
-import {agentLive, agentProgress, agentTools, answeringAgent, bffEvents, configureBff, createBffApi, emitChange, isAgentBusy, onChange, optimiserHost} from '@tsp/bff';
+import type {BffContract, ChatAttachment, GoldLine} from '@sprint/contracts';
+import {configureSystem, systemConfig} from '@sprint/domain';
+import {createCatalog} from '@sprint/catalog';
+import {createTelemetry} from '@sprint/telemetry';
+import {createGateway} from '@sprint/llm-gateway';
+import {browserLocks, createLabeling} from '@sprint/labeling';
+import {createAgentRuntime} from '@sprint/agents';
+import {createPlatform} from '@sprint/platform-impl';
+import {createOptimiser} from '@sprint/optimiser';
+import {agentLive, agentProgress, agentTools, answeringAgent, bffEvents, configureBff, createBffApi, emitChange, isAgentBusy, onChange, optimiserHost} from '@sprint/bff';
 import type {BffClient} from './client';
 import {webTelemetry} from './web-telemetry';
 import {callFailed, callId, pageOpened, snapshot} from './diagnostics';
 
 /**
  * Composition root. The only place that knows which implementation sits behind each contract:
- * `@tsp/platform-impl` is the stand-ins by default and the internal adapters when the build sets
- * TSP_PLATFORM_IMPL (see docs/handover/integration.md).
+ * `@sprint/platform-impl` is the stand-ins by default and the internal adapters when the build sets
+ * SPRINT_PLATFORM_IMPL (see docs/handover/integration.md).
  */
 const platform = createPlatform();
 const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? '0.1.0';
@@ -25,7 +25,7 @@ configureSystem(platform.config);
 const telemetry = createTelemetry({
   sink: platform.telemetry ?? {pushMetrics: async () => {}, pushEvents: async () => {}},
   appVersion: APP_VERSION,
-  env: process.env.NEXT_PUBLIC_TSP_ENV ?? 'dev',
+  env: process.env.NEXT_PUBLIC_SPRINT_ENV ?? 'dev',
 });
 const gateway = createGateway(platform, {telemetry});
 const catalog = createCatalog(platform.db, {telemetry});
@@ -38,7 +38,7 @@ const web = webTelemetry(telemetry);
 void platform.identity.currentUser().then(u => telemetry.setContext({userId: u.id}));
 
 /**
- * Every bff call is counted and timed (`tsp_bff_calls_total`, `tsp_bff_call_duration_seconds`);
+ * Every bff call is counted and timed (`sprint_bff_calls_total`, `sprint_bff_call_duration_seconds`);
  * a failed call also counts as a backend error on the page, and goes into the browser's record
  * for problem reports with its call id (an HTTP client sends that id as `X-Request-Id`).
  */
@@ -50,9 +50,9 @@ function timed<A extends unknown[], R>(method: string, fn: (...a: A) => R): (...
     const end = (outcome: 'ok' | 'error', error?: unknown) => {
       if (outcome === 'error') callFailed(method, id, error);
       const seconds = (Date.now() - started) / 1000;
-      telemetry.counter('tsp_bff_calls_total', {method, outcome});
-      telemetry.histogram('tsp_bff_call_duration_seconds', seconds, {method});
-      if (method === 'loadProjectState') telemetry.histogram('tsp_bff_project_state_load_seconds', seconds);
+      telemetry.counter('sprint_bff_calls_total', {method, outcome});
+      telemetry.histogram('sprint_bff_call_duration_seconds', seconds, {method});
+      if (method === 'loadProjectState') telemetry.histogram('sprint_bff_project_state_load_seconds', seconds);
       if (outcome === 'error') web.backendError();
     };
     try {
@@ -102,7 +102,7 @@ function subscribeChanges(listener: () => void): () => void {
  * Other tabs of the same site hear about writes too, so a second tab shows a run's progress.
  * (Stand-in for the store's own change feed; the real storage runtime can use `subscribe`.)
  */
-const tabs = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('tsp-changes') : null;
+const tabs = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('sprint-changes') : null;
 let tabNotice: ReturnType<typeof setTimeout> | null = null;
 onChange(() => {
   if (!tabs || tabNotice) return;
@@ -113,12 +113,12 @@ onChange(() => {
 });
 
 async function uploadAsset(file: File): Promise<{url: string}> {
-  telemetry.histogram('tsp_files_upload_bytes', file.size, {kind: file.type.startsWith('image/') ? 'image' : 'other'});
+  telemetry.histogram('sprint_files_upload_bytes', file.size, {kind: file.type.startsWith('image/') ? 'image' : 'other'});
   return platform.files.upload(file, file.name);
 }
 
 /**
- * The in-process client: every service runs in this page, on `@tsp/platform-impl` (the stand-ins
+ * The in-process client: every service runs in this page, on `@sprint/platform-impl` (the stand-ins
  * by default). The whole product can be accepted in a local browser this way.
  */
 export const inProcessClient: BffClient = {

@@ -15,7 +15,7 @@ import type {
 } from './types.ts';
 
 /**
- * Contract 2: BFF <-> Agent Runtime Service (`@tsp/contracts/agent-api`).
+ * Contract 2: BFF <-> Agent Runtime Service (`@sprint/contracts/agent-api`).
  *
  * The BFF service (`apps/bff`) owns persistence, state orchestration, and database records.
  * The Agent service (`apps/agents`) is a stateless, DB-free runtime that receives a serialisable

@@ -1,5 +1,5 @@
-import type {EndpointId, ProjectState, PromptVersion} from '@tsp/contracts';
-import {autoSpendUsd, dueStarts, versionLabel, type DueStart, systemConfig, msg} from '@tsp/domain';
+import type {EndpointId, ProjectState, PromptVersion} from '@sprint/contracts';
+import {autoSpendUsd, dueStarts, versionLabel, type DueStart, systemConfig, msg} from '@sprint/domain';
 import {busy, getApp, once, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {buildReport, labelEvalSet} from './evaluation.ts';
@@ -41,7 +41,7 @@ const going = (d: DueStart) => busy(`auto:${d.key}`) || busy(`label:${d.versionI
 
 /**
  * Runs one due start without a click and records it: an `auto_start` audit record and the
- * `tsp_auto_starts_total` metric.
+ * `sprint_auto_starts_total` metric.
  */
 async function autoStart(state: ProjectState, d: DueStart) {
   const {catalog} = getApp();
@@ -53,7 +53,7 @@ async function autoStart(state: ProjectState, d: DueStart) {
   void once(`auto:${d.key}`, () => scoreVersion(projectId, v, d.endpoint, {auto: true}));
   await postEvent(projectId, 'auto', 'workflow', msg('started scoring {version} on {model}', {version: versionLabel(v), model}), {path: '/prompt'});
   await catalog.audit(projectId, 'system', 'auto_start', {what: d.what, version: d.versionId, endpoint: d.endpoint, estimateUsd: d.estimateUsd, autoSpendUsd: spent});
-  tm().counter('tsp_auto_starts_total', {what: d.what, decision: 'started'});
+  tm().counter('sprint_auto_starts_total', {what: d.what, decision: 'started'});
   tm().event('auto_started', {what: d.what, estimate_usd: d.estimateUsd, project_auto_spend_usd: spent});
 }
 
@@ -122,5 +122,5 @@ function optimiserService() {
   return optimiser;
 }
 
-/** The lock an optimiser run on one model holds for as long as it runs, in any tab (the name `@tsp/optimiser` uses). */
+/** The lock an optimiser run on one model holds for as long as it runs, in any tab (the name `@sprint/optimiser` uses). */
 const optimiserLock = (projectId: string, endpoint: string) => `optimiser:${projectId}:${endpoint}`;

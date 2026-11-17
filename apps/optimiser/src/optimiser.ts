@@ -1,6 +1,6 @@
-import type {AgentRuntimeContract, Answer, CatalogContract, EndpointId, Example, ExampleBrief, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@tsp/contracts';
-import {NO_TELEMETRY} from '@tsp/contracts';
-import {checkStructured, msg, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withComments, wrongExamples, type PoolEntry} from '@tsp/domain';
+import type {AgentRuntimeContract, Answer, CatalogContract, EndpointId, Example, ExampleBrief, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@sprint/contracts';
+import {NO_TELEMETRY} from '@sprint/contracts';
+import {checkStructured, msg, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withComments, wrongExamples, type PoolEntry} from '@sprint/domain';
 
 /**
  * The Optimiser (GEPA, ported to TypeScript; docs/design/optimiser.md). Runs from
@@ -217,7 +217,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
         } catch (e) {
           if (signal.aborted || isAbort(e)) throw aborted();
           last = e;
-          tm.counter('tsp_optimiser_step_failures_total', {step: name});
+          tm.counter('sprint_optimiser_step_failures_total', {step: name});
         }
       }
       const what = `${STEP_NAME[name]}${version ? ` ${versionLabel(version)}` : ''}`;
@@ -389,7 +389,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
           });
           if (verdict !== 'ok') {
             wasted++;
-            tm.counter('tsp_optimiser_candidates_total', {slot: endpoint, result: verdict});
+            tm.counter('sprint_optimiser_candidates_total', {slot: endpoint, result: verdict});
             await putRound({...round, outcome: verdict, step: undefined});
             continue;
           }
@@ -426,7 +426,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
           const {better: _better, tied, regressed, ...dryRun} = result;
           if (regressed) {
             wasted++;
-            tm.counter('tsp_optimiser_candidates_total', {slot: endpoint, result: 'dropped'});
+            tm.counter('sprint_optimiser_candidates_total', {slot: endpoint, result: 'dropped'});
             await putRound({...round, outcome: 'dropped', dryRun, step: undefined});
             continue;
           }
@@ -458,7 +458,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
         if (gain) wasted = 0;
         else wasted++;
         keptSinceMerge = round.kind === 'merge' ? 0 : keptSinceMerge + 1;
-        tm.counter('tsp_optimiser_candidates_total', {slot: endpoint, result: gain ? 'kept' : 'no_gain'});
+        tm.counter('sprint_optimiser_candidates_total', {slot: endpoint, result: gain ? 'kept' : 'no_gain'});
         await putRound({...round, outcome: 'kept', score: s.report.metrics.macroF1, passed: s.passed, confirm, gain, step: undefined});
         if (s.passed && confirm?.passed) {
           passedVersion = cand;
@@ -482,7 +482,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       await save({finishedAt: nowIso(), step: null, stepStartedAt: null, stepVersionId: null});
       const outcome = run.state === 'done' ? (run.stopReason ?? 'max_rounds') : run.state;
       const kept = run.history.filter(h => h.outcome === 'kept');
-      tm.counter('tsp_optimiser_runs_total', {slot: endpoint, outcome});
+      tm.counter('sprint_optimiser_runs_total', {slot: endpoint, outcome});
       if (run.state === 'stopped') tm.event('optimiser_stopped_by_user', {slot: endpoint, candidates: run.candidates, cost_usd: run.costUsd});
       tm.event('optimiser_ended', {
         slot: endpoint,

@@ -1,4 +1,4 @@
-import type {AgentLive, AgentPreset, BffContract, ChatAttachment, DatasetUploadResult, EventName, EventProps, GoldUploadResult, PageContext} from '@tsp/contracts';
+import type {AgentLive, AgentPreset, BffContract, ChatAttachment, DatasetUploadResult, EventName, EventProps, GoldUploadResult, PageContext} from '@sprint/contracts';
 
 /**
  * What the pages call (spec 1.0.0, section 7.3): the bff's contract, plus the few things that only

@@ -1,5 +1,5 @@
-import type {AgentPreset, ChatEvent, ChatLink, ChatMessage, Msg} from '@tsp/contracts';
-import {agentName, msg, msgText, newId} from '@tsp/domain';
+import type {AgentPreset, ChatEvent, ChatLink, ChatMessage, Msg} from '@sprint/contracts';
+import {agentName, msg, msgText, newId} from '@sprint/domain';
 import {emitChange, getApp, now} from './app.ts';
 
 /** Who an action line names: a helper, the user, or the workflow (work started by code). */

@@ -1,4 +1,4 @@
-import type {FileStore, FileUploadOptions, Identity, TelemetryEvent, TelemetrySink, UploadedFileInfo} from '@tsp/contracts';
+import type {FileStore, FileUploadOptions, Identity, TelemetryEvent, TelemetrySink, UploadedFileInfo} from '@sprint/contracts';
 
 /** Stand-in identity: one built-in user. */
 export function localIdentity(name = 'Evelyn'): Identity {
@@ -24,12 +24,12 @@ export function browserFiles(): FileStore {
 
 /**
  * Stand-in telemetry sink: nothing leaves the browser. Events are kept in a ring of the last 1,000
- * in local storage (`tsp-telemetry-events`); the latest metrics text is on
- * `globalThis.__tspMetrics`, so both can be inspected in the console. The company's adapter
+ * in local storage (`sprint-telemetry-events`); the latest metrics text is on
+ * `globalThis.__sprintMetrics`, so both can be inspected in the console. The company's adapter
  * replaces this (see docs/design/telemetry.md).
  */
 export function localTelemetrySink(keep = 1000): TelemetrySink {
-  const KEY = 'tsp-telemetry-events';
+  const KEY = 'sprint-telemetry-events';
   return {
     async pushEvents(events: TelemetryEvent[]) {
       if (typeof localStorage === 'undefined') return;
@@ -47,7 +47,7 @@ export function localTelemetrySink(keep = 1000): TelemetrySink {
       }
     },
     async pushMetrics(exposition: string) {
-      (globalThis as {__tspMetrics?: string}).__tspMetrics = exposition;
+      (globalThis as {__sprintMetrics?: string}).__sprintMetrics = exposition;
     },
   };
 }

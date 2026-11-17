@@ -18,7 +18,7 @@ apps/web ──► apps/web/src/backend-api (the BffClient the pages call; in-pr
                  │                      ├──► optimiser    (Auto Optimise runs) ──► catalog, labeling, agents
                  │                      └──► llm-gateway  (endpoint list, agent model)
                  ├── telemetry (one port, given to every app above) ──► the platform's sink
-                 └── @tsp/platform-impl (stand-ins, or the internal adapters)
+                 └── @sprint/platform-impl (stand-ins, or the internal adapters)
                        document store · labeling models · agent model · identity · files · examples · telemetry sink
 
 All apps depend only on packages/contracts (types, contracts) and packages/domain (pure rules).
@@ -37,7 +37,7 @@ composition root is the only place that knows which implementation sits behind e
 | `agents` | Agent presets and the turn/handoff logic. Stateless | `AgentRuntimeContract` (`agent-api.ts`) |
 | `optimiser` | The Auto Optimise loop and the `optimisation_runs` records. Asks the bff (through `OptimiserHost`) to save a version, label examples and build a score | `OptimiserContract` (`optimiser-api.ts`) |
 | `bff` | Nothing stored. Workflow, gates, when labeling starts, reports | `BffContract` (`bff-api.ts`) |
-| `telemetry` | Metrics (Prometheus style, `tsp_*`) and product events; sends them to `Platform.telemetry` | `TelemetryPort` (`telemetry.ts`) |
+| `telemetry` | Metrics (Prometheus style, `sprint_*`) and product events; sends them to `Platform.telemetry` | `TelemetryPort` (`telemetry.ts`) |
 | `web` | Pages and components | calls `@/backend-api` (`BffClient`) |
 
 ### Contracts are ready for an interface definition language
@@ -65,7 +65,7 @@ Since 1.0.0 phase 1 every service contract is written so it maps one to one to a
 
 `apps/web/src/backend-api` has three files: `client.ts` (the `BffClient` interface pages use:
 the contract plus live listeners, file uploads and page telemetry), `in-process.ts` (the default
-client and composition root: every service runs in the page on `@tsp/platform-impl`) and
+client and composition root: every service runs in the page on `@sprint/platform-impl`) and
 `index.ts` (picks the client). A microservice deployment adds an HTTP client and exports it from
 `index.ts`; no page changes.
 
@@ -264,7 +264,7 @@ domain make (action lines, the AI Suggestion card, the Optimiser's now line, gat
 reasons a prompt cannot be saved, a helper's live line) carry a `Msg` with their English text, so
 the page can show them in the user's language while helpers and logs read English. Helpers answer
 in the user's language (`AgentTurnInput.locale` adds one line to their system prompt, with the
-site's own Chinese words). The choice lives in the browser (`tsp-locale`); the static export is
+site's own Chinese words). The choice lives in the browser (`sprint-locale`); the static export is
 built in English and switches after the first paint. A test lists every key the source uses and
 fails on any the Chinese catalog lacks.
 

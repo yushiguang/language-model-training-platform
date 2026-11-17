@@ -1,4 +1,4 @@
-# bff (`@tsp/bff`)
+# bff (`@sprint/bff`)
 
 What pages call (`BffContract` in `packages/contracts/src/bff-api.ts`). Stores nothing itself:
 it reads and writes through the catalog, starts labeling tasks, and asks the agent runtime.
@@ -16,7 +16,7 @@ it reads and writes through the catalog, starts labeling tasks, and asks the age
   a budget, so nothing pauses for cost (the user stops a costly run with Stop).
   Tests: `work.test.ts` (real catalog and labeling over the stand-in store, fake model).
 - `api.ts`: `createBffApi()`, the bff as `BffContract` (ids and plain JSON in, records read here).
-- `optimiser-host.ts`: what the bff does for `@tsp/optimiser` (`OptimiserHost`): labels, scores and
+- `optimiser-host.ts`: what the bff does for `@sprint/optimiser` (`OptimiserHost`): labels, scores and
   saves a version through the same code as every other path, and what follows a pass.
 - `settings.ts`: Project Settings (pass rule, labeling model) and their one-time confirmation
   before the first paid run. `prompts.ts`: saving a version from a structured prompt (compiles the

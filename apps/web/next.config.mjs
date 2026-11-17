@@ -10,11 +10,11 @@ const webDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(webDir, '../..');
 
 /**
- * `@tsp/platform-impl` = what sits behind the platform contracts. Default: the stand-ins.
- * The internal build sets TSP_PLATFORM_IMPL to a module (relative to the repo root) that
+ * `@sprint/platform-impl` = what sits behind the platform contracts. Default: the stand-ins.
+ * The internal build sets SPRINT_PLATFORM_IMPL to a module (relative to the repo root) that
  * exports the same `createPlatform()` over the real adapters.
  */
-const platformImpl = process.env.TSP_PLATFORM_IMPL || 'packages/platform/src/config.ts';
+const platformImpl = process.env.SPRINT_PLATFORM_IMPL || 'packages/platform/src/config.ts';
 
 export default {
   output: 'export',
@@ -27,7 +27,7 @@ export default {
   turbopack: {
     root: repoRoot,
     resolveAlias: {
-      '@tsp/platform-impl': path.relative(webDir, path.resolve(repoRoot, platformImpl)),
+      '@sprint/platform-impl': path.relative(webDir, path.resolve(repoRoot, platformImpl)),
     },
   },
 };

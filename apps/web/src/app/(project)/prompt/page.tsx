@@ -2,8 +2,8 @@
 
 import {useGo} from '@/components/nav';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode} from 'react';
-import type {Answer, LabelingRun, MismatchList, OptimisationRun, OptimiserRound, PageContext, PromptVersion} from '@tsp/contracts';
-import {aiSuggestion, canScore, compilePrompt, dryRunSize, optimiserVersions, stepMsg, versionLabel, systemConfig, withNewestReports, type SuggestionAction} from '@tsp/domain';
+import type {Answer, LabelingRun, MismatchList, OptimisationRun, OptimiserRound, PageContext, PromptVersion} from '@sprint/contracts';
+import {aiSuggestion, canScore, compilePrompt, dryRunSize, optimiserVersions, stepMsg, versionLabel, systemConfig, withNewestReports, type SuggestionAction} from '@sprint/domain';
 import {Frame, ProjectPage, useOpenAskAi} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {ScoreChart} from '@/components/prompt/ScoreChart';

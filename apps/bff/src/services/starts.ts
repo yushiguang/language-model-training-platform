@@ -1,5 +1,5 @@
-import type {AgentPreset, ChatLink, EndpointId, Msg, ProjectState} from '@tsp/contracts';
-import {autoSpendUsd, canScore, compilePrompt, readStructured, evalEstimate, optimiserEstimate, versionLabel, visibleToAgents, systemConfig, msg} from '@tsp/domain';
+import type {AgentPreset, ChatLink, EndpointId, Msg, ProjectState} from '@sprint/contracts';
+import {autoSpendUsd, canScore, compilePrompt, readStructured, evalEstimate, optimiserEstimate, versionLabel, visibleToAgents, systemConfig, msg} from '@sprint/domain';
 import {getApp, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {asModel, findVersion, modelName} from './page-views.ts';
@@ -116,7 +116,7 @@ export async function agentStart(projectId: string, agent: AgentPreset, tool: St
   if (p.line) await postEvent(projectId, 'start', agent, p.line, p.link);
   if (p.estimateUsd > 0) {
     await getApp().catalog.audit(projectId, `agent:${agent}`, 'auto_start', {what: tool, args, estimateUsd: p.estimateUsd, autoSpendUsd: spent});
-    tm().counter('tsp_auto_starts_total', {what: tool, decision: 'started'});
+    tm().counter('sprint_auto_starts_total', {what: tool, decision: 'started'});
     tm().event('auto_started', {what: tool, estimate_usd: p.estimateUsd, project_auto_spend_usd: spent});
   }
   return result;

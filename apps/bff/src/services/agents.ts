@@ -13,8 +13,8 @@ import type {
   PageContext,
   StartRequest,
   StructuredPrompt,
-} from '@tsp/contracts';
-import {agentName, answersForHelpers, isRight, newId, promptKeys, readStructured, rewordOnly, settingsHash, structuredEquals, tidyStructured, versionLabel, visibleToAgents, wrongExamples, toMap, msg, msgText} from '@tsp/domain';
+} from '@sprint/contracts';
+import {agentName, answersForHelpers, isRight, newId, promptKeys, readStructured, rewordOnly, settingsHash, structuredEquals, tidyStructured, versionLabel, visibleToAgents, wrongExamples, toMap, msg, msgText} from '@sprint/domain';
 import {loadProjectState} from './projects.ts';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {joinedMsg, postEvent} from './chat-events.ts';
@@ -134,7 +134,7 @@ async function loadWorkspaceSnapshot(
 /**
  * BFF dispatcher for assistant turns:
  * 1. Persists the user's message and loads the project's workspace snapshot from the catalog.
- * 2. Calls the stateless Agent Runtime service (`@tsp/agents`) with `AgentTurnInput`, which
+ * 2. Calls the stateless Agent Runtime service (`@sprint/agents`) with `AgentTurnInput`, which
  *    includes the view of the page the user is on, and lends it the read tools.
  * 3. Persists start requests, emitted agent/event messages, and any new proposal to the catalog.
  */
@@ -247,8 +247,8 @@ export async function sendUserMessage(
   } finally {
     busyProjects.delete(projectId);
     setLive(projectId, null);
-    tm().counter('tsp_agent_turns_total', {agent: entry, page: pageId, outcome});
-    tm().histogram('tsp_agent_turn_duration_seconds', (Date.now() - started) / 1000, {agent: entry});
+    tm().counter('sprint_agent_turns_total', {agent: entry, page: pageId, outcome});
+    tm().histogram('sprint_agent_turn_duration_seconds', (Date.now() - started) / 1000, {agent: entry});
     emitChange();
   }
 }
@@ -256,19 +256,19 @@ export async function sendUserMessage(
 /** Metrics and events for one answered turn. Only counts and names; never the text. */
 function recordTurn(out: AgentTurnOutput, entry: string, started: number) {
   const t = tm();
-  for (const c of out.modelCalls) t.counter('tsp_agent_model_calls_total', {agent: c.agent, model: c.model});
-  for (const f of out.parseFailures) t.counter('tsp_agent_parse_failures_total', {agent: f.agent, intent: f.intent});
+  for (const c of out.modelCalls) t.counter('sprint_agent_model_calls_total', {agent: c.agent, model: c.model});
+  for (const f of out.parseFailures) t.counter('sprint_agent_parse_failures_total', {agent: f.agent, intent: f.intent});
   const handoff = out.invocations.find(i => i.from !== 'user' && i.from !== 'system');
-  if (handoff) t.counter('tsp_agent_handoffs_total', {from: handoff.from, to: handoff.to, outcome: 'joined'});
+  if (handoff) t.counter('sprint_agent_handoffs_total', {from: handoff.from, to: handoff.to, outcome: 'joined'});
   const last = out.invocations[out.invocations.length - 1]?.to ?? entry;
-  t.histogram('tsp_agent_tool_calls_per_turn', out.toolCalls.length, {agent: last});
+  t.histogram('sprint_agent_tool_calls_per_turn', out.toolCalls.length, {agent: last});
   for (const c of out.toolCalls) {
-    t.counter('tsp_agent_tool_calls_total', {agent: c.agent, tool: c.name, outcome: c.ok ? 'ok' : 'error'});
-    t.histogram('tsp_agent_tool_duration_seconds', c.ms / 1000, {tool: c.name});
+    t.counter('sprint_agent_tool_calls_total', {agent: c.agent, tool: c.name, outcome: c.ok ? 'ok' : 'error'});
+    t.histogram('sprint_agent_tool_duration_seconds', c.ms / 1000, {tool: c.name});
     t.event('agent_tool_called', {agent: c.agent, tool: c.name, ok: c.ok, ms: c.ms});
   }
   if (out.proposal) {
-    t.counter('tsp_agent_proposals_total', {agent: out.proposal.agent, kind: 'prompt', outcome: 'shown'});
+    t.counter('sprint_agent_proposals_total', {agent: out.proposal.agent, kind: 'prompt', outcome: 'shown'});
     t.event('prompt_proposal_shown', {agent: out.proposal.agent, unmapped: out.proposal.payload.unmapped.length});
   }
   t.event('agent_replied', {agent: last, seconds: (Date.now() - started) / 1000, handoff_to: handoff?.to ?? null, tool_calls: out.toolCalls.length, proposal_kind: out.proposal?.kind ?? null});
@@ -300,7 +300,7 @@ export async function closeProposal(p: AgentProposal, state: 'approved' | 'disca
   if (fresh && fresh.state !== 'open') return;
   await getApp().catalog.patch('agent_proposals', p.id, {state});
   if (state === 'discarded') await postEvent(p.projectId, 'discarded', 'user', msg('discarded the draft'));
-  tm().counter('tsp_agent_proposals_total', {agent: p.agent, kind: 'prompt', outcome: state});
+  tm().counter('sprint_agent_proposals_total', {agent: p.agent, kind: 'prompt', outcome: state});
   tm().event(state === 'approved' ? 'prompt_proposal_approved' : 'prompt_proposal_discarded', state === 'approved' ? {agent: p.agent, edited_before_approve: false} : {agent: p.agent});
   emitChange();
 }
@@ -358,13 +358,13 @@ export async function improveWithAi(projectId: string, versionId: string, locale
     const line = n === 1 ? msg('I made 1 change to {version}. Hover each mark to see why.', {version}) : n ? msg('I made {n} changes to {version}. Hover each mark to see why.', {n, version}) : msg('I have no new change for {version}.', {version});
     await post(projectId, {role: 'agent', agent: 'prompt_agent', text: msgText(line), msg: line, page: 'Edit prompt'});
     await postEvent(projectId, 'draft', 'prompt_agent', msg('put a draft on {page}', {page: 'Edit prompt'}), {path: '/prompt/edit', params: {v: v.id}});
-    tm().counter('tsp_agent_proposals_total', {agent: 'prompt_agent', kind: 'prompt', outcome: 'shown'});
+    tm().counter('sprint_agent_proposals_total', {agent: 'prompt_agent', kind: 'prompt', outcome: 'shown'});
     tm().event('prompt_proposal_shown', {agent: 'prompt_agent', unmapped: 0});
     outcome = 'ok';
   } finally {
     busyProjects.delete(projectId);
     setLive(projectId, null);
-    tm().counter('tsp_agent_turns_total', {agent: 'prompt_agent', page: 'prompt', outcome});
+    tm().counter('sprint_agent_turns_total', {agent: 'prompt_agent', page: 'prompt', outcome});
     emitChange();
   }
 }

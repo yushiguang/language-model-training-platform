@@ -5,9 +5,9 @@ import {
   type AgentModel,
   type LlmStreamChunk,
   type ModelMessage,
-} from '@tsp/contracts';
-import {SAMPLE_STRUCTURED, addRule, addToDefinition, fixTarget, hasRule, nextRuleGroupId, ruleFor, schemaOf} from '@tsp/domain';
-import type {LabelValue, MixUp, RuleGroup, Schema, StructuredPrompt} from '@tsp/contracts';
+} from '@sprint/contracts';
+import {SAMPLE_STRUCTURED, addRule, addToDefinition, fixTarget, hasRule, nextRuleGroupId, ruleFor, schemaOf} from '@sprint/domain';
+import type {LabelValue, MixUp, RuleGroup, Schema, StructuredPrompt} from '@sprint/contracts';
 
 /**
  * Stand-in agent model. It answers each agent request with fixed, sensible JSON so the whole

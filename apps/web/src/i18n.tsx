@@ -1,16 +1,16 @@
 'use client';
 
 import {createContext, Fragment, useCallback, useContext, useEffect, useState, type ReactNode} from 'react';
-import type {Locale, Msg} from '@tsp/contracts';
-import {hasKey, isLocale, translate} from '@tsp/domain';
+import type {Locale, Msg} from '@sprint/contracts';
+import {hasKey, isLocale, translate} from '@sprint/domain';
 
 /**
  * The site's language (spec 1.1.0, 2). English is the source: every text is its own key and
- * `t()` looks it up in the chosen language's catalog (`@tsp/domain`, `locales/`). The static
+ * `t()` looks it up in the chosen language's catalog (`@sprint/domain`, `locales/`). The static
  * export is built in English; the saved choice is applied right after the first paint, and a
  * switch re-renders the whole tree in place.
  */
-const KEY = 'tsp-locale';
+const KEY = 'sprint-locale';
 let current: Locale = 'en';
 
 /** Keys asked for in this session that the current catalog lacks (read by the browser check). */
@@ -20,7 +20,7 @@ const missing = new Set<string>();
 export function t(key: string, params?: Msg['params']): string {
   if (current !== 'en' && !hasKey(current, key) && /[A-Za-z]{2}/.test(key.replace(/\{\w+\}/g, ''))) {
     missing.add(key);
-    (globalThis as {__tspI18nMissing?: string[]}).__tspI18nMissing = [...missing];
+    (globalThis as {__sprintI18nMissing?: string[]}).__sprintI18nMissing = [...missing];
   }
   return translate(current, key, params);
 }

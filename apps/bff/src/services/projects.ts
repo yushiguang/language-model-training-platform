@@ -1,5 +1,5 @@
-import {DocFieldValue, type GateApproval, type LabelComment, type NodeId, type Project, type ProjectState, type WorkflowFacts} from '@tsp/contracts';
-import {asAnswerOrNull, compareVersions, contextIdFor, gate, judge, newId, scoresUpdating, systemConfig} from '@tsp/domain';
+import {DocFieldValue, type GateApproval, type LabelComment, type NodeId, type Project, type ProjectState, type WorkflowFacts} from '@sprint/contracts';
+import {asAnswerOrNull, compareVersions, contextIdFor, gate, judge, newId, scoresUpdating, systemConfig} from '@sprint/domain';
 import {emitChange, getApp, now, tm} from './app.ts';
 import {getSamplingTask, stopSampleDataset} from './dataset.ts';
 import {cannotBuild, latestGold} from './evaluation.ts';
@@ -130,7 +130,7 @@ export async function approveNode(projectId: string, node: NodeId): Promise<void
   if (!state) throw new Error('Project not found');
   const g = gate(node, state.facts);
   if (!g.ready) {
-    tm().counter('tsp_gate_actions_total', {node, action: 'refused'});
+    tm().counter('sprint_gate_actions_total', {node, action: 'refused'});
     throw new Error(g.reason ?? 'Not ready');
   }
   const u = await user();
@@ -138,7 +138,7 @@ export async function approveNode(projectId: string, node: NodeId): Promise<void
   await catalog.insert('gate_approvals', approval);
   await catalog.patch('projects', projectId, {approvedNodes: DocFieldValue.arrayUnion(node)});
   await catalog.audit(projectId, u.name, 'gate.approve', {node});
-  tm().counter('tsp_gate_actions_total', {node, action: 'approve'});
+  tm().counter('sprint_gate_actions_total', {node, action: 'approve'});
   const project = await catalog.get('projects', projectId);
   if (project) tm().event('step_reached', {node, minutes_since_project_created: Math.round((Date.now() - Date.parse(project.createdAt)) / 60000)});
   // Leaving Gold Labels: while no helper has read an example, the halves are balanced again by

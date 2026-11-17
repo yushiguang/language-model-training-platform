@@ -17,8 +17,8 @@ import type {
   AgentModel,
   AgentPreset,
   StructuredPrompt,
-} from '@tsp/contracts';
-import {FEATURES, msg, msgText, readStructured, rewordOnly, structuredEquals, systemConfig} from '@tsp/domain';
+} from '@sprint/contracts';
+import {FEATURES, msg, msgText, readStructured, rewordOnly, structuredEquals, systemConfig} from '@sprint/domain';
 import {agentName, languageLine, presetModel, PRESETS, START_TOOLS, systemPrompt, TOOL_SPECS} from './presets.ts';
 
 
@@ -268,7 +268,7 @@ export function importIntent(agent: AgentPreset, intent: string, text: string | 
 }
 
 /**
- * Executes one user turn in the Agent Runtime service (`@tsp/agents`).
+ * Executes one user turn in the Agent Runtime service (`@sprint/agents`).
  *
  * Stateless and free of database dependencies: receives `AgentTurnInput` from the BFF,
  * runs the page's active agent (plus an optional specialist handoff from `front_desk`), lets

@@ -1,4 +1,4 @@
-import type {BffContract, EventStreamPort, EventTopic} from '@tsp/contracts';
+import type {BffContract, EventStreamPort, EventTopic} from '@sprint/contracts';
 import {getApp, onChange} from './services/app.ts';
 import * as agents from './services/agents.ts';
 import * as dataset from './services/dataset.ts';

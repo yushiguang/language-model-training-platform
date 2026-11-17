@@ -1,5 +1,5 @@
-import type {AgentPreset, ClientDiagnostics, Locale, PageContext, TicketSubmission} from '@tsp/contracts';
-import {agentName, msg, systemConfig, versionLabel} from '@tsp/domain';
+import type {AgentPreset, ClientDiagnostics, Locale, PageContext, TicketSubmission} from '@sprint/contracts';
+import {agentName, msg, systemConfig, versionLabel} from '@sprint/domain';
 import {getApp, now, tm} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {loadProjectState} from './projects.ts';

@@ -1,4 +1,4 @@
-import type {AuthorizationPort, JobQueuePort, TenantConfigPort} from '@tsp/contracts';
+import type {AuthorizationPort, JobQueuePort, TenantConfigPort} from '@sprint/contracts';
 
 /**
  * Single-tenant stand-ins for the enterprise ports: one tenant with no overrides, every action

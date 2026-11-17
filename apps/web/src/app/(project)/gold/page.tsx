@@ -3,8 +3,8 @@
 import {useGo} from '@/components/nav';
 import {useSearchParams} from 'next/navigation';
 import {Fragment, Suspense, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import type {Answer, Example, ExampleMedia, LabelComment, MismatchList, MismatchReview, RemovalReason} from '@tsp/contracts';
-import {FEATURES, featureText, gate, inLabelOrder, labelBounds, sameAnswer, versionLabel} from '@tsp/domain';
+import type {Answer, Example, ExampleMedia, LabelComment, MismatchList, MismatchReview, RemovalReason} from '@sprint/contracts';
+import {FEATURES, featureText, gate, inLabelOrder, labelBounds, sameAnswer, versionLabel} from '@sprint/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {useSettings} from '@/components/ProjectSettings';

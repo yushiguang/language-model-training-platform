@@ -1,7 +1,7 @@
-import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@tsp/contracts';
+import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@sprint/contracts';
 import {agentStart, isStartTool} from './starts.ts';
 import {reportProblem} from './problems.ts';
-import {aiSuggestion, featureItems, featureText, labelBalance, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, normalizeStructured, matchRuleGroup, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap, sameAnswer} from '@tsp/domain';
+import {aiSuggestion, featureItems, featureText, labelBalance, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, normalizeStructured, matchRuleGroup, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap, sameAnswer} from '@sprint/domain';
 import {getApp} from './app.ts';
 import {lockHoldout} from './governance.ts';
 import {mismatches} from './mismatches.ts';

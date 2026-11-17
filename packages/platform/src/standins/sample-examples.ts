@@ -1,5 +1,5 @@
-import type {ExampleMedia, ExampleSource, MediaSource, RawExample} from '@tsp/contracts';
-import {featureItems, toFeatures} from '@tsp/domain';
+import type {ExampleMedia, ExampleSource, MediaSource, RawExample} from '@sprint/contracts';
+import {featureItems, toFeatures} from '@sprint/domain';
 
 interface SampleFile {
   examples: RawExample[];

@@ -1,6 +1,6 @@
-import type {TicketPort, TicketSubmission} from '@tsp/contracts';
+import type {TicketPort, TicketSubmission} from '@sprint/contracts';
 
-const KEY = 'tsp-tickets';
+const KEY = 'sprint-tickets';
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 /** A ticket id the user can read out: "T-" and six letters or digits that are easy to tell apart. */

@@ -1,4 +1,4 @@
-import {EVENT_PROP_KEYS, LABEL_VALUES, METRICS, type EventName, type EventProps, type Labels, type MetricName, type TelemetryContext, type TelemetryEvent, type TelemetryPort, type TelemetrySink} from '@tsp/contracts';
+import {EVENT_PROP_KEYS, LABEL_VALUES, METRICS, type EventName, type EventProps, type Labels, type MetricName, type TelemetryContext, type TelemetryEvent, type TelemetryPort, type TelemetrySink} from '@sprint/contracts';
 
 export interface TelemetryOptions {
   sink: TelemetrySink;
@@ -14,11 +14,11 @@ export interface TelemetryOptions {
 
 /** Which app a metric belongs to, from its name: becomes the `app` label. */
 function appOf(name: string): string {
-  if (name.startsWith('tsp_llm_')) return 'llm_gateway';
-  if (name.startsWith('tsp_labeling_')) return 'labeling';
-  if (name.startsWith('tsp_agent_') || name.startsWith('tsp_optimiser_')) return 'agents';
-  if (name.startsWith('tsp_catalog_') || name.startsWith('tsp_storage_') || name.startsWith('tsp_files_')) return 'catalog';
-  if (name.startsWith('tsp_web_')) return 'web';
+  if (name.startsWith('sprint_llm_')) return 'llm_gateway';
+  if (name.startsWith('sprint_labeling_')) return 'labeling';
+  if (name.startsWith('sprint_agent_') || name.startsWith('sprint_optimiser_')) return 'agents';
+  if (name.startsWith('sprint_catalog_') || name.startsWith('sprint_storage_') || name.startsWith('sprint_files_')) return 'catalog';
+  if (name.startsWith('sprint_web_')) return 'web';
   return 'bff';
 }
 

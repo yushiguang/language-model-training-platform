@@ -14,8 +14,8 @@ import {
   type Platform,
   NO_TELEMETRY,
   type TelemetryPort,
-} from '@tsp/contracts';
-import {estimateTokens, systemConfig} from '@tsp/domain';
+} from '@sprint/contracts';
+import {estimateTokens, systemConfig} from '@sprint/domain';
 import {EndpointLimiter} from './limiter.ts';
 import {buildRegistry} from './registry.ts';
 
@@ -54,7 +54,7 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
   tm.allowLabelValues('endpoint', registry.map(e => e.id));
   tm.allowLabelValues('model', registry.map(e => e.model));
   for (const ep of registry)
-    for (const [kind, v] of [['qpm', ep.qpm], ['tpm', ep.tpm], ['concurrency', ep.maxConcurrency]] as const) tm.gauge('tsp_llm_endpoint_limit', v, {endpoint: ep.id, kind, assumed: ep.assumed});
+    for (const [kind, v] of [['qpm', ep.qpm], ['tpm', ep.tpm], ['concurrency', ep.maxConcurrency]] as const) tm.gauge('sprint_llm_endpoint_limit', v, {endpoint: ep.id, kind, assumed: ep.assumed});
   const delays = opts.retryDelaysMs ?? systemConfig().gateway.retryDelaysMs;
   const sleep = opts.sleep ?? abortableSleep;
   const limiters = new Map<string, EndpointLimiter>();
@@ -69,11 +69,11 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
 
   const sample = (ep: EndpointConfig, l: EndpointLimiter) => {
     const st = l.stats();
-    tm.gauge('tsp_llm_limiter_queue_length', st.waiting, {endpoint: ep.id});
-    tm.gauge('tsp_llm_in_flight', st.inFlight, {endpoint: ep.id});
-    tm.gauge('tsp_llm_concurrency_limit', st.concurrency, {endpoint: ep.id});
-    tm.gauge('tsp_llm_qpm_used_ratio', ep.qpm ? st.requestsInWindow / ep.qpm : 0, {endpoint: ep.id});
-    tm.gauge('tsp_llm_tpm_used_ratio', ep.tpm ? st.tokensInWindow / ep.tpm : 0, {endpoint: ep.id});
+    tm.gauge('sprint_llm_limiter_queue_length', st.waiting, {endpoint: ep.id});
+    tm.gauge('sprint_llm_in_flight', st.inFlight, {endpoint: ep.id});
+    tm.gauge('sprint_llm_concurrency_limit', st.concurrency, {endpoint: ep.id});
+    tm.gauge('sprint_llm_qpm_used_ratio', ep.qpm ? st.requestsInWindow / ep.qpm : 0, {endpoint: ep.id});
+    tm.gauge('sprint_llm_tpm_used_ratio', ep.tpm ? st.tokensInWindow / ep.tpm : 0, {endpoint: ep.id});
   };
 
   /** Runs one call under the endpoint's limiter, retrying busy or broken replies. */
@@ -81,14 +81,14 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
     const purpose = ep.purpose;
     const started = Date.now();
     const done = (outcome: string) => {
-      tm.counter('tsp_llm_calls_total', {endpoint: ep.id, purpose, outcome});
-      tm.histogram('tsp_llm_call_duration_seconds', (Date.now() - started) / 1000, {endpoint: ep.id, purpose});
+      tm.counter('sprint_llm_calls_total', {endpoint: ep.id, purpose, outcome});
+      tm.histogram('sprint_llm_call_duration_seconds', (Date.now() - started) / 1000, {endpoint: ep.id, purpose});
     };
     if (!ep.active) {
       done('rejected');
       throw new LlmCallError('rejected', `Endpoint ${ep.id} (${ep.model}) is not active.`);
     }
-    tm.histogram('tsp_llm_request_tokens', estimate, {endpoint: ep.id, purpose});
+    tm.histogram('sprint_llm_request_tokens', estimate, {endpoint: ep.id, purpose});
     const limiter = limiterFor(ep);
     let last: unknown;
     for (let attempt = 0; attempt <= delays.length; attempt++) {
@@ -100,14 +100,14 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
         done('aborted');
         throw e;
       }
-      tm.histogram('tsp_llm_limiter_wait_seconds', (Date.now() - asked) / 1000, {endpoint: ep.id});
+      tm.histogram('sprint_llm_limiter_wait_seconds', (Date.now() - asked) / 1000, {endpoint: ep.id});
       sample(ep, limiter);
       const sent = Date.now();
       try {
         const {value, tokens} = await fn();
         permit.release(tokens);
-        tm.counter('tsp_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose, outcome: 'ok'});
-        tm.histogram('tsp_llm_request_duration_seconds', (Date.now() - sent) / 1000, {endpoint: ep.id, model: ep.model, purpose});
+        tm.counter('sprint_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose, outcome: 'ok'});
+        tm.histogram('sprint_llm_request_duration_seconds', (Date.now() - sent) / 1000, {endpoint: ep.id, model: ep.model, purpose});
         sample(ep, limiter);
         done('ok');
         return {value, attempts: attempt + 1};
@@ -119,8 +119,8 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
         if (kind === 'rate_limited') limiter.onRateLimited(retryAfter ?? delays[Math.min(attempt, delays.length - 1)] ?? 1000);
         permit.release();
         sample(ep, limiter);
-        tm.counter('tsp_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose, outcome: kind});
-        tm.histogram('tsp_llm_request_duration_seconds', (Date.now() - sent) / 1000, {endpoint: ep.id, model: ep.model, purpose});
+        tm.counter('sprint_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose, outcome: kind});
+        tm.histogram('sprint_llm_request_duration_seconds', (Date.now() - sent) / 1000, {endpoint: ep.id, model: ep.model, purpose});
         if (kind === 'aborted') {
           done('aborted');
           throw e;
@@ -135,7 +135,7 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
         }
         last = e;
         if (attempt === delays.length) break;
-        tm.counter('tsp_llm_retries_total', {endpoint: ep.id, purpose, reason: kind});
+        tm.counter('sprint_llm_retries_total', {endpoint: ep.id, purpose, reason: kind});
         await sleep(Math.max(delays[attempt], retryAfter ?? 0), signal);
       }
     }
@@ -146,10 +146,10 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
 
   const usage = (ep: EndpointConfig, input: number, output: number, reasoning = 0) => {
     const l = {endpoint: ep.id, model: ep.model, purpose: ep.purpose};
-    tm.counter('tsp_llm_tokens_total', {...l, kind: 'input'}, input);
-    tm.counter('tsp_llm_tokens_total', {...l, kind: 'output'}, output);
-    if (reasoning) tm.counter('tsp_llm_tokens_total', {...l, kind: 'reasoning'}, reasoning);
-    tm.counter('tsp_llm_cost_usd_total', l, costOf(ep, input, output));
+    tm.counter('sprint_llm_tokens_total', {...l, kind: 'input'}, input);
+    tm.counter('sprint_llm_tokens_total', {...l, kind: 'output'}, output);
+    if (reasoning) tm.counter('sprint_llm_tokens_total', {...l, kind: 'reasoning'}, reasoning);
+    tm.counter('sprint_llm_cost_usd_total', l, costOf(ep, input, output));
   };
 
   const chatEndpointFor = (model?: string): EndpointConfig => {
@@ -198,16 +198,16 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
             yield chunk;
           }
           permit.release(input + Math.ceil(chars / systemConfig().gateway.charsPerTokenEstimate));
-          tm.counter('tsp_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose: ep.purpose, outcome: 'ok'});
+          tm.counter('sprint_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose: ep.purpose, outcome: 'ok'});
           return;
         } catch (e) {
           const kind = errorKindOf(e);
           const retryAfter = e instanceof LlmCallError ? e.retryAfterMs : undefined;
           if (kind === 'rate_limited') limiter.onRateLimited(retryAfter ?? delays[Math.min(attempt, delays.length - 1)] ?? 1000);
           permit.release(started ? input + Math.ceil(chars / systemConfig().gateway.charsPerTokenEstimate) : undefined);
-          tm.counter('tsp_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose: ep.purpose, outcome: kind});
+          tm.counter('sprint_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose: ep.purpose, outcome: kind});
           if (started || kind === 'aborted' || kind === 'rejected' || kind === 'filtered' || attempt >= delays.length) throw e;
-          tm.counter('tsp_llm_retries_total', {endpoint: ep.id, purpose: ep.purpose, reason: kind});
+          tm.counter('sprint_llm_retries_total', {endpoint: ep.id, purpose: ep.purpose, reason: kind});
           await sleep(Math.max(delays[attempt], retryAfter ?? 0), o.signal);
         }
       }

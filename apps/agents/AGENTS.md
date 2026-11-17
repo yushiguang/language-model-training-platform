@@ -1,6 +1,6 @@
 # Agent Runtime Service Guide (`apps/agents`)
 
-`apps/agents` (`@tsp/agents`) is the standalone Agent Runtime service for Sprint, the training set platform.
+`apps/agents` (`@sprint/agents`) is the standalone Agent Runtime service for Sprint, the training set platform.
 It is owned and evolved by coding agents working in the public repository, and will later be
 deployed as a dedicated microservice (or ported to Go alongside the BFF).
 
@@ -9,7 +9,7 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
 1. **Multi-agent orchestration (`src/runtime.ts`)**:
    - Implements `runAgentTurn(input: AgentTurnInput, llm: AgentModel, tools?: AgentToolHost): Promise<AgentTurnOutput>`
      and `reflectPrompt(input: OptimiserReflectInput, llm: AgentModel): Promise<OptimiserReflectOutput>`
-     defined in `@tsp/contracts/agent-api`.
+     defined in `@sprint/contracts/agent-api`.
    - Routes user messages starting from the page's active agent (`input.page.agent`), handles
      `front_desk` handoffs to specialist agents, and extracts structured `schema` or `prompt`
      proposals.
@@ -33,11 +33,11 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
    - `optimiser`: Proposes targeted single-rule improvements during the GEPA-style optimiser loop.
 3. **Validation**: a handoff goes only to a known specialist with a known intent; anything else
    is ignored and the front desk answers itself. A returned prompt is read with `readStructured`; Improve with AI and the
-   Optimiser are held to wording-only changes with `rewordOnly` (both from `@tsp/domain`).
+   Optimiser are held to wording-only changes with `rewordOnly` (both from `@sprint/domain`).
 
 ## Strict Boundary Rules
 
-- **Stateless and storage-free**: imports `@tsp/contracts` and `@tsp/domain` only (the boundary check enforces it). All project
+- **Stateless and storage-free**: imports `@sprint/contracts` and `@sprint/domain` only (the boundary check enforces it). All project
   state (`task`, `schema`, `history`, `attachedExamples`, `pageView`) arrives via
   `AgentTurnInput.workspace`, anything more comes through the read tools the bff lends, and all
   side effects (messages to append, proposals to save) are returned in `AgentTurnOutput` for the
@@ -47,7 +47,7 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
   - `llm.chat(messages, {model, json, maxOutputTokens, signal})`: returns plain text.
   - `llm.complete(messages, {model, json, maxOutputTokens, signal})`: returns `{text, thinking, model, stopReason, usage}` including reasoning traces.
   - `llm.chatStream(messages, {model, json, maxOutputTokens, signal})`: yields incremental `LlmStreamChunk` events (`delta`, `thinking`, `done`, `error`).
-  The full catalog of models supported by the runtime is exported from `@tsp/contracts` as
+  The full catalog of models supported by the runtime is exported from `@sprint/contracts` as
   `AVAILABLE_LLM_MODELS` (and returned by `llm.models()`):
   - `'gpt-5.6-terra'` (`reasoning` tier, active): highest-quality reasoning model for complex schema design, prompt drafting, and optimiser reflection.
   - `'gpt-5.6-luna'` (`balanced` tier, active): balanced quality and latency model for multi-turn agent tasks and evaluation analysis.

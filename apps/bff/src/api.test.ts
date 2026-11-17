@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, EndpointInfo, ExampleSource, FileStore, Identity, LabelCallResult, LlmGatewayContract} from '@tsp/contracts';
-import {createCatalog} from '@tsp/catalog';
-import {createLabeling, memoryLocks} from '@tsp/labeling';
-import {localDocRuntime} from '@tsp/platform';
+import type {AgentRuntimeContract, EndpointInfo, ExampleSource, FileStore, Identity, LabelCallResult, LlmGatewayContract} from '@sprint/contracts';
+import {createCatalog} from '@sprint/catalog';
+import {createLabeling, memoryLocks} from '@sprint/labeling';
+import {localDocRuntime} from '@sprint/platform';
 import {createBffApi} from './api.ts';
 import {configureBff} from './services/app.ts';
 

@@ -1,4 +1,4 @@
-# labeling (`@tsp/labeling`)
+# labeling (`@sprint/labeling`)
 
 Runs labeling tasks: one prompt version on one model over a list of examples, one prediction per
 example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts`. Owns the
@@ -29,7 +29,7 @@ example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts
     cost passes 120% of it.
   - `tryTemplate` labels a few examples with an unsaved template (the prompt agent's
     try_prompt tool) and saves nothing.
-  - Metrics: `tsp_labeling_*` (runs started and ended, resumes, examples, durations, cost,
+  - Metrics: `sprint_labeling_*` (runs started and ended, resumes, examples, durations, cost,
     cost against the estimate, lock conflicts, stop latency).
 - `locks.ts`: browser Web Locks per task and per prediction; an in-memory version for tests and
   Node. Two computers are not coordinated (MVP: runs live in one browser).

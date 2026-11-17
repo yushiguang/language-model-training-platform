@@ -1,4 +1,4 @@
-import type {Answer, Example, Schema} from '@tsp/contracts';
+import type {Answer, Example, Schema} from '@sprint/contracts';
 import {systemConfig} from './config.ts';
 import {hashString} from './template.ts';
 

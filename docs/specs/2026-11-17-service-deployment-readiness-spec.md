@@ -71,31 +71,31 @@ Decided with the owner on 2026-11-17:
 
 ## 2. A thin BFF and a separate application module (no contract change)
 
-Move the business logic out of `apps/bff` into a new application module, `@tsp/workflow`
-(the agent-facing half may be split out as `@tsp/assistant` if the module grows too large):
+Move the business logic out of `apps/bff` into a new application module, `@sprint/workflow`
+(the agent-facing half may be split out as `@sprint/assistant` if the module grows too large):
 
 | Today (`apps/bff/src/services/`) | Moves to |
 |---|---|
-| `projects.ts`, `work.ts` (project state, `dueStarts`, automatic starts) | `@tsp/workflow` |
-| `evaluation.ts`, `prompts.ts`, `settings.ts` (scoring triggers, reports, version creation, settings) | `@tsp/workflow` |
-| `governance.ts`, `mismatches.ts`, `dataset.ts` (dataset governance, gold review, sampling and upload use cases) | `@tsp/workflow` (sampling execution goes to the job module, Section 3) |
-| `agents.ts`, `page-views.ts`, `starts.ts`, `problems.ts` (turn orchestration, page views, agent tools, proposals, problem reports) | `@tsp/workflow` / `@tsp/assistant` |
+| `projects.ts`, `work.ts` (project state, `dueStarts`, automatic starts) | `@sprint/workflow` |
+| `evaluation.ts`, `prompts.ts`, `settings.ts` (scoring triggers, reports, version creation, settings) | `@sprint/workflow` |
+| `governance.ts`, `mismatches.ts`, `dataset.ts` (dataset governance, gold review, sampling and upload use cases) | `@sprint/workflow` (sampling execution goes to the job module, Section 3) |
+| `agents.ts`, `page-views.ts`, `starts.ts`, `problems.ts` (turn orchestration, page views, agent tools, proposals, problem reports) | `@sprint/workflow` / `@sprint/assistant` |
 
 Rules after the move:
 
 - The BFF keeps: identity and request-context injection, request/response mapping, error
   mapping, upload signing, live-update forwarding, and per-call telemetry. It holds no records
   (as today) and makes no business decision: gates, `dueStarts`, scoring rules, and prompt
-  signature checks all live in `@tsp/domain`, `@tsp/workflow`, or the owning service.
-- `@tsp/workflow` is a factory (`createWorkflow(deps)`), like every other app in this
+  signature checks all live in `@sprint/domain`, `@sprint/workflow`, or the owning service.
+- `@sprint/workflow` is a factory (`createWorkflow(deps)`), like every other app in this
   repository. It holds **no module-level mutable state**: the configured-dependencies singleton
   and the cached signed-in user in today's `configureBff` are removed, and identity is read per
   call from the request context below. Short-lived per-turn state that lives in process memory
   today (the running turn's live view, the sticky answering helper, problem-report drafts,
   per-turn client diagnostics) moves behind a small shared-state port with TTL expiry;
-  `@tsp/platform` provides an in-memory stand-in. Sampling state moves to the job module
+  `@sprint/platform` provides an in-memory stand-in. Sampling state moves to the job module
   (Section 3).
-- `@tsp/workflow` gets its own capability contract (`WorkflowContract`) so it can be deployed
+- `@sprint/workflow` gets its own capability contract (`WorkflowContract`) so it can be deployed
   next to the BFF or behind RPC later. Defining it is a contract change (additive: a new file in
   `packages/contracts`). **Every workflow method takes `ctx: RequestContext` from the first
   version** (the type already exists in `platform-api.ts`): a server is multi-user from day
@@ -103,7 +103,7 @@ Rules after the move:
   and permission *enforcement* is still deferred (Section 7); carrying the context is not.
 - Apart from the command semantics of Section 3, `BffContract` keeps its surface, so pages do
   not change.
-- Test for whether logic belongs in `@tsp/workflow` or stays in the BFF: if a CLI or tool channel
+- Test for whether logic belongs in `@sprint/workflow` or stays in the BFF: if a CLI or tool channel
   would need the same behaviour, it is workflow; if only the web pages need it, it is BFF.
   Permission checks are workflow (every channel must enforce them); the BFF only authenticates
   (who the caller is, which tenant).
@@ -130,11 +130,11 @@ Domain work registers as executors, one per kind, implemented by the owning app:
 
 | Job kind | Executor owner | Replaces |
 |---|---|---|
-| `labeling.runTask` | `@tsp/labeling` | the browser-locked runner in the open page |
-| `report.build` | `@tsp/workflow` | report building piggybacked on page ticks |
-| `dataset.sample` | `@tsp/workflow` | the in-memory sampling task in the BFF (lost on page close) |
-| `optimiser.run` | `@tsp/optimiser` | the browser-locked optimiser loop |
-| `project.delete` | `@tsp/catalog` with `@tsp/labeling` | deleting a project's records one document at a time inside a request |
+| `labeling.runTask` | `@sprint/labeling` | the browser-locked runner in the open page |
+| `report.build` | `@sprint/workflow` | report building piggybacked on page ticks |
+| `dataset.sample` | `@sprint/workflow` | the in-memory sampling task in the BFF (lost on page close) |
+| `optimiser.run` | `@sprint/optimiser` | the browser-locked optimiser loop |
+| `project.delete` | `@sprint/catalog` with `@sprint/labeling` | deleting a project's records one document at a time inside a request |
 | `batch_labeling.run`, `export.run` | future apps | reserved kinds, no code yet |
 
 Rules:
@@ -239,7 +239,7 @@ Each item is its own `Contract change:` pull request.
   reply) keeps its exact semantics but is implemented over a shared atomic store, so every
   replica of every caller shares one budget per endpoint. The port (working name
   `LimiterStorePort`, on `Platform` next to the other optional ports) offers the atomic
-  operations the limiter needs; `@tsp/platform` provides the in-memory implementation the
+  operations the limiter needs; `@sprint/platform` provides the in-memory implementation the
   gateway uses by default, so `apps/llm-gateway` still imports contracts and domain only.
   In-flight slots are leased with an expiry: a process that dies without releasing must not
   leak its slots and wedge the endpoint. Concurrency tests run several limiter instances
@@ -255,15 +255,15 @@ Each item is its own `Contract change:` pull request.
 
 - `AgentRuntimeContract` is already framework-neutral (plain JSON in and out, tools and progress
   injected at construction, cancellation by request id). It stays the single definition of what
-  an agent runtime does; this repository's `@tsp/agents` remains the reference implementation
+  an agent runtime does; this repository's `@sprint/agents` remains the reference implementation
   used by every test and the browser check.
 - The prompts (`presets.ts`), the tool definitions (names, argument schemas, what a tool may
-  return, per-preset permissions), and the guard rules in `@tsp/domain` (no held-out examples to
+  return, per-preset permissions), and the guard rules in `@sprint/domain` (no held-out examples to
   any helper, wording-only optimiser changes, nothing carried over silently on prompt import,
   handoffs only to known specialists, proposals never save themselves) are the specification any
   other implementation must satisfy. The golden fixtures of Section 4.5 are its acceptance test.
 - Tool implementations split by what they touch, and the split is by contract, not by deployment:
-  tools that read project data run as part of `@tsp/workflow`/`@tsp/assistant` behind the same
+  tools that read project data run as part of `@sprint/workflow`/`@sprint/assistant` behind the same
   permission and held-out rules as the pages; tools that read outside documents or file tickets
   stay behind the existing `DocumentSource` and `TicketPort` platform ports. An agent runtime,
   wherever it runs, only ever sees `AgentToolHost` and those ports.
@@ -295,7 +295,7 @@ Each item is its own `Contract change:` pull request.
   6); what is deferred is *enforcing* tenancy and permissions on it. Wiring `TenantConfigPort`
   and `AuthorizationPort` into those checks is the hosting platform's deployment work,
   sequenced after the topology stands up, and by then it changes checks, not signatures. The
-  one requirement this spec adds now: permission checks live in `@tsp/workflow` (Section 2),
+  one requirement this spec adds now: permission checks live in `@sprint/workflow` (Section 2),
   never only in the BFF, so no future channel can bypass them.
 - **Scale work owned before real datasets arrive.** `loadProjectState` reads whole collections
   today; at a few thousand examples a single response is several megabytes and the pages poll
@@ -311,7 +311,7 @@ Each item is its own `Contract change:` pull request.
 
 ## 8. Delivery order
 
-1. Section 2 (thin BFF, `@tsp/workflow`): moves plus the factory, per-call request context,
+1. Section 2 (thin BFF, `@sprint/workflow`): moves plus the factory, per-call request context,
    and shared short-lived state. No contract change except the additive `WorkflowContract`
    (with `RequestContext` from the start). Proof: full check suite and browser check unchanged,
    plus two-users-one-process tests.
@@ -334,7 +334,7 @@ Each item is its own `Contract change:` pull request.
 
 ## 9. Verification
 
-- `npm run check:boundaries` — the new modules obey the same import table (`@tsp/workflow` and
+- `npm run check:boundaries` — the new modules obey the same import table (`@sprint/workflow` and
   the job module may import contracts and domain only, and receive storage and queues through
   injected ports; the BFF keeps importing contracts and domain only, receiving everything else
   through configuration). The checker itself is updated in Section 4.4 to allow the

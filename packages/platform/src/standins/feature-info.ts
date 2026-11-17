@@ -1,4 +1,4 @@
-import type {FeatureInfo, FeatureInfoSource} from '@tsp/contracts';
+import type {FeatureInfo, FeatureInfoSource} from '@sprint/contracts';
 
 /**
  * Stand-in feature descriptions, made up for the public repository. The internal build provides

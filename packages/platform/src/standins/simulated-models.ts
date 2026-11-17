@@ -1,4 +1,4 @@
-import type {ChatRequest, ChatResult, EndpointInfo, LabelingModels, LlmStreamChunk, ModelMessage} from '@tsp/contracts';
+import type {ChatRequest, ChatResult, EndpointInfo, LabelingModels, LlmStreamChunk, ModelMessage} from '@sprint/contracts';
 import {loadSampleFile} from './sample-examples.ts';
 
 /**

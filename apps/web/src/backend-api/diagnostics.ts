@@ -1,5 +1,5 @@
-import type {ClientDiagnostics} from '@tsp/contracts';
-import {newId, systemConfig} from '@tsp/domain';
+import type {ClientDiagnostics} from '@sprint/contracts';
+import {newId, systemConfig} from '@sprint/domain';
 
 /**
  * The browser's rolling record for problem reports (spec 1.1.0, 3.2): the last pages, failed

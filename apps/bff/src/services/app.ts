@@ -1,4 +1,4 @@
-import {NO_TELEMETRY, type TicketPort, type AgentRuntimeContract, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type MediaSource, type Identity, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type TelemetryPort} from '@tsp/contracts';
+import {NO_TELEMETRY, type TicketPort, type AgentRuntimeContract, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type MediaSource, type Identity, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type TelemetryPort} from '@sprint/contracts';
 
 /**
  * What the bff talks to. The bff holds no records of its own: product records live in the
@@ -13,7 +13,7 @@ export interface BffDeps {
   labeling: LabelingContract;
   gateway: LlmGatewayContract;
   agents: AgentRuntimeContract;
-  /** The Optimiser service (`@tsp/optimiser`). Without it Auto Optimise is not available. */
+  /** The Optimiser service (`@sprint/optimiser`). Without it Auto Optimise is not available. */
   optimiser?: OptimiserContract;
   identity: Identity;
   files: FileStore;

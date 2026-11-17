@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {StructuredPrompt} from '@tsp/contracts';
-import {scriptedAgent} from '@tsp/platform';
-import {translate} from '@tsp/domain';
+import type {StructuredPrompt} from '@sprint/contracts';
+import {scriptedAgent} from '@sprint/platform';
+import {translate} from '@sprint/domain';
 import {draftImprovement, importIntent, partialReply, reflectPrompt, runAgentTurn} from './runtime.ts';
 import {languageLine, PRESETS, systemPrompt} from './presets.ts';
 import {createAgentRuntime} from './index.ts';

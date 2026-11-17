@@ -1,4 +1,4 @@
-import type {DocumentSource} from '@tsp/contracts';
+import type {DocumentSource} from '@sprint/contracts';
 
 /**
  * Stand-in for document links (review finding 4). The public build cannot open the internal

@@ -1,5 +1,5 @@
 {
-  "name": "@tsp/llm-gateway",
+  "name": "@sprint/llm-gateway",
   "version": "0.1.0",
   "private": true,
   "type": "module",

@@ -1,4 +1,4 @@
-import type {JobState, LabelingRun, LabelingTask, TaskState} from '@tsp/contracts';
+import type {JobState, LabelingRun, LabelingTask, TaskState} from '@sprint/contracts';
 
 /** Task states as pages show them. "Needs attention" shows as failed, with the task's message. */
 export function jobState(s: TaskState): JobState {

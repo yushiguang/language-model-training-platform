@@ -90,7 +90,7 @@ Return one JSON object only, with exact field keys and allowed label values from
 {"category": "ValueA | ValueB"}
 </output_format>
 ```
-*(Omit `<rules>` when `ruleGroups` has no non-empty groups; include `<reference_images>` when `p.images.length > 0`; escape XML attribute quotes on user-supplied names; keep `@tsp/labeling`'s trailing `REASON_LINE` behavior compatible.)*
+*(Omit `<rules>` when `ruleGroups` has no non-empty groups; include `<reference_images>` when `p.images.length > 0`; escape XML attribute quotes on user-supplied names; keep `@sprint/labeling`'s trailing `REASON_LINE` behavior compatible.)*
 
 ---
 

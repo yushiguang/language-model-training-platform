@@ -6,7 +6,7 @@ import type {DeepPartial, SystemConfig} from './config.ts';
 export type {EndpointInfo};
 
 /**
- * Contract 3: Platform Runtime API (`@tsp/contracts/platform-api`).
+ * Contract 3: Platform Runtime API (`@sprint/contracts/platform-api`).
  *
  * Defines the complete set of capabilities exposed by the underlying hosting platform
  * (document database, online labeling models, agent LLM gateway, SSO identity, file storage,
@@ -458,7 +458,7 @@ export interface DocumentSource {
 
 // ---------------------------------------------------------------------------------------------
 // Enterprise extension ports (spec 1.0.0, section 7.1). All optional: the single-tenant stand-ins
-// in `@tsp/platform` allow everything and run jobs in the page.
+// in `@sprint/platform` allow everything and run jobs in the page.
 
 /** Who a service call is made for. Carried in request structs once services are split. */
 export interface RequestContext {

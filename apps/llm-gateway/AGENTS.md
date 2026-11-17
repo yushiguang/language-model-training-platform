@@ -1,4 +1,4 @@
-# llm-gateway (`@tsp/llm-gateway`)
+# llm-gateway (`@sprint/llm-gateway`)
 
 Every model call goes through here: labeling calls (`label`) and agent chat (`agentModel()`).
 Contract: `LlmGatewayContract` in `packages/contracts/src/gateway-api.ts`.

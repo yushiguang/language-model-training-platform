@@ -1,4 +1,4 @@
-import type {PromptVersion} from '@tsp/contracts';
+import type {PromptVersion} from '@sprint/contracts';
 
 /** v3 for a major version, v3.2 for a minor one. */
 export const versionLabel = (v: Pick<PromptVersion, 'major' | 'minor'>) => (v.minor ? `v${v.major}.${v.minor}` : `v${v.major}`);
