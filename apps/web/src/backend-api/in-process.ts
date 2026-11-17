@@ -6,7 +6,7 @@ import {createGateway} from '@sprint/llm-gateway';
 import {browserLocks, createLabeling, labelingExecutor} from '@sprint/labeling';
 import {createAgentRuntime} from '@sprint/agents';
 import {createPlatform} from '@sprint/platform-impl';
-import {loopback, memoryJobStore, memorySharedState} from '@sprint/platform';
+import {loopback, memoryJobStore, memoryLimiterStore, memorySharedState} from '@sprint/platform';
 import {createJobs} from '@sprint/jobs';
 import {createOptimiser, optimiserExecutor} from '@sprint/optimiser';
 import {createWorkflow} from '@sprint/workflow';
@@ -30,7 +30,8 @@ const telemetry = createTelemetry({
   appVersion: APP_VERSION,
   env: process.env.NEXT_PUBLIC_SPRINT_ENV ?? 'dev',
 });
-const gateway = createGateway(platform, {telemetry});
+// One process: the limits are counted here unless the platform shares a store (spec 5).
+const gateway = createGateway(platform, {telemetry, limiterStore: platform.limiterStore ?? memoryLimiterStore()});
 const catalog = createCatalog(platform.db, {telemetry});
 const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: projectId => workflow.changed(projectId), telemetry});
 /**

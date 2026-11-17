@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {LlmCallError, NO_TELEMETRY, type ChatRequest, type ChatResult, type EndpointInfo, type Platform} from '@sprint/contracts';
-import {STAND_IN_MODELS} from '@sprint/platform';
+import {memoryLimiterStore, STAND_IN_MODELS} from '@sprint/platform';
 import {createGateway} from './gateway.ts';
 import {EndpointLimiter} from './limiter.ts';
 import {buildRegistry} from './registry.ts';
@@ -11,8 +11,12 @@ const INFOS: EndpointInfo[] = [
   {id: 'B', name: 'gpt-5.4', description: '', badge: '', cost: 'Lower', speed: 'Faster', supportsTemperature: false, priceIn: 0.5, priceOut: 2},
 ];
 
-function fakePlatform(chat: (req: ChatRequest) => Promise<ChatResult>, endpoints?: Platform['endpoints']): Pick<Platform, 'models' | 'agent' | 'endpoints'> {
+/** A limiter on its own store, as one process has it; waiters ask again every 5 ms. */
+const oneStore = () => ({store: memoryLimiterStore(), key: 'ep', pollMs: 5});
+
+function fakePlatform(chat: (req: ChatRequest) => Promise<ChatResult>, endpoints?: Platform['endpoints']): Pick<Platform, 'models' | 'agent' | 'endpoints' | 'limiterStore'> {
   return {
+    limiterStore: memoryLimiterStore(),
     models: {endpoints: () => INFOS, chat, chatStream: async function* () {}},
     agent: {
       models: () => STAND_IN_MODELS,
@@ -90,14 +94,14 @@ test('chat routes to the chat endpoint of the requested model, inactive models f
 });
 
 test('limiter never exceeds QPM in a window and caps calls in flight', async () => {
-  const lim = new EndpointLimiter({qpm: 3, tpm: 1_000_000, maxConcurrency: 2, windowMs: 120});
+  const lim = new EndpointLimiter({...oneStore(), qpm: 3, tpm: 1_000_000, maxConcurrency: 2, windowMs: 120});
   const started: number[] = [];
   const t0 = Date.now();
   await Promise.all(
     Array.from({length: 6}, async () => {
       const p = await lim.acquire(10);
       started.push(Date.now() - t0);
-      assert.ok(lim.stats().inFlight <= 2);
+      assert.ok((await lim.stats()).inFlight <= 2);
       await new Promise(r => setTimeout(r, 5));
       p.release(10);
     }),
@@ -108,7 +112,7 @@ test('limiter never exceeds QPM in a window and caps calls in flight', async () 
 });
 
 test('limiter holds calls that would exceed TPM until the window frees', async () => {
-  const lim = new EndpointLimiter({qpm: 100, tpm: 1000, maxConcurrency: 10, windowMs: 100});
+  const lim = new EndpointLimiter({...oneStore(), qpm: 100, tpm: 1000, maxConcurrency: 10, windowMs: 100});
   const t0 = Date.now();
   const a = await lim.acquire(800);
   a.release(800);
@@ -118,9 +122,9 @@ test('limiter holds calls that would exceed TPM until the window frees', async (
 });
 
 test('limiter halves concurrency after a 429 and holds new calls', async () => {
-  const lim = new EndpointLimiter({qpm: 100, tpm: 1_000_000, maxConcurrency: 8, windowMs: 1000});
-  lim.onRateLimited(60);
-  assert.equal(lim.stats().concurrency, 4);
+  const lim = new EndpointLimiter({...oneStore(), qpm: 100, tpm: 1_000_000, maxConcurrency: 8, windowMs: 1000});
+  await lim.onRateLimited(60);
+  assert.equal((await lim.stats()).concurrency, 4);
   const t0 = Date.now();
   (await lim.acquire(1)).release();
   assert.ok(Date.now() - t0 >= 50);
@@ -163,7 +167,7 @@ test('after a 429 no queued call goes out during the hold, and a 429 on the last
 });
 
 test('limiter: a shorter wakeup replaces a pending later timer', async () => {
-  const lim = new EndpointLimiter({qpm: 100, tpm: 100, maxConcurrency: 4, windowMs: 1000});
+  const lim = new EndpointLimiter({...oneStore(), qpm: 100, tpm: 100, maxConcurrency: 4, windowMs: 1000});
   const a = await lim.acquire(60);
   const t0 = Date.now();
   // b does not fit (60 + 60 > 100): the limiter wakes when a's window entry expires, in 1 s.
@@ -175,7 +179,7 @@ test('limiter: a shorter wakeup replaces a pending later timer', async () => {
 });
 
 test('limiter: aborting a queued call lets the one behind it go', async () => {
-  const lim = new EndpointLimiter({qpm: 100, tpm: 100, maxConcurrency: 4, windowMs: 1000});
+  const lim = new EndpointLimiter({...oneStore(), qpm: 100, tpm: 100, maxConcurrency: 4, windowMs: 1000});
   const a = await lim.acquire(60);
   const ctrl = new AbortController();
   const big = lim.acquire(60, ctrl.signal);
@@ -295,4 +299,103 @@ test('request fields (spec 5): a reasoning effort the model does not list is dro
   const withTools = await agent.complete(msg, {model: 'thinker', tools: [tool]});
   assert.deepEqual(withTools.toolCalls, [{id: 'c1', name: 'get_report', arguments: '{}'}]);
   await assert.rejects(agent.complete(msg, {model: 'plain', tools: [tool]}), (e: Error) => e instanceof LlmCallError && e.kind === 'rejected');
+});
+
+// The shared store (spec 5): several limiters, as several processes would have them, on one store.
+const sleepMs = (ms: number) => new Promise(r => setTimeout(r, ms));
+const onShared = (store: ReturnType<typeof memoryLimiterStore>, o: {qpm: number; tpm: number; maxConcurrency: number; windowMs: number; leaseMs?: number}) => new EndpointLimiter({store, key: 'labeling-A', pollMs: 3, ...o});
+
+test('shared store: three instances together never exceed the endpoint QPM or calls in flight', async () => {
+  const store = memoryLimiterStore();
+  const limits = {qpm: 5, tpm: 1_000_000, maxConcurrency: 3, windowMs: 150};
+  const instances = [onShared(store, limits), onShared(store, limits), onShared(store, limits)];
+  let running = 0;
+  let most = 0;
+  const t0 = Date.now();
+  await Promise.all(
+    instances.flatMap(lim =>
+      Array.from({length: 5}, async () => {
+        const p = await lim.acquire(100);
+        running++;
+        most = Math.max(most, running);
+        const st = await lim.stats();
+        assert.ok(st.requestsInWindow <= 5, `${st.requestsInWindow} requests in one window`);
+        assert.ok(st.inFlight <= 3, `${st.inFlight} in flight`);
+        await sleepMs(10);
+        running--;
+        p.release(100);
+      }),
+    ),
+  );
+  assert.ok(most <= 3, `${most} calls ran at once`);
+  // 15 calls at 5 a window: the last ones waited for two windows to pass.
+  assert.ok(Date.now() - t0 >= 280, `all done after ${Date.now() - t0} ms`);
+});
+
+test('shared store: three instances together never exceed the endpoint TPM', async () => {
+  const store = memoryLimiterStore();
+  const limits = {qpm: 1000, tpm: 300, maxConcurrency: 10, windowMs: 120};
+  const instances = [onShared(store, limits), onShared(store, limits), onShared(store, limits)];
+  await Promise.all(
+    instances.flatMap(lim =>
+      Array.from({length: 3}, async () => {
+        const p = await lim.acquire(100);
+        const st = await lim.stats();
+        assert.ok(st.tokensInWindow <= 300, `${st.tokensInWindow} tokens in one window`);
+        p.release(100);
+      }),
+    ),
+  );
+});
+
+test('shared store: a busy reply seen by one instance holds the calls of every instance', async () => {
+  const store = memoryLimiterStore();
+  const limits = {qpm: 100, tpm: 1_000_000, maxConcurrency: 4, windowMs: 1000};
+  const [a, b] = [onShared(store, limits), onShared(store, limits)];
+  await a.onRateLimited(60);
+  assert.equal((await b.stats()).concurrency, 2);
+  const t0 = Date.now();
+  (await b.acquire(1)).release();
+  assert.ok(Date.now() - t0 >= 50, `b went after ${Date.now() - t0} ms`);
+});
+
+test('shared store: a dead instance frees its slot when the lease ends, and its waiting ticket expires', async () => {
+  const store = memoryLimiterStore();
+  const limits = {qpm: 100, tpm: 1_000_000, maxConcurrency: 1, windowMs: 1000};
+  // A process takes the only slot and dies; another of its calls was first in the queue.
+  const now = Date.now();
+  assert.ok((await store.tryAcquire('labeling-A', {ticket: 'gone_1', tokens: 1, limits, leaseMs: 60, ticketTtlMs: 40, now})).granted);
+  assert.equal((await store.tryAcquire('labeling-A', {ticket: 'gone_2', tokens: 1, limits, leaseMs: 60, ticketTtlMs: 40, now})).granted, false);
+  const t0 = Date.now();
+  (await onShared(store, limits).acquire(1)).release();
+  const waited = Date.now() - t0;
+  assert.ok(waited >= 45 && waited < 1000, `the live instance waited ${waited} ms`);
+});
+
+test('shared store: a long call renews its lease, so no one takes its slot while it runs', async () => {
+  const store = memoryLimiterStore();
+  const limits = {qpm: 100, tpm: 1_000_000, maxConcurrency: 1, windowMs: 1000, leaseMs: 30};
+  const [a, b] = [onShared(store, limits), onShared(store, limits)];
+  const long = await a.acquire(1);
+  let releasedAt = 0;
+  const other = b.acquire(1).then(p => (p.release(), Date.now()));
+  await sleepMs(120);
+  releasedAt = Date.now();
+  long.release();
+  assert.ok((await other) >= releasedAt, 'b started only after a released');
+});
+
+test('shared store: waiters from different instances go first in, first out', async () => {
+  const store = memoryLimiterStore();
+  const limits = {qpm: 100, tpm: 1_000_000, maxConcurrency: 1, windowMs: 1000};
+  const [a, b, c] = [onShared(store, limits), onShared(store, limits), onShared(store, limits)];
+  const held = await a.acquire(1);
+  const order: string[] = [];
+  const first = b.acquire(1).then(p => (order.push('b'), p.release()));
+  await sleepMs(10);
+  const second = c.acquire(1).then(p => (order.push('c'), p.release()));
+  await sleepMs(10);
+  held.release();
+  await Promise.all([first, second]);
+  assert.deepEqual(order, ['b', 'c']);
 });

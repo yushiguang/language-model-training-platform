@@ -9,6 +9,7 @@ import {
   type LabelCallRequest,
   type LabelCallResult,
   type LlmGatewayContract,
+  type LimiterStorePort,
   type LlmStreamChunk,
   type ModelMessage,
   type Platform,
@@ -27,6 +28,14 @@ export interface GatewayOptions {
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   /** Output budget assumed for chat calls that do not set one (reasoning counts toward TPM). */
   defaultChatOutputTokens?: number;
+  /**
+   * Where the limits are counted: shared by every replica in a server deployment
+   * (`Platform.limiterStore`), or `memoryLimiterStore()` from `@sprint/platform` for one process.
+   * Left out here, the platform's is used.
+   */
+  limiterStore?: LimiterStorePort;
+  /** How often a waiting call asks the store again (default 250 ms; tests shorten it). */
+  limiterPollMs?: number;
   telemetry?: TelemetryPort;
 }
 
@@ -74,8 +83,10 @@ async function withTimeout<T>(ep: EndpointConfig, timeoutMs: number | undefined,
  * The llm-gateway: every model call in the platform goes through here.
  * Stateless apart from one limiter per endpoint.
  */
-export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'endpoints'>, opts: GatewayOptions = {}): LlmGatewayContract {
+export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'endpoints' | 'limiterStore'>, opts: GatewayOptions = {}): LlmGatewayContract {
   const registry = buildRegistry(platform);
+  const store = opts.limiterStore ?? platform.limiterStore;
+  if (!store) throw new Error('The gateway needs a limiter store (Platform.limiterStore, or memoryLimiterStore() for one process).');
   const tm = opts.telemetry ?? NO_TELEMETRY;
   // Endpoint ids and models are label values; only the registry's own may appear.
   tm.allowLabelValues('endpoint', registry.map(e => e.id));
@@ -117,20 +128,24 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
   const limiterFor = (ep: EndpointConfig) => {
     let l = limiters.get(ep.id);
     if (!l) {
-      l = new EndpointLimiter({qpm: ep.qpm, tpm: ep.tpm, maxConcurrency: ep.maxConcurrency, windowMs: opts.windowMs ?? systemConfig().gateway.windowMs});
+      l = new EndpointLimiter({store, key: ep.id, qpm: ep.qpm, tpm: ep.tpm, maxConcurrency: ep.maxConcurrency, windowMs: opts.windowMs ?? systemConfig().gateway.windowMs, pollMs: opts.limiterPollMs});
       limiters.set(ep.id, l);
     }
     return l;
   };
 
-  const sample = (ep: EndpointConfig, l: EndpointLimiter) => {
-    const st = l.stats();
-    tm.gauge('sprint_llm_limiter_queue_length', st.waiting, {endpoint: ep.id});
-    tm.gauge('sprint_llm_in_flight', st.inFlight, {endpoint: ep.id});
-    tm.gauge('sprint_llm_concurrency_limit', st.concurrency, {endpoint: ep.id});
-    tm.gauge('sprint_llm_qpm_used_ratio', ep.qpm ? st.requestsInWindow / ep.qpm : 0, {endpoint: ep.id});
-    tm.gauge('sprint_llm_tpm_used_ratio', ep.tpm ? st.tokensInWindow / ep.tpm : 0, {endpoint: ep.id});
-  };
+  /** The endpoint's gauges, across every process sharing the store (read in the background). */
+  const sample = (ep: EndpointConfig, l: EndpointLimiter) =>
+    void l.stats().then(
+      st => {
+        tm.gauge('sprint_llm_limiter_queue_length', st.waiting, {endpoint: ep.id});
+        tm.gauge('sprint_llm_in_flight', st.inFlight, {endpoint: ep.id});
+        tm.gauge('sprint_llm_concurrency_limit', st.concurrency, {endpoint: ep.id});
+        tm.gauge('sprint_llm_qpm_used_ratio', ep.qpm ? st.requestsInWindow / ep.qpm : 0, {endpoint: ep.id});
+        tm.gauge('sprint_llm_tpm_used_ratio', ep.tpm ? st.tokensInWindow / ep.tpm : 0, {endpoint: ep.id});
+      },
+      () => undefined,
+    );
 
   /** Runs one call under the endpoint's limiter, retrying busy or broken replies. */
   async function call<T>(ep: EndpointConfig, estimate: number, signal: AbortSignal | undefined, fn: (signal?: AbortSignal) => Promise<{value: T; tokens?: number}>, timeoutMs?: number): Promise<{value: T; attempts: number}> {
@@ -172,7 +187,7 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
         // Slow down before giving the slot back: releasing first would let a queued call go out
         // during the hold. Also on the last attempt, so the next caller waits too.
         const retryAfter = e instanceof LlmCallError ? e.retryAfterMs : undefined;
-        if (kind === 'rate_limited') limiter.onRateLimited(retryAfter ?? delays[Math.min(attempt, delays.length - 1)] ?? 1000);
+        if (kind === 'rate_limited') await limiter.onRateLimited(retryAfter ?? delays[Math.min(attempt, delays.length - 1)] ?? 1000).catch(() => undefined);
         permit.release();
         sample(ep, limiter);
         tm.counter('sprint_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose, outcome: kind});
@@ -281,7 +296,7 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
         } catch (e) {
           const kind = errorKindOf(e);
           const retryAfter = e instanceof LlmCallError ? e.retryAfterMs : undefined;
-          if (kind === 'rate_limited') limiter.onRateLimited(retryAfter ?? delays[Math.min(attempt, delays.length - 1)] ?? 1000);
+          if (kind === 'rate_limited') await limiter.onRateLimited(retryAfter ?? delays[Math.min(attempt, delays.length - 1)] ?? 1000).catch(() => undefined);
           permit.release(started ? input + Math.ceil(chars / systemConfig().gateway.charsPerTokenEstimate) : undefined);
           tm.counter('sprint_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose: ep.purpose, outcome: kind});
           if (started || kind === 'aborted' || kind === 'rejected' || kind === 'filtered' || attempt >= delays.length) throw e;

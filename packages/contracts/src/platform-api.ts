@@ -545,6 +545,64 @@ export interface SharedStatePort {
   delete(key: string): Promise<void>;
 }
 
+/** One endpoint's limits, as the gateway's registry has them. */
+export interface LimiterLimits {
+  /** Requests per window. */
+  qpm: number;
+  /** Tokens per window (input, output and reasoning). */
+  tpm: number;
+  /** Calls in flight at most (before a busy reply halves it). */
+  maxConcurrency: number;
+  /** The sliding window, one minute in production. */
+  windowMs: number;
+}
+
+/** A waiter's try: a permit, or not yet (with when trying again may succeed, -1 unknown). */
+export type LimiterTry = {granted: true; permitId: string} | {granted: false; waitMs: number};
+
+export interface LimiterStats {
+  inFlight: number;
+  /** The cap on calls in flight now (lowered after a busy reply, back up one per quiet window). */
+  concurrency: number;
+  requestsInWindow: number;
+  tokensInWindow: number;
+  /** Waiters in the queue, from every process. */
+  waiting: number;
+}
+
+/**
+ * The gateway's rate-limiter state for every endpoint, shared by every replica of every caller
+ * (deployment readiness spec, 5), so one endpoint has one budget. Each method is one atomic step
+ * on one endpoint's state (`key`): a Redis implementation runs each as a script; SQL as one
+ * transaction. `@sprint/platform` has the in-memory one (`memoryLimiterStore`).
+ *
+ * Semantics, the same as one process's limiter: a sliding window of requests and tokens (QPM,
+ * TPM), a cap on calls in flight, one FIFO queue of waiters, and after a busy reply half the
+ * concurrency and a hold, with one call back per quiet window. A permit holds its slot until its
+ * lease ends: a process that dies without releasing never wedges the endpoint. A waiter's ticket
+ * expires the same way when the waiter stops asking. `now` is the caller's clock; a shared store
+ * may use its own instead, so the replicas' clocks need not agree.
+ */
+export interface LimiterStorePort {
+  /**
+   * Drops what expired (window entries, permits whose lease ended, tickets not asked for within
+   * `ticketTtlMs`), puts `ticket` in the queue or refreshes it, and grants a permit when the
+   * ticket is first, the endpoint is not on hold, and `tokens` fit the window and a slot is free.
+   * A single call larger than the whole TPM may go alone. The permit's lease ends at
+   * `now + leaseMs`.
+   */
+  tryAcquire(key: string, req: {ticket: string; tokens: number; limits: LimiterLimits; leaseMs: number; ticketTtlMs: number; now: number}): Promise<LimiterTry>;
+  /** Takes a waiter out of the queue (it was stopped). */
+  leave(key: string, ticket: string): Promise<void>;
+  /** Frees the permit's slot and corrects its window entry to the real token count, when known. */
+  release(key: string, permitId: string, actualTokens: number | null, now: number): Promise<void>;
+  /** Extends a permit's lease (a long call); false when the lease had already ended. */
+  renew(key: string, permitId: string, leaseMs: number, now: number): Promise<boolean>;
+  /** A busy reply: halves the concurrency and holds every call until `now + retryAfterMs`. */
+  penalize(key: string, retryAfterMs: number, limits: LimiterLimits, now: number): Promise<void>;
+  stats(key: string, limits: LimiterLimits, now: number): Promise<LimiterStats>;
+}
+
 /** Per-tenant overrides of the system configuration. */
 export interface TenantConfigPort {
   configFor(ctx: RequestContext): Promise<DeepPartial<SystemConfig>>;
@@ -600,6 +658,11 @@ export interface Platform {
    * in the memory of its own process (`memoryJobStore`), which is right for the browser build.
    */
   jobStore?: JobStorePort;
+  /**
+   * Where the gateway's rate limits are counted (spec 5). Optional: without it each process counts
+   * its own (`memoryLimiterStore`), right for the browser build and one gateway process.
+   */
+  limiterStore?: LimiterStorePort;
   /**
    * Short-lived shared state with expiry. Optional: without it the workflow keeps it in the
    * memory of its own process, which is right for the browser build and one server replica.

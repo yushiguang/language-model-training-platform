@@ -190,7 +190,15 @@ prompt saved with several fields reads its first field as the label.
   on calls in flight, and a first-in first-out queue. A call waits until it fits; it is never sent
   over the limit. Tokens are estimated before the call (text / 4, 800 per image, plus the output
   cap) and corrected with the real usage after. Reasoning tokens count toward TPM. After a 429 the
-  limiter halves its rate and recovers after a quiet window.
+  limiter halves its rate and recovers after a quiet window. The counts live in a
+  `LimiterStorePort` (spec 5): with a shared store every replica of every caller shares one budget
+  per endpoint. A call's slot is leased and renewed while it runs, so a process that dies frees
+  its slots when the lease ends; a waiter's place in the queue expires when it stops asking.
+- **Models.** Chat models come from the registry the platform supplies (`AgentModel.models()`):
+  opaque ids, capabilities, prices, an active flag. Requests may set a reasoning effort (dropped
+  when the model does not list it), a response format, native tools (refused on a model without
+  them) and a timeout per try (a late try is retried as timed out). Reasoning tokens are counted
+  apart and billed at the output price.
 - **Retries.** Busy (429), server and timeout errors are retried after 2, 4, 8 and 16 s. Rejected
   requests (other 4xx) and stops are not retried.
 

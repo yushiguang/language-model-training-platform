@@ -383,6 +383,10 @@ Each item is its own `Contract change:` pull request.
    **Request fields built** on branch `feat/model-request-fields` (additive): `reasoningEffort`,
    `responseFormat`, `timeoutMs` (enforced per try by the gateway), native `tools` with
    `toolCalls`, and `reasoningTokens` in results, cost and TPM.
+   **Shared limiter built** on branch `feat/shared-limiter-store`: `LimiterStorePort` on
+   `Platform` (`limiterStore?`), `memoryLimiterStore` in `@sprint/platform`, the gateway's
+   limiter over it with leased, renewed permits and expiring FIFO tickets; tests run several
+   limiters on one store.
 5. Section 6 fixtures and tool context: golden agent fixtures published as data, `AgentToolCall`
    carrying its context. Proof: the reference implementation passes them; they are the
    acceptance bar for any reimplementation.
