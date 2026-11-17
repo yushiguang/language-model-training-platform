@@ -1,4 +1,4 @@
-import type {AgentProgressPort, AgentToolHost, EventStreamPort, EventTopic, JobExecutor, OptimiserHost, RequestContext, WorkflowContract} from '@sprint/contracts';
+import type {AgentProgressPort, AgentToolHost, EventStreamPort, EventTopic, JobExecutor, OptimiserHost, RequestContext, WorkflowContract} from '@yushiguang/sprint-contracts';
 import {createInstance, systemContext, type Connected, type Scope, type WorkflowDeps} from './services/app.ts';
 import * as agents from './services/agents.ts';
 import * as dataset from './services/dataset.ts';
@@ -14,7 +14,7 @@ import {optimiserHost} from './services/optimiser-host.ts';
 import {workflowExecutors} from './services/executors.ts';
 
 /**
- * The application module (`@sprint/workflow`, deployment readiness spec, 2): everything a channel
+ * The application module (`@yushiguang/sprint-workflow`, deployment readiness spec, 2): everything a channel
  * needs, as `WorkflowContract`, with the caller's `RequestContext` first on every method. Each
  * method takes ids and the caller's input, reads the records itself, and returns plain JSON.
  *

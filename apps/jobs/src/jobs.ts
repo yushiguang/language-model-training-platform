@@ -1,8 +1,8 @@
-import {NO_TELEMETRY, type Job, type JobContext, type JobControl, type JobExecutor, type JobKind, type JobOutcome, type JobProgress, type JobRequest, type JobsContract, type JobStorePort, type RequestContext, type TelemetryPort} from '@sprint/contracts';
-import {newId} from '@sprint/domain';
+import {NO_TELEMETRY, type Job, type JobContext, type JobControl, type JobExecutor, type JobKind, type JobOutcome, type JobProgress, type JobRequest, type JobsContract, type JobStorePort, type RequestContext, type TelemetryPort} from '@yushiguang/sprint-contracts';
+import {newId} from '@yushiguang/sprint-domain';
 
 /**
- * The job module (`@sprint/jobs`, deployment readiness spec, 3): one way to run every piece of
+ * The job module (`@yushiguang/sprint-jobs`, deployment readiness spec, 3): one way to run every piece of
  * background work. It owns the queue (through the injected `JobStorePort`), one runner per job
  * (a lease that a heartbeat extends), recovery of jobs whose runner died (`sweep`), retries,
  * cancellation, and the order jobs are taken in (fair across tenants, in the store). It knows no

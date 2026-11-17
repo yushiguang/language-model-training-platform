@@ -1,6 +1,6 @@
-import {NO_TELEMETRY, type CatalogContract, type CatalogKind, type CatalogRecords, type DocRuntime, type NewPromptVersion, type NewSetupVersion, type PromptVersion, type SetupVersion, type TelemetryPort} from '@sprint/contracts';
-import {nextVersion} from '@sprint/domain';
-import {DocRepo, newId} from '@sprint/platform';
+import {NO_TELEMETRY, type CatalogContract, type CatalogKind, type CatalogRecords, type DocRuntime, type NewPromptVersion, type NewSetupVersion, type PromptVersion, type SetupVersion, type TelemetryPort} from '@yushiguang/sprint-contracts';
+import {nextVersion} from '@yushiguang/sprint-domain';
+import {DocRepo, newId} from '@yushiguang/sprint-platform';
 
 const now = () => new Date().toISOString();
 

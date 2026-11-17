@@ -17,9 +17,9 @@ import {
   type TaskState,
   type TelemetryPort,
   type TryTemplateRow,
-} from '@sprint/contracts';
-import {asAnswerOrNull, hashString, parseOutput, REASON_LINE, renderPrompt, settingsHash, type Part, systemConfig} from '@sprint/domain';
-import {DocRepo, newId} from '@sprint/platform';
+} from '@yushiguang/sprint-contracts';
+import {asAnswerOrNull, hashString, parseOutput, REASON_LINE, renderPrompt, settingsHash, type Part, systemConfig} from '@yushiguang/sprint-domain';
+import {DocRepo, newId} from '@yushiguang/sprint-platform';
 import {browserLocks, type TaskLocks} from './locks.ts';
 
 export interface LabelingDeps {

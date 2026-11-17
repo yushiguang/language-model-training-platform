@@ -1,5 +1,5 @@
-import {NO_TELEMETRY, type TicketPort, type AgentRuntimeContract, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@sprint/contracts';
-import {newId} from '@sprint/domain';
+import {NO_TELEMETRY, type TicketPort, type AgentRuntimeContract, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@yushiguang/sprint-contracts';
+import {newId} from '@yushiguang/sprint-domain';
 
 /**
  * The workflow module's wiring (deployment readiness spec, 2). `createWorkflow` builds one
@@ -33,11 +33,11 @@ export interface WorkflowDeps {
   locks?: WorkLocks;
   /**
    * Short-lived state every instance of the module must see (the live turn, the helper that
-   * answers, problem-report drafts), with TTL expiry. `@sprint/platform` has an in-memory stand-in.
+   * answers, problem-report drafts), with TTL expiry. `@yushiguang/sprint-platform` has an in-memory stand-in.
    */
   sharedState: SharedStatePort;
   /**
-   * Where background work goes (`@sprint/jobs`): scoring, reports, sampling, Optimiser runs and
+   * Where background work goes (`@yushiguang/sprint-jobs`): scoring, reports, sampling, Optimiser runs and
    * project deletion are jobs; the workflow only enqueues and reads them back.
    */
   jobs: JobsContract;
@@ -57,7 +57,7 @@ export interface WorkflowDeps {
 /** Built after the workflow, since they call back into it (`connect`). */
 export interface Connected {
   agents: AgentRuntimeContract;
-  /** The Optimiser service (`@sprint/optimiser`). Without it Auto Optimise is not available. */
+  /** The Optimiser service (`@yushiguang/sprint-optimiser`). Without it Auto Optimise is not available. */
   optimiser?: OptimiserContract;
 }
 

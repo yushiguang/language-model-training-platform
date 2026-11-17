@@ -1,4 +1,4 @@
-import type {TicketPort, TicketSubmission} from '@sprint/contracts';
+import type {TicketPort, TicketSubmission} from '@yushiguang/sprint-contracts';
 
 const KEY = 'sprint-tickets';
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';

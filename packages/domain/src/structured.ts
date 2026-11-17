@@ -1,4 +1,4 @@
-import type {FeatureSelection, LabelKind, LabelSignature, LabelValue, Msg, RuleGroup, Schema, StructuredPrompt} from '@sprint/contracts';
+import type {FeatureSelection, LabelKind, LabelSignature, LabelValue, Msg, RuleGroup, Schema, StructuredPrompt} from '@yushiguang/sprint-contracts';
 import {msg, msgText} from './i18n.ts';
 import {FEATURES, ITEM_ROWS, labelOf} from './catalogue.ts';
 

@@ -1,5 +1,5 @@
-import type {AgentPreset, AgentToolName, Locale} from '@sprint/contracts';
-import {agentName, PRESET_TOOLS, START_TOOLS, translate} from '@sprint/domain';
+import type {AgentPreset, AgentToolName, Locale} from '@yushiguang/sprint-contracts';
+import {agentName, PRESET_TOOLS, START_TOOLS, translate} from '@yushiguang/sprint-domain';
 
 export {agentName};
 
@@ -9,7 +9,7 @@ export {agentName};
  *
  * A preset names its model by registry id (`AgentModel.models()`, supplied by the hosting
  * platform; spec 5). An unknown or inactive id falls back in the gateway to an active reasoning
- * model, so a registry without this id still answers. Limits live in `@sprint/llm-gateway`.
+ * model, so a registry without this id still answers. Limits live in `@yushiguang/sprint-llm-gateway`.
  */
 export interface Preset {
   name: string;
@@ -48,7 +48,7 @@ export const TOOL_SPECS: Record<AgentToolName, {args: string; returns: string}> 
   },
 };
 
-/** Tools that spend money, and which helper may call which tool: in `@sprint/domain` (the tool host enforces them too). */
+/** Tools that spend money, and which helper may call which tool: in `@yushiguang/sprint-domain` (the tool host enforces them too). */
 export {START_TOOLS};
 
 const common = `You are one of the helpers inside Sprint, a website where people tune a labeling prompt for a language model against their own gold labels. The people you help know their business well and are usually not machine-learning experts. They count on you for the technical side, so write in plain words and short sentences. Say "the Optimiser", never "GEPA", and never say "teacher" or "student". Use the pages' own words: the steps are Prompt Design, Eval Dataset, Gold Labels and Prompt Tuning; versions are v1, v2 and so on; models go by the names the pages show. The labeling model and the pass rule live in Project Settings (the Settings button at the top). In Ask AI the helpers are called the Assistant, the Prompt helper and the Scores helper.

@@ -10,14 +10,14 @@ const webDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(webDir, '../..');
 
 /**
- * `@sprint/platform-impl` = what sits behind the platform contracts. Default: the stand-ins.
- * The internal build sets SPRINT_PLATFORM_IMPL to a module (relative to the repo root) that
- * exports the same `createPlatform()` over the real adapters.
+ * `@yushiguang/sprint-platform-impl` = what sits behind the platform contracts. Default: the stand-ins.
+ * A deployment sets SPRINT_PLATFORM_IMPL to a module (relative to the repo root) that exports
+ * the same `createPlatform()` over its real adapters.
  */
 const platformImpl = process.env.SPRINT_PLATFORM_IMPL || 'packages/platform/src/config.ts';
 
 /**
- * `@sprint/client-impl` = the `BffClient` the pages call. Default: the in-process client (every
+ * `@yushiguang/sprint-client-impl` = the `BffClient` the pages call. Default: the in-process client (every
  * service runs in the page). A server deployment sets SPRINT_CLIENT_IMPL to a module (relative to
  * the repo root) that exports `client`, such as an HTTP client; the backend apps are then not
  * bundled into the site.
@@ -41,8 +41,8 @@ export default {
   turbopack: {
     root: repoRoot,
     resolveAlias: {
-      '@sprint/platform-impl': fromWeb(platformImpl),
-      '@sprint/client-impl': fromWeb(clientImpl),
+      '@yushiguang/sprint-platform-impl': fromWeb(platformImpl),
+      '@yushiguang/sprint-client-impl': fromWeb(clientImpl),
     },
   },
 };

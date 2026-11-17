@@ -1,8 +1,8 @@
 'use client';
 
 import {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import {compilePrompt, diffWords, FEATURES, matchRuleGroup, nextRuleGroupId, withReasons, type MarkSeg} from '@sprint/domain';
-import type {FeatureSelection, LabelValue, RuleGroup, Schema, StructuredPrompt} from '@sprint/contracts';
+import {compilePrompt, diffWords, FEATURES, matchRuleGroup, nextRuleGroupId, withReasons, type MarkSeg} from '@yushiguang/sprint-domain';
+import type {FeatureSelection, LabelValue, RuleGroup, Schema, StructuredPrompt} from '@yushiguang/sprint-contracts';
 import {Badge, Button, Card, Cb, Dialog, Empty, Hov, Icon, Seg, useCopy} from '@/ui';
 import {t} from '@/i18n';
 

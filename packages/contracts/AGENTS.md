@@ -1,7 +1,7 @@
-# contracts (`@sprint/contracts`)
+# contracts (`@yushiguang/sprint-contracts`)
 
 Types and every contract between apps and with the hosting platform. No logic (pure rules live in
-`@sprint/domain`).
+`@yushiguang/sprint-domain`).
 
 | File | Contract |
 |---|---|
@@ -15,4 +15,4 @@ Types and every contract between apps and with the hosting platform. No logic (p
 | `errors.ts` | `LlmCallError`, `errorKindOf` |
 
 Rules: imports nothing. Any change here is a contract change: mark it in the PR and follow
-"Asking for a contract change" in `docs/handover/integration.md`.
+"Asking for a contract change" in `docs/integration.md`.

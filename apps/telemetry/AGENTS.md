@@ -1,4 +1,4 @@
-# telemetry (`@sprint/telemetry`)
+# telemetry (`@yushiguang/sprint-telemetry`)
 
 Metrics and product events. Contract: `TelemetryPort` and the catalogues `METRICS` and
 `EventProps` in `packages/contracts/src/telemetry.ts`; the conventions and the rules for

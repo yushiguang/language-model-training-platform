@@ -1,4 +1,4 @@
-import type {FileStore, FileUploadOptions, Identity, TelemetryEvent, TelemetrySink, UploadedFileInfo} from '@sprint/contracts';
+import type {FileStore, FileUploadOptions, Identity, TelemetryEvent, TelemetrySink, UploadedFileInfo} from '@yushiguang/sprint-contracts';
 
 /** Stand-in identity: one built-in user. */
 export function localIdentity(name = 'Evelyn'): Identity {

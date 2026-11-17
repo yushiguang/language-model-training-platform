@@ -3,7 +3,7 @@ import type {RequestContext} from './platform-api.ts';
 /**
  * Contract: background work (deployment readiness spec, 3). Every piece of work that outlives a
  * request (labeling an eval set, building a report, sampling a dataset, an Optimiser run,
- * deleting a project) is a job. The job module (`@sprint/jobs`) owns the queue, one runner per
+ * deleting a project) is a job. The job module (`@yushiguang/sprint-jobs`) owns the queue, one runner per
  * job (a lease with expiry), heartbeats, recovery of expired leases, retries, cancellation and
  * fair scheduling across tenants. It knows no business rule: the work itself is done by an
  * executor that the owning app registers per kind.
@@ -130,7 +130,7 @@ export interface JobsContract {
  * Where jobs are kept: injected into the job module (deployment readiness spec, 3; review P1). It
  * asks for whole operations, each atomic in the store, so several runners in several processes
  * never take the same job: a shared store (Redis with SET NX PX and scripts, or SQL with
- * conditional updates) implements them; `memoryJobStore` in `@sprint/platform` is the stand-in
+ * conditional updates) implements them; `memoryJobStore` in `@yushiguang/sprint-platform` is the stand-in
  * for one process. Times are ISO strings; `now` is passed in so tests control the clock.
  */
 export interface JobStorePort {

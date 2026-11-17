@@ -1,5 +1,5 @@
 import {DEFAULT_SYSTEM_CONFIG, systemConfig} from './config.ts';
-import type {Answer, Metrics, MixUp, Msg, Schema, Thresholds, ValueMetrics} from '@sprint/contracts';
+import type {Answer, Metrics, MixUp, Msg, Schema, Thresholds, ValueMetrics} from '@yushiguang/sprint-contracts';
 import {fill, msg} from './i18n.ts';
 
 export interface Scored {

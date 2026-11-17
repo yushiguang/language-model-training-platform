@@ -2,7 +2,7 @@ import type {LabelingTask} from './labeling-api.ts';
 import type {ChatEvent, ChatLink, EndpointId, EvalReport, MixUp, Msg, OptimisationRun, ProjectState, PromptVersion, StructuredPrompt} from './types.ts';
 
 /**
- * Contract: the Optimiser service (`@sprint/optimiser`, spec 1.0.0 section 7.2). It owns the
+ * Contract: the Optimiser service (`@yushiguang/sprint-optimiser`, spec 1.0.0 section 7.2). It owns the
  * optimisation loop (GEPA; docs/design/optimiser.md) and the `optimisation_runs` records.
  * Plain JSON in and out; ids, never records.
  */

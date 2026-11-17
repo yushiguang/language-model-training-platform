@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, AgentToolRequest, ClientDiagnostics, RequestContext, SharedStatePort, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission} from '@sprint/contracts';
-import {createCatalog} from '@sprint/catalog';
-import {createLabeling, labelingExecutor, memoryLocks} from '@sprint/labeling';
-import {createOptimiser, optimiserExecutor} from '@sprint/optimiser';
-import {DocRepo, localDocRuntime, memoryJobStore, memorySharedState} from '@sprint/platform';
-import {createJobs} from '@sprint/jobs';
+import type {AgentRuntimeContract, AgentToolRequest, ClientDiagnostics, RequestContext, SharedStatePort, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission} from '@yushiguang/sprint-contracts';
+import {createCatalog} from '@yushiguang/sprint-catalog';
+import {createLabeling, labelingExecutor, memoryLocks} from '@yushiguang/sprint-labeling';
+import {createOptimiser, optimiserExecutor} from '@yushiguang/sprint-optimiser';
+import {DocRepo, localDocRuntime, memoryJobStore, memorySharedState} from '@yushiguang/sprint-platform';
+import {createJobs} from '@yushiguang/sprint-jobs';
 import {createInstance, systemContext} from './app.ts';
 import {optimiserHost} from './optimiser-host.ts';
 import {workflowExecutors} from './executors.ts';
@@ -17,7 +17,7 @@ import {beginTurn, endTurn, turnOf} from './turns.ts';
 import {agentToolHost} from './page-views.ts';
 import {agentStart} from './starts.ts';
 import {scoreVersion, tick} from './work.ts';
-import {compilePrompt, DEFAULT_THRESHOLDS, versionLabel} from '@sprint/domain';
+import {compilePrompt, DEFAULT_THRESHOLDS, versionLabel} from '@yushiguang/sprint-domain';
 
 const schema: Schema = {name: 'format', kind: 'single', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]};
 /** Output price only, so every estimate is 150 tokens x $200/M = $0.03 per example. */

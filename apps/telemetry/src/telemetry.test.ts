@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {TelemetryEvent} from '@sprint/contracts';
+import type {TelemetryEvent} from '@yushiguang/sprint-contracts';
 import {createTelemetry} from './telemetry.ts';
 
 const sink = () => {

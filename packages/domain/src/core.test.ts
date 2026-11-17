@@ -4,7 +4,7 @@ import {applyFix, checkTemplate, diffLines, diffWords, renderPrompt, withReasons
 import {pageFromPath} from './pages.ts';
 import {computeMetrics, judge, DEFAULT_THRESHOLDS} from './metrics.ts';
 import {nextVersion, versionLabel} from './versions.ts';
-import type {Schema} from '@sprint/contracts';
+import type {Schema} from '@yushiguang/sprint-contracts';
 
 const sel = {video: ['Description', 'Frame'], photo_text: ['Description', 'Title'], metadata: ['Language']};
 

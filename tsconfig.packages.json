@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": ".",
+    "outDir": "build/tsc",
+    "lib": ["es2023", "dom"],
+    "jsx": "preserve"
+  },
+  "include": [
+    "packages/contracts/src/**/*.ts",
+    "packages/domain/src/**/*.ts",
+    "packages/platform/src/**/*.ts",
+    "apps/llm-gateway/src/**/*.ts",
+    "apps/catalog/src/**/*.ts",
+    "apps/labeling/src/**/*.ts",
+    "apps/optimiser/src/**/*.ts",
+    "apps/jobs/src/**/*.ts",
+    "apps/workflow/src/**/*.ts",
+    "apps/bff/src/**/*.ts",
+    "apps/telemetry/src/**/*.ts"
+  ],
+  "exclude": ["**/*.test.ts", "packages/domain/src/locales/used-keys.ts"]
+}

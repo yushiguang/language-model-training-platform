@@ -1,5 +1,5 @@
-import type {EndpointId, Job, JobOutcome, JobRequest, ProjectState, PromptVersion, StartedRuns} from '@sprint/contracts';
-import {autoSpendUsd, dueStarts, settingsHash, versionLabel, type DueStart, systemConfig, msg} from '@sprint/domain';
+import type {EndpointId, Job, JobOutcome, JobRequest, ProjectState, PromptVersion, StartedRuns} from '@yushiguang/sprint-contracts';
+import {autoSpendUsd, dueStarts, settingsHash, versionLabel, type DueStart, systemConfig, msg} from '@yushiguang/sprint-domain';
 import type {Scope} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {buildReport, findTask, settingsFor} from './evaluation.ts';
@@ -212,5 +212,5 @@ function optimiserService(w: Scope) {
   return optimiser;
 }
 
-/** The lock an optimiser run on one model holds for as long as it runs, in any tab (the name `@sprint/optimiser` uses). */
+/** The lock an optimiser run on one model holds for as long as it runs, in any tab (the name `@yushiguang/sprint-optimiser` uses). */
 const optimiserLock = (projectId: string, endpoint: string) => `optimiser:${projectId}:${endpoint}`;

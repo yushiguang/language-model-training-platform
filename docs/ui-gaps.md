@@ -132,7 +132,7 @@ Known limits of the language switch:
 | --- | --- |
 | Automatic paid starts | Decided 2026-11-06: every task starts by itself, with no cost limit and no Approve card. The user stops a costly task with its Stop button |
 | Choosing which models to use | One labeling model per project, chosen in Project Settings (decided 2026-11-09). Comparing models comes later |
-| Reading document links | The helpers read a linked document with the `read_doc` tool. The public build's stand-in opens nothing, so the helper asks for the pasted text; the internal agent connects the real document service (docs/handover/integration.md) |
+| Reading document links | The helpers read a linked document with the `read_doc` tool. The public build's stand-in opens nothing, so the helper asks for the pasted text; a deployment connects the real document service (docs/integration.md) |
 | Agent replies | The helpers read model names and version labels the way the pages show them. The page views hold no cost or time, and the helpers' rules say never to mention either (MVP review finding 16) |
 | Gold Labels, a version with no answer for an example | The Model answer card says "No answer from this version for this example" (not drawn) |
 | Gold Labels, no mismatches left | The Mismatches tab shows "No mismatches left" with the usual empty-state look (not drawn) |

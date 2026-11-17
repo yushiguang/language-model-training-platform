@@ -1,5 +1,5 @@
-import type {EndpointId, EvalReport, Example, GoldLabel, LabelingTask, ModelSettings, Prediction, PromptVersion, SetupVersion, TaskPurpose} from '@sprint/contracts';
-import {asAnswer, toMap, computeMetrics, judge, newId, settingsHash, versionLabel, type Scored, msg} from '@sprint/domain';
+import type {EndpointId, EvalReport, Example, GoldLabel, LabelingTask, ModelSettings, Prediction, PromptVersion, SetupVersion, TaskPurpose} from '@yushiguang/sprint-contracts';
+import {asAnswer, toMap, computeMetrics, judge, newId, settingsHash, versionLabel, type Scored, msg} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {postEvent} from './chat-events.ts';
 

@@ -1,7 +1,7 @@
 'use client';
 
 import {useEffect, useState} from 'react';
-import type {AgentProposal} from '@sprint/contracts';
+import type {AgentProposal} from '@yushiguang/sprint-contracts';
 import {closeProposal, openProposals, subscribeChanges, type ProjectState} from '@/backend-api';
 
 /** The Prompt helper's open draft for this project, if any (the newest); it updates as drafts come and go. */

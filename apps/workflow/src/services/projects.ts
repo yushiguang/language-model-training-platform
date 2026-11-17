@@ -1,5 +1,5 @@
-import {DocFieldValue, type GateApproval, type Job, type JobOutcome, type LabelComment, type NodeId, type Project, type ProjectState, type ProjectStatus, type WorkflowFacts} from '@sprint/contracts';
-import {asAnswerOrNull, compareVersions, contextIdFor, gate, judge, newId, scoresUpdating, systemConfig} from '@sprint/domain';
+import {DocFieldValue, type GateApproval, type Job, type JobOutcome, type LabelComment, type NodeId, type Project, type ProjectState, type ProjectStatus, type WorkflowFacts} from '@yushiguang/sprint-contracts';
+import {asAnswerOrNull, compareVersions, contextIdFor, gate, judge, newId, scoresUpdating, systemConfig} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {getSamplingTask} from './dataset.ts';
 import {latestGold} from './evaluation.ts';

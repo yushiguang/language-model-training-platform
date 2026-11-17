@@ -1,4 +1,4 @@
-import type {ExampleType, FeatureGroup} from '@sprint/contracts';
+import type {ExampleType, FeatureGroup} from '@yushiguang/sprint-contracts';
 
 /**
  * The feature catalogue is fixed in code (tech doc §2). Video and photo&text share a

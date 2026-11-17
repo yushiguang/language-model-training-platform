@@ -1,4 +1,4 @@
-# bff (`@sprint/bff`)
+# bff (`@yushiguang/sprint-bff`)
 
 What pages call (`BffContract` in `packages/contracts/src/bff-api.ts`). A thin channel adapter
 (deployment readiness spec, 2): it holds no records and makes no business decision.
@@ -14,7 +14,7 @@ What pages call (`BffContract` in `packages/contracts/src/bff-api.ts`). A thin c
 - Tests: `api.test.ts` (a real workflow behind the loopback, over the stand-in store).
 
 Test for where logic goes: if a CLI or a tool channel would need it, it belongs in
-`@sprint/workflow`; if only the web pages need it, it stays here.
+`@yushiguang/sprint-workflow`; if only the web pages need it, it stays here.
 
 Rules: imports contracts and domain only; the workflow and identity arrive through
 `createBffApi`. Its tests may import platform, workflow, catalog and labeling.

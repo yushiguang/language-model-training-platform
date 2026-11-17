@@ -1,6 +1,6 @@
-import type {AgentRuntimeContract, Answer, CatalogContract, EndpointId, Example, ExampleBrief, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@sprint/contracts';
-import {NO_TELEMETRY} from '@sprint/contracts';
-import {checkStructured, msg, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withComments, wrongExamples, type PoolEntry} from '@sprint/domain';
+import type {AgentRuntimeContract, Answer, CatalogContract, EndpointId, Example, ExampleBrief, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@yushiguang/sprint-contracts';
+import {NO_TELEMETRY} from '@yushiguang/sprint-contracts';
+import {checkStructured, msg, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withComments, wrongExamples, type PoolEntry} from '@yushiguang/sprint-domain';
 
 /**
  * The Optimiser (GEPA, ported to TypeScript; docs/design/optimiser.md). Runs from

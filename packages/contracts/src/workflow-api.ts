@@ -2,7 +2,7 @@ import type {BffContract, RuntimeInfo} from './bff-api.ts';
 import type {RequestContext} from './platform-api.ts';
 
 /**
- * Contract 6: the application module (`@sprint/workflow`, deployment readiness spec, 2).
+ * Contract 6: the application module (`@yushiguang/sprint-workflow`, deployment readiness spec, 2).
  *
  * Everything a channel (the web pages' bff today; a CLI or a tool channel later) needs, with the
  * caller's `RequestContext` as the first argument of every method, so a server is multi-user from

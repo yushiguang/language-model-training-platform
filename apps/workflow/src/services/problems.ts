@@ -1,5 +1,5 @@
-import type {AgentPreset, TicketSubmission} from '@sprint/contracts';
-import {agentName, msg, systemConfig, versionLabel} from '@sprint/domain';
+import type {AgentPreset, TicketSubmission} from '@yushiguang/sprint-contracts';
+import {agentName, msg, systemConfig, versionLabel} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {loadProjectState} from './projects.ts';

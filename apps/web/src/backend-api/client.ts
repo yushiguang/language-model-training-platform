@@ -1,4 +1,4 @@
-import type {AgentLive, BffContract, ChatAttachment, DatasetUploadResult, EventName, EventProps, GoldUploadResult} from '@sprint/contracts';
+import type {AgentLive, BffContract, ChatAttachment, DatasetUploadResult, EventName, EventProps, GoldUploadResult} from '@yushiguang/sprint-contracts';
 
 /**
  * What the pages call (spec 1.0.0, section 7.3): the bff's contract, plus the few things that only
@@ -13,7 +13,7 @@ import type {AgentLive, BffContract, ChatAttachment, DatasetUploadResult, EventN
  *
  * `in-process.ts` is the default client (every service runs in the page). A server deployment
  * builds with SPRINT_CLIENT_IMPL naming its own module (an HTTP client) that exports `client` with
- * this same interface; `index.ts` takes it through `@sprint/client-impl`. No page changes, and no
+ * this same interface; `index.ts` takes it through `@yushiguang/sprint-client-impl`. No page changes, and no
  * backend app is bundled into the browser.
  */
 export interface BffClient extends BffContract {

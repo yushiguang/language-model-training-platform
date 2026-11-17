@@ -1,4 +1,4 @@
-import type {AgentRuntimeContract, AgentRuntimeDeps, RequestContext} from '@sprint/contracts';
+import type {AgentRuntimeContract, AgentRuntimeDeps, RequestContext} from '@yushiguang/sprint-contracts';
 import {draftImprovement, reflectPrompt, runAgentTurn, type ToolCaller} from './runtime.ts';
 
 export * from './presets.ts';

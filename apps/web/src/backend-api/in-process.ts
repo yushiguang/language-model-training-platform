@@ -1,24 +1,24 @@
-import type {AgentLive, BffContract, ChatAttachment, GoldLine} from '@sprint/contracts';
-import {configureSystem, systemConfig} from '@sprint/domain';
-import {createCatalog} from '@sprint/catalog';
-import {createTelemetry} from '@sprint/telemetry';
-import {createGateway} from '@sprint/llm-gateway';
-import {browserLocks, createLabeling, labelingExecutor} from '@sprint/labeling';
-import {createAgentRuntime} from '@sprint/agents';
-import {createPlatform} from '@sprint/platform-impl';
-import {loopback, memoryJobStore, memoryLimiterStore, memorySharedState} from '@sprint/platform';
-import {createJobs} from '@sprint/jobs';
-import {createOptimiser, optimiserExecutor} from '@sprint/optimiser';
-import {createWorkflow} from '@sprint/workflow';
-import {createBffApi} from '@sprint/bff';
+import type {AgentLive, BffContract, ChatAttachment, GoldLine} from '@yushiguang/sprint-contracts';
+import {configureSystem, systemConfig} from '@yushiguang/sprint-domain';
+import {createCatalog} from '@yushiguang/sprint-catalog';
+import {createTelemetry} from '@yushiguang/sprint-telemetry';
+import {createGateway} from '@yushiguang/sprint-llm-gateway';
+import {browserLocks, createLabeling, labelingExecutor} from '@yushiguang/sprint-labeling';
+import {createAgentRuntime} from '@yushiguang/sprint-agents';
+import {createPlatform} from '@yushiguang/sprint-platform-impl';
+import {loopback, memoryJobStore, memoryLimiterStore, memorySharedState} from '@yushiguang/sprint-platform';
+import {createJobs} from '@yushiguang/sprint-jobs';
+import {createOptimiser, optimiserExecutor} from '@yushiguang/sprint-optimiser';
+import {createWorkflow} from '@yushiguang/sprint-workflow';
+import {createBffApi} from '@yushiguang/sprint-bff';
 import type {BffClient} from './client';
 import {webTelemetry} from './web-telemetry';
 import {callFailed, callId, pageOpened, snapshot} from './diagnostics';
 
 /**
  * Composition root. The only place that knows which implementation sits behind each contract:
- * `@sprint/platform-impl` is the stand-ins by default and the internal adapters when the build sets
- * SPRINT_PLATFORM_IMPL (see docs/handover/integration.md).
+ * `@yushiguang/sprint-platform-impl` is the stand-ins by default and a deployment's adapters when the build sets
+ * SPRINT_PLATFORM_IMPL (see docs/integration.md).
  */
 const platform = createPlatform();
 const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? '0.1.0';
@@ -202,9 +202,9 @@ async function uploadAsset(file: File): Promise<{url: string}> {
 }
 
 /**
- * The in-process client: every service runs in this page, on `@sprint/platform-impl` (the stand-ins
+ * The in-process client: every service runs in this page, on `@yushiguang/sprint-platform-impl` (the stand-ins
  * by default). The whole product can be accepted in a local browser this way. It is the default
- * module behind `@sprint/client-impl`; any other client module exports `client` the same way.
+ * module behind `@yushiguang/sprint-client-impl`; any other client module exports `client` the same way.
  */
 export const client: BffClient = {
   ...timedApi,

@@ -1,4 +1,4 @@
-import type {OptimiserHost, ProjectState, PromptVersion} from '@sprint/contracts';
+import type {OptimiserHost, ProjectState, PromptVersion} from '@yushiguang/sprint-contracts';
 import type {Scope} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {buildReport, confirmScore, labelEvalSet, labelExamples, scoreOnOptimiserHalf} from './evaluation.ts';

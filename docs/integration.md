@@ -1,35 +1,59 @@
-# Handover: connecting the hosting platform
+# Integrating Sprint
 
-This repo is public and runs end to end on stand-ins. The internal build swaps the stand-ins for
-adapters over the hosting platform's runtimes, without changing any file in this repo. This guide
-says who changes what, where the swap happens, what each adapter must do, and how to ask for a
-contract change.
+Sprint runs end to end on stand-ins in this repository. To run it on your own platform, you
+provide adapters for the platform ports in `packages/contracts/src/platform-api.ts` and compose
+the modules, either in a server of your own (with the npm packages below) or in the static site
+(with the build switches). Nothing in this repository needs to change; if something does, ask in
+an issue (`CONTRIBUTING.md`).
 
-Keep this repo free of internal product names, internal URLs, package scopes, keys and tokens.
+## The npm packages
 
-## Who changes what
+Every module except the agent runtime and the web site is published to GitHub Packages, all at one
+version, by the `Release packages` workflow:
 
-| | External agents (this repo) | Internal agent (overlay outside this repo) |
-|---|---|---|
-| Apps, packages, pages, tests | yes | through a pull request here, like anyone |
-| Contracts (`packages/contracts`) | yes, as a marked contract change | requests changes (below) |
-| Stand-ins (`packages/platform/src/standins`) | yes | no |
-| Adapters over the platform runtimes | no | yes |
-| Registered endpoints with real QPM/TPM | no (only assumed defaults) | yes |
-| Build settings, deployment | documents them | yes |
+| Package | What it is |
+|---|---|
+| `@yushiguang/sprint-contracts` | Types and every service and platform contract |
+| `@yushiguang/sprint-domain` | Pure rules |
+| `@yushiguang/sprint-platform` | Stand-ins, `DocRepo`, `loopback` |
+| `@yushiguang/sprint-llm-gateway` | `createGateway` |
+| `@yushiguang/sprint-catalog` | `createCatalog` |
+| `@yushiguang/sprint-labeling` | `createLabeling`, `labelingExecutor`, locks |
+| `@yushiguang/sprint-optimiser` | `createOptimiser`, `optimiserExecutor` |
+| `@yushiguang/sprint-jobs` | `createJobs` |
+| `@yushiguang/sprint-workflow` | `createWorkflow`, `systemContext` |
+| `@yushiguang/sprint-bff` | `createBffApi` |
+| `@yushiguang/sprint-telemetry` | `createTelemetry` |
 
-## Where the swap happens: `@sprint/platform-impl`
+Each package is compiled JavaScript (ES modules) with type declarations, and depends on the exact
+same version of the others it uses. To install, point the scope at GitHub Packages with a token
+that can read packages (GitHub asks for one even for public packages), in your project's `.npmrc`:
 
-Only the composition root (`apps/web/src/backend-api/in-process.ts`) imports `@sprint/platform-impl`,
+```
+@yushiguang:registry=https://npm.pkg.github.com
+//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}
+```
+
+The agent runtime is not published: implement `AgentRuntimeContract`
+(`packages/contracts/src/agent-api.ts`) in any language, and hold it to the golden fixtures in
+`apps/agents/fixtures/` (format in their README). `@yushiguang/sprint-agents` in this repository
+is the reference implementation.
+
+A version's contract changes are listed in its pull requests (titles start with `Contract change:`).
+Before 1.0.0 of the packages, a minor version may break a contract.
+
+## Where the swap happens: `@yushiguang/sprint-platform-impl`
+
+Only the composition root (`apps/web/src/backend-api/in-process.ts`) imports `@yushiguang/sprint-platform-impl`,
 and only its `createPlatform(): Platform`. It resolves to:
 
 - the stand-ins, `packages/platform/src/config.ts`, by default (`tsconfig.base.json` paths and
   `apps/web/next.config.mjs`);
-- the internal module when the build sets `SPRINT_PLATFORM_IMPL` to its path, relative to the repo
-  root, for example `SPRINT_PLATFORM_IMPL=internal/platform.ts npm run build`. `/internal/` is
-  ignored by git, so the overlay can sit there.
+- your module when the build sets `SPRINT_PLATFORM_IMPL` to its path, relative to the repo root,
+  for example `SPRINT_PLATFORM_IMPL=local/platform.ts npm run build`. `/local/` is ignored by
+  git, so your modules can sit there in a checkout.
 
-The internal module exports `createPlatform()` returning the `Platform` object from
+Your module exports `createPlatform()` returning the `Platform` object from
 `packages/contracts/src/platform-api.ts`:
 
 | Field | What it must do | Stand-in |
@@ -42,21 +66,21 @@ The internal module exports `createPlatform()` returning the `Platform` object f
 | `examples: ExampleSource` | The prepared examples file (50 to 100 examples with features) and id lookup | `sampleExamples` |
 | `media?: MediaSource` | The player page and still images of one example by item id, for people to look at on Gold Labels (see "Media") | `sampleMedia` (made-up pictures, no player) |
 | `endpoints?: EndpointConfig[]` | Registered endpoints with real limits (next section) | not set: assumed limits |
-| `telemetry?: TelemetrySink` | Takes product events (`pushEvents`, batches of `TelemetryEvent`) and metrics as Prometheus text (`pushMetrics`) and forwards them to the company's telemetry system. Must not throw; slow is fine (the app buffers) | `localTelemetrySink` (`localStorage`); not set: kept in memory only |
+| `telemetry?: TelemetrySink` | Takes product events (`pushEvents`, batches of `TelemetryEvent`) and metrics as Prometheus text (`pushMetrics`) and forwards them to your telemetry system. Must not throw; slow is fine (the app buffers) | `localTelemetrySink` (`localStorage`); not set: kept in memory only |
 | `tickets?: TicketPort` | Files a problem report and returns its ticket id (see "Problem reports") | `localTickets` (`localStorage`, `sprint-tickets`); not set: helpers say reports cannot be sent |
 | `sharedState?: SharedStatePort` | Short-lived keys every server instance must see, with a TTL (`get`, `set(key, value, ttlMs)`, `delete`; values are plain JSON): the live Ask AI turn, the helper that keeps answering on a page, the running turn's caller and page, problem-report drafts. A shared store such as Redis in a server deployment | `memorySharedState` (a map in the page); not set: the composition root uses the same |
 | `limiterStore?: LimiterStorePort` | The gateway's rate-limit counts for every endpoint (`platform-api.ts`, spec 5), as whole atomic operations per endpoint: try to acquire (sliding QPM/TPM window, calls in flight, one FIFO queue of expiring tickets, hold after a busy reply), release, renew a permit's lease, leave the queue, penalize, stats. A Redis script per operation on one key per endpoint; prefer the store's own clock over the caller's `now` | `memoryLimiterStore` (memory of one process); not set: the composition root uses the same |
 | `jobStore?: JobStorePort` | Where background jobs are kept (`packages/contracts/src/jobs-api.ts`), as whole atomic operations so several runners never take the same job: enqueue once per idempotency key among queued and running jobs, claim the next job with a lease (fair across tenants), heartbeat, finish, requeue, cancel, and recover expired leases. Redis (SET NX PX and a script per operation) or SQL with conditional updates | `memoryJobStore` (memory of one process); not set: the composition root uses the same |
 | `standIns: string[]` | Names shown in the header while any stand-in is in use; empty in production | all |
 
-## The page client: `@sprint/client-impl`
+## The page client: `@yushiguang/sprint-client-impl`
 
 The pages call one `BffClient` (`apps/web/src/backend-api/client.ts`). `index.ts` takes it from
-`@sprint/client-impl`, the second build-time switch next to `@sprint/platform-impl`:
+`@yushiguang/sprint-client-impl`, the second build-time switch next to `@yushiguang/sprint-platform-impl`:
 
 - by default it is `apps/web/src/backend-api/in-process.ts`, where every service runs in the page;
 - a server deployment sets `SPRINT_CLIENT_IMPL` to its own module, relative to the repo root (for
-  example `SPRINT_CLIENT_IMPL=internal/http-client.ts npm run build`). The module exports
+  example `SPRINT_CLIENT_IMPL=local/http-client.ts npm run build`). The module exports
   `client: BffClient`, usually an HTTP client of the server's bff. The in-process module is then
   never imported, so no backend app is bundled into the static site.
 
@@ -66,12 +90,12 @@ imports the in-process client directly instead of through the alias.
 ## Building the server's own composition
 
 Each module's factory is its package's entry point (`exports` `"."`), so a server composition
-imports it and wraps it without reaching into `src/` paths: `createGateway` (`@sprint/llm-gateway`),
-`createCatalog` (`@sprint/catalog`), `createLabeling` with `memoryLocks` and `browserLocks`
-(`@sprint/labeling`), `createAgentRuntime` (`@sprint/agents`), `createOptimiser`
-(`@sprint/optimiser`), `createWorkflow` and `systemContext` (`@sprint/workflow`), `createBffApi`
-(`@sprint/bff`), `createTelemetry` (`@sprint/telemetry`), and the stand-ins plus `loopback`
-(`@sprint/platform`). `in-process.ts` is the worked example of wiring them.
+imports it and wraps it without reaching into `src/` paths: `createGateway` (`@yushiguang/sprint-llm-gateway`),
+`createCatalog` (`@yushiguang/sprint-catalog`), `createLabeling` with `memoryLocks` and `browserLocks`
+(`@yushiguang/sprint-labeling`), `createAgentRuntime` (`@yushiguang/sprint-agents`), `createOptimiser`
+(`@yushiguang/sprint-optimiser`), `createWorkflow` and `systemContext` (`@yushiguang/sprint-workflow`), `createBffApi`
+(`@yushiguang/sprint-bff`), `createTelemetry` (`@yushiguang/sprint-telemetry`), and the stand-ins plus `loopback`
+(`@yushiguang/sprint-platform`). `in-process.ts` is the worked example of wiring them.
 
 `createLabeling`'s `resolveUrl` turns a stored image URL into one the model can fetch. It may
 return a Promise, so a server can sign a URL per call; every image of a prompt is resolved at once
@@ -110,7 +134,7 @@ examples never go in this repo.
 Since 1.0.0 each feature on a `RawExample` is a `FeatureValue` (`packages/contracts/src/types.ts`):
 `{text}` for text features and `{items}` for lists such as image URLs, never a plain string. An
 `ExampleSource` adapter that still returns plain strings can wrap them with `toFeatures` from
-`@sprint/domain`; prompts read features only through `featureText` and `featureItems`.
+`@yushiguang/sprint-domain`; prompts read features only through `featureText` and `featureItems`.
 
 Since 2026-11-16 a project has one label, single or multi select (`Schema {name, kind, min?, max?,
 values}`, a value may be `exclusive`), and an answer is a list of its values in label order
@@ -125,7 +149,7 @@ projects made before this change start fresh (they were test data).
 `MediaSource` (`packages/contracts/src/platform-api.ts`) feeds the player and still images on
 Gold Labels. Playback is an embedded player page, never a direct video file:
 
-1. Implement `media(externalId, type)` in the internal module: return an `ExampleMedia` with a
+1. Implement `media(externalId, type)` in your platform module: return an `ExampleMedia` with a
    `playerUrl` the Gold Labels page loads in an iframe (the item's official embed player, or a
    fallback viewer when the item is no longer publicly playable — the adapter may probe
    availability first), a `coverUrl`, still `imageUrls` (key frames, or a photo-and-text post's
@@ -148,7 +172,7 @@ template, and the URLs there must be reachable by the models (see "Endpoints and
 Optimiser and the Prompt helper read it with the `read_feature_info` tool before they tick or
 untick a feature, and the prompt editor shows it on hover over a feature name.
 
-1. Implement `describe(keys)` in the internal module: for each feature key (the placeholder name,
+1. Implement `describe(keys)` in your platform module: for each feature key (the placeholder name,
    for example `OCR_Text`) return a `FeatureInfo` with a one-line `description` of what the
    feature holds, and optionally `goodFor` (when it helps labeling) and `caveats` (often empty,
    cut, noisy, costly as an image). Leave out keys with no description.
@@ -164,7 +188,7 @@ the workflow passes it to `Platform.documents` with the request context of the A
 (`ctx.user` is the person the helper answers) and cuts the text at 20,000 characters. The stand-in
 (`packages/platform/src/standins/documents.ts`) opens nothing, and the helper asks for the text.
 
-1. Implement `read(ctx, url)` in the internal module: for a link to the internal document
+1. Implement `read(ctx, url)` in your platform module: for a link to your document
    service, return a `LinkedDocument` with its `title` and its `text` (plain text or Markdown;
    tables as text), read as `ctx.user` (never as a service account) so a person never sees a
    document they can't open. Return
@@ -189,8 +213,8 @@ has written again, so a report never goes without a yes. The workflow then build
 - `content`: the compiled prompt of the version in question, only when the user agreed; never
   examples or gold labels.
 
-1. Implement `submit(ticket)` in the internal module: file the ticket wherever developers or the
-   developer agent pick work up, and return `{ticketId}` (any short string the user can quote).
+1. Implement `submit(ticket)` in your platform module: file the ticket wherever developers pick
+   work up, and return `{ticketId}` (any short string the user can quote).
 2. Set `tickets` on the `Platform` object and drop `'problem reports'` from `standIns`.
 3. Once the bff runs behind HTTP, send each call's id (`callId()` in
    `apps/web/src/backend-api/diagnostics.ts`) as the `X-Request-Id` header and log it on the
@@ -207,14 +231,14 @@ lacks).
 
 ## Asking for a contract change
 
-A contract is any type or interface in `packages/contracts`. Changing one can break the internal
+A contract is any type or interface in `packages/contracts`. Changing one can break a deployment's
 adapters, so:
 
-1. Open an issue or pull request titled `Contract change: <what>`, saying which interface changes,
-   why, and whether the change is additive (new optional field or method) or breaking.
-2. Additive changes can merge once the stand-ins and tests are updated.
-3. Breaking changes merge after the internal agent confirms the adapters are ready; the PR lists
-   what the adapters must do.
+1. Open an issue titled `Contract change: <what>`, saying which interface changes, why, and
+   whether the change is additive (new optional field or method) or breaking.
+2. Additive changes merge once the stand-ins and tests are updated.
+3. A breaking change says in its pull request what every adapter must do, and merges when the
+   maintainers agree; it ships in the next released version.
 
 ## Moving a service behind HTTP later
 
@@ -227,7 +251,7 @@ takes the caller's `RequestContext` first on every method, and one call crosses 
 `{error: {code, message}}`). In the browser the bff already calls it through `loopback`
 (`packages/platform/src/standins/loopback.ts`), which puts every call through JSON the same way,
 so a server only has to carry those envelopes. The browser then calls the server through the
-module behind `@sprint/client-impl` (above). Give the server's workflow a shared
+module behind `@yushiguang/sprint-client-impl` (above). Give the server's workflow a shared
 `Platform.sharedState`, so every instance sees the same live turn and drafts.
 
 Background work is jobs (`docs/architecture.md`, "Background work is jobs"). A server deployment:
@@ -245,8 +269,11 @@ calls `loadProjectState` again only when its `revision` is not the one it holds,
 `changes` event where the server streams it. Revisions live in `Platform.sharedState`, so it must
 be shared by every bff and worker unit.
 
-Until the agent service (spec 6) lands, an Ask AI turn's progress stays with the instance that
-started it. See "Known limits" in `docs/architecture.md`.
+An Ask AI turn runs in the instance that accepted it; its record and live progress are in
+`Platform.sharedState` (`turn:{turnId}`, `live:{projectId}`), so any instance can serve the page's
+reads and the turn's tool calls. A remote agent runtime calls the workflow's tool host
+(`Workflow.toolHost`) with each call's project, turn and caller, and publishes progress to
+`Workflow.agentProgress`.
 
 ## Verify
 

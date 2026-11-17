@@ -3,9 +3,9 @@
 import Link from 'next/link';
 import {useGo} from '@/components/nav';
 import {useEffect, useState} from 'react';
-import type {Project} from '@sprint/contracts';
+import type {Project} from '@yushiguang/sprint-contracts';
 import {hrefFor} from '@/components/ProjectContext';
-import {NODES} from '@sprint/domain';
+import {NODES} from '@yushiguang/sprint-domain';
 import {UserEnd} from '@/components/Shell';
 import {SignedIn} from '@/components/session';
 import {createProject, deleteProject, listProjects} from '@/backend-api';

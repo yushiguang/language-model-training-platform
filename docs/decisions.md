@@ -143,7 +143,7 @@ where it matters, why. The code follows these; change a line here when a decisio
   right. Every decision is recorded.
 - **Gold Labels picks the version to compare with.** Default: the best scored version.
 - **Document links.** The helpers read linked documents through a document interface; the
-  internal build connects the real document service.
+  deployment connects the real document service.
 - **Merging.** The stacked pull requests are merged in order.
 
 ## 2026-11-09

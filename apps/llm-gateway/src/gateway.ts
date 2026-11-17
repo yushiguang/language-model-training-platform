@@ -15,8 +15,8 @@ import {
   type Platform,
   NO_TELEMETRY,
   type TelemetryPort,
-} from '@sprint/contracts';
-import {estimateTokens, systemConfig} from '@sprint/domain';
+} from '@yushiguang/sprint-contracts';
+import {estimateTokens, systemConfig} from '@yushiguang/sprint-domain';
 import {EndpointLimiter} from './limiter.ts';
 import {buildRegistry} from './registry.ts';
 
@@ -30,7 +30,7 @@ export interface GatewayOptions {
   defaultChatOutputTokens?: number;
   /**
    * Where the limits are counted: shared by every replica in a server deployment
-   * (`Platform.limiterStore`), or `memoryLimiterStore()` from `@sprint/platform` for one process.
+   * (`Platform.limiterStore`), or `memoryLimiterStore()` from `@yushiguang/sprint-platform` for one process.
    * Left out here, the platform's is used.
    */
   limiterStore?: LimiterStorePort;

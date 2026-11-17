@@ -1,6 +1,6 @@
 # Agent Runtime Service Guide (`apps/agents`)
 
-`apps/agents` (`@sprint/agents`) is the standalone Agent Runtime service for Sprint, the training set platform.
+`apps/agents` (`@yushiguang/sprint-agents`) is the standalone Agent Runtime service for Sprint, the training set platform.
 It is owned and evolved by coding agents working in the public repository, and will later be
 deployed as a dedicated microservice (or ported to Go alongside the BFF).
 
@@ -8,7 +8,7 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
 
 1. **Multi-agent orchestration (`src/runtime.ts`)**:
    - `createAgentRuntime({llm, tools, progress})` (`src/index.ts`) is the `AgentRuntimeContract`
-     in `@sprint/contracts/agent-api`. Each request carries the caller's `ctx`; every tool call
+     in `@yushiguang/sprint-contracts/agent-api`. Each request carries the caller's `ctx`; every tool call
      goes to the one injected `AgentToolHost` with `projectId`, `turnId` and `ctx`
      (`AgentToolCall`). A turn's progress events go to the `AgentProgressPort` one at a time, in
      order, and the turn answers after the last one landed. Inside, `runAgentTurn`,
@@ -24,7 +24,7 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
      an answer `{"tool": {"name", "args"}}`; the runtime runs it through `tools.call(...)` and
      sends `{"tool_result": {...}}` back as the next user message. At most `MAX_TOOL_CALLS` (4)
      calls per turn; a tool not on the preset's list is refused here and again by the host
-     (`PRESET_TOOLS` and `mayCallTool` in `@sprint/domain`); results are cut at 12,000
+     (`PRESET_TOOLS` and `mayCallTool` in `@yushiguang/sprint-domain`); results are cut at 12,000
      characters. Changes are still proposals in the answer.
    - **Start tools** (`START_TOOLS`: `try_prompt`, `score_version`, `start_optimiser`) spend
      money and are marked PAID in the prompt. The host runs them at once (no cost limit, no
@@ -38,11 +38,11 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
    - `optimiser`: Proposes targeted single-rule improvements during the GEPA-style optimiser loop.
 3. **Validation**: a handoff goes only to a known specialist with a known intent; anything else
    is ignored and the front desk answers itself. A returned prompt is read with `readStructured`; Improve with AI and the
-   Optimiser are held to wording-only changes with `rewordOnly` (both from `@sprint/domain`).
+   Optimiser are held to wording-only changes with `rewordOnly` (both from `@yushiguang/sprint-domain`).
 
 ## Strict Boundary Rules
 
-- **Stateless and storage-free**: imports `@sprint/contracts` and `@sprint/domain` only (the boundary check enforces it). All project
+- **Stateless and storage-free**: imports `@yushiguang/sprint-contracts` and `@yushiguang/sprint-domain` only (the boundary check enforces it). All project
   state (`task`, `schema`, `history`, `attachedExamples`, `pageView`) arrives via
   `AgentTurnInput.workspace`, anything more comes through the read tools the bff lends, and all
   side effects (messages to append, proposals to save) are returned in `AgentTurnOutput` for the
@@ -57,7 +57,7 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
   readiness spec 5): each entry has an opaque id, a name, a tier, capabilities (vision, tools,
   reasoning effort levels, context length, temperature), prices and an active flag. A preset
   names its model by registry id; an unknown or inactive id falls back in the gateway to an
-  active reasoning model. The stand-in registry (`STAND_IN_MODELS` in `@sprint/platform`) lists
+  active reasoning model. The stand-in registry (`STAND_IN_MODELS` in `@yushiguang/sprint-platform`) lists
   `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.4` and the inactive `gpt-5.5`.
   Every preset uses `'gpt-5.6-terra'` (decided 2026-11-04: chat needs the smartest model).
   Change a preset's model in `src/presets.ts` only with the product owner's agreement.

@@ -1,4 +1,4 @@
-import type {RpcResponse} from '@sprint/contracts';
+import type {RpcResponse} from '@yushiguang/sprint-contracts';
 
 /**
  * A service contract as it would be served behind RPC, in this process (deployment readiness

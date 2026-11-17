@@ -1,5 +1,5 @@
-import type {EventName, EventProps, TelemetryPort} from '@sprint/contracts';
-import {pageFromPath} from '@sprint/domain';
+import type {EventName, EventProps, TelemetryPort} from '@yushiguang/sprint-contracts';
+import {pageFromPath} from '@yushiguang/sprint-domain';
 
 /**
  * Browser-side telemetry: page views, page load and interaction times, script errors and failed

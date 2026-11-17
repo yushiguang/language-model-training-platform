@@ -1,5 +1,5 @@
-import type {Answer, DatasetSnapshot, DatasetUploadResult, Example, ExampleMedia, GoldLabel, Job, JobControl, JobOutcome, RawExample, SamplingTask, Schema} from '@sprint/contracts';
-import {hashString, newId, readGoldAnswer, toFeatures} from '@sprint/domain';
+import type {Answer, DatasetSnapshot, DatasetUploadResult, Example, ExampleMedia, GoldLabel, Job, JobControl, JobOutcome, RawExample, SamplingTask, Schema} from '@yushiguang/sprint-contracts';
+import {hashString, newId, readGoldAnswer, toFeatures} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {appendExamples, insertExamplesSettled} from './governance.ts';
 

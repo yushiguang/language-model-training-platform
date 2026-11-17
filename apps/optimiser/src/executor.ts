@@ -1,4 +1,4 @@
-import type {JobExecutor, OptimiserContract} from '@sprint/contracts';
+import type {JobExecutor, OptimiserContract} from '@yushiguang/sprint-contracts';
 
 /**
  * The `optimiser.run` job (deployment readiness spec, 3): runs one saved Optimiser run until it

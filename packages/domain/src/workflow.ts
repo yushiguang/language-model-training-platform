@@ -1,5 +1,5 @@
 import {systemConfig} from './config.ts';
-import type {Actor, AgentPreset, EndpointId, EndpointInfo, Msg, ProjectState} from '@sprint/contracts';
+import type {Actor, AgentPreset, EndpointId, EndpointInfo, Msg, ProjectState} from '@yushiguang/sprint-contracts';
 import {msg, msgText} from './i18n.ts';
 import {versionLabel} from './versions.ts';
 import {judge} from './metrics.ts';

@@ -1,5 +1,5 @@
-import type {BffContract, CallerUser, Identity, Locale, RequestContext, WorkflowContract} from '@sprint/contracts';
-import {newId} from '@sprint/domain';
+import type {BffContract, CallerUser, Identity, Locale, RequestContext, WorkflowContract} from '@yushiguang/sprint-contracts';
+import {newId} from '@yushiguang/sprint-domain';
 
 /**
  * The bff as its contract (`BffContract`): the one surface the web pages call, in-process or over

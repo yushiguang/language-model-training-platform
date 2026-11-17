@@ -8,7 +8,7 @@
 import Link, {useLinkStatus} from 'next/link';
 import {createPortal} from 'react-dom';
 import {createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode} from 'react';
-import {systemConfig} from '@sprint/domain';
+import {systemConfig} from '@yushiguang/sprint-domain';
 import {t} from '@/i18n';
 
 /** Mounted once around the app. The kit needs no theme provider; this only sets the root class. */

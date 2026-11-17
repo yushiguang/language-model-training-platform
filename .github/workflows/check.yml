@@ -21,6 +21,8 @@ jobs:
       # Typecheck, unit tests and the boundary check (who may import what).
       - run: npm run check
       - run: npm run build
+      # The npm packages build, install and typecheck the way a consumer uses them.
+      - run: npm run check:packages
 
   # The whole workflow in a browser on the stand-ins (apps/web/scripts/e2e-check.cjs, about 4 minutes).
   # Screenshots are kept as a build artifact.

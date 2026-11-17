@@ -1,4 +1,4 @@
-import {ACTIVE_JOB_STATES, type Job, type JobFilter, type JobKind, type JobStorePort} from '@sprint/contracts';
+import {ACTIVE_JOB_STATES, type Job, type JobFilter, type JobKind, type JobStorePort} from '@yushiguang/sprint-contracts';
 
 /**
  * The job store stand-in: jobs in this process's memory. Right for the browser (each tab runs its

@@ -1,5 +1,5 @@
-import type {ModelSettings, ProjectSettings, Schema, SetupVersion, Thresholds} from '@sprint/contracts';
-import {DEFAULT_THRESHOLDS, sameSignature, signatureOf} from '@sprint/domain';
+import type {ModelSettings, ProjectSettings, Schema, SetupVersion, Thresholds} from '@yushiguang/sprint-contracts';
+import {DEFAULT_THRESHOLDS, sameSignature, signatureOf} from '@yushiguang/sprint-domain';
 import type {Scope} from './app.ts';
 import {getProject} from './projects.ts';
 

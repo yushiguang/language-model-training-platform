@@ -12,8 +12,8 @@ import type {
   PageContext,
   StartRequest,
   StructuredPrompt,
-} from '@sprint/contracts';
-import {agentName, answersForHelpers, isRight, newId, promptKeys, readStructured, rewordOnly, settingsHash, structuredEquals, tidyStructured, versionLabel, visibleToAgents, wrongExamples, toMap, msg, msgText} from '@sprint/domain';
+} from '@yushiguang/sprint-contracts';
+import {agentName, answersForHelpers, isRight, newId, promptKeys, readStructured, rewordOnly, settingsHash, structuredEquals, tidyStructured, versionLabel, visibleToAgents, wrongExamples, toMap, msg, msgText} from '@yushiguang/sprint-domain';
 import {loadProjectState} from './projects.ts';
 import {now, type Instance, type Scope} from './app.ts';
 import {joinedMsg, postEvent} from './chat-events.ts';
@@ -153,7 +153,7 @@ async function loadWorkspaceSnapshot(w: Scope,
  * on (`runTurn`), and the page follows it through `getAgentLive` and the chat (deployment
  * readiness spec, 6). The turn:
  * 1. Loads the project's workspace snapshot from the catalog.
- * 2. Calls the stateless Agent Runtime service (`@sprint/agents`) with `AgentTurnInput`, which
+ * 2. Calls the stateless Agent Runtime service (`@yushiguang/sprint-agents`) with `AgentTurnInput`, which
  *    includes the view of the page the user is on; the runtime calls the workflow's tool host.
  * 3. Persists start requests and any new proposal; messages were saved as they came
  *    (`agentProgress`). If the turn fails, the chat says so and the user can ask again.

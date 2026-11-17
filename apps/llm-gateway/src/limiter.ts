@@ -1,5 +1,5 @@
-import type {LimiterLimits, LimiterStats, LimiterStorePort} from '@sprint/contracts';
-import {newId} from '@sprint/domain';
+import type {LimiterLimits, LimiterStats, LimiterStorePort} from '@yushiguang/sprint-contracts';
+import {newId} from '@yushiguang/sprint-domain';
 
 /**
  * Rate limiter for one endpoint: requests per minute, tokens per minute and calls in flight

@@ -1,4 +1,4 @@
-import type {JobExecutor} from '@sprint/contracts';
+import type {JobExecutor} from '@yushiguang/sprint-contracts';
 import type {Instance} from './app.ts';
 import {runSample} from './dataset.ts';
 import {runDelete} from './projects.ts';

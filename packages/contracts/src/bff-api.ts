@@ -31,7 +31,7 @@ import type {
 import type {ExampleMedia, FeatureInfo} from './platform-api.ts';
 
 /**
- * Contract 1: Frontend Web App <-> BFF Service (`@sprint/contracts/bff-api`).
+ * Contract 1: Frontend Web App <-> BFF Service (`@yushiguang/sprint-contracts/bff-api`).
  *
  * IDL-ready (spec 1.0.0, section 7.1): every method is asynchronous, and every argument and result
  * is plain JSON (no `Map`, `Set`, `File` or function). A call passes ids and the user's input,

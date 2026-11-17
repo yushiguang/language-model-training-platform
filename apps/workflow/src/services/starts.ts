@@ -1,5 +1,5 @@
-import type {AgentPreset, ChatLink, EndpointId, Msg, ProjectState} from '@sprint/contracts';
-import {autoSpendUsd, canScore, compilePrompt, readStructured, evalEstimate, optimiserEstimate, versionLabel, visibleToAgents, systemConfig, msg} from '@sprint/domain';
+import type {AgentPreset, ChatLink, EndpointId, Msg, ProjectState} from '@yushiguang/sprint-contracts';
+import {autoSpendUsd, canScore, compilePrompt, readStructured, evalEstimate, optimiserEstimate, versionLabel, visibleToAgents, systemConfig, msg} from '@yushiguang/sprint-domain';
 import type {Scope} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {asModel, findVersion, modelName} from './page-views.ts';

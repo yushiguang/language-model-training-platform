@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {PromptVersion} from '@sprint/contracts';
-import {localDocRuntime} from '@sprint/platform';
-import {LABEL_VALUES} from '@sprint/contracts';
+import type {PromptVersion} from '@yushiguang/sprint-contracts';
+import {localDocRuntime} from '@yushiguang/sprint-platform';
+import {LABEL_VALUES} from '@yushiguang/sprint-contracts';
 import {catalogKinds, createCatalog} from './catalog.ts';
 
 const base = {projectId: 'pr_1', structured: {taskSummary: '', features: {video: [], photo_text: [], metadata: []}, label: {name: '', kind: 'single' as const, values: []}, ruleGroups: [], images: []}, template: 't', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user' as const, change: '', schemaVersion: 1};

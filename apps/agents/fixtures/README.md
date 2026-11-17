@@ -2,7 +2,7 @@
 
 Each `.json` file here is one case for an agent runtime (`AgentRuntimeContract` in
 `packages/contracts/src/agent-api.ts`), as plain JSON, so an implementation in any language can be
-held to the same cases as this repository's reference runtime (`@sprint/agents`). They are the
+held to the same cases as this repository's reference runtime (`@yushiguang/sprint-agents`). They are the
 acceptance bar of the deployment readiness spec, sections 4.6 and 6.
 
 ## What a file holds

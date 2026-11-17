@@ -1,7 +1,7 @@
 # Specification: Acceptance Pass Refinements — Auth Session UX, Structured Rule Groups, XML Prompt Compilation, and Project Settings Redesign
 
 **Date:** 2026-11-16  
-**Target:** External Agent (contracts, domain, agents, bff, Unified UI design system, and web app)  
+**Target:** Contributors (contracts, domain, agents, bff, Unified UI design system, and web app)  
 **Contract Impact:** Breaking `StructuredPrompt` update (`Contract change: custom RuleGroup list, removal of field note, XML prompt compilation, and optional Identity.signOut`)
 
 ---
@@ -19,7 +19,7 @@ Hands-on acceptance testing on the hosted preview environment revealed that the 
    - When `canSignOut` is `true` (provided by the hosting platform's SSO adapter; `false` on local stand-ins), render a **Sign out** item (translated in `zh.ts`) at the bottom of the avatar menu (`UserMenu`).
 3. **Typography problem on project icon & default user avatar**:
    - **Observed issue**: The project icon badge (`.proj-ic`, showing `"S"` on `/` or the project's initial) and the default user avatar badge (`.avatar` / `.avatar-btn`) look visually thin and lack weight. Notably, `.avatar-btn` in `app.css` declares `font: inherit`, which resets `kit.css`'s `.avatar` font-weight back to normal `400`.
-   - **Goal for External Agent**: Please review and update the design system / CSS so both `.proj-ic` and `.avatar` / `.avatar-btn` render in a crisp **bold** weight.
+   - **Goal**: Please review and update the design system / CSS so both `.proj-ic` and `.avatar` / `.avatar-btn` render in a crisp **bold** weight.
 
 ---
 
@@ -90,13 +90,13 @@ Return one JSON object only, with exact field keys and allowed label values from
 {"category": "ValueA | ValueB"}
 </output_format>
 ```
-*(Omit `<rules>` when `ruleGroups` has no non-empty groups; include `<reference_images>` when `p.images.length > 0`; escape XML attribute quotes on user-supplied names; keep `@sprint/labeling`'s trailing `REASON_LINE` behavior compatible.)*
+*(Omit `<rules>` when `ruleGroups` has no non-empty groups; include `<reference_images>` when `p.images.length > 0`; escape XML attribute quotes on user-supplied names; keep `@yushiguang/sprint-labeling`'s trailing `REASON_LINE` behavior compatible.)*
 
 ---
 
 ## 3. Project Settings Dialog Redesign (Visual & UX Issues)
 
-Hands-on review of the **Project Settings** dialog (`apps/web/src/components/ProjectSettings.tsx`) identified 6 usability and visual issues. Please let the External Agent determine the exact spacing tokens and component styling within the Unified UI design system to address all 6 points:
+Hands-on review of the **Project Settings** dialog (`apps/web/src/components/ProjectSettings.tsx`) identified 6 usability and visual issues. Please let the contributor determine the exact spacing tokens and component styling within the Unified UI design system to address all 6 points:
 
 1. **Redesign the `Evaluation` section header & mode toggle**:
    - **Observed issue**: The two-column layout with `"Pass rule"` on the left (two large bordered radio cards with multi-line descriptions) and `"Checks"` on the right looks cluttered and unbalanced.

@@ -25,12 +25,12 @@ import type {
   Schema,
   SetupVersion,
   StructuredPrompt,
-} from '@sprint/contracts';
+} from '@yushiguang/sprint-contracts';
 import type {BffClient} from './client';
-import {client as chosen} from '@sprint/client-impl';
+import {client as chosen} from '@yushiguang/sprint-client-impl';
 
 /**
- * The backend as the pages see it: one `BffClient`, from `@sprint/client-impl` (deployment readiness
+ * The backend as the pages see it: one `BffClient`, from `@yushiguang/sprint-client-impl` (deployment readiness
  * spec, 4.4). The build picks the module: the in-process client by default (every service runs in
  * the page, `in-process.ts`), or the module SPRINT_CLIENT_IMPL names, such as an HTTP client for a
  * server deployment. Nothing here imports the in-process module itself, so a server build does not

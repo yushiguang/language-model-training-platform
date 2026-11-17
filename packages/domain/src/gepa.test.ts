@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {Example, Schema} from '@sprint/contracts';
+import type {Example, Schema} from '@yushiguang/sprint-contracts';
 import {compareDryRun, dryRunSize, exampleBrief, exampleScore, mergePair, paretoFront, pickDryRun, pickParent, promptKeys, wrongExamples} from './gepa.ts';
 import {toFeatures} from './template.ts';
 

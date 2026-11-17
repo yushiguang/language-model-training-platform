@@ -1,6 +1,6 @@
 'use client';
 
-import type {Answer, Schema} from '@sprint/contracts';
+import type {Answer, Schema} from '@yushiguang/sprint-contracts';
 import {Card, Hov} from '@/ui';
 import {t} from '@/i18n';
 

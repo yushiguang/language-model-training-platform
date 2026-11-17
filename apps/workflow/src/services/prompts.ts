@@ -1,5 +1,5 @@
-import type {ChatMessage, FeatureInfo, NewVersion, PromptVersion} from '@sprint/contracts';
-import {checkStructured, compilePrompt, MADE_BY, newId, schemaOf, signatureOf, sameSignature, tidyStructured, versionLabel, msg, msgText} from '@sprint/domain';
+import type {ChatMessage, FeatureInfo, NewVersion, PromptVersion} from '@yushiguang/sprint-contracts';
+import {checkStructured, compilePrompt, MADE_BY, newId, schemaOf, signatureOf, sameSignature, tidyStructured, versionLabel, msg, msgText} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {syncLabels} from './settings.ts';

@@ -1,5 +1,5 @@
 import {systemConfig} from './config.ts';
-import type {EndpointId, ProjectState, PromptVersion} from '@sprint/contracts';
+import type {EndpointId, ProjectState, PromptVersion} from '@yushiguang/sprint-contracts';
 import {estimateTokens} from './labels.ts';
 import {renderPrompt} from './template.ts';
 import {costForTokens} from './workflow.ts';

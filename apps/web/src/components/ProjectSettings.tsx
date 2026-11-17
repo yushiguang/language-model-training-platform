@@ -1,8 +1,8 @@
 'use client';
 
 import {createContext, useCallback, useContext, useRef, useState, type ReactNode} from 'react';
-import {CUSTOM_START, DEFAULT_THRESHOLDS, systemConfig} from '@sprint/domain';
-import type {Thresholds} from '@sprint/contracts';
+import {CUSTOM_START, DEFAULT_THRESHOLDS, systemConfig} from '@yushiguang/sprint-domain';
+import type {Thresholds} from '@yushiguang/sprint-contracts';
 import {renameProject, saveSettings, type ProjectState} from '@/backend-api';
 import {t} from '@/i18n';
 import {Button, Dialog, Field, Seg, Select, Switch, Table} from '@/ui';

@@ -4,10 +4,10 @@ import {
   type AgentModel,
   type LlmStreamChunk,
   type ModelMessage,
-} from '@sprint/contracts';
+} from '@yushiguang/sprint-contracts';
 import {STAND_IN_MODELS} from './models.ts';
-import {SAMPLE_STRUCTURED, addRule, addToDefinition, fixTarget, hasRule, nextRuleGroupId, ruleFor, schemaOf} from '@sprint/domain';
-import type {LabelValue, MixUp, RuleGroup, Schema, StructuredPrompt} from '@sprint/contracts';
+import {SAMPLE_STRUCTURED, addRule, addToDefinition, fixTarget, hasRule, nextRuleGroupId, ruleFor, schemaOf} from '@yushiguang/sprint-domain';
+import type {LabelValue, MixUp, RuleGroup, Schema, StructuredPrompt} from '@yushiguang/sprint-contracts';
 
 /**
  * Stand-in agent model. It answers each agent request with fixed, sensible JSON so the whole

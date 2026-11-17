@@ -1,5 +1,5 @@
-import type {Answer, Example, ExampleBrief, MismatchList, MismatchReview, Prediction, ProjectState} from '@sprint/contracts';
-import {withComments, isRight, versionLabel, visibleToAgents, systemConfig, sameAnswer} from '@sprint/domain';
+import type {Answer, Example, ExampleBrief, MismatchList, MismatchReview, Prediction, ProjectState} from '@yushiguang/sprint-contracts';
+import {withComments, isRight, versionLabel, visibleToAgents, systemConfig, sameAnswer} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {saveGold} from './dataset.ts';
 import {buildReport, predictionsFor} from './evaluation.ts';

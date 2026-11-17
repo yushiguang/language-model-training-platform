@@ -1,18 +1,18 @@
 # Specification: Single-Label Project Scope, Stacked Label Cards, Agent System Alignment, and Chat/UI Refinements
 
 **Date:** 2026-11-16  
-**Target:** External Agent (architectural review + implementation across `@sprint/contracts`, `@sprint/domain`, `@sprint/agents`, `@sprint/optimiser`, `@sprint/bff`, `@sprint/platform`, and `@sprint/web`)  
+**Target:** Contributors (architectural review + implementation across `@yushiguang/sprint-contracts`, `@yushiguang/sprint-domain`, `@yushiguang/sprint-agents`, `@yushiguang/sprint-optimiser`, `@yushiguang/sprint-bff`, `@yushiguang/sprint-platform`, and `@yushiguang/sprint-web`)  
 **Contract Impact:** Breaking `StructuredPrompt`, `Schema`, `Answer`, `Metrics`, `AgentRuntimeContract`, and `BffContract` simplification (`Contract change: single mutually-exclusive label per project, plain string answers, and locale on DraftImprovementInput`)
 
 ---
 
-## 0. Architectural Second-Review Request for External Agent
+## 0. Architectural Second-Review Request for contributors
 
 Section 1 of this specification introduces a deliberate product and domain-model shift: **every Prompt Tuning project owns exactly one mutually-exclusive (single-select) label**, removing multi-field (`fields[]`) and multi-select (`kind: 'multi'`, `min`, `max`) support.
 
 Before or as you execute this change, **please conduct a second architectural review** of Section 1 against the whole codebase:
 - If you agree with the design and find no hidden edge cases, proceed directly to full implementation and record the key architectural reasoning in `docs/decisions.md` and `docs/architecture.md`.
-- If you identify any structural flaw, subtle invariant issue, or strictly cleaner representation in `@sprint/contracts` / `@sprint/domain`, document your counter-proposal or adjustment clearly in `docs/tmp/2026-11-16-single-label-review.md` (or apply the cleaner refinement if backwards-compatible with the product rules below and note it in the commit message).
+- If you identify any structural flaw, subtle invariant issue, or strictly cleaner representation in `@yushiguang/sprint-contracts` / `@yushiguang/sprint-domain`, document your counter-proposal or adjustment clearly in `docs/tmp/2026-11-16-single-label-review.md` (or apply the cleaner refinement if backwards-compatible with the product rules below and note it in the commit message).
 
 ---
 
@@ -32,7 +32,7 @@ Hands-on optimization runs and beta testing established that **the quality and c
 
 ### 1.2 Contract Simplification (`packages/contracts`)
 
-Flatten the multi-field and multi-select structures across `@sprint/contracts`:
+Flatten the multi-field and multi-select structures across `@yushiguang/sprint-contracts`:
 
 1. **`Schema`, `LabelSignature`, and `StructuredPrompt` (`types.ts`)**:
    - Remove `FieldKind` (`'single' | 'multi'`), `min`, `max`, `LabelField`, `LabelSignatureField`, and `StructuredFieldPrompt`.
@@ -111,7 +111,7 @@ Return one JSON object only, with the exact key "{label.name}" and exactly one a
 ```
 *(When `v.definition` is empty, emit `<label value="..."/>`; when non-empty—whether one line or multi-line bullets—indent or wrap cleanly inside `<label value="...">\n...\n  </label>` so multi-paragraph definitions read clearly in `View full prompt`.)*
 
-### 1.4 Page & Workflow Simplifications Across `@sprint/web`
+### 1.4 Page & Workflow Simplifications Across `@yushiguang/sprint-web`
 
 1. **`Prompt Design` & `Edit prompt` (`StructuredEditor.tsx`)**:
    - Remove the two-column `Fields` sidebar (`grid-split sp-fields`), `Add field` / `Remove field`, `Single-select / Multi-select` segmented toggle, and `Choose min to max` inputs.
@@ -151,7 +151,7 @@ Return one JSON object only, with the exact key "{label.name}" and exactly one a
 
 ---
 
-## 3. Agent System & Working Prompt Alignment (`@sprint/agents`, `@sprint/bff`)
+## 3. Agent System & Working Prompt Alignment (`@yushiguang/sprint-agents`, `@yushiguang/sprint-bff`)
 
 Testing `Prompt helper` on real multimodal moderation prompts exposed three mismatches between our new structured prompt model and the existing agent routing / system prompts:
 
@@ -189,7 +189,7 @@ Testing `Prompt helper` on real multimodal moderation prompts exposed three mism
 
 ## 4. Verification Checklist
 
-1. `./internal/deploy/check-public.sh` (English-only outside `locales/`, clean boundaries).
+1. `npm run check` (English-only outside `locales/`, clean boundaries).
 2. `npm run check` — Boundaries, TypeScript across all packages/apps, i18n completeness test (`zh.ts` updated for all new keys and pruned of dead multi-field/shortcut keys), and unit tests covering:
    - Single-label `StructuredPrompt`, `compilePrompt` with multi-line `<label>` formatting, `checkStructured`, `rewordOnly`, and legacy/new gold-label upload parsing.
    - Single-label `computeMetrics`, `judge`, `assignEvalHalves`, `labelBalance`, and `compareDryRun`.

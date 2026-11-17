@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {Job, JobControl, JobExecutor, JobKind, JobOutcome, RequestContext} from '@sprint/contracts';
-import {memoryJobStore} from '@sprint/platform';
+import type {Job, JobControl, JobExecutor, JobKind, JobOutcome, RequestContext} from '@yushiguang/sprint-contracts';
+import {memoryJobStore} from '@yushiguang/sprint-platform';
 import {createJobs} from './jobs.ts';
 
 /**

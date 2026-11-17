@@ -1,0 +1,47 @@
+name: Release packages
+
+# Publishes every module except the agent runtime and the web app to GitHub Packages
+# (npm.pkg.github.com) under @yushiguang/sprint-*, all at one version.
+# Start it by pushing a tag `v<version>` (for example v1.2.0), or from the Actions tab with a version.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, for example 1.2.0'
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: '@yushiguang'
+      - name: Version
+        id: version
+        run: |
+          v="${{ github.event.inputs.version }}"
+          if [ -z "$v" ]; then v="${GITHUB_REF_NAME#v}"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - run: npm ci
+      - run: npm run check
+      - run: node scripts/build-packages.mjs "${{ steps.version.outputs.version }}"
+      - run: node scripts/check-packages.mjs
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for dir in build/packages/*/; do
+            (cd "$dir" && npm publish)
+          done
