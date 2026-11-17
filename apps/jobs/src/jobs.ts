@@ -164,10 +164,11 @@ export function createJobs(deps: JobsDeps): Jobs {
         else if (!r.lost && job.attempts <= (executor.retries ?? 0)) {
           clearInterval(timer);
           await r.writing;
-          await store.requeue(job.id, owner, new Date(clock() + retryDelayMs * job.attempts).toISOString(), message);
+          const notBefore = clock() + retryDelayMs * job.attempts;
+          await store.requeue(job.id, owner, new Date(notBefore).toISOString(), message);
           tm.counter('sprint_jobs_ended_total', {job_kind: job.kind, outcome: 'retried'});
           done();
-          setTimeout(drain, retryDelayMs * job.attempts);
+          wakeAt(notBefore);
           return;
         } else outcome = {state: 'failed', error: message};
       }
@@ -187,6 +188,15 @@ export function createJobs(deps: JobsDeps): Jobs {
       emit();
       drain();
     }
+  }
+
+  /**
+   * Drains once `clock()` has reached `at`. A timer may fire a little before the wall clock gets
+   * there (timers and `Date.now` are different clocks), and a drain then would find the job not
+   * due yet with nothing left to wake it: so it checks, and waits again if early.
+   */
+  function wakeAt(at: number) {
+    setTimeout(() => (clock() >= at ? drain() : wakeAt(at)), Math.max(1, at - clock()));
   }
 
   function drain() {
