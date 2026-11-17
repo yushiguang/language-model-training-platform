@@ -396,6 +396,9 @@ Each item is its own `Contract change:` pull request.
    list is in `docs/architecture.md`, "Where each agent guard lives"); turn records are in shared
    state under `turn:{turnId}`; progress is written to the chat and the live line in shared state,
    with no instance-local handlers.
+   **Send returns on accept** on branch `feat/send-returns-on-accept` (breaking `BffContract`):
+   `sendUserMessage` returns `{turnId}` once the message is saved and the turn started; the page
+   follows the turn with `getAgentLive`. Chat as a job (G1) stays out of scope.
 
 ## 9. Verification
 

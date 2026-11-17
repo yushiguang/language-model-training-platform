@@ -32,6 +32,10 @@ reads and writes through the catalog, starts labeling tasks, and asks the agent 
   `services/executors.ts` (`workflowExecutors`, also `Workflow.executors`): `report.build`
   (`work.runReport`), `dataset.sample` (`dataset.runSample`), `project.delete`
   (`projects.runDelete`). Labeling's and the Optimiser's executors come from their packages.
+- Ask AI: `sendUserMessage` saves the message, writes the turn record and the first live line and
+  returns `{turnId}`; the turn runs on (`runTurn` in `services/agents.ts`, kept by
+  `Instance.turnRunning`). `Workflow.turnsIdle()` waits for this instance's turns (tests, and a
+  server that drains before it stops). A failed turn posts "Sorry, I could not answer that".
 - Events (`changes`, `agent_live`) carry no data; a client reads again through the contract
   (`getAgentLive` for the live turn).
 - A helper's tool runs as the user whose turn it is (`turn:{projectId}`), or as the helper with a

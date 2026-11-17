@@ -109,12 +109,15 @@ test("two users in one process: a problem-report draft and a live turn belong to
   assert.equal(await api.getAgentLive(ctxOf(bob), b.id), null, "and not on Bob's");
   await api.sendUserMessage(ctxOf(bob), {projectId: b.id, text: 'bob: it broke', page: page()});
   await turnA;
+  // The calls return once each turn started; the turns run on.
+  await wf.turnsIdle();
   assert.match(String((seen.bobSendsAlicesDraft as {error: string}).error), /no draft/, "Bob's project has no draft: Alice's draft is not his");
   assert.ok((seen.draftA as {draft: unknown}).draft);
   assert.equal(await api.getAgentLive(ctxOf(alice), a.id), null, 'nothing is live once the turn ended');
 
   // Alice agrees in a new message; Bob's turn on his project runs in between.
   await Promise.all([api.sendUserMessage(ctxOf(alice), {projectId: a.id, text: 'alice: yes, send it', page: page()}), api.sendUserMessage(ctxOf(bob), {projectId: b.id, text: 'bob: yes, send it', page: page()})]);
+  await wf.turnsIdle();
   assert.deepEqual(seen['alice: yes, send it'], {ticketId: 'T-1', note: 'Tell the user the ticket id in one line; the team picks the report up from there.'});
   assert.match(String((seen['bob: yes, send it'] as {error: string}).error), /no draft/);
   assert.equal(tickets.length, 1);
@@ -130,7 +133,7 @@ test("two users in one process: a problem-report draft and a live turn belong to
 
 test("two users in one process: a helper reads a linked document as the person it answers (gap G3)", async () => {
   const readers: string[] = [];
-  const {api} = world(
+  const {wf, api} = world(
     'wf-docs',
     w => ({
       ...noHelpers(),
@@ -144,6 +147,7 @@ test("two users in one process: a helper reads a linked document as the person i
   const a = await api.createProject(ctxOf(alice), 'A');
   const b = await api.createProject(ctxOf(bob), 'B');
   await Promise.all([api.sendUserMessage(ctxOf(alice), {projectId: a.id, text: 'read this', page: page()}), api.sendUserMessage(ctxOf(bob), {projectId: b.id, text: 'read this', page: page()})]);
+  await wf.turnsIdle();
   assert.deepEqual(readers.sort(), ['Alice:https://docs.example/guide', 'Bob:https://docs.example/guide']);
 });
 
@@ -198,6 +202,7 @@ test('the tool host enforces the guards (review P4): preset tools only, the turn
   const a = await api.createProject(ctxOf(alice), 'A');
   const b = await api.createProject(ctxOf(bob), 'B');
   await api.sendUserMessage(ctxOf(alice), {projectId: a.id, text: b.id, page: page()});
+  await wf.turnsIdle();
   assert.match(seen.notMine, /cannot use start_optimiser/);
   assert.match(seen.otherProject, /turn has ended/);
   assert.equal(seen.own, 'ran');
@@ -206,4 +211,31 @@ test('the tool host enforces the guards (review P4): preset tools only, the turn
   assert.match(await refused(wf.toolHost.call({...call, projectId: a.id, turnId: 'turn_gone'})), /turn has ended/);
   await api.deleteProject(ctxOf(alice), {projectId: a.id});
   assert.match(await refused(wf.toolHost.call({...call, projectId: a.id, turnId: null})), /not found/);
+});
+
+test('sending a message returns once the turn started; the turn runs on, and a failed turn says so in the chat', async () => {
+  let finish!: () => void;
+  const held = new Promise<void>(r => (finish = r));
+  const {wf, api} = world('wf-accept', () => ({
+    ...noHelpers(),
+    async runTurn(input: AgentTurnRequest) {
+      if (input.userText === 'fail') throw new Error('model down');
+      await held;
+      return {invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
+    },
+  }));
+  const a = await api.createProject(ctxOf(alice), 'A');
+  const out = await api.sendUserMessage(ctxOf(alice), {projectId: a.id, text: 'hello', page: page()});
+  assert.match(out.turnId, /^turn_/);
+  assert.deepEqual(JSON.parse(JSON.stringify(out)), out, 'plain JSON');
+  assert.ok(await api.getAgentLive(ctxOf(alice), a.id), 'the turn is live after the call returned');
+  assert.deepEqual((await api.chatHistory(ctxOf(alice), a.id)).map(m => m.text), ['hello'], 'the message is saved before the call returns');
+  finish();
+  await wf.turnsIdle();
+  assert.equal(await api.getAgentLive(ctxOf(alice), a.id), null);
+  await api.sendUserMessage(ctxOf(alice), {projectId: a.id, text: 'fail', page: page()});
+  await wf.turnsIdle();
+  assert.equal(await api.getAgentLive(ctxOf(alice), a.id), null, 'a failed turn ends too');
+  const last = (await api.chatHistory(ctxOf(alice), a.id)).at(-1);
+  assert.deepEqual([last?.role, last?.agent, last?.msg?.key], ['agent', 'front_desk', 'Sorry, I could not answer that. Please ask again.']);
 });

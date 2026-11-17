@@ -177,6 +177,23 @@ async function asked<T>(projectId: string, call: () => Promise<T>): Promise<T> {
     localChanges.forEach(fn => fn());
   }
 }
+/**
+ * Resolves when no turn is live on the project. `sendUserMessage` returns once the turn started;
+ * Ask AI stays busy until the turn ended, as it did when the call waited for the answer.
+ */
+async function turnEnded(projectId: string): Promise<void> {
+  while (await timedApi.getAgentLive(projectId)) {
+    await new Promise<void>(resolve => {
+      const done = () => {
+        clearTimeout(t);
+        liveListeners.delete(done);
+        resolve();
+      };
+      const t = setTimeout(done, 1000);
+      liveListeners.add(done);
+    });
+  }
+}
 const isAgentBusy = (projectId: string) => (asking.get(projectId) ?? 0) > 0 || !!agentLive(projectId);
 
 async function uploadAsset(file: File): Promise<{url: string}> {
@@ -192,7 +209,12 @@ async function uploadAsset(file: File): Promise<{url: string}> {
 export const client: BffClient = {
   ...timedApi,
   // Each Ask AI message carries the browser's record, for a problem report (spec 1.1.0, 3.2).
-  sendUserMessage: req => asked(req.projectId, () => timedApi.sendUserMessage({...req, client: req.client ?? snapshot()})),
+  sendUserMessage: req =>
+    asked(req.projectId, async () => {
+      const out = await timedApi.sendUserMessage({...req, client: req.client ?? snapshot()});
+      await turnEnded(req.projectId);
+      return out;
+    }),
   improveWithAi: (projectId, versionId, locale) => asked(projectId, () => timedApi.improveWithAi(projectId, versionId, locale)),
   subscribeChanges,
   subscribeAgentLive(listener) {

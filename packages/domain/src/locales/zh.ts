@@ -154,6 +154,7 @@ export const ZH: Readonly<Record<string, string>> = {
   "You": "你",
   "{who} joined to answer": "{who}加入来回答",
   "{who} answers on {page}": "{who}在{page}上回答",
+  "Sorry, I could not answer that. Please ask again.": "抱歉，我没能回答。请再问一次。",
   "{who} put a draft on {page}": "{who}在{page}上放了一份草稿",
   "{who} discarded the draft": "{who}放弃了草稿",
   "{who} asked the Prompt helper to improve {version}": "{who}请提示词助手改进 {version}",

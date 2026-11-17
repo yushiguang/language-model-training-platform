@@ -41,6 +41,8 @@ export interface Workflow {
   agentProgress: AgentProgressPort;
   /** For the Optimiser: labeling, scoring and saving versions through the workflow's own code. */
   optimiserHost: OptimiserHost;
+  /** Waits for the Ask AI turns this instance accepted to end (tests, and a server that drains). */
+  turnsIdle(): Promise<void>;
   /** Hands over the services built after the workflow, since they call back into it. */
   connect(c: Connected): void;
   /**
@@ -173,6 +175,7 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     // The Optimiser's loop is not a person's call: it runs as the Optimiser.
     optimiserHost: optimiserHost(inst.scope(systemContext('optimiser'))),
     connect: c => inst.connect(c),
+    turnsIdle: () => inst.turnsIdle(),
     executors: workflowExecutors(inst),
     async sweep() {
       const w = at(systemContext('sweep'));

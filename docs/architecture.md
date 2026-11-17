@@ -94,7 +94,9 @@ Since 1.0.0 phase 1 every service contract is written so it maps one to one to a
   record (project, caller, page, language, browser record) is in shared state under `turn:{turnId}`
   while it runs; progress events are written to the chat and to the live line in shared state by
   whichever instance receives them, and the runtime answers a turn only after its last event
-  landed. Work is stopped by id: the
+  landed. `sendUserMessage` returns `{turnId}` once the message is saved and the turn started; the
+  turn runs on in the instance that accepted it (not as a job), and the page follows it with
+  `getAgentLive` and the chat. A failed turn ends its live line and says so in the chat. Work is stopped by id: the
   caller passes a `requestId` and calls `cancel(requestId)` on the agent runtime (an Optimiser
   change), the gateway (`label`; a labeling run gives all its calls one id, so Stop cancels them
   together) or labeling (`tryTemplate`). Signals stay inside the process that owns the work.

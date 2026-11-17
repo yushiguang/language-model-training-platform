@@ -81,6 +81,13 @@ export interface Instance extends WorkflowDeps, Connected {
   once<T>(key: string, fn: () => Promise<T>): Promise<T | null>;
   busy(key: string): boolean;
   /**
+   * Ask AI turns run on after the call that accepted them returned (deployment readiness spec, 6).
+   * `turnRunning` keeps hold of one; `turnsIdle` waits for those running in this instance (tests,
+   * and a server that drains before it stops).
+   */
+  turnRunning(turn: Promise<void>): void;
+  turnsIdle(): Promise<void>;
+  /**
    * State that stays with this instance: two caches of facts that can be worked out again.
    */
   local: {
@@ -104,6 +111,7 @@ export function createInstance(deps: WorkflowDeps): Instance & {connect(c: Conne
   const changeListeners = new Set<() => void>();
   const liveListeners = new Set<() => void>();
   const starting = new Set<string>();
+  const turns = new Set<Promise<void>>();
   const revisions = projectRevisions(deps.sharedState, deps.revisionCoalesceMs ?? 200);
   const inst: Instance & {connect(c: Connected): void} = {
     ...deps,
@@ -135,6 +143,13 @@ export function createInstance(deps: WorkflowDeps): Instance & {connect(c: Conne
       }
     },
     busy: key => starting.has(key),
+    turnRunning(turn) {
+      turns.add(turn);
+      void turn.finally(() => turns.delete(turn));
+    },
+    async turnsIdle() {
+      while (turns.size) await Promise.allSettled([...turns]);
+    },
     local: {cannotBuild: new Set(), fullAnswers: new Map()},
     // The scope reads the instance live (not a copy), so services connected later are seen.
     scope: ctx => Object.assign(Object.create(inst) as Scope, {ctx, user: async () => ctx.user}),

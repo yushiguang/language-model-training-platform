@@ -293,10 +293,13 @@ test('a helper that joined keeps answering on its page; on another page the page
   const gold = {label: 'Gold Labels', agent: 'front_desk' as const, intent: 'answer', context: {}, where: {page: 'gold' as const, params: {}}};
   const dataset = {...gold, label: 'Dataset', where: {page: 'dataset' as const, params: {}}};
   await sendUserMessage(w.ws, w.projectId, 'add a value', gold);
+  await w.inst.turnsIdle();
   assert.equal(await answeringAgent(w.ws, w.projectId, gold), 'prompt_agent');
   await sendUserMessage(w.ws, w.projectId, 'and another', gold);
+  await w.inst.turnsIdle();
   assert.equal(await answeringAgent(w.ws, w.projectId, dataset), 'front_desk');
   await sendUserMessage(w.ws, w.projectId, 'hello', dataset);
+  await w.inst.turnsIdle();
   assert.deepEqual(seen, ['front_desk:answer', 'prompt_agent:follow_up', 'front_desk:answer']);
   assert.equal(await agentLive(w.ws, w.projectId), null, 'nothing is live after the turn');
   const chat = await w.catalog.find('chat_messages', {projectId: w.projectId}, 'createdAt');

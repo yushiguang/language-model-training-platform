@@ -148,11 +148,15 @@ async function loadWorkspaceSnapshot(w: Scope,
 }
 
 /**
- * The workflow's dispatcher for assistant turns:
- * 1. Persists the user's message and loads the project's workspace snapshot from the catalog.
+ * The workflow's dispatcher for assistant turns. Accepting a message (this function) saves it,
+ * writes the turn's record and the first live line, and returns the turn's id; the turn then runs
+ * on (`runTurn`), and the page follows it through `getAgentLive` and the chat (deployment
+ * readiness spec, 6). The turn:
+ * 1. Loads the project's workspace snapshot from the catalog.
  * 2. Calls the stateless Agent Runtime service (`@sprint/agents`) with `AgentTurnInput`, which
- *    includes the view of the page the user is on, and lends it the read tools.
- * 3. Persists start requests, emitted agent/event messages, and any new proposal to the catalog.
+ *    includes the view of the page the user is on; the runtime calls the workflow's tool host.
+ * 3. Persists start requests and any new proposal; messages were saved as they came
+ *    (`agentProgress`). If the turn fails, the chat says so and the user can ask again.
  */
 export async function sendUserMessage(
   w: Scope,
@@ -164,9 +168,8 @@ export async function sendUserMessage(
   join?: boolean,
   /** The user's language and what their browser saw (spec 1.1.0): for this turn only, never saved. */
   extra: {locale?: Locale; client?: ClientDiagnostics} = {},
-): Promise<AgentProposal | null> {
+): Promise<{turnId: string}> {
   const started = Date.now();
-  const pageId = page.where?.page ?? 'other';
   // Back from another page: the page's own helper answers again, and the chat says so.
   let stay = await w.shared.get<Stay>(stayKey(projectId));
   if (stay && stay.page !== pageKey(page)) {
@@ -181,7 +184,6 @@ export async function sendUserMessage(
   const turnPage: PageContext = stay ? {...page, agent: stay.agent, intent: 'follow_up'} : page;
   const entry = turnPage.agent;
   await setLive(w, projectId, {agent: entry, working: 'Thinking…', reply: null});
-  let outcome = 'error';
   w.tm.event('chat_message_sent', {entry_agent: entry, chars: text.length, attachments: attachments?.length ?? 0});
   const cleanAttachments = attachments?.map(({name, size, url}) => ({name, size, ...(url ? {url} : {})}));
   await post(w, projectId, {
@@ -192,16 +194,39 @@ export async function sendUserMessage(
     ...(cleanAttachments?.length ? {attachments: cleanAttachments} : {}),
   });
   if (join) await post(w, projectId, {role: 'event', agent: null, event: 'join', text: `${agentName(page.agent)} joined to answer`, msg: joinedMsg(page.agent), page: page.label});
+  // The turn's record tells the tools and the progress whose turn it is.
+  const turnId = newId('turn');
+  const locale = extra.locale ?? 'en';
+  await beginTurn(w, turnId, {projectId, page: turnPage, entry, locale, client: extra.client ?? null});
+  w.turnRunning(runTurn(w, {turnId, projectId, text, page, turnPage, attachments, join: !!join, locale, started}));
+  return {turnId};
+}
 
+interface Turn {
+  turnId: string;
+  projectId: string;
+  text: string;
+  /** The page the user wrote on, and the page as the answering helper gets it. */
+  page: PageContext;
+  turnPage: PageContext;
+  attachments?: ChatAttachment[];
+  join: boolean;
+  locale: Locale;
+  started: number;
+}
+
+/** One accepted turn, to its end. Never throws: a failed turn says so in the chat. */
+async function runTurn(w: Scope, t: Turn): Promise<void> {
+  const {turnId, projectId, text, page, turnPage, attachments, join, locale, started} = t;
+  const entry = turnPage.agent;
+  const pageId = page.where?.page ?? 'other';
+  let outcome = 'error';
   try {
-    const {catalog, agents, gateway} = w;
+    const {catalog, agents} = w;
     const workspace = await loadWorkspaceSnapshot(w, projectId, turnPage, attachments);
     // Messages are saved the moment they are final; the live line and the streamed reply show
-    // what the turn is doing until then (`agentProgress`). The turn's record tells the tools and
-    // the progress whose turn it is; the runtime answers after its last event landed.
-    const turnId = newId('turn');
-    const locale = extra.locale ?? 'en';
-    await beginTurn(w, turnId, {projectId, page: turnPage, entry, locale, client: extra.client ?? null});
+    // what the turn is doing until then (`agentProgress`). The runtime answers after its last
+    // event landed.
     const turnOut = await agents.runTurn({userText: text, page: turnPage, attachments, workspace, turnId, locale, ctx: w.ctx}).finally(() => endTurn(w, turnId));
     outcome = 'ok';
     recordTurn(w, turnOut, entry, started);
@@ -227,7 +252,7 @@ export async function sendUserMessage(
       // A draft that changes nothing on the page is a plain answer, not a draft.
       const base = workspace.prompt;
       const structured = tidyStructured(turnOut.proposal.payload.structured);
-      if (base && structuredEquals(base, structured) && !turnOut.proposal.payload.unmapped.length) return null;
+      if (base && structuredEquals(base, structured) && !turnOut.proposal.payload.unmapped.length) return;
       for (const prev of await openProposals(w, projectId)) await catalog.patch('agent_proposals', prev.id, {state: 'discarded'});
       const [newest] = await catalog.find('prompt_versions', {projectId}, 'createdAt desc');
       const onEdit = page.where?.page === 'prompt_edit';
@@ -244,10 +269,10 @@ export async function sendUserMessage(
       };
       await catalog.insert('agent_proposals', proposal);
       await postEvent(w, projectId, 'draft', proposal.agent, msg('put a draft on {page}', {page: newest ? 'Edit prompt' : 'Prompt Design'}), draftLink(page, newest?.id ?? null, baseVersionId));
-      w.emitChange(projectId);
-      return proposal;
     }
-    return null;
+  } catch {
+    // Counted as an error below. The user sees that the helper could not answer, and may ask again.
+    await post(w, projectId, {role: 'agent', agent: entry, text: COULD_NOT_ANSWER.key, msg: COULD_NOT_ANSWER, page: page.label}).catch(() => undefined);
   } finally {
     await setLive(w, projectId, null);
     w.tm.counter('sprint_agent_turns_total', {agent: entry, page: pageId, outcome});
@@ -255,6 +280,8 @@ export async function sendUserMessage(
     w.emitChange(projectId);
   }
 }
+
+const COULD_NOT_ANSWER = msg('Sorry, I could not answer that. Please ask again.');
 
 /** Metrics and events for one answered turn. Only counts and names; never the text. */
 function recordTurn(w: Scope, out: AgentTurnOutput, entry: string, started: number) {

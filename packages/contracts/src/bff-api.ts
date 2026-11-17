@@ -316,7 +316,12 @@ export interface BffContract {
   getAgentLive(projectId: string): Promise<AgentLive | null>;
   /** Which helper answers the next message on this page: one that joined on it stays until the page changes. */
   getAnsweringAgent(projectId: string, page: PageContext): Promise<AgentPreset>;
-  sendUserMessage(req: SendMessageRequest): Promise<AgentProposal | null>;
+  /**
+   * Accepts an Ask AI message and returns once it is saved and its turn has started (deployment
+   * readiness spec, 6). The turn runs on: its live line is read with `getAgentLive` (null again
+   * when it ended), and its messages and any draft appear in `chatHistory` and `openProposals`.
+   */
+  sendUserMessage(req: SendMessageRequest): Promise<{turnId: string}>;
   openProposals(projectId: string): Promise<AgentProposal[]>;
   /** Open and approved proposals, oldest first (Ask AI cards). */
   proposals(projectId: string): Promise<AgentProposal[]>;
