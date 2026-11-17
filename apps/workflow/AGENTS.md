@@ -4,23 +4,29 @@ The application module (`WorkflowContract` in `packages/contracts/src/workflow-a
 channel (the web pages' bff today, a CLI or tool channel later) needs. Stores nothing itself: it
 reads and writes through the catalog, starts labeling tasks, and asks the agent runtime.
 
-- `workflow.ts`: `createWorkflow(deps)` returns `{api, events, changed, agentTools, agentProgress,
+- `workflow.ts`: `createWorkflow(deps)` returns `{api, events, changed, toolHost, agentProgress,
   optimiserHost, connect}`. Every `api` method takes the caller's `RequestContext` first; who did
   something (audit records, `createdBy`, gold labels, comments, problem reports) comes from it.
   `connect({agents, optimiser})` hands over the services built after the workflow, since they call
-  back into it (`agentTools`, `agentProgress`, `optimiserHost`).
+  back into it (`toolHost`, `agentProgress`, `optimiserHost`).
 - `services/app.ts`: the `Instance` (the dependencies, the telemetry port, the change bus, `once`,
   the shared-state port and the instance-local maps) and the per-call `Scope` (instance plus
   context). **No module-level mutable state**: two workflows in one process share nothing. Every
   service function takes `w: Scope` first.
 - Shared short-lived state (`deps.sharedState`, `SharedStatePort`, with TTL): the live turn
   (`live:{projectId}`), the helper that keeps answering on a page (`stay:{projectId}`), the turn
-  running now with its caller's context, page, language and browser record (`turn:{projectId}`,
-  `services/turns.ts`), and problem-report drafts (`report-draft:{projectId}`). The stand-in is
-  `memorySharedState` in `@sprint/platform`.
-- Instance-local (`Instance.local`): progress handlers of running turns (until the agent service,
-  spec 6), the reports that cannot be built from saved answers, and saved answers on the whole
-  eval set (a cache).
+  running, by its id, with its project, caller's context, page, language and browser record
+  (`turn:{turnId}`, `services/turns.ts`), and problem-report drafts (`report-draft:{projectId}`).
+  The stand-in is `memorySharedState` in `@sprint/platform`.
+- The helpers' tool host (`toolHost`, `agentToolHost` in `services/page-views.ts`) is one host for
+  every project: each `AgentToolCall` names its project, turn and context, and the host enforces
+  the guards (preset tools, project exists, turn ownership, held-out half, start tools, report
+  send gate; the list is in `docs/architecture.md`, "Where each agent guard lives").
+- Progress (`agentProgress` in `services/agents.ts`) writes each event where every instance reads
+  it: final messages to the chat, the live line to shared state. An event for an ended turn, or
+  for another project, is dropped.
+- Instance-local (`Instance.local`): the reports that cannot be built from saved answers, and
+  saved answers on the whole eval set (a cache).
 - Background work goes to the job module (`deps.jobs`, `JobsContract`): `scoreVersion`,
   `startOptimiser`, `retryOptimiser`, sampling and `deleteProject` queue jobs and return.
   `services/executors.ts` (`workflowExecutors`, also `Workflow.executors`): `report.build`

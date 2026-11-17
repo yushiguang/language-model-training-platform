@@ -3,7 +3,7 @@ import {agentName, msg, systemConfig, versionLabel} from '@sprint/domain';
 import {now, type Scope} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {loadProjectState} from './projects.ts';
-import {currentTurn} from './turns.ts';
+import type {TurnRecord} from './turns.ts';
 
 /**
  * Problem reports (spec 1.1.0, 3). Any helper can call `report_problem`: first without `send` to
@@ -42,10 +42,9 @@ function readFields(args: Record<string, unknown>, base?: Fields): Fields {
 }
 
 /** The `report_problem` tool. Returns a draft to show the user, the ticket id, or an error to act on. */
-export async function reportProblem(w: Scope, projectId: string, agent: AgentPreset, args: Record<string, unknown>): Promise<unknown> {
+export async function reportProblem(w: Scope, projectId: string, agent: AgentPreset, args: Record<string, unknown>, turn: TurnRecord | null): Promise<unknown> {
   const {tickets, catalog} = w;
   if (!tickets) return {error: 'Problem reports cannot be sent from this site. Tell the user to report it to their team directly.'};
-  const turn = await currentTurn(w, projectId);
   const page = turn?.page.where?.page ?? 'other';
   const client = turn?.client ?? null;
 

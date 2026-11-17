@@ -44,7 +44,7 @@ const jobs = createJobs({store: platform.jobStore ?? memoryJobStore(), telemetry
 /** The application module, with no state of its own; short-lived shared state goes to the platform's store. */
 const workflow = createWorkflow({jobs: jobs.api, catalog, labeling, gateway, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, tickets: platform.tickets, appVersion: APP_VERSION, standIns: platform.standIns, telemetry, locks: browserLocks(), sharedState: platform.sharedState ?? memorySharedState()});
 /** The helpers, built once with their model, the project tools and where live progress goes. */
-const agentRuntime = createAgentRuntime({llm: gateway.agentModel(), tools: projectId => workflow.agentTools(projectId), progress: workflow.agentProgress});
+const agentRuntime = createAgentRuntime({llm: gateway.agentModel(), tools: workflow.toolHost, progress: workflow.agentProgress});
 const optimiser = createOptimiser({catalog, labeling, agents: agentRuntime, host: workflow.optimiserHost, locks: browserLocks(), telemetry, onChange: projectId => workflow.changed(projectId)});
 workflow.connect({agents: agentRuntime, optimiser});
 // Executors tell open pages when their records change, as before; a job's own life does not, so a

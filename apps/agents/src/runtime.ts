@@ -1,5 +1,5 @@
 import type {
-  AgentToolHost,
+  AgentToolRequest,
   AgentToolName,
   Msg,
   ModelMessage,
@@ -18,12 +18,10 @@ import type {
   AgentPreset,
   StructuredPrompt,
 } from '@sprint/contracts';
-import {FEATURES, msg, msgText, readStructured, rewordOnly, structuredEquals, systemConfig} from '@sprint/domain';
+import {FEATURES, HANDOFF_TARGETS, msg, msgText, readStructured, rewordOnly, structuredEquals, systemConfig} from '@sprint/domain';
 import {agentName, languageLine, presetModel, PRESETS, START_TOOLS, systemPrompt, TOOL_SPECS} from './presets.ts';
 
 
-/** Handoffs go only to these specialists; anything else is ignored (no handoff). */
-const HANDOFF_TARGETS: AgentPreset[] = ['prompt_agent', 'evaluation_agent'];
 
 interface RawAgentReply {
   tool?: {name: AgentToolName; args?: Record<string, unknown>};
@@ -36,6 +34,14 @@ interface RawAgentReply {
   unmapped?: unknown;
   /** One short question when the request is unclear (R3-10): the turn then proposes nothing. */
   question?: string;
+}
+
+/**
+ * The tools as the runtime's helpers call them: a request by name. `createAgentRuntime` binds each
+ * request to the project, turn and context it serves before it reaches the `AgentToolHost`.
+ */
+export interface ToolCaller {
+  call(req: AgentToolRequest): Promise<unknown>;
 }
 
 function parseJsonObject<T>(raw: string, fallback: T): T {
@@ -79,7 +85,7 @@ function buildAgentContext(input: AgentTurnInput, targetAgent: AgentPreset): Rec
 }
 
 interface TurnTools {
-  host?: AgentToolHost;
+  host?: ToolCaller;
   used: AgentTurnOutput['toolCalls'];
   modelCalls: AgentTurnOutput['modelCalls'];
   parseFailures: AgentTurnOutput['parseFailures'];
@@ -181,7 +187,7 @@ async function callModel(llm: AgentModel, to: AgentPreset, messages: ModelMessag
   return raw;
 }
 
-function toolBlurb(to: AgentPreset, host?: AgentToolHost): string {
+function toolBlurb(to: AgentPreset, host?: ToolCaller): string {
   const names = host ? PRESETS[to].tools : [];
   if (!names.length) return '';
   const list = names.map(n => `- ${n} ${TOOL_SPECS[n].args}: ${TOOL_SPECS[n].returns}`).join('\n');
@@ -275,7 +281,7 @@ export function importIntent(agent: AgentPreset, intent: string, text: string | 
  * each agent call its read tools through `host`, and returns the emitted messages, invocation
  * records, tool calls, and any schema/prompt proposal.
  */
-export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?: AgentToolHost, progress?: AgentTurnProgress): Promise<AgentTurnOutput> {
+export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?: ToolCaller, progress?: AgentTurnProgress): Promise<AgentTurnOutput> {
   const invocations: AgentTurnOutput['invocations'] = [];
   const messages: AgentEmittedMessage[] = [];
   const tools: TurnTools = {host, used: [], modelCalls: [], parseFailures: [], progress};
@@ -350,7 +356,7 @@ function withImages(body: {preset: string; intent: string; context: Record<strin
  * A one-shot call (no chat history) that may read feature descriptions first: the model answers
  * {"tool": {"name": "read_feature_info", "args": {"keys": [...]}}} to read them, up to twice.
  */
-async function withFeatureInfo(llm: AgentModel, preset: AgentPreset | 'optimiser', intent: string, context: Record<string, unknown>, tools?: AgentToolHost, signal?: AbortSignal, extra = ''): Promise<string> {
+async function withFeatureInfo(llm: AgentModel, preset: AgentPreset | 'optimiser', intent: string, context: Record<string, unknown>, tools?: ToolCaller, signal?: AbortSignal, extra = ''): Promise<string> {
   const shape = PRESETS[preset].intents[intent];
   const toolLine = tools
     ? `\nTo read what features hold and when they help, answer {"tool": {"name": "read_feature_info", "args": {"keys": string[]}}} first; the result comes back as the next message. At most 2 reads.`
@@ -380,7 +386,7 @@ async function withFeatureInfo(llm: AgentModel, preset: AgentPreset | 'optimiser
  * One Optimiser step: a change from the parent's mistakes (reflection), or a merge of two
  * versions that win on different examples. May tick or untick features, with the reason.
  */
-export async function reflectPrompt(input: OptimiserReflectInput, llm: AgentModel, tools?: AgentToolHost, signal?: AbortSignal): Promise<OptimiserReflectOutput> {
+export async function reflectPrompt(input: OptimiserReflectInput, llm: AgentModel, tools?: ToolCaller, signal?: AbortSignal): Promise<OptimiserReflectOutput> {
   const mode = input.mode ?? 'change';
   const raw = await withFeatureInfo(
     llm,
@@ -409,7 +415,7 @@ function reworded(base: StructuredPrompt, answer: unknown): StructuredPrompt {
 }
 
 /** Improve with AI: the Prompt helper's draft of a version, with every change and its reason. */
-export async function draftImprovement(input: DraftImprovementInput, llm: AgentModel, tools?: AgentToolHost): Promise<DraftImprovementOutput> {
+export async function draftImprovement(input: DraftImprovementInput, llm: AgentModel, tools?: ToolCaller): Promise<DraftImprovementOutput> {
   const {locale, ...context} = input;
   // The reply and each change's reason come in the user's language; the prompt keeps its own (2026-11-16).
   const lang = languageLine(locale) ? `${languageLine(locale)} Write each change's "reason" in Simplified Chinese too; "text" quotes the prompt's own words.` : '';

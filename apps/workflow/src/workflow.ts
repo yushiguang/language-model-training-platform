@@ -9,7 +9,7 @@ import * as projects from './services/projects.ts';
 import * as prompts from './services/prompts.ts';
 import * as settings from './services/settings.ts';
 import * as work from './services/work.ts';
-import {agentTools} from './services/page-views.ts';
+import {agentToolHost} from './services/page-views.ts';
 import {optimiserHost} from './services/optimiser-host.ts';
 import {workflowExecutors} from './services/executors.ts';
 
@@ -32,8 +32,11 @@ export interface Workflow {
    * with the project, gives it a new revision.
    */
   changed(projectId?: string): void;
-  /** For the agent runtime: the helpers' tools on a project, run as the user whose turn it is. */
-  agentTools(projectId: string): AgentToolHost;
+  /**
+   * For the agent runtime: the helpers' tools. One host for every project; each call names its
+   * project, turn and context, and the host enforces the guards (deployment readiness spec, 6).
+   */
+  toolHost: AgentToolHost;
   /** For the agent runtime: where a turn's progress goes. */
   agentProgress: AgentProgressPort;
   /** For the Optimiser: labeling, scoring and saving versions through the workflow's own code. */
@@ -165,7 +168,7 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
       subscribe: (topic: EventTopic, listener: () => void) => (topic === 'changes' ? inst.onChange(listener) : inst.onLive(listener)),
     },
     changed: projectId => inst.emitChange(projectId ?? null),
-    agentTools: projectId => agentTools(inst, projectId),
+    toolHost: agentToolHost(inst),
     agentProgress: agents.agentProgress(inst),
     // The Optimiser's loop is not a person's call: it runs as the Optimiser.
     optimiserHost: optimiserHost(inst.scope(systemContext('optimiser'))),

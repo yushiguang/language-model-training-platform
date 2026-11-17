@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, AgentTurnInput, CallerUser, DocumentSource, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, PageContext, RequestContext, TicketSubmission, WorkflowContract} from '@sprint/contracts';
+import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, CallerUser, DocumentSource, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, PageContext, RequestContext, TicketSubmission, WorkflowContract} from '@sprint/contracts';
 import {createCatalog} from '@sprint/catalog';
 import {createLabeling, memoryLocks} from '@sprint/labeling';
 import {createJobs} from '@sprint/jobs';
@@ -49,6 +49,11 @@ function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) =
   return {wf, api: loopback(wf.api) as WorkflowContract, catalog, tickets};
 }
 
+/** The tools as the runtime binds them for one turn: every call carries the turn's project, id and context. */
+const toolsOf = (wf: ReturnType<typeof createWorkflow>, input: AgentTurnRequest) => ({
+  call: (r: AgentToolRequest) => wf.toolHost.call({...r, projectId: input.workspace.projectId, turnId: input.turnId, ctx: input.ctx}),
+});
+
 const noHelpers = (): AgentRuntimeContract => ({
   runTurn: async () => ({invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []}),
   reflectPrompt: async () => {
@@ -79,8 +84,8 @@ test("two users in one process: a problem-report draft and a live turn belong to
   const seen: Record<string, unknown> = {};
   const {wf, api, tickets} = world('wf-two-turns', w => ({
     ...noHelpers(),
-    async runTurn(input: AgentTurnInput) {
-      const tools = w.agentTools(input.workspace.projectId);
+    async runTurn(input: AgentTurnRequest) {
+      const tools = toolsOf(w, input);
       const text = input.userText;
       if (text === 'alice: it broke') {
         seen.draftA = await tools.call({agent: 'front_desk', name: 'report_problem', args: {summary: 'Save does nothing'}});
@@ -119,8 +124,8 @@ test("two users in one process: a problem-report draft and a live turn belong to
   const textsOf = async (ctx: RequestContext, projectId: string) => (await api.chatHistory(ctx, projectId)).filter(m => m.role === 'user').map(m => m.text);
   assert.deepEqual(await textsOf(ctxOf(alice), a.id), ['alice: it broke', 'alice: yes, send it']);
   assert.deepEqual(await textsOf(ctxOf(bob), b.id), ['bob: it broke', 'bob: yes, send it']);
-  // With no turn running, a helper's tool still runs (as the helper, with a system context).
-  await wf.agentTools(a.id).call({agent: 'prompt_agent', name: 'get_project_summary', args: {}});
+  // With no turn, a helper's tool runs as the context the call carried.
+  await wf.toolHost.call({agent: 'prompt_agent', name: 'get_project_summary', args: {}, projectId: a.id, turnId: null, ctx: ctxOf(alice)});
 });
 
 test("two users in one process: a helper reads a linked document as the person it answers (gap G3)", async () => {
@@ -129,8 +134,8 @@ test("two users in one process: a helper reads a linked document as the person i
     'wf-docs',
     w => ({
       ...noHelpers(),
-      async runTurn(input: AgentTurnInput) {
-        await w.agentTools(input.workspace.projectId).call({agent: 'front_desk', name: 'read_doc', args: {url: 'https://docs.example/guide'}});
+      async runTurn(input: AgentTurnRequest) {
+        await toolsOf(w, input).call({agent: 'front_desk', name: 'read_doc', args: {url: 'https://docs.example/guide'}});
         return {invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
       },
     }),
@@ -173,4 +178,32 @@ test('loopback: arguments, results and errors cross as JSON, as they would over 
   assert.equal(arg.keep, 1, 'the caller gets a copy');
   await assert.rejects(api.fails(), (e: Error & {code?: string}) => e.message === 'This version does not exist.' && e.code === 'not_found');
   assert.equal(await api.nothing(), null);
+});
+
+test('the tool host enforces the guards (review P4): preset tools only, the turn\'s own project, no deleted project', async () => {
+  const seen: Record<string, string> = {};
+  const refused = (p: Promise<unknown>) => p.then(() => 'ran', (e: Error) => e.message);
+  const {wf, api} = world('wf-guards', w => ({
+    ...noHelpers(),
+    async runTurn(input: AgentTurnRequest) {
+      const other = input.userText;
+      // A tool the front desk does not have.
+      seen.notMine = await refused(toolsOf(w, input).call({agent: 'front_desk', name: 'start_optimiser', args: {}}));
+      // This turn's id on another project.
+      seen.otherProject = await refused(w.toolHost.call({agent: 'front_desk', name: 'get_page_view', args: {}, projectId: other, turnId: input.turnId, ctx: input.ctx}));
+      seen.own = await refused(toolsOf(w, input).call({agent: 'front_desk', name: 'get_page_view', args: {}}));
+      return {invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
+    },
+  }));
+  const a = await api.createProject(ctxOf(alice), 'A');
+  const b = await api.createProject(ctxOf(bob), 'B');
+  await api.sendUserMessage(ctxOf(alice), {projectId: a.id, text: b.id, page: page()});
+  assert.match(seen.notMine, /cannot use start_optimiser/);
+  assert.match(seen.otherProject, /turn has ended/);
+  assert.equal(seen.own, 'ran');
+  // A turn that ended no longer lends its user to a tool call.
+  const call = {agent: 'front_desk' as const, name: 'get_page_view' as const, args: {}, ctx: ctxOf(alice)};
+  assert.match(await refused(wf.toolHost.call({...call, projectId: a.id, turnId: 'turn_gone'})), /turn has ended/);
+  await api.deleteProject(ctxOf(alice), {projectId: a.id});
+  assert.match(await refused(wf.toolHost.call({...call, projectId: a.id, turnId: null})), /not found/);
 });

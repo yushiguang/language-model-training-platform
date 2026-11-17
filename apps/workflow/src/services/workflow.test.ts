@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, ClientDiagnostics, SharedStatePort, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission} from '@sprint/contracts';
+import type {AgentRuntimeContract, AgentToolRequest, ClientDiagnostics, RequestContext, SharedStatePort, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission} from '@sprint/contracts';
 import {createCatalog} from '@sprint/catalog';
 import {createLabeling, labelingExecutor, memoryLocks} from '@sprint/labeling';
 import {createOptimiser, optimiserExecutor} from '@sprint/optimiser';
@@ -13,7 +13,8 @@ import {agentProgress} from './agents.ts';
 import {deleteProject, loadProjectState, projectStatus, renameProject} from './projects.ts';
 import {addComment} from './governance.ts';
 import {reportProblem} from './problems.ts';
-import {beginTurn, endTurn} from './turns.ts';
+import {beginTurn, endTurn, turnOf} from './turns.ts';
+import {agentToolHost} from './page-views.ts';
 import {agentStart} from './starts.ts';
 import {scoreVersion, tick} from './work.ts';
 import {compilePrompt, DEFAULT_THRESHOLDS, versionLabel} from '@sprint/domain';
@@ -45,6 +46,12 @@ interface WorldOpts {
   /** Where problem reports go (none: reports cannot be sent). */
   tickets?: TicketPort;
   sharedState?: SharedStatePort;
+}
+
+/** The helpers' tools on the world's project, with no turn: calls run as the world's caller. */
+function toolsOf(w: {inst: Parameters<typeof agentToolHost>[0]; projectId: string; ws: {ctx: RequestContext}}) {
+  const host = agentToolHost(w.inst);
+  return {call: (r: AgentToolRequest) => host.call({...r, projectId: w.projectId, turnId: null, ctx: w.ws.ctx})};
 }
 
 async function world(prefix: string, opts: WorldOpts = {}) {
@@ -269,12 +276,12 @@ test('a helper that joined keeps answering on its page; on another page the page
       const progress = (e: Parameters<ReturnType<typeof agentProgress>['publish']>[2]) => agentProgress(w.inst).publish(input.workspace.projectId, input.turnId, e);
       seen.push(`${input.page.agent}:${input.page.intent}`);
       if (input.page.agent === 'front_desk') {
-        progress?.({message: {role: 'event', agent: null, event: 'join', text: 'Prompt helper joined to answer'}});
-        progress?.({agent: 'prompt_agent', reply: 'Sure'});
-        progress?.({message: {role: 'agent', agent: 'prompt_agent', text: 'Sure.'}});
+        await progress({message: {role: 'event', agent: null, event: 'join', text: 'Prompt helper joined to answer'}});
+        await progress({agent: 'prompt_agent', reply: 'Sure'});
+        await progress({message: {role: 'agent', agent: 'prompt_agent', text: 'Sure.'}});
         return {invocations: [{from: 'user', to: 'front_desk', intent: 'answer', note: ''}, {from: 'front_desk', to: 'prompt_agent', intent: 'revise_prompt', note: ''}], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
       }
-      progress?.({message: {role: 'agent', agent: input.page.agent, text: 'Again.'}});
+      await progress({message: {role: 'agent', agent: input.page.agent, text: 'Again.'}});
       return {invocations: [{from: 'user', to: input.page.agent, intent: input.page.intent, note: ''}], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
     },
     reflectPrompt: async () => ({prompt: sp(), change: ''}),
@@ -451,10 +458,9 @@ test('Auto Optimise: a pass is confirmed by labeling the held-out half again bef
   assert.equal(run.stopReason, 'passes');
   assert.deepEqual(run.history.at(-1)?.confirm, {score: 1, passed: true});
   // The helpers read it on the report (the Scores helper recommends a version only when its pass holds).
-  const {agentTools} = await import('./page-views.ts');
   const s = await w.state();
   const label = (id: string | null) => versionLabel(s.versions.find(v => v.id === id)!);
-  const rep = (v: string) => agentTools(w.inst, w.projectId).call({agent: 'evaluation_agent', name: 'get_report', args: {version: v}}) as Promise<{report: {confirmed: boolean | null}}>;
+  const rep = (v: string) => toolsOf(w).call({agent: 'evaluation_agent', name: 'get_report', args: {version: v}}) as Promise<{report: {confirmed: boolean | null}}>;
   assert.equal((await rep(label(run.history.at(-1)!.versionId))).report.confirmed, true);
   assert.equal((await rep(label(run.startVersionId))).report.confirmed, null, 'no second labeling for the start version');
   // Each held-out example was labeled twice for the passing version.
@@ -480,16 +486,14 @@ test('Auto Optimise: a pass that the second labeling does not confirm does not e
   assert.notEqual(run.stopReason, 'passes');
   const passed = run.history.filter(h => h.passed);
   assert.ok(passed.length > 0 && passed.every(h => h.confirm?.passed === false));
-  const {agentTools} = await import('./page-views.ts');
   const ref = versionLabel(s.versions.find(v => v.id === passed[0].versionId)!);
-  const rep = (await agentTools(w.inst, w.projectId).call({agent: 'evaluation_agent', name: 'get_report', args: {version: ref}})) as {report: {passed: boolean; confirmed: boolean | null}};
+  const rep = (await toolsOf(w).call({agent: 'evaluation_agent', name: 'get_report', args: {version: ref}})) as {report: {passed: boolean; confirmed: boolean | null}};
   assert.deepEqual([rep.report.passed, rep.report.confirmed], [true, false], 'the report says the pass was not confirmed');
 });
 
 test('read_doc: a link that cannot be opened says so, so the helper asks for the text', async () => {
   const w = await world('b28');
-  const {agentTools} = await import('./page-views.ts');
-  const out = (await agentTools(w.inst, w.projectId).call({agent: 'prompt_agent', name: 'read_doc', args: {url: 'https://docs.example.com/docx/abc'}})) as {error?: string};
+  const out = (await toolsOf(w).call({agent: 'prompt_agent', name: 'read_doc', args: {url: 'https://docs.example.com/docx/abc'}})) as {error?: string};
   assert.match(out.error ?? '', /cannot be opened/);
 });
 
@@ -590,8 +594,7 @@ test('Finding 3: no helper tool or helper input carries an example of the held-o
   const s = await w.state();
   const heldOut = new Set(s.examples.filter(e => e.split === 'eval' && !e.optimiserHalf).flatMap(e => [e.externalId, e.id]));
   assert.equal(heldOut.size, 10);
-  const {agentTools} = await import('./page-views.ts');
-  const tools = agentTools(w.inst, w.projectId);
+  const tools = toolsOf(w);
   const call = (name: string, args: Record<string, unknown> = {}) => tools.call({agent: 'prompt_agent', name: name as 'get_examples', args});
   const leaks = (x: unknown) => [...heldOut].filter(id => new RegExp(`"(id|externalId|exampleId)":"${id}"`).test(JSON.stringify(x)));
 
@@ -777,11 +780,10 @@ test('comments are append-only, cut to the limit, and reach helpers only for the
 
 test('the first read of examples by a helper locks the halves', async () => {
   const w = await world('g5');
-  const {agentTools} = await import('./page-views.ts');
   assert.equal((await w.state()).project.holdoutLocked, undefined);
-  await agentTools(w.inst, w.projectId).call({agent: 'prompt_agent', name: 'get_dataset_stats', args: {}});
+  await toolsOf(w).call({agent: 'prompt_agent', name: 'get_dataset_stats', args: {}});
   assert.equal((await w.state()).project.holdoutLocked, undefined, 'counts only: no lock');
-  const found = (await agentTools(w.inst, w.projectId).call({agent: 'prompt_agent', name: 'search_examples', args: {text: ' '}}).catch(e => e)) as Error;
+  const found = (await toolsOf(w).call({agent: 'prompt_agent', name: 'search_examples', args: {text: ' '}}).catch(e => e)) as Error;
   assert.match(found.message, /words/);
   assert.equal((await w.state()).project.holdoutLocked, true);
 });
@@ -819,18 +821,20 @@ test('problem report (1.1.0): drafts first, sends only after the user answers, w
   const w = await world('pb1', {tickets});
   await w.newVersion('be careful');
   const client: ClientDiagnostics = {url: '/prompt?p=x', userAgent: 'test', viewport: '1440x900', screen: '1440x900', timeZone: 'UTC', language: 'en', at: '', pages: [{at: '', path: '/prompt'}], failedCalls: [{at: '', method: 'scoreVersion', callId: 'rq_1', message: 'down'}], errors: []};
-  await beginTurn(w.ws, w.projectId, {page: {label: 'Prompt Tuning', agent: 'front_desk', intent: 'answer', context: {}, where: {page: 'prompt', params: {}}}, locale: 'zh', client});
+  await beginTurn(w.ws, 'turn_pb1', {projectId: w.projectId, entry: 'front_desk', page: {label: 'Prompt Tuning', agent: 'front_desk', intent: 'answer', context: {}, where: {page: 'prompt', params: {}}}, locale: 'zh', client});
+  const turn = await turnOf(w.ws, 'turn_pb1', w.projectId);
+  assert.ok(turn && !(await turnOf(w.ws, 'turn_pb1', 'pr_other')), 'a turn belongs to its own project');
   // No draft yet: nothing to send.
-  assert.match(String((await reportProblem(w.ws, w.projectId, 'front_desk', {send: true}) as {error: string}).error), /no draft/);
-  const draft = (await reportProblem(w.ws, w.projectId, 'front_desk', {summary: 'Save does nothing', expected: 'A new version', actual: 'Nothing happens'})) as {draft: {summary: string}; attached: string[]};
+  assert.match(String((await reportProblem(w.ws, w.projectId, 'front_desk', {send: true}, turn) as {error: string}).error), /no draft/);
+  const draft = (await reportProblem(w.ws, w.projectId, 'front_desk', {summary: 'Save does nothing', expected: 'A new version', actual: 'Nothing happens'}, turn)) as {draft: {summary: string}; attached: string[]};
   assert.equal(draft.draft.summary, 'Save does nothing');
   assert.ok(draft.attached.some(a => a.includes('1 failed backend calls')));
   // The same turn cannot send: the user has not answered.
-  assert.match(String((await reportProblem(w.ws, w.projectId, 'front_desk', {send: true}) as {error: string}).error), /not answered/);
+  assert.match(String((await reportProblem(w.ws, w.projectId, 'front_desk', {send: true}, turn) as {error: string}).error), /not answered/);
   assert.equal(sent.length, 0);
   await new Promise(r => setTimeout(r, 5));
   await w.catalog.insert('chat_messages', {id: 'cm_yes', projectId: w.projectId, createdAt: new Date().toISOString(), role: 'user', agent: null, text: 'yes', page: 'prompt'});
-  const res = (await reportProblem(w.ws, w.projectId, 'front_desk', {send: true})) as {ticketId: string};
+  const res = (await reportProblem(w.ws, w.projectId, 'front_desk', {send: true}, turn)) as {ticketId: string};
   assert.equal(res.ticketId, 'T-TEST1');
   const t = sent[0];
   assert.equal(t.summary, 'Save does nothing');
@@ -845,19 +849,19 @@ test('problem report (1.1.0): drafts first, sends only after the user answers, w
   assert.equal(line?.text, 'You sent a problem report T-TEST1');
   assert.deepEqual(line?.msg, {key: '{who} sent a problem report {ticket}', params: {ticket: 'T-TEST1', who: 'You'}});
   // The draft is used up: a second send needs a new draft.
-  assert.match(String((await reportProblem(w.ws, w.projectId, 'front_desk', {send: true}) as {error: string}).error), /no draft/);
+  assert.match(String((await reportProblem(w.ws, w.projectId, 'front_desk', {send: true}, turn) as {error: string}).error), /no draft/);
   // With the user's consent the prompt goes too.
-  await reportProblem(w.ws, w.projectId, 'prompt_agent', {summary: 'Odd labels', includeContent: true});
+  await reportProblem(w.ws, w.projectId, 'prompt_agent', {summary: 'Odd labels', includeContent: true}, turn);
   await new Promise(r => setTimeout(r, 5));
   await w.catalog.insert('chat_messages', {id: 'cm_yes2', projectId: w.projectId, createdAt: new Date().toISOString(), role: 'user', agent: null, text: 'yes, include it', page: 'prompt'});
-  await reportProblem(w.ws, w.projectId, 'prompt_agent', {send: true});
+  await reportProblem(w.ws, w.projectId, 'prompt_agent', {send: true}, turn);
   assert.ok(sent[1].content?.prompt.includes('be careful'));
-  await endTurn(w.ws, w.projectId);
+  await endTurn(w.ws, 'turn_pb1');
 });
 
 test('problem report (1.1.0): without a ticket port the helper is told to send the user elsewhere', async () => {
   const w = await world('pb2');
-  const res = (await reportProblem(w.ws, w.projectId, 'front_desk', {summary: 'x'})) as {error: string};
+  const res = (await reportProblem(w.ws, w.projectId, 'front_desk', {summary: 'x'}, null)) as {error: string};
   assert.match(res.error, /cannot be sent/);
 });
 

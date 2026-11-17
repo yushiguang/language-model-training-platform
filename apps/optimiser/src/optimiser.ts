@@ -360,6 +360,8 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
               agents.reflectPrompt({
                 projectId,
                 requestId,
+                // The Optimiser's own context: its tool calls run as the Optimiser, not as a person.
+                ctx: {requestId: requestId ?? newId('rq'), user: {id: 'optimiser', name: 'Optimiser'}, caller: 'optimiser'},
                 mode: other ? 'merge' : 'change',
                 prompt: parent.structured,
                 triedChanges: run.history.filter(h => h.parentId === parent.id && h.change).map(h => h.change),

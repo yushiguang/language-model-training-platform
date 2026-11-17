@@ -7,9 +7,13 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
 ## Responsibilities
 
 1. **Multi-agent orchestration (`src/runtime.ts`)**:
-   - Implements `runAgentTurn(input: AgentTurnInput, llm: AgentModel, tools?: AgentToolHost): Promise<AgentTurnOutput>`
-     and `reflectPrompt(input: OptimiserReflectInput, llm: AgentModel): Promise<OptimiserReflectOutput>`
-     defined in `@sprint/contracts/agent-api`.
+   - `createAgentRuntime({llm, tools, progress})` (`src/index.ts`) is the `AgentRuntimeContract`
+     in `@sprint/contracts/agent-api`. Each request carries the caller's `ctx`; every tool call
+     goes to the one injected `AgentToolHost` with `projectId`, `turnId` and `ctx`
+     (`AgentToolCall`). A turn's progress events go to the `AgentProgressPort` one at a time, in
+     order, and the turn answers after the last one landed. Inside, `runAgentTurn`,
+     `reflectPrompt` and `draftImprovement` (`src/runtime.ts`) call tools through a bound
+     `ToolCaller`.
    - Routes user messages starting from the page's active agent (`input.page.agent`), handles
      `front_desk` handoffs to specialist agents, and extracts structured `schema` or `prompt`
      proposals.
@@ -19,7 +23,8 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
      specs in `TOOL_SPECS`). The agent model has no native function calling, so a tool call is
      an answer `{"tool": {"name", "args"}}`; the runtime runs it through `tools.call(...)` and
      sends `{"tool_result": {...}}` back as the next user message. At most `MAX_TOOL_CALLS` (4)
-     calls per turn; a tool not on the preset's list is refused; results are cut at 12,000
+     calls per turn; a tool not on the preset's list is refused here and again by the host
+     (`PRESET_TOOLS` and `mayCallTool` in `@sprint/domain`); results are cut at 12,000
      characters. Changes are still proposals in the answer.
    - **Start tools** (`START_TOOLS`: `try_prompt`, `score_version`, `start_optimiser`) spend
      money and are marked PAID in the prompt. The host runs them at once (no cost limit, no
@@ -41,7 +46,8 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
   state (`task`, `schema`, `history`, `attachedExamples`, `pageView`) arrives via
   `AgentTurnInput.workspace`, anything more comes through the read tools the bff lends, and all
   side effects (messages to append, proposals to save) are returned in `AgentTurnOutput` for the
-  BFF to persist. In a split deployment the tool host is a callback to the bff's API.
+  BFF to persist. In a split deployment the tool host is a call to the workflow's API; a tool
+  call is plain JSON and carries its project, turn and caller.
 - **Model calls**: only through the `llm: AgentModel` parameter. The bff passes the llm-gateway's
   agent model, which keeps calls under the chat endpoint's QPM/TPM and retries busy replies:
   - `llm.chat(messages, {model, json, maxOutputTokens, signal})`: returns plain text.

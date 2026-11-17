@@ -1,12 +1,12 @@
 import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@sprint/contracts';
 import {agentStart, isStartTool} from './starts.ts';
 import {reportProblem} from './problems.ts';
-import {aiSuggestion, featureItems, featureText, labelBalance, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, normalizeStructured, matchRuleGroup, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap, sameAnswer, newId} from '@sprint/domain';
-import {systemContext, type Instance, type Scope} from './app.ts';
-import {currentTurn} from './turns.ts';
+import {aiSuggestion, featureItems, featureText, labelBalance, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, normalizeStructured, matchRuleGroup, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap, sameAnswer, newId, mayCallTool, agentName} from '@sprint/domain';
+import type {Instance, Scope} from './app.ts';
+import {turnOf} from './turns.ts';
 import {lockHoldout} from './governance.ts';
 import {mismatches} from './mismatches.ts';
-import {loadProjectState} from './projects.ts';
+import {getProject, loadProjectState} from './projects.ts';
 
 /**
  * Page views: each page as the agent sees it, built from the same saved data the page shows.
@@ -333,15 +333,29 @@ async function mismatchSummary(w: Scope, projectId: string, state: ProjectState,
 }
 
 /**
- * The read tools, run as the signed-in user. Each call is written to the audit log. Errors come
- * back to the agent as messages it can act on.
+ * The helpers' tool host (deployment readiness spec, 6; review P4): one host for every project and
+ * turn. Each call carries its project, its turn and the caller's context, so the call is plain data
+ * and the runtime keeps nothing. The guards that protect data live here, not in the runtime, so
+ * they hold whatever runtime sends the call (the list is in docs/architecture.md, "Agent guards"):
+ * - a helper calls only the tools its preset lists (`mayCallTool`);
+ * - the project exists and is not being deleted;
+ * - a call for a turn runs as the user whose turn it is, and only on that turn's project; a call
+ *   with no turn (the Optimiser, Improve with AI) runs as the context it carried;
+ * - the held-out half stays hidden: the first read of examples locks the halves, and every read
+ *   leaves held-out examples out (`visibleToAgents`);
+ * - start tools start work at once and say so in the chat; nothing here saves a prompt version;
+ * - a problem report is sent only after the user answered its draft.
+ * Each call is written to the audit log. Errors come back to the agent as messages it can act on.
  */
-export function agentTools(inst: Instance, projectId: string): AgentToolHost {
+export function agentToolHost(inst: Instance): AgentToolHost {
   return {
-    async call({agent, name, args}: AgentToolCall): Promise<unknown> {
-      // The tool runs as the user whose turn asked for it; with no turn, as the helper itself.
-      const turn = await currentTurn(inst, projectId);
-      const w = inst.scope(turn ? {...turn.ctx, requestId: newId('rq'), caller: `agent:${agent}`} : systemContext(`agent:${agent}`));
+    async call({agent, name, args, projectId, turnId, ctx}: AgentToolCall): Promise<unknown> {
+      if (!mayCallTool(agent, name)) throw new Error(`The ${agentName(agent)} cannot use ${String(name)}.`);
+      const turn = await turnOf(inst, turnId, projectId);
+      if (turnId && !turn) throw new Error('This turn has ended. Answer with what you have.');
+      // The tool runs as the user whose turn asked for it; with no turn, as the caller it carried.
+      const w = inst.scope({...(turn?.ctx ?? ctx), requestId: newId('rq'), caller: `agent:${agent}`});
+      if (!(await getProject(w, projectId))) throw new Error('The project was not found.');
       const {catalog, labeling} = w;
       await catalog.audit(projectId, `agent:${agent}`, 'agent.tool', {name, args});
       // The first read of examples fixes the halves for good (spec 1.0.0, 4.2).
@@ -349,7 +363,7 @@ export function agentTools(inst: Instance, projectId: string): AgentToolHost {
       // Start-work tools spend money and start at once; they live in starts.ts.
       if (isStartTool(name)) return agentStart(w, projectId, agent, name, args);
       // A problem report: drafted first, sent only after the user agrees (spec 1.1.0, 3).
-      if (name === 'report_problem') return reportProblem(w, projectId, agent, args);
+      if (name === 'report_problem') return reportProblem(w, projectId, agent, args, turn);
       const state = await loadProjectState(w, projectId);
       if (!state) throw new Error('The project was not found.');
       switch (name) {

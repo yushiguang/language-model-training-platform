@@ -390,6 +390,12 @@ Each item is its own `Contract change:` pull request.
 5. Section 6 fixtures and tool context: golden agent fixtures published as data, `AgentToolCall`
    carrying its context. Proof: the reference implementation passes them; they are the
    acceptance bar for any reimplementation.
+   **Tool context built (2026-11-17)** on branch `feat/agent-tool-context` (contract change):
+   `AgentToolCall` carries `projectId`, `turnId` and `ctx`, and every agent request carries `ctx`;
+   the workflow has one tool host (`Workflow.toolHost`) that enforces the guards (review P4; the
+   list is in `docs/architecture.md`, "Where each agent guard lives"); turn records are in shared
+   state under `turn:{turnId}`; progress is written to the chat and the live line in shared state,
+   with no instance-local handlers.
 
 ## 9. Verification
 

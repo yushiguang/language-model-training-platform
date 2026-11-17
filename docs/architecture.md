@@ -85,9 +85,16 @@ Since 1.0.0 phase 1 every service contract is written so it maps one to one to a
   `apps/workflow/src/workflow.ts` (`createWorkflow`) the workflow as its own. Services inside the
   workflow still pass records to each other.
 - No callbacks or signals cross a service contract (phase 3, and deployment readiness spec 4.1).
-  The agent runtime is built once with `createAgentRuntime({llm, tools, progress})`: the model, a
-  project's tools and an `AgentProgressPort` for Ask AI's live line are injected, so `runTurn`,
-  `reflectPrompt` and `draftImprovement` take and return plain data. Work is stopped by id: the
+  The agent runtime is built once with `createAgentRuntime({llm, tools, progress})`: the model,
+  the workflow's one tool host (`Workflow.toolHost`) and an `AgentProgressPort` for Ask AI's live
+  line are injected, so `runTurn`, `reflectPrompt` and `draftImprovement` take and return plain
+  data. Each request carries the caller's `ctx`, and every tool call the runtime makes carries
+  `projectId`, `turnId` (null outside an Ask AI turn) and that `ctx` (`AgentToolCall`), so a tool
+  host in another process gets all it needs from the call (deployment readiness spec, 6). A turn's
+  record (project, caller, page, language, browser record) is in shared state under `turn:{turnId}`
+  while it runs; progress events are written to the chat and to the live line in shared state by
+  whichever instance receives them, and the runtime answers a turn only after its last event
+  landed. Work is stopped by id: the
   caller passes a `requestId` and calls `cancel(requestId)` on the agent runtime (an Optimiser
   change), the gateway (`label`; a labeling run gives all its calls one id, so Stop cancels them
   together) or labeling (`tryTemplate`). Signals stay inside the process that owns the work.
@@ -262,6 +269,26 @@ Both have their own design docs, which hold the design and the as-built detail:
   and start tools, what they may never see). Presets and runtime in `apps/agents`, page views and
   tools in `apps/workflow/src/services/page-views.ts`.
 
+### Where each agent guard lives (review P4)
+
+The rules that protect data hold in the tool host (`agentToolHost` in
+`apps/workflow/src/services/page-views.ts`), so they hold whatever runtime sends the call; the
+runtime and the golden fixtures hold the rules about what a helper answers.
+
+| Guard | Where it is enforced |
+|---|---|
+| A helper calls only the tools its preset lists (`PRESET_TOOLS`, `mayCallTool` in `packages/domain/src/agent-guards.ts`) | Tool host (refuses); the runtime also offers each helper its own tools only |
+| The project exists and is not being deleted | Tool host |
+| A call for a turn runs as that turn's user and only on that turn's project; an ended turn lends no one | Tool host (`turnOf` in `services/turns.ts`) |
+| No helper reads the held-out half (`visibleToAgents`); the first read of examples locks the halves | Tool host |
+| Start tools start work at once and say so in the chat | Tool host (`services/starts.ts`) |
+| A problem report is sent only after the user answered its draft | Tool host (`services/problems.ts`) |
+| Proposals never save themselves: a draft is saved as a version only by the user | Workflow (`sendUserMessage` stores a proposal; no tool saves a version) |
+| Handoffs go only to known specialists with a known intent (`HANDOFF_TARGETS`) | Runtime; fixtures |
+| Improve with AI and the Optimiser change wording only (`rewordOnly`) | Runtime and the Optimiser; fixtures |
+| Nothing is carried over silently on prompt import (unmapped parts are listed) | Runtime; fixtures |
+| An answer that is not JSON is retried once, then shown as plain text or a short apology | Runtime; fixtures |
+
 ## Scores, gold labels and what starts by itself
 
 **Rebuild scores** (Evelyn, 2026-11-12: by hand only). A gold edit changes the evaluation context,
@@ -378,7 +405,8 @@ application `id` to the store's document id.
 | Versions are major.minor and never overwritten; the catalog assigns the numbers | `packages/domain/src/versions.ts`, `apps/catalog/src/catalog.ts` |
 | Gates between steps; Gold Labels is an ordinary step (R5-8) | `packages/domain/src/gates.ts` |
 | The recommended next step (the best score wins; cost only breaks a tie) | `packages/domain/src/workflow.ts` |
-| Agent prompts, handoffs (to known specialists only), read tools per preset | `apps/agents/src/presets.ts`, `apps/agents/src/runtime.ts` |
+| Agent prompts and handoffs (to known specialists only) | `apps/agents/src/presets.ts`, `apps/agents/src/runtime.ts` |
+| Tools per preset, start tools, handoff targets | `packages/domain/src/agent-guards.ts` |
 | What an agent sees of each page (page views) and the read tools' implementation | `apps/workflow/src/services/page-views.ts` |
 | No helper reads the held-out half (`visibleToAgents`) | `packages/domain/src/gepa.ts`, used in `page-views.ts`, `starts.ts`, `agents.ts` |
 | When labeling starts, reports scored on the held-out half of the eval set | `apps/workflow/src/services/evaluation.ts`, `work.ts` |

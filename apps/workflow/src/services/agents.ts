@@ -4,7 +4,6 @@ import type {
   AgentProgressPort,
   AgentProposal,
   AgentTurnOutput,
-  AgentTurnProgress,
   AgentWorkspaceSnapshot,
   ChatAttachment,
   ChatMessage,
@@ -18,20 +17,35 @@ import {agentName, answersForHelpers, isRight, newId, promptKeys, readStructured
 import {loadProjectState} from './projects.ts';
 import {now, type Instance, type Scope} from './app.ts';
 import {joinedMsg, postEvent} from './chat-events.ts';
-import {beginTurn, endTurn} from './turns.ts';
+import {beginTurn, endTurn, turnOf} from './turns.ts';
 import {getPageView} from './page-views.ts';
 import {scoreOnOptimiserHalf} from './evaluation.ts';
 import {labelComments, withComments} from './mismatches.ts';
 import {lockHoldout} from './governance.ts';
 
 /**
- * The progress port the agent runtime is built with (spec 1.0.0, 7.1.3): each event goes to the
- * turn that asked for it, which saves its messages and moves Ask AI's live line. The handlers are
- * callbacks, so they stay with the instance that runs the turn (spec 6 moves turns to the agent
- * service, which then reports progress over the wire).
+ * The progress port the agent runtime is built with (spec 1.0.0, 7.1.3; deployment readiness
+ * spec, 6): each event is written where every instance reads it. A final message is saved to the
+ * chat; the live line and the streamed reply go to shared state. The turn's record says whose
+ * turn it is, so any instance can take the event; one for a turn that ended, or for another
+ * project, is dropped. The runtime sends a turn's events in order, one at a time.
  */
 export function agentProgress(inst: Instance): AgentProgressPort {
-  return {publish: (_projectId, turnId, event) => inst.local.turnProgress.get(turnId)?.(event)};
+  return {
+    async publish(projectId, turnId, event) {
+      const turn = await turnOf(inst, turnId, projectId);
+      if (!turn) return;
+      const w = inst.scope({...turn.ctx, requestId: newId('rq'), caller: 'agent-progress'});
+      if ('message' in event) {
+        const m = event.message;
+        await post(w, projectId, {role: m.role, agent: m.agent, text: m.text, page: turn.page.label, ...(m.event ? {event: m.event} : {}), ...(m.msg ? {msg: m.msg} : {}), ...(m.choices ? {choices: m.choices} : {})});
+        // After an answer the line clears; after a hand-off line the helper thinks again.
+        const current = await agentLive(w, projectId);
+        await setLive(w, projectId, m.role === 'agent' ? null : {agent: current?.agent ?? turn.entry, working: 'Thinking…', reply: null});
+      } else if ('working' in event) await setLive(w, projectId, {agent: event.agent, working: event.working, msg: event.msg ?? null, reply: null});
+      else await setLive(w, projectId, {agent: event.agent, working: null, reply: event.reply});
+    },
+  };
 }
 
 export type {PageContext};
@@ -153,13 +167,6 @@ export async function sendUserMessage(
 ): Promise<AgentProposal | null> {
   const started = Date.now();
   const pageId = page.where?.page ?? 'other';
-  // Live lines go out in the order they were made; `current` is the newest.
-  let current: AgentLive | null = null;
-  let liveWrites = Promise.resolve();
-  const live = (l: AgentLive | null) => {
-    current = l;
-    liveWrites = liveWrites.then(() => setLive(w, projectId, l)).catch(() => undefined);
-  };
   // Back from another page: the page's own helper answers again, and the chat says so.
   let stay = await w.shared.get<Stay>(stayKey(projectId));
   if (stay && stay.page !== pageKey(page)) {
@@ -173,7 +180,7 @@ export async function sendUserMessage(
   }
   const turnPage: PageContext = stay ? {...page, agent: stay.agent, intent: 'follow_up'} : page;
   const entry = turnPage.agent;
-  live({agent: entry, working: 'Thinking…', reply: null});
+  await setLive(w, projectId, {agent: entry, working: 'Thinking…', reply: null});
   let outcome = 'error';
   w.tm.event('chat_message_sent', {entry_agent: entry, chars: text.length, attachments: attachments?.length ?? 0});
   const cleanAttachments = attachments?.map(({name, size, url}) => ({name, size, ...(url ? {url} : {})}));
@@ -190,27 +197,12 @@ export async function sendUserMessage(
     const {catalog, agents, gateway} = w;
     const workspace = await loadWorkspaceSnapshot(w, projectId, turnPage, attachments);
     // Messages are saved the moment they are final; the live line and the streamed reply show
-    // what the turn is doing until then.
-    let saving = Promise.resolve();
-    const progress: AgentTurnProgress = p => {
-      if ('message' in p) {
-        const msg = p.message;
-        saving = saving.then(() =>
-          post(w, projectId, {role: msg.role, agent: msg.agent, text: msg.text, page: page.label, ...(msg.event ? {event: msg.event} : {}), ...(msg.msg ? {msg: msg.msg} : {}), ...(msg.choices ? {choices: msg.choices} : {})}).then(() => undefined),
-        );
-        live(msg.role === 'agent' ? null : {agent: current?.agent ?? entry, working: 'Thinking…', reply: null});
-      } else if ('working' in p) live({agent: p.agent, working: p.working, msg: p.msg ?? null, reply: null});
-      else live({agent: p.agent, working: null, reply: p.reply});
-    };
+    // what the turn is doing until then (`agentProgress`). The turn's record tells the tools and
+    // the progress whose turn it is; the runtime answers after its last event landed.
     const turnId = newId('turn');
-    w.local.turnProgress.set(turnId, progress);
     const locale = extra.locale ?? 'en';
-    await beginTurn(w, projectId, {page: turnPage, locale, client: extra.client ?? null});
-    const turnOut = await agents.runTurn({userText: text, page: turnPage, attachments, workspace, turnId, locale}).finally(async () => {
-      w.local.turnProgress.delete(turnId);
-      await endTurn(w, projectId);
-    });
-    await saving;
+    await beginTurn(w, turnId, {projectId, page: turnPage, entry, locale, client: extra.client ?? null});
+    const turnOut = await agents.runTurn({userText: text, page: turnPage, attachments, workspace, turnId, locale, ctx: w.ctx}).finally(() => endTurn(w, turnId));
     outcome = 'ok';
     recordTurn(w, turnOut, entry, started);
     const joined = turnOut.invocations.filter(i => i.from !== 'user').at(-1);
@@ -257,8 +249,7 @@ export async function sendUserMessage(
     }
     return null;
   } finally {
-    live(null);
-    await liveWrites;
+    await setLive(w, projectId, null);
     w.tm.counter('sprint_agent_turns_total', {agent: entry, page: pageId, outcome});
     w.tm.histogram('sprint_agent_turn_duration_seconds', (Date.now() - started) / 1000, {agent: entry});
     w.emitChange(projectId);
@@ -346,7 +337,7 @@ export async function improveWithAi(w: Scope, projectId: string, versionId: stri
   let outcome = 'error';
   try {
     const m = await scoreOnOptimiserHalf(w, setup, v, report.endpoint, state.examples, state.gold);
-    const out = await agents.draftImprovement({projectId, version: versionLabel(v), prompt: v.structured, mixUps: m.mixUps.slice(0, 8), macroF1: m.macroF1, lowestValue: m.lowestValue, mistakes, examples, ...(locale ? {locale} : {})});
+    const out = await agents.draftImprovement({projectId, ctx: w.ctx, version: versionLabel(v), prompt: v.structured, mixUps: m.mixUps.slice(0, 8), macroF1: m.macroF1, lowestValue: m.lowestValue, mistakes, examples, ...(locale ? {locale} : {})});
     for (const prev of await openProposals(w, projectId)) await catalog.patch('agent_proposals', prev.id, {state: 'discarded'});
     // Improve with AI rewords; the label's key and values stay as they are.
     const structured: StructuredPrompt = tidyStructured(rewordOnly(v.structured, out.prompt));

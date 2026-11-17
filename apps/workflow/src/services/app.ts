@@ -1,4 +1,4 @@
-import {NO_TELEMETRY, type TicketPort, type AgentRuntimeContract, type AgentTurnProgress, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@sprint/contracts';
+import {NO_TELEMETRY, type TicketPort, type AgentRuntimeContract, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@sprint/contracts';
 import {newId} from '@sprint/domain';
 
 /**
@@ -81,11 +81,9 @@ export interface Instance extends WorkflowDeps, Connected {
   once<T>(key: string, fn: () => Promise<T>): Promise<T | null>;
   busy(key: string): boolean;
   /**
-   * State that stays with this instance: running turns' progress handlers (until the agent service,
-   * spec 6) and two caches of facts that can be worked out again.
+   * State that stays with this instance: two caches of facts that can be worked out again.
    */
   local: {
-    turnProgress: Map<string, AgentTurnProgress>;
     /** Reports that cannot be built from saved answers, as "versionId|endpoint|contextId" (R5-4). */
     cannotBuild: Set<string>;
     /** Saved answers on the whole eval set, by version, model and settings (R5-5). */
@@ -137,7 +135,7 @@ export function createInstance(deps: WorkflowDeps): Instance & {connect(c: Conne
       }
     },
     busy: key => starting.has(key),
-    local: {turnProgress: new Map(), cannotBuild: new Set(), fullAnswers: new Map()},
+    local: {cannotBuild: new Set(), fullAnswers: new Map()},
     // The scope reads the instance live (not a copy), so services connected later are seen.
     scope: ctx => Object.assign(Object.create(inst) as Scope, {ctx, user: async () => ctx.user}),
     connect(c) {
