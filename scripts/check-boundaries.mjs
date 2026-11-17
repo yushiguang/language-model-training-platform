@@ -33,6 +33,8 @@ const RULES = [
   {dir: 'apps/catalog/src', allow: ['@sprint/contracts', '@sprint/domain', '@sprint/platform']},
   {dir: 'apps/labeling/src', allow: ['@sprint/contracts', '@sprint/domain', '@sprint/platform'], tests: ['@sprint/catalog']},
   {dir: 'apps/agents/src', allow: ['@sprint/contracts', '@sprint/domain'], tests: ['@sprint/platform']},
+  // The golden fixtures' recorder takes its model replies from the stand-in model, as the tests do.
+  {dir: 'apps/agents/scripts', allow: ['@sprint/contracts', '@sprint/platform']},
   {dir: 'apps/optimiser/src', allow: ['@sprint/contracts', '@sprint/domain']},
   {dir: 'apps/jobs/src', allow: ['@sprint/contracts', '@sprint/domain'], tests: ['@sprint/platform']},
   {dir: 'apps/workflow/src', allow: ['@sprint/contracts', '@sprint/domain'], tests: ['@sprint/platform', '@sprint/catalog', '@sprint/labeling', '@sprint/optimiser', '@sprint/jobs']},

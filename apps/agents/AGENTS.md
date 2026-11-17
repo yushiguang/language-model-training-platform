@@ -62,5 +62,9 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
   Every preset uses `'gpt-5.6-terra'` (decided 2026-11-04: chat needs the smartest model).
   Change a preset's model in `src/presets.ts` only with the product owner's agreement.
 - **English only**: Write all prompts, comments, and tests in English.
-- **Testing**: unit tests in `src/agents.test.ts`; run `npm test` from the repo root.
+- **Testing**: unit tests in `src/agents.test.ts`; run `npm test` from the repo root. The golden
+  fixtures (`fixtures/*.json`, format in `fixtures/README.md`) are plain JSON cases any agent
+  runtime must pass; `src/fixtures.test.ts` replays them here. A change to the prompts, the
+  answer protocol or the guards that changes a case is re-recorded with
+  `scripts/record-fixtures.ts`, and the diff is read before committing.
 - **No framework**: agents are hand-written on purpose; keep it that way unless agreed.

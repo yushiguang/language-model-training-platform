@@ -275,7 +275,10 @@ Both have their own design docs, which hold the design and the as-built detail:
 
 The rules that protect data hold in the tool host (`agentToolHost` in
 `apps/workflow/src/services/page-views.ts`), so they hold whatever runtime sends the call; the
-runtime and the golden fixtures hold the rules about what a helper answers.
+runtime and the golden fixtures hold the rules about what a helper answers. The fixtures
+(`apps/agents/fixtures/*.json`, format in its README) are plain JSON cases: request, model
+replies, tool answers and the expected output. Any agent runtime is accepted against them, and
+`apps/agents/src/fixtures.test.ts` replays them on the reference runtime.
 
 | Guard | Where it is enforced |
 |---|---|
@@ -286,7 +289,7 @@ runtime and the golden fixtures hold the rules about what a helper answers.
 | Start tools start work at once and say so in the chat | Tool host (`services/starts.ts`) |
 | A problem report is sent only after the user answered its draft | Tool host (`services/problems.ts`) |
 | Proposals never save themselves: a draft is saved as a version only by the user | Workflow (`sendUserMessage` stores a proposal; no tool saves a version) |
-| Handoffs go only to known specialists with a known intent (`HANDOFF_TARGETS`) | Runtime; fixtures |
+| Handoffs go only to known specialists with a known intent (`HANDOFF_TARGETS`) | Runtime; fixtures (`apps/agents/fixtures`) |
 | Improve with AI and the Optimiser change wording only (`rewordOnly`) | Runtime and the Optimiser; fixtures |
 | Nothing is carried over silently on prompt import (unmapped parts are listed) | Runtime; fixtures |
 | An answer that is not JSON is retried once, then shown as plain text or a short apology | Runtime; fixtures |

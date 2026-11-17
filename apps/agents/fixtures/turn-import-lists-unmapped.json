@@ -1,0 +1,149 @@
+{
+  "name": "A pasted prompt is imported into the structured parts; what has no place is listed",
+  "guards": [
+    "nothing is carried over silently on import: unmapped passages are listed word for word"
+  ],
+  "kind": "turn",
+  "request": {
+    "userText": "You label customer messages for a support team.\n\n## Intent\n- Complaint: something went wrong and the customer wants it fixed\n- Question: the customer asks how to do something\nWhen a message does both, choose Complaint.\n\n## Rules\n- If the message is empty, choose Question.\n\n## Examples\nMessage: \"my order is late\" -> Complaint\n\n## Output\nReturn JSON only.",
+    "page": {
+      "label": "Prompt Design",
+      "agent": "front_desk",
+      "intent": "answer",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_fixture",
+      "task": "Tag short videos",
+      "prompt": null,
+      "history": [],
+      "pageView": null
+    },
+    "turnId": "turn_fixture",
+    "ctx": {
+      "requestId": "rq_fixture",
+      "user": {
+        "id": "u_fixture",
+        "name": "Fixture user"
+      },
+      "caller": "workflow",
+      "locale": "en"
+    },
+    "locale": "en"
+  },
+  "model": [
+    "{\"handoff\":{\"to\":\"prompt_agent\",\"intent\":\"import_prompt\"},\"reply\":\"I'll bring in the Prompt helper to read your prompt.\"}",
+    "{\"reply\":\"I sorted your prompt into the label intent with 2 values, the task and the rules. 2 passages have no place in the structured prompt (for example examples or output format): the page lists them under \\\"Not carried over\\\". Check the draft, then approve it at the top right.\",\"prompt\":{\"taskSummary\":\"You label customer messages for a support team.\",\"features\":{\"video\":[\"Description\",\"OCR_Text\",\"ASR\",\"Creator_Nick_Name\",\"Creator_Bio\"],\"photo_text\":[\"Title\",\"Description\",\"OCR_Text\",\"ASR\",\"Creator_Nick_Name\",\"Creator_Bio\"],\"metadata\":[\"Country_Code\",\"Language\"]},\"label\":{\"name\":\"intent\",\"kind\":\"single\",\"values\":[{\"name\":\"Complaint\",\"definition\":\"something went wrong and the customer wants it fixed\"},{\"name\":\"Question\",\"definition\":\"the customer asks how to do something\"}]},\"ruleGroups\":[{\"id\":\"rg1\",\"title\":\"Choosing a value\",\"content\":\"When a message does both, choose Complaint.\"},{\"id\":\"rg2\",\"title\":\"Rules\",\"content\":\"- If the message is empty, choose Question.\"}],\"images\":[]},\"change\":\"Imported from an existing prompt\",\"unmapped\":[\"## Examples\\nMessage: \\\"my order is late\\\" -> Complaint\",\"## Output\\nReturn JSON only.\"]}"
+  ],
+  "tools": [],
+  "expected": {
+    "invocations": [
+      {
+        "from": "user",
+        "to": "front_desk",
+        "intent": "answer",
+        "note": ""
+      },
+      {
+        "from": "front_desk",
+        "to": "prompt_agent",
+        "intent": "import_prompt",
+        "note": "Handed off by the front desk"
+      }
+    ],
+    "messages": [
+      {
+        "role": "event",
+        "agent": null,
+        "event": "join",
+        "text": "Prompt helper joined to answer",
+        "msg": {
+          "key": "{who} joined to answer",
+          "params": {
+            "who": "Prompt helper"
+          }
+        }
+      },
+      {
+        "role": "agent",
+        "agent": "prompt_agent",
+        "text": "I sorted your prompt into the label intent with 2 values, the task and the rules. 2 passages have no place in the structured prompt (for example examples or output format): the page lists them under \"Not carried over\". Check the draft, then approve it at the top right."
+      }
+    ],
+    "proposal": {
+      "kind": "prompt",
+      "agent": "prompt_agent",
+      "brief": "You label customer messages for a support team.\n\n## Intent\n- Complaint: something went wrong and the customer wants it fixed\n- Question: the customer asks how to do something\nWhen a message does both, choose Complaint.\n\n## Rules\n- If the message is empty, choose Question.\n\n## Examples\nMessage: \"my order is late\" -> Complaint\n\n## Output\nReturn JSON only.",
+      "payload": {
+        "structured": {
+          "taskSummary": "You label customer messages for a support team.",
+          "features": {
+            "video": [
+              "Description",
+              "OCR_Text",
+              "ASR",
+              "Creator_Nick_Name",
+              "Creator_Bio"
+            ],
+            "photo_text": [
+              "Title",
+              "Description",
+              "OCR_Text",
+              "ASR",
+              "Creator_Nick_Name",
+              "Creator_Bio"
+            ],
+            "metadata": [
+              "Country_Code",
+              "Language"
+            ]
+          },
+          "label": {
+            "name": "intent",
+            "kind": "single",
+            "values": [
+              {
+                "name": "Complaint",
+                "definition": "something went wrong and the customer wants it fixed"
+              },
+              {
+                "name": "Question",
+                "definition": "the customer asks how to do something"
+              }
+            ]
+          },
+          "ruleGroups": [
+            {
+              "id": "rg1",
+              "title": "Choosing a value",
+              "content": "When a message does both, choose Complaint."
+            },
+            {
+              "id": "rg2",
+              "title": "Rules",
+              "content": "- If the message is empty, choose Question."
+            }
+          ],
+          "images": []
+        },
+        "change": "Imported from an existing prompt",
+        "unmapped": [
+          "## Examples\nMessage: \"my order is late\" -> Complaint",
+          "## Output\nReturn JSON only."
+        ]
+      }
+    },
+    "toolCalls": [],
+    "modelCalls": [
+      {
+        "agent": "front_desk",
+        "model": "gpt-5.6-terra"
+      },
+      {
+        "agent": "prompt_agent",
+        "model": "gpt-5.6-terra"
+      }
+    ],
+    "parseFailures": []
+  }
+}

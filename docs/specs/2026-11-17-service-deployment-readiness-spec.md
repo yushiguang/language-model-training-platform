@@ -399,6 +399,10 @@ Each item is its own `Contract change:` pull request.
    **Send returns on accept** on branch `feat/send-returns-on-accept` (breaking `BffContract`):
    `sendUserMessage` returns `{turnId}` once the message is saved and the turn started; the page
    follows the turn with `getAgentLive`. Chat as a job (G1) stays out of scope.
+   **Golden fixtures built** on branch `feat/agent-golden-fixtures`: 15 agent cases (turn,
+   reflect, improve) in `apps/agents/fixtures/*.json`, recorded by
+   `apps/agents/scripts/record-fixtures.ts` and replayed by `apps/agents/src/fixtures.test.ts`.
+   BFF fixtures are not built yet.
 
 ## 9. Verification
 

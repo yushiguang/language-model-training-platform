@@ -1,0 +1,64 @@
+{
+  "name": "A handoff to a helper that does not exist is ignored; the front desk answers itself",
+  "guards": [
+    "handoffs go only to known specialists"
+  ],
+  "kind": "turn",
+  "request": {
+    "userText": "hi",
+    "page": {
+      "label": "Projects",
+      "agent": "front_desk",
+      "intent": "answer",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_fixture",
+      "task": "Tag short videos",
+      "prompt": null,
+      "history": [],
+      "pageView": null
+    },
+    "turnId": "turn_fixture",
+    "ctx": {
+      "requestId": "rq_fixture",
+      "user": {
+        "id": "u_fixture",
+        "name": "Fixture user"
+      },
+      "caller": "workflow",
+      "locale": "en"
+    },
+    "locale": "en"
+  },
+  "model": [
+    "{\"reply\":\"Here is what I know.\",\"handoff\":{\"to\":\"billing_agent\",\"intent\":\"refund\"}}"
+  ],
+  "tools": [],
+  "expected": {
+    "invocations": [
+      {
+        "from": "user",
+        "to": "front_desk",
+        "intent": "answer",
+        "note": ""
+      }
+    ],
+    "messages": [
+      {
+        "role": "agent",
+        "agent": "front_desk",
+        "text": "Here is what I know."
+      }
+    ],
+    "proposal": null,
+    "toolCalls": [],
+    "modelCalls": [
+      {
+        "agent": "front_desk",
+        "model": "gpt-5.6-terra"
+      }
+    ],
+    "parseFailures": []
+  }
+}

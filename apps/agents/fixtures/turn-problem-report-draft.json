@@ -1,0 +1,117 @@
+{
+  "name": "A problem is drafted as a report and shown to the user; nothing is sent",
+  "guards": [
+    "a problem report is drafted first; it is sent only on a later yes (the host enforces it)"
+  ],
+  "kind": "turn",
+  "request": {
+    "userText": "Saving does nothing",
+    "page": {
+      "label": "Prompt Design",
+      "agent": "front_desk",
+      "intent": "answer",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_fixture",
+      "task": "Tag short videos",
+      "prompt": null,
+      "history": [],
+      "pageView": {
+        "page": "prompt_design",
+        "title": "Prompt Design",
+        "summary": "",
+        "data": {}
+      }
+    },
+    "turnId": "turn_fixture",
+    "ctx": {
+      "requestId": "rq_fixture",
+      "user": {
+        "id": "u_fixture",
+        "name": "Fixture user"
+      },
+      "caller": "workflow",
+      "locale": "en"
+    },
+    "locale": "en"
+  },
+  "model": [
+    "{\"tool\":{\"name\":\"report_problem\",\"args\":{\"summary\":\"Saving does nothing\",\"expected\":\"Prompt Design works as described.\",\"actual\":\"Saving does nothing\",\"steps\":[\"Open Prompt Design\"]}}}",
+    "{\"reply\":\"Here is the report I would send: \\\"Saving does nothing\\\". It includes the page and the project it is about; not your prompt, examples and gold labels. Shall I send it?\"}"
+  ],
+  "tools": [
+    {
+      "agent": "front_desk",
+      "name": "report_problem",
+      "args": {
+        "summary": "Saving does nothing",
+        "expected": "Prompt Design works as described.",
+        "actual": "Saving does nothing",
+        "steps": [
+          "Open Prompt Design"
+        ]
+      },
+      "result": {
+        "draft": {
+          "summary": "Saving does nothing",
+          "expected": "Prompt Design works as described.",
+          "actual": "Saving does nothing",
+          "steps": [
+            "Open Prompt Design"
+          ]
+        },
+        "attached": [
+          "the page and the project it is about"
+        ],
+        "notAttached": [
+          "your prompt, examples and gold labels"
+        ]
+      }
+    }
+  ],
+  "expected": {
+    "invocations": [
+      {
+        "from": "user",
+        "to": "front_desk",
+        "intent": "answer",
+        "note": ""
+      }
+    ],
+    "messages": [
+      {
+        "role": "agent",
+        "agent": "front_desk",
+        "text": "Here is the report I would send: \"Saving does nothing\". It includes the page and the project it is about; not your prompt, examples and gold labels. Shall I send it?"
+      }
+    ],
+    "proposal": null,
+    "toolCalls": [
+      {
+        "agent": "front_desk",
+        "name": "report_problem",
+        "args": {
+          "summary": "Saving does nothing",
+          "expected": "Prompt Design works as described.",
+          "actual": "Saving does nothing",
+          "steps": [
+            "Open Prompt Design"
+          ]
+        },
+        "ok": true
+      }
+    ],
+    "modelCalls": [
+      {
+        "agent": "front_desk",
+        "model": "gpt-5.6-terra"
+      },
+      {
+        "agent": "front_desk",
+        "model": "gpt-5.6-terra"
+      }
+    ],
+    "parseFailures": []
+  }
+}

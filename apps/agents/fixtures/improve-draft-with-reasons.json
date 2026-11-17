@@ -1,0 +1,97 @@
+{
+  "name": "Improve with AI returns a draft with each change and its reason",
+  "guards": [
+    "Improve with AI changes wording only and gives a reason for every change"
+  ],
+  "kind": "improve",
+  "request": {
+    "projectId": "pr_fixture",
+    "ctx": {
+      "requestId": "rq_fixture",
+      "user": {
+        "id": "u_fixture",
+        "name": "Fixture user"
+      },
+      "caller": "workflow",
+      "locale": "en"
+    },
+    "version": "v2",
+    "prompt": {
+      "taskSummary": "Label the post.",
+      "features": {
+        "video": [
+          "Description"
+        ],
+        "photo_text": [],
+        "metadata": []
+      },
+      "label": {
+        "name": "format",
+        "kind": "single",
+        "values": [
+          {
+            "name": "Vlog",
+            "definition": "a day in a life"
+          },
+          {
+            "name": "Clip",
+            "definition": "a cut from a longer video"
+          }
+        ]
+      },
+      "ruleGroups": [],
+      "images": []
+    },
+    "mixUps": [
+      {
+        "kind": "confused",
+        "gold": "Clip",
+        "predicted": "Vlog",
+        "count": 5,
+        "exampleIds": []
+      }
+    ],
+    "macroF1": 0.5,
+    "lowestValue": null,
+    "mistakes": 5
+  },
+  "model": [
+    "{\"reply\":\"I made 1 change to v2. Hover each mark to see why.\",\"prompt\":{\"taskSummary\":\"Label the post.\",\"features\":{\"video\":[\"Description\"],\"photo_text\":[],\"metadata\":[]},\"label\":{\"name\":\"format\",\"kind\":\"single\",\"values\":[{\"name\":\"Vlog\",\"definition\":\"- a day in a life\\n- Does not apply when the post fits Clip better (a cut from a longer video).\"},{\"name\":\"Clip\",\"definition\":\"a cut from a longer video\"}]},\"ruleGroups\":[],\"images\":[]},\"changes\":[{\"text\":\"- Does not apply when the post fits Clip better (a cut from a longer video).\",\"reason\":\"5 Clip examples were read as Vlog\"}]}"
+  ],
+  "tools": [],
+  "expected": {
+    "prompt": {
+      "taskSummary": "Label the post.",
+      "features": {
+        "video": [
+          "Description"
+        ],
+        "photo_text": [],
+        "metadata": []
+      },
+      "label": {
+        "name": "format",
+        "kind": "single",
+        "values": [
+          {
+            "name": "Vlog",
+            "definition": "- a day in a life\n- Does not apply when the post fits Clip better (a cut from a longer video)."
+          },
+          {
+            "name": "Clip",
+            "definition": "a cut from a longer video"
+          }
+        ]
+      },
+      "ruleGroups": [],
+      "images": []
+    },
+    "changes": [
+      {
+        "text": "- Does not apply when the post fits Clip better (a cut from a longer video).",
+        "reason": "5 Clip examples were read as Vlog"
+      }
+    ],
+    "reply": "I made 1 change to v2. Hover each mark to see why."
+  }
+}
