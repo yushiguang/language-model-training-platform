@@ -2,13 +2,19 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {Example, Schema} from '@tsp/contracts';
 import {compareDryRun, dryRunSize, exampleBrief, exampleScore, mergePair, paretoFront, pickDryRun, pickParent, promptKeys, wrongExamples} from './gepa.ts';
+import {toFeatures} from './template.ts';
 
-const schema: Schema = {fields: [{name: 'a', kind: 'single', values: []}, {name: 'b', kind: 'multi', values: []}]};
+test('an example scores 1 when its answer matches the gold label; an invalid answer scores 0', () => {
+  assert.equal(exampleScore(['x'], ['x']), 1);
+  assert.equal(exampleScore(['x'], ['y']), 0);
+  assert.equal(exampleScore(['x'], null), 0);
+});
 
-test('an example scores the share of fields right; an invalid answer scores 0', () => {
-  assert.equal(exampleScore(schema, {a: ['x'], b: ['p', 'q']}, {a: ['x'], b: ['q', 'p']}), 1);
-  assert.equal(exampleScore(schema, {a: ['x'], b: ['p']}, {a: ['x'], b: []}), 0.5);
-  assert.equal(exampleScore(schema, {a: ['x'], b: ['p']}, null), 0);
+test('a multi-select answer earns part of the score for the values it gets right', () => {
+  assert.equal(exampleScore(['a', 'b'], ['b', 'a']), 1);
+  assert.equal(exampleScore(['a', 'b'], ['a']), 2 / 3);
+  assert.equal(exampleScore(['a', 'b'], ['a', 'c']), 0.5);
+  assert.equal(exampleScore(['a'], []), 0);
 });
 
 test('dry run: half of the optimiser half, at most 20', () => {
@@ -19,19 +25,19 @@ test('dry run: half of the optimiser half, at most 20', () => {
   assert.equal(dryRunSize(1), 1);
 });
 
-test('helpers read the wrong examples worst first, at most 8, with text features cut short and no images', () => {
-  const ex = (i: number): Example => ({id: `e${i}`, snapshotId: 's', externalId: `ex-${i}`, type: 'photo_text', title: '', features: {Title: `title ${i}`, Body: 'x'.repeat(500), Cover: 'https://img/1.jpg', Pics: ['https://img/2.jpg'], Unused: 'not in the prompt'}, split: 'eval', optimiserHalf: true});
+test('helpers read the wrong examples, invalid answers first, at most 8, with text features cut short and no images', () => {
+  const ex = (i: number): Example => ({id: `e${i}`, snapshotId: 's', externalId: `ex-${i}`, type: 'photo_text', title: '', features: toFeatures({Title: `title ${i}`, Body: 'x'.repeat(500), Cover: 'https://img/1.jpg', Pics: ['https://img/2.jpg'], Unused: 'not in the prompt'}), split: 'eval', optimiserHalf: true});
   const exs = Array.from({length: 12}, (_, i) => ex(i));
-  const gold = new Map(exs.map(e => [e.id, {a: ['x'], b: ['p']}]));
-  // e0..e3 right, e4..e7 half right, e8..e11 wrong.
-  const pred = new Map(exs.map((e, i) => [e.id, i < 4 ? {a: ['x'], b: ['p']} : i < 8 ? {a: ['x'], b: []} : null]));
-  const out = wrongExamples(schema, exs, promptKeys({template: '{{Title}} {{Body}} {{Cover}}', features: {video: [], photo_text: ['Pics'], metadata: []}}), gold, pred);
+  const gold = new Map(exs.map(e => [e.id, ['x']]));
+  // e0..e3 right, e4..e7 wrong, e8..e11 invalid.
+  const pred = new Map(exs.map((e, i) => [e.id, i < 4 ? ['x'] : i < 8 ? ['y'] : null]));
+  const out = wrongExamples(exs, promptKeys({template: '{{Title}} {{Body}} {{Cover}}', features: {video: [], photo_text: ['Pics'], metadata: []}}), gold, pred);
   assert.equal(out.length, 8);
   assert.deepEqual(out.slice(0, 4).map(e => e.externalId), ['ex-8', 'ex-9', 'ex-10', 'ex-11']);
   assert.deepEqual(Object.keys(out[0].features).sort(), ['Body', 'Title']);
   assert.ok(out[0].features.Body.length <= 300);
   assert.equal(out[0].predicted, null);
-  assert.equal(exampleBrief(exs[0], ['Title'], {a: ['x']}, null, 'other').rightIn, 'other');
+  assert.equal(exampleBrief(exs[0], ['Title'], ['x'], null, 'other').rightIn, 'other');
 });
 
 test('the Pareto front keeps every version that is best on some example, weighted by wins', () => {
@@ -67,47 +73,37 @@ test('the dry run picks at random, up to half from the focus examples', () => {
   assert.equal(pickDryRun(['e1', 'e2'], 5).length, 2);
 });
 
-test('a change goes on only when it gets more fields right, the lowest field counting double', () => {
-  const gold = {a: ['x'], b: ['p']};
-  const r = compareDryRun(schema, 'v1', [
-    {gold, candidate: {a: ['x'], b: ['p']}, parent: {a: ['y'], b: ['p']}},
-    {gold, candidate: {a: ['x'], b: ['p']}, parent: {a: ['x'], b: ['p']}},
-    {gold, candidate: null, parent: {a: ['x'], b: []}},
+test('a dry run drops a change only when it scores lower than the version it came from; a tie goes on', () => {
+  const r = compareDryRun('v1', [
+    {gold: ['x'], candidate: ['x'], parent: ['y']},
+    {gold: ['x'], candidate: ['x'], parent: ['x']},
+    {gold: ['x'], candidate: null, parent: ['x']},
   ]);
-  assert.equal(r.passed, 2);
-  assert.equal(r.parentPassed, 1);
-  assert.deepEqual(r.fields, [{field: 'a', passed: 2, parentPassed: 2}, {field: 'b', passed: 2, parentPassed: 2}]);
-  // More examples fully right, but the same fields right: no better, but a tie (R5-6) since the
-  // two are right on different examples.
-  assert.equal(r.better, false);
-  assert.equal(r.tied, true);
-  // The same answers everywhere is no tie: there is nothing new in it.
-  assert.equal(compareDryRun(schema, 'v1', [{gold, candidate: gold, parent: gold}]).tied, false);
-  // Fixing one field of two counts.
-  assert.equal(compareDryRun(schema, 'v1', [{gold, candidate: gold, parent: {a: ['x'], b: []}}]).better, true);
-  assert.equal(compareDryRun(schema, 'v1', [{gold, candidate: gold, parent: gold}]).better, false);
-  // One field gained on b, one lost on a: a tie, unless a is the lowest field (then worse) or b is (then better).
-  const swap = [{gold, candidate: {a: ['y'], b: ['p']}, parent: {a: ['x'], b: []}}];
-  assert.equal(compareDryRun(schema, 'v1', swap).better, false);
-  assert.equal(compareDryRun(schema, 'v1', swap, 'b').better, true);
+  assert.deepEqual([r.passed, r.parentPassed, r.better, r.tied, r.regressed], [2, 2, false, true, false]);
+  assert.equal(compareDryRun('v1', [{gold: ['x'], candidate: ['x'], parent: ['x']}]).tied, true);
+  assert.equal(compareDryRun('v1', [{gold: ['x'], candidate: ['x'], parent: ['y']}]).better, true);
+  assert.equal(compareDryRun('v1', [{gold: ['x'], candidate: ['y'], parent: ['x']}]).regressed, true);
+  // Multi-select: getting one more value right is progress even with no exact match.
+  const m = compareDryRun('v1', [{gold: ['a', 'b'], candidate: ['a'], parent: ['c']}]);
+  assert.deepEqual([m.passed, m.parentPassed, m.better], [0, 0, true]);
 });
 
 test("helpers read the model's reason and the invalid reason; filtered answers are left out", async () => {
   const {answersForHelpers} = await import('./gepa.ts');
   const {parseOutput, REASON_LINE} = await import('./labels.ts');
   assert.match(REASON_LINE, /"reason"/);
-  const named: Schema = {fields: [{name: 'a', kind: 'single', values: [{name: 'x', definition: ''}]}, {name: 'b', kind: 'multi', values: [{name: 'p', definition: ''}]}]};
-  assert.deepEqual(parseOutput('{"reason": " The clip shows steps. ", "a": "x", "b": "p"}', named), {answer: {a: ['x'], b: ['p']}, reason: null, note: 'The clip shows steps.'});
-  assert.deepEqual(parseOutput('{"reason": "It is new.", "a": "nope", "b": "p"}', named), {answer: null, reason: '"nope" isn\'t a value of a', note: 'It is new.'});
-  assert.equal(parseOutput('{"a": "x", "b": "p"}', named).note, undefined);
-  const ex = (i: number): Example => ({id: `e${i}`, snapshotId: 's', externalId: `ex-${i}`, type: 'video', title: '', features: {Title: `t${i}`}, split: 'eval', optimiserHalf: true});
+  const named: Schema = {name: 'a', kind: 'single', values: [{name: 'x', definition: ''}, {name: 'q', definition: ''}]};
+  assert.deepEqual(parseOutput('{"reason": " The clip shows steps. ", "a": "x"}', named), {answer: ['x'], reason: null, note: 'The clip shows steps.'});
+  assert.deepEqual(parseOutput('{"reason": "It is new.", "a": "nope"}', named), {answer: null, reason: '"nope" isn\'t a value of a', note: 'It is new.'});
+  assert.equal(parseOutput('{"a": "x"}', named).note, undefined);
+  const ex = (i: number): Example => ({id: `e${i}`, snapshotId: 's', externalId: `ex-${i}`, type: 'video', title: '', features: toFeatures({Title: `t${i}`}), split: 'eval', optimiserHalf: true});
   const exs = [0, 1, 2].map(ex);
-  const gold = new Map(exs.map(e => [e.id, {a: ['x'], b: ['p']}]));
+  const gold = new Map(exs.map(e => [e.id, ['x']]));
   const said = answersForHelpers([
-    {exampleId: 'e0', answer: {a: ['x'], b: ['q']}, invalidReason: null, reason: 'Looks like q.'},
+    {exampleId: 'e0', answer: ['q'], invalidReason: null, reason: 'Looks like q.'},
     {exampleId: 'e1', answer: null, invalidReason: 'Not valid JSON'},
     {exampleId: 'e2', answer: null, invalidReason: 'Stopped by the safety filter', filtered: true},
   ]);
-  const out = wrongExamples(schema, exs, ['Title'], gold, said.predicted, undefined, said.notes);
+  const out = wrongExamples(exs, ['Title'], gold, said.predicted, undefined, said.notes);
   assert.deepEqual(out.map(e => [e.externalId, e.reason, e.invalid]), [['ex-1', undefined, 'Not valid JSON'], ['ex-0', 'Looks like q.', undefined]]);
 });

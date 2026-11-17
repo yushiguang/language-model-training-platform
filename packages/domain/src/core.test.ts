@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {applyFix, checkTemplate, diffLines, diffWords, renderPrompt, withReasons} from './template.ts';
+import {applyFix, checkTemplate, diffLines, diffWords, renderPrompt, withReasons, toFeatures} from './template.ts';
 import {pageFromPath} from './pages.ts';
 import {computeMetrics, judge, DEFAULT_THRESHOLDS} from './metrics.ts';
 import {nextVersion, versionLabel} from './versions.ts';
@@ -27,7 +27,7 @@ test('single braces are text, broken double braces are errors', () => {
 
 test('render drops lines not ticked for the example type and fills empty with none', () => {
   const t = 'Title: {{Title}}\nDesc: {{Description}}\nLang: {{Language}}\nFrames: {{Frame}}';
-  const parts = renderPrompt(t, {type: 'video', features: {Description: 'hello', Language: '', Frame: ['f1.jpg', 'f2.jpg']}}, sel);
+  const parts = renderPrompt(t, {type: 'video', features: toFeatures({Description: 'hello', Language: '', Frame: ['f1.jpg', 'f2.jpg']})}, sel);
   const text = parts.filter(p => p.type === 'text').map(p => (p as {text: string}).text).join('');
   assert.ok(!text.includes('Title'));
   assert.ok(text.includes('Desc: hello'));
@@ -37,7 +37,7 @@ test('render drops lines not ticked for the example type and fills empty with no
 
 test('images sit where their placeholders were, and captions stay out of the text', () => {
   const t = 'Desc: {{Description}}\nFrames: {{Frame}}\nLogo: [Image 1]\nEnd';
-  const parts = renderPrompt(t, {type: 'video', features: {Description: 'hi', Title: '', Language: '', Frame: ['f1.jpg', 'f2.jpg']}}, sel, [{url: 'logo.png', name: 'logo.png', size: 1}]);
+  const parts = renderPrompt(t, {type: 'video', features: toFeatures({Description: 'hi', Title: '', Language: '', Frame: ['f1.jpg', 'f2.jpg']})}, sel, [{url: 'logo.png', name: 'logo.png', size: 1}]);
   assert.deepEqual(
     parts.map(p => (p.type === 'text' ? p.text : p.url)),
     ['Desc: hi\nFrames: ', 'f1.jpg', 'f2.jpg', '\nLogo: ', 'logo.png', '\nEnd'],
@@ -51,31 +51,39 @@ test('images sit where their placeholders were, and captions stay out of the tex
 });
 
 test('pages are found from the URL path, with or without a base path', () => {
-  assert.equal(pageFromPath('/report/'), 'report');
+  assert.equal(pageFromPath('/gold/'), 'gold');
   assert.equal(pageFromPath('/language-model-training-platform/prompt/edit/'), 'prompt_edit');
-  assert.equal(pageFromPath('/training-set.html'), 'training');
+  assert.equal(pageFromPath('/prompt-design.html'), 'prompt_design');
   assert.equal(pageFromPath('/'), 'projects');
 });
 
 test('macro-F1 and pass judgement', () => {
-  const schema: Schema = {fields: [{name: 'f', kind: 'single', values: [{name: 'a', definition: ''}, {name: 'b', definition: ''}]}]};
+  const schema: Schema = {name: 'f', kind: 'single', values: [{name: 'a', definition: ''}, {name: 'b', definition: ''}]};
   const items = [
-    {exampleId: '1', gold: {f: ['a']}, predicted: {f: ['a']}, costUsd: 0.001},
-    {exampleId: '2', gold: {f: ['b']}, predicted: {f: ['a']}, costUsd: 0.001},
-    {exampleId: '3', gold: {f: ['b']}, predicted: {f: ['b']}, costUsd: 0.001},
-    {exampleId: '4', gold: {f: ['b']}, predicted: null, costUsd: 0.001},
+    {exampleId: '1', gold: ['a'], predicted: ['a'], costUsd: 0.001},
+    {exampleId: '2', gold: ['b'], predicted: ['a'], costUsd: 0.001},
+    {exampleId: '3', gold: ['b'], predicted: ['b'], costUsd: 0.001},
+    {exampleId: '4', gold: ['b'], predicted: null, costUsd: 0.001},
   ];
-  const m = computeMetrics(schema, [...items, {exampleId: '5', gold: {f: ['a']}, predicted: null, filtered: true, costUsd: 0}]);
+  const m = computeMetrics(schema, [...items, {exampleId: '5', gold: ['a'], predicted: null, filtered: true, costUsd: 0}]);
   // R4-6: the invalid (4) and filtered (5) answers are left out. a: p=0.5 r=1 f1=0.667; b: p=1 r=1/2 f1=0.667
-  assert.equal(m.fields[0].macroF1, 0.667);
+  assert.equal(m.macroF1, 0.667);
+  assert.equal(m.accuracy, 0.667);
+  assert.deepEqual(m.lowestValue, {value: 'a', f1: 0.667});
+  assert.deepEqual(m.mixUps, [{kind: 'confused', gold: 'b', predicted: 'a', count: 1, exampleIds: ['2']}]);
+  assert.equal(judge(m, DEFAULT_THRESHOLDS, 30).checks[0].label, 'Macro-F1');
   assert.deepEqual([m.n, m.total, m.invalid, m.filtered, m.invalidRate], [3, 5, 1, 1, 0.2]);
   assert.equal(m.mixUps[0].count, 1);
   // The invalid cap is always checked: 20% invalid fails even with a passing score.
   const lenient = {...DEFAULT_THRESHOLDS, macroF1: 0.5};
   const j = judge(m, lenient, 30);
   assert.equal(j.passed, false);
-  assert.deepEqual(j.checks.find(c => c.label === 'Invalid outputs'), {label: 'Invalid outputs', actual: '20%', need: '≤ 1.0%', met: false});
+  assert.deepEqual(j.checks.find(c => c.label === 'Invalid outputs'), {label: 'Invalid outputs', msg: {key: 'Invalid outputs'}, actual: '20%', need: '≤ 1.0%', met: false});
   assert.equal(judge(computeMetrics(schema, items.slice(0, 3)), lenient, 30).passed, true);
+  // Review 2026-11-13: the count is of gold-labeled eval examples; under minEval it is a rough
+  // reading and never passes, however good the score.
+  const few = judge(computeMetrics(schema, items.slice(0, 3)), lenient, 4);
+  assert.deepEqual([few.passed, few.rough], [false, true]);
 });
 
 test('versions: Save makes the next minor, Save as new version the next major, an Optimiser run its reserved major', () => {
@@ -105,10 +113,56 @@ test('[Image N] without prompt image N is an error, so deleting an image used in
   assert.equal(checkTemplate(t, sel, {images: [...one, ...one]}).errors.length, 0);
 });
 
-test('a multi-select answer with the same value twice keeps it once', async () => {
+test('a single-select answer is exactly one value of the label; a one-item list is read as that value', async () => {
   const {parseOutput} = await import('./labels.ts');
-  const schema: Schema = {fields: [{name: 'topic', kind: 'multi', values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}]}]};
-  assert.deepEqual(parseOutput('{"topic": ["Food", "Food", "Travel"]}', schema).answer, {topic: ['Food', 'Travel']});
+  const schema: Schema = {name: 'topic', kind: 'single', values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}]};
+  assert.deepEqual(parseOutput('{"reason": "x", "topic": "Food"}', schema).answer, ['Food']);
+  assert.deepEqual(parseOutput('{"topic": ["Travel"]}', schema).answer, ['Travel']);
+  assert.equal(parseOutput('{"topic": ["Travel", "Travel"]}', schema).reason, 'topic lists a value twice');
+  assert.equal(parseOutput('{"topic": ["Food", "Travel"]}', schema).reason, 'topic needs exactly one value');
+  assert.equal(parseOutput('{"topic": "Games"}', schema).reason, '"Games" isn\'t a value of topic');
+  assert.equal(parseOutput('{"other": "Food"}', schema).answer, null);
+});
+
+test('a multi-select answer is a list within the bounds, in label order, with an exclusive value on its own', async () => {
+  const {parseOutput, sameAnswer} = await import('./labels.ts');
+  const schema: Schema = {name: 'tags', kind: 'multi', min: 1, max: 2, values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}, {name: 'Pets', definition: ''}, {name: 'None', definition: '', exclusive: true}]};
+  assert.deepEqual(parseOutput('{"tags": ["Travel", "Food"]}', schema).answer, ['Food', 'Travel']);
+  assert.deepEqual(parseOutput('{"tags": "Pets"}', schema).answer, ['Pets']);
+  assert.deepEqual(parseOutput('{"tags": ["None"]}', schema).answer, ['None']);
+  assert.equal(parseOutput('{"tags": []}', schema).reason, 'tags needs 1 to 2 values');
+  assert.equal(parseOutput('{"tags": ["Food", "Travel", "Pets"]}', schema).reason, 'tags needs 1 to 2 values');
+  assert.equal(parseOutput('{"tags": ["Food", "None"]}', schema).reason, '"None" must be the only value of tags');
+  assert.equal(sameAnswer(['Travel', 'Food'], ['Food', 'Travel']), true);
+  assert.equal(sameAnswer(['Food'], ['Food', 'Travel']), false);
+});
+
+test('multi-select scores: a value counts wherever it is in the list; accuracy needs the exact set', () => {
+  const schema: Schema = {name: 'tags', kind: 'multi', min: 1, max: 2, values: [{name: 'a', definition: ''}, {name: 'b', definition: ''}]};
+  const m = computeMetrics(schema, [
+    {exampleId: '1', gold: ['a', 'b'], predicted: ['a', 'b'], costUsd: 0},
+    {exampleId: '2', gold: ['a'], predicted: ['a', 'b'], costUsd: 0},
+    {exampleId: '3', gold: ['a', 'b'], predicted: ['a'], costUsd: 0},
+  ]);
+  // a: all right (f1 1); b: tp 1, fp 1, fn 1 (f1 0.5). Exact sets: 1 of 3.
+  assert.equal(m.macroF1, 0.75);
+  assert.equal(m.accuracy, 0.333);
+  assert.deepEqual(m.mixUps.map(x => [x.kind, x.gold, x.predicted, x.exampleIds]), [
+    ['extra', null, 'b', ['2']],
+    ['missed', 'b', null, ['3']],
+  ]);
+});
+
+test('gold labels from upload files: the value, a list, or an older file\'s one-item list', async () => {
+  const {readGoldAnswer} = await import('./labels.ts');
+  const schema: Schema = {name: 'topic', kind: 'single', values: [{name: 'Food', definition: ''}, {name: 'Travel', definition: ''}]};
+  assert.deepEqual(readGoldAnswer('Food', schema), ['Food']);
+  assert.deepEqual(readGoldAnswer({topic: ['Travel']}, schema), ['Travel']);
+  assert.deepEqual(readGoldAnswer({primary: ['Food']}, schema), ['Food']);
+  assert.deepEqual(readGoldAnswer({tags: ['Travel', 'Food', 'Food']}, {...schema, name: 'tags', kind: 'multi', max: 2}), ['Food', 'Travel']);
+  assert.equal(readGoldAnswer({a: ['Food'], b: ['Travel']}, schema), null);
+  assert.equal(readGoldAnswer({topic: ['Food', 'Travel']}, schema), null);
+  assert.equal(readGoldAnswer('Games', schema), null);
 });
 
 test('change marks: word-level diff with removed text before added text', () => {

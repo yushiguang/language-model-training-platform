@@ -11,6 +11,7 @@
     "apps/catalog",
     "apps/labeling",
     "apps/agents",
+    "apps/optimiser",
     "apps/bff",
     "apps/telemetry",
     "apps/web"

@@ -1,8 +1,8 @@
 # telemetry (`@tsp/telemetry`)
 
 Metrics and product events. Contract: `TelemetryPort` and the catalogues `METRICS` and
-`EventProps` in `packages/contracts/src/telemetry.ts`; the full list with meanings is in the
-"Telemetry: events and metrics" design doc. This app keeps them and sends them to a
+`EventProps` in `packages/contracts/src/telemetry.ts`; the conventions and the rules for
+changing them are in `docs/design/telemetry.md`. This app keeps them and sends them to a
 `TelemetrySink`; it decides nothing about the product.
 
 - `telemetry.ts`: `createTelemetry({sink, appVersion, env, flushMs, maxBuffered})` returns a

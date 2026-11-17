@@ -4,8 +4,7 @@ import type {PageId} from '@tsp/contracts';
 export function pageFromPath(path: string): PageId {
   const p = path.replace(/\.html$/, '').replace(/\/+$/, '');
   if (/\/prompt\/edit$/.test(p)) return 'prompt_edit';
-  if (/\/prompt\/compare$/.test(p)) return 'compare';
   const last = p.split('/').pop() ?? '';
-  const map: Record<string, PageId> = {setup: 'setup', dataset: 'dataset', gold: 'gold', prompt: 'prompt', report: 'report', 'training-set': 'training'};
+  const map: Record<string, PageId> = {'prompt-design': 'prompt_design', dataset: 'dataset', gold: 'gold', prompt: 'prompt'};
   return map[last] ?? 'projects';
 }

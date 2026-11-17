@@ -3,6 +3,74 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-16 (workflow resilience and single or multi select)
+
+- **The one label is single select or multi select.** A project still has one label and is never mixed with another; a multi-select label says how many values an answer holds (at least, at most). Answers are lists everywhere (`Answer = string[]`), one value long for single select. A value can be marked "Only on its own" (exclusive): a catch-all such as "None" is never chosen next to another value.
+- **Multi-select scores** count each value wherever it sits in the list (per-value F1, Macro-F1 over values); accuracy needs the exact set. Mix-ups name a value that was added when it did not apply, or missed. In the Optimiser an example scores the F1 of its values, so a partly right answer earns part.
+- **The approved Prompt Design page has no Edit prompt**; versions are edited from Prompt Tuning.
+- **Sampling and uploads keep their progress on screen until the dataset is saved** (a "Saving the examples" step with no Stop). One example that fails to save is tried once more, then skipped and counted as "could not be saved", apart from invalid rows; the halves are evened over the saved ones. Only a task that saved nothing fails.
+- **Gold Labels has an Open item link** to the item's own page for when the player cannot be embedded. The player gets only the site's origin, over https (`strict-origin`), and may autoplay.
+- **Nothing is scored by itself before Gold Labels is approved.**
+- **The Optimiser drops a change only when it scores lower in the dry run**; a tie goes on to full labeling (this replaces R5-6's tie handling, and the tie limit is gone). Whether a kept change is progress is judged on the optimiser half's Macro-F1, never the held-out half, which no helper or Optimiser step reads. A kept change with no gain shows "No gain" and counts as a wasted round.
+- **Rebuild scores is on only when scores are out of date.** The AI Suggestion stays while they are, read from each version's newest score, and Edit prompt, Improve with AI and Auto Optimise ask "Rebuild scores first?" (Cancel, Continue anyway, Rebuild scores).
+- **A failed action reads "{Action} failed. {why}"**, and the banner's Retry spins while the action runs again.
+
+## 2026-11-16 (single-label projects and helper alignment)
+
+- **A project classifies exactly one label**, with mutually exclusive values, and the model answers one plain string (later the same day the label became single or multi select, and answers lists; see above). Projects are never mixed or merged, so there is no label combining and no multi-project merge; another label is another project.
+- **The Prompt helper suggests a catch-all value** ("Other" or "None") when the values may not cover every item, so every item can get one.
+- **Old projects are test data and start fresh**: the stored-data prefix changed and nothing is migrated. Old gold upload files (`{"name": ["value"]}`) still import.
+- **Value-specific rules go into the value's definition**; rule groups hold rules across values. A long pasted prompt is treated as an import whatever the user asked.
+- **The values are stacked cards** (name, definition, Move up / Move down / Remove), the version card scores each value, and Gold Labels shows one answer per item.
+- **The chat panel shows no page tag and no helper lines** ("Prompt helper answers", "Helpers read your recent messages"). Shift+Enter sends and Enter adds a line.
+
+## 2026-11-16 (acceptance refinements)
+
+- **No page renders before the signed-in user is known**; the identity is read once per page load and kept, so the avatar never flashes empty. Sign out shows only when the platform can end the session.
+- **A new project ticks no features.** A pre-ticked feature can break a task's own rules (for example a cover-only check that forbids on-screen text); the user or the Prompt helper ticks them.
+- **The prompt reads in authoring order**: Persona & Task, Input Features, Output Labels & Definitions, Rule Groups.
+- **Rules live in groups the user names**, replacing the per-field tie-break box and the one general-rules box, because real prompts organise their rules by topic, with paragraphs and nested bullets. An import keeps each rules section as its own group.
+- **The compiled prompt uses XML-style sections**, for clear boundaries and so that item text cannot pass for an instruction.
+- **Project Settings is three sections set apart by a line**; Default/Custom is a switch beside the Evaluation heading; no intro line and no model description; the checks show their names only, with no explanation line and no line between rows; the Model list is the site's own dropdown.
+
+## 2026-11-14 (1.1.0: creator, languages, problem reports)
+
+- **The Projects list shows who created each project**, nothing more until tenants arrive; the id is stored too, for ownership checks later.
+- **Rename lives in Project Settings**, as a Name field, not on the top island.
+- **English and Chinese now; more languages later**, as new catalog files. The switch sits in a menu under the avatar.
+- **Reporting a problem is a tool every helper has**, not a separate helper, because users get stuck on any page. The site defines the ticket submission interface; the internal platform files the ticket and the user gets its id. There is no reports page.
+- **A report needs the user's yes**, enforced in code: a draft first, a send only after the user writes again. The prompt goes along only when the user agrees; examples and gold labels never do.
+
+## 2026-11-14 (building 1.0.0 phases 3 and 4)
+
+- **Unlabeled examples never make a score stale.** Scores rest on gold-labeled eval examples only; an added example waits for its gold label and is counted next to the score.
+- **The halves are fixed at the first helper read**, not at the first score: until then they are rebalanced by gold label when Gold Labels is left.
+- **Removing is a soft delete with a trail**, restorable, and the score line says how many gold-labeled examples were removed before it.
+- **The "Why" on Mismatches is a comment.** Comments are append-only and reach the helpers for the readable half only.
+- **Gold Labels saves only on Save**, on both tabs; "Use the model's answer" is gone.
+- **Motion lives in code only** until the canvas has a way to show it.
+
+## 2026-11-13 (building 1.0.0 phase 2)
+
+- **The structured prompt is the only thing edited**; the text sent to the model is compiled from it and shown read-only.
+- **Only a changed field or value starts a new schema version.** New wording keeps gold labels and scores valid.
+- **The Optimiser and Improve with AI change wording only.** Fields and values are changed by people, on Prompt Design or in the editor.
+- **Project Settings are confirmed once, before the first paid run**; nothing paid starts before that.
+- **No Approve card in the chat.** A draft is approved on its page.
+- **Existing 0.x projects are not migrated** (assumed test data, to be discarded).
+- **The UI canvas was updated from the built site** (59 boards): the 1.0.0 screens are boards made from the pages' own markup.
+
+## 2026-11-12 (review of the 1.0.0 spec)
+
+- **No pass verdict under 20 scored examples.** The score shows as a rough reading and Finish stays closed.
+- **Appending examples never freezes scoring.** Versions are scored on gold-labeled examples; new ones are pending; changed scores are stale until Rebuild scores.
+- **Every example removal is recorded and restorable**, and the removed count shows next to the score.
+- **The held-out half is not a test set.** Confirm a pass stays; an untouched test set comes with the batch labeling project.
+- **Prompt import lists what it could not carry over.**
+- **1.0.0 ships in four phases**, the first a contract and service refactor with no behaviour change.
+- **A task that just finished is never marked as left behind** (found by the browser check during phase 1): the check that pauses tasks of closed pages reads the task again before it writes.
+- **Three 0.x UI rules change in 1.0.0:** Enter sends in Ask AI (Shift+Enter adds a line, input-method safe); user-written content wraps; the Project Settings default panel shows explanations as subtitles.
+
 ## 2026-11-11
 
 - **Gold Labels is an ordinary step** (acceptance R5-8): not optional or "recommended", and no
@@ -18,6 +86,8 @@ where it matters, why. The code follows these; change a line here when a decisio
   why a task waits.
 - **A tied dry run goes on** (R5-6): it may hold what the parent lacks, so it is labeled in full
   and joins the pool, but it is not progress (a wasted round; 2 ties in a row end the run).
+  Replaced on 2026-11-16: every tie goes on, progress is judged on the optimiser half, and there
+  is no tie limit.
 - **Round 1 changes the version the user started from** (R5-7); later rounds pick from the
   Pareto front, weighted by the examples each version wins, and the panel says which and why.
 - **Invalid and filtered answers are left out of scores** (acceptance R4-6). They are counted on

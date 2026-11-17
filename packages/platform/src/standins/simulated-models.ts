@@ -11,13 +11,8 @@ export const ENDPOINTS: EndpointInfo[] = [
   {id: 'B', name: 'gpt-5.4', description: 'Faster', badge: 'Faster', cost: 'Lower', speed: 'Faster', supportsTemperature: false, priceIn: 0.75, priceOut: 3.0},
 ];
 
-const SCHEMA_VALUES: Record<string, string[]> = {
-  primary_value: ['Entertainment', 'Practical', 'Discussion', 'Ecosystem issue'],
-  format: ['Vlog', 'Tutorial', 'Review', 'Skit', 'Clip', 'Other'],
-  topics: ['Food & drink', 'Travel', 'Home & renting', 'Work & money', 'Tech', 'Health & fitness', 'Beauty & fashion', 'Pets & animals', 'Games', 'News & society'],
-};
-const CONFUSE: Record<string, string> = {Entertainment: 'Discussion', Discussion: 'Entertainment', Practical: 'Entertainment', 'Ecosystem issue': 'Practical', Vlog: 'Review', Clip: 'Vlog', Review: 'Tutorial', Tutorial: 'Review', Skit: 'Clip', Other: 'Vlog'};
-const DIFFICULTY: Record<string, number> = {primary_value: 0, format: 0.02, topics: 0.07};
+const SAMPLE_VALUES = ['Entertainment', 'Practical', 'Discussion', 'Ecosystem issue'];
+const CONFUSE: Record<string, string> = {Entertainment: 'Discussion', Discussion: 'Entertainment', Practical: 'Entertainment', 'Ecosystem issue': 'Practical'};
 
 function rng(seed: string) {
   let h = 2166136261;
@@ -33,42 +28,55 @@ const textOf = (messages: ModelMessage[]) =>
   messages.map(m => (typeof m.content === 'string' ? m.content : m.content.map(p => (p.type === 'text' ? p.text : '')).join(''))).join('\n');
 const imageCount = (messages: ModelMessage[]) => messages.reduce((n, m) => n + (typeof m.content === 'string' ? 0 : m.content.filter(p => p.type === 'image').length), 0);
 
-/** Field names the prompt asks for, read from the output line or field headings. */
-function fieldsAsked(text: string): string[] {
-  const names = new Set<string>();
-  for (const m of text.matchAll(/###\s*\d+\.\s*([A-Za-z_][A-Za-z0-9_]*)/g)) names.add(m[1]);
-  for (const m of text.matchAll(/"([a-z_][a-z0-9_]*)"\s*:/g)) if (!['summary', 'reasoning', 'reason'].includes(m[1])) names.add(m[1]);
-  return [...names];
+const unescape = (x: string) => x.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+
+/** The label's key, read from the <output_labels> tag or the output format line. */
+function labelAsked(text: string): string | null {
+  const tag = text.match(/<output_labels name="([^"]*)"/)?.[1];
+  if (tag) return unescape(tag);
+  for (const m of text.matchAll(/"([a-z_][a-z0-9_]*)"\s*:/g)) if (!['summary', 'reasoning', 'reason'].includes(m[1])) return m[1];
+  return null;
 }
 
-function valuesFor(text: string, field: string): string[] {
-  if (SCHEMA_VALUES[field]) return SCHEMA_VALUES[field];
-  const sec = text.split(new RegExp(`###\\s*\\d+\\.\\s*${field}`))[1]?.split('###')[0] ?? '';
-  return [...sec.matchAll(/^\s*-\s*([^:\n]+):/gm)].map(m => m[1].trim());
+/** The label's values, read from the <label value> tags (the sample's when there are none). */
+function valuesFor(text: string): string[] {
+  const sec = text.split('<output_labels')[1]?.split('</output_labels>')[0] ?? '';
+  const found = [...sec.matchAll(/<label value="([^"]+)"/g)].map(m => unescape(m[1]));
+  return found.length ? found : SAMPLE_VALUES;
 }
 
 async function answer(req: ChatRequest): Promise<ChatResult> {
   const text = textOf(req.messages);
-  const truth = (await loadSampleFile('')).labels.find(l => l.externalId === req.traceId)?.answer ?? {};
+  const truth0 = (await loadSampleFile('')).labels.find(l => l.externalId === req.traceId)?.answer;
   const rules = text.split('\n').filter(l => /\b(before|unless|never|only|check|if|always|prefer|when|not)\b/i.test(l)).length;
   const base = req.endpoint === 'A' ? 0.72 : 0.66;
-  const q = Math.min(0.985, base + 0.035 * Math.max(0, rules - 2) + (text.includes('Return JSON only') ? 0.02 : 0));
-  const r = rng(`${req.endpoint}|${req.traceId}|${text.length}|${rules}|${req.temperature ?? 0}`);
+  const q = Math.min(0.985, base + 0.035 * Math.max(0, rules - 2) + (text.includes('Return one JSON object only') ? 0.02 : 0));
+  // The draws depend on the example, not on the prompt's text: a prompt with more rules only turns
+  // wrong answers right, so the stand-in Optimiser's progress is not lost to a reshuffle.
+  const r = rng(`${req.endpoint}|${req.traceId}|${req.temperature ?? 0}`);
   const out: Record<string, unknown> = text.includes('"reason" key') ? {reason: 'Based on the description and what is shown.'} : {summary: 'A short post.', reasoning: 'Based on the description and what is shown.'};
-  for (const field of fieldsAsked(text)) {
-    const values = valuesFor(text, field);
-    const gold = truth[field] ?? [values[Math.floor(r() * values.length)]];
-    const p = Math.max(0.3, q - (DIFFICULTY[field] ?? 0.03));
-    if (field === 'topics' || gold.length > 1) {
-      const set = new Set(gold);
-      if (r() > p) set.add(values[Math.floor(r() * values.length)]);
-      if (r() > p + 0.05 && set.size > 1) set.delete([...set][0]);
-      out[field] = [...set].slice(0, 3);
-    } else {
-      out[field] = r() < p ? gold[0] : (CONFUSE[gold[0]] ?? values[Math.floor(r() * values.length)]);
+  const key = labelAsked(text);
+  if (key) {
+    const values = valuesFor(text);
+    const tag = text.match(/<output_labels [^>]*>/)?.[0] ?? '';
+    const multi = /selection="multi"/.test(tag);
+    const truth = (Array.isArray(truth0) ? truth0 : typeof truth0 === 'string' ? [truth0] : []).filter(v => values.includes(v));
+    const gold = truth[0] ?? values[Math.floor(r() * values.length)];
+    const p = Math.max(0.3, q);
+    const other = values.filter(v => v !== gold);
+    const pick = r() < p || !other.length ? gold : CONFUSE[gold] && values.includes(CONFUSE[gold]) ? CONFUSE[gold] : other[Math.floor(r() * other.length)];
+    if (!multi) out[key] = pick;
+    else {
+      // A multi-select answer: the picked value, sometimes with a second one, within max.
+      const max = Number(tag.match(/max="(\d+)"/)?.[1] ?? values.length);
+      const second = other.filter(v => v !== pick)[Math.floor(r() * Math.max(1, other.length - 1))];
+      out[key] = max > 1 && second && r() > p ? [pick, second] : [pick];
     }
   }
-  const json = r() < 0.006 ? JSON.stringify(out).slice(0, -8) : JSON.stringify(out);
+  // A broken reply is not tied to the example: a version that reads differently draws it afresh, so
+  // the same few examples are not invalid in every version (which no prompt could fix).
+  const broken = rng(`${req.endpoint}|${req.traceId}|${text.length}`)() < 0.006;
+  const json = broken ? JSON.stringify(out).slice(0, -8) : JSON.stringify(out);
   const inputTokens = Math.round(text.length / 4) + imageCount(req.messages) * 258;
   return {text: json, inputTokens, outputTokens: Math.round(json.length / 4)};
 }

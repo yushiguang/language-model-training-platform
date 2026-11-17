@@ -1,7 +1,7 @@
 # catalog (`@tsp/catalog`)
 
 The product records: projects, setup versions, dataset snapshots, examples, gold labels, prompt
-versions, eval reports, optimiser runs, training sets, approvals, chat, proposals, audit log.
+versions (each holding its structured prompt), eval reports, optimiser runs, approvals, chat, proposals, audit log.
 Contract: `CatalogContract` in `packages/contracts/src/catalog-api.ts` (`CatalogRecords` lists the
 collections and their types).
 

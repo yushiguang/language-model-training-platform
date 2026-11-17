@@ -1,42 +1,36 @@
-import type {Answer, DryRunResult, Example, ExampleBrief, OptimisationRun, OptimiserRound, Prediction, PromptVersion, Schema} from '@tsp/contracts';
-import {placeholderKeys} from './template.ts';
+import {systemConfig} from './config.ts';
+import type {Answer, DryRunResult, Example, ExampleBrief, Msg, OptimisationRun, OptimiserRound, Prediction, PromptVersion} from '@tsp/contracts';
+import {msg, msgText} from './i18n.ts';
+import {featureItems, featureText, placeholderKeys} from './template.ts';
 import {isImageKey} from './catalogue.ts';
 
 /**
- * Pure parts of the Optimiser (GEPA, ported to TypeScript; see the design doc "Prompt optimising
- * in Sprint"): per-example scores, the Pareto front, picking a parent and the dry-run examples,
+ * Pure parts of the Optimiser (GEPA, ported to TypeScript; see
+ * docs/design/optimiser.md): per-example scores, the Pareto front, picking a parent and the dry-run examples,
  * and comparing a change with its parent in the dry run. The loop itself is in the bff.
  */
 
-const same = (a: string[] | undefined, b: string[] | undefined) => {
-  const x = [...(a ?? [])].sort();
-  const y = [...(b ?? [])].sort();
-  return x.length === y.length && x.every((v, i) => v === y[i]);
+/** True when the answer holds exactly the gold label's values. */
+export const isRight = (gold: Answer, predicted: Answer | null) => predicted != null && gold.length === predicted.length && gold.every(v => predicted.includes(v));
+
+/**
+ * One example's score in [0, 1]: the F1 of the answer's values against the gold label's. 1 on an
+ * exact match, 0 with no answer or nothing in common; a multi-select answer that gets some values
+ * right earns part (resilience spec, 1.2), so the Pareto front rewards partial progress.
+ */
+export const exampleScore = (gold: Answer, predicted: Answer | null) => {
+  if (!predicted || !predicted.length || !gold.length) return 0;
+  const common = predicted.filter(v => gold.includes(v)).length;
+  return (2 * common) / (gold.length + predicted.length);
 };
 
-/** Fields of one answer that match the gold label. An invalid answer (null) gets none. */
-export function fieldsRight(schema: Schema, gold: Answer, predicted: Answer | null): string[] {
-  if (!predicted) return [];
-  return schema.fields.filter(f => same(gold[f.name], predicted[f.name])).map(f => f.name);
-}
-
-/** One example's score: the share of fields right (1 = every field matches the gold label). */
-export const exampleScore = (schema: Schema, gold: Answer, predicted: Answer | null) => (schema.fields.length ? fieldsRight(schema, gold, predicted).length / schema.fields.length : 0);
-
 /** Dry-run size: half of the optimiser half, at most 20 (D4, 2026-11-10). */
-export const dryRunSize = (optimiserHalf: number) => Math.min(20, Math.max(1, Math.floor(optimiserHalf / 2)));
+export const dryRunSize = (optimiserHalf: number) => Math.min(systemConfig().optimiser.dryRunMaxExamples, Math.max(1, Math.floor(optimiserHalf / 2)));
 
 /** The features a version's prompt shows the model: its ticked features and its placeholders. */
 export const promptKeys = (v: Pick<PromptVersion, 'template' | 'features'>) => new Set([...v.features.video, ...v.features.photo_text, ...v.features.metadata, ...placeholderKeys(v.template)]);
 
-/** How long one feature may be in an example a helper reads. */
-export const BRIEF_FEATURE_CHARS = 300;
-/** How many wrong examples a helper reads (D3), and how many each version wins in a merge. */
-export const BRIEF_WRONG = 8;
-export const BRIEF_WINS = 4;
 
-/** How many images of one example a helper sees. */
-export const BRIEF_IMAGES = 2;
 
 /**
  * An example as a helper reads it: the text features in `keys`, cut short (URLs left out), and
@@ -45,15 +39,18 @@ export const BRIEF_IMAGES = 2;
 export function exampleBrief(e: Example, keys: Iterable<string>, gold: Answer, predicted: Answer | null, rightIn?: 'template' | 'other', said?: HelperNote): ExampleBrief {
   const features: Record<string, string> = {};
   for (const k of keys) {
-    const v = e.features[k];
-    if (typeof v !== 'string' || !v.trim() || /^https?:\/\//.test(v.trim())) continue;
-    features[k] = v.length > BRIEF_FEATURE_CHARS ? `${v.slice(0, BRIEF_FEATURE_CHARS - 1).trimEnd()}…` : v;
+    const raw = e.features[k];
+    // Text features only: lists (images, URLs) go as images below.
+    if (!raw || Array.isArray(raw) || (typeof raw === 'object' && raw.items)) continue;
+    const v = featureText(raw);
+    if (!v.trim() || /^https?:\/\//.test(v.trim())) continue;
+    features[k] = v.length > systemConfig().optimiser.briefFeatureMaxChars ? `${v.slice(0, systemConfig().optimiser.briefFeatureMaxChars - 1).trimEnd()}…` : v;
   }
   const images = Object.entries(e.features)
     .filter(([k]) => isImageKey(k))
-    .flatMap(([, v]) => (Array.isArray(v) ? v : [v]))
-    .filter(u => typeof u === 'string' && u.trim())
-    .slice(0, BRIEF_IMAGES);
+    .flatMap(([, v]) => featureItems(v))
+    .filter(u => u.trim())
+    .slice(0, systemConfig().optimiser.briefMaxImages);
   return {externalId: e.externalId, features, gold, predicted, ...(said?.reason ? {reason: said.reason} : {}), ...(said?.invalid ? {invalid: said.invalid} : {}), ...(images.length ? {images} : {}), ...(rightIn ? {rightIn} : {})};
 }
 
@@ -68,16 +65,16 @@ export const visibleToAgents = (e: Pick<Example, 'split' | 'optimiserHalf'>): bo
 export const HIDDEN_NOTE = 'The held-out half of the eval set is hidden from helpers so its scores stay fair; it is not in this list.';
 
 /**
- * The examples a version gets wrong, worst first (fewest fields right), at most `max`. Pass only
+ * The examples a version gets wrong (invalid answers first), at most `max`. Pass only
  * optimiser-half examples: the held-out half must never reach a helper.
  */
-export function wrongExamples(schema: Schema, examples: Example[], keys: Iterable<string>, gold: Map<string, Answer>, predicted: Map<string, Answer | null>, max = BRIEF_WRONG, notes?: Map<string, HelperNote>): ExampleBrief[] {
+export function wrongExamples(examples: Example[], keys: Iterable<string>, gold: Map<string, Answer>, predicted: Map<string, Answer | null>, max = systemConfig().optimiser.briefWrongExamples, notes?: Map<string, HelperNote>): ExampleBrief[] {
   const ks = [...keys];
   return examples
     .filter(e => gold.has(e.id) && predicted.has(e.id))
-    .map(e => ({e, s: exampleScore(schema, gold.get(e.id)!, predicted.get(e.id)!)}))
+    .map(e => ({e, s: exampleScore(gold.get(e.id)!, predicted.get(e.id)!), invalid: predicted.get(e.id) == null}))
     .filter(x => x.s < 1)
-    .sort((a, b) => a.s - b.s)
+    .sort((a, b) => Number(b.invalid) - Number(a.invalid))
     .slice(0, max)
     .map(({e}) => exampleBrief(e, ks, gold.get(e.id)!, predicted.get(e.id)!, undefined, notes?.get(e.id)));
 }
@@ -184,27 +181,20 @@ export function pickDryRun(exampleIds: string[], size: number, focus: Set<string
 }
 
 /**
- * Compares a change with its parent on the dry-run examples. It goes on only when it gets more
- * fields right in total (finding 5), the `lowest` field counting double (finding 7: the gate is
- * that field's score). `passed` and `parentPassed` still count examples fully right.
+ * Compares a change with its parent on the dry-run examples, by the sum of example scores (exact
+ * matches on a single-select label; partial credit on a multi-select one). Resilience spec, 6: only
+ * a change that does worse than its parent is dropped (`regressed`); one that ties goes on to the
+ * full labeling, since a small sample often misses what a targeted change fixes. Whether it counts
+ * as progress is decided after the full labeling, on the optimiser half.
  */
-/**
- * The dry run's verdict. `better`: more fields right, the lowest field counting double. `tied`
- * (acceptance R5-6): as many, but right on different examples, so the change may hold something
- * the parent lacks; it goes on to the full labeling without counting as progress.
- */
-export function compareDryRun(schema: Schema, parentId: string, items: {gold: Answer; candidate: Answer | null; parent: Answer | null}[], lowest?: string): DryRunResult & {better: boolean; tied: boolean} {
-  const all = (a: Answer | null, gold: Answer) => fieldsRight(schema, gold, a).length === schema.fields.length;
-  const passed = items.filter(i => all(i.candidate, i.gold)).length;
-  const parentPassed = items.filter(i => all(i.parent, i.gold)).length;
-  const fields = schema.fields.map(f => ({
-    field: f.name,
-    passed: items.filter(i => fieldsRight(schema, i.gold, i.candidate).includes(f.name)).length,
-    parentPassed: items.filter(i => fieldsRight(schema, i.gold, i.parent).includes(f.name)).length,
-  }));
-  const weighted = (k: 'passed' | 'parentPassed') => fields.reduce((n, f) => n + f[k] * (f.field === lowest ? 2 : 1), 0);
-  const differs = items.some(i => fieldsRight(schema, i.gold, i.candidate).join() !== fieldsRight(schema, i.gold, i.parent).join());
-  return {examples: items.length, passed, parentPassed, parentId, fields, better: weighted('passed') > weighted('parentPassed'), tied: weighted('passed') === weighted('parentPassed') && differs};
+export function compareDryRun(parentId: string, items: {gold: Answer; candidate: Answer | null; parent: Answer | null}[]): DryRunResult & {better: boolean; tied: boolean; regressed: boolean} {
+  const passed = items.filter(i => isRight(i.gold, i.candidate)).length;
+  const parentPassed = items.filter(i => isRight(i.gold, i.parent)).length;
+  const sum = (k: 'candidate' | 'parent') => items.reduce((n, i) => n + exampleScore(i.gold, i[k]), 0);
+  const round3 = (x: number) => Math.round(x * 1000) / 1000;
+  const score = round3(sum('candidate'));
+  const parentScore = round3(sum('parent'));
+  return {examples: items.length, passed, parentPassed, score, parentScore, parentId, better: score > parentScore, tied: score === parentScore, regressed: score < parentScore};
 }
 
 /** What the Optimiser did with a version, for the versions list and the version card. */
@@ -222,24 +212,37 @@ export function optimiserVersions(runs: OptimisationRun[]): Map<string, Optimise
 
 /** The labels of the panel's "Now" line. */
 export function stepLine(step: OptimisationRun['step'], version: string | null, examples: number, parent?: string | null): string {
+  return msgText(stepMsg(step, version, examples, parent));
+}
+
+/** `stepLine` as a catalog key, for other languages. */
+export function stepMsg(step: OptimisationRun['step'], version: string | null, examples: number, parent?: string | null): Msg {
   switch (step) {
     case 'parent':
-      return version ? `Labeling ${version} on the eval set, the version to start from` : 'Picking the version to start from';
+      return version ? msg('Labeling {version} on the eval set, the version to start from', {version}) : msg('Picking the version to start from');
     case 'reflect':
-      return `Writing a change to ${version ?? 'the prompt'}`;
+      return version ? msg('Writing a change to {version}', {version}) : msg('Writing a change to the prompt');
     case 'merge':
-      return 'Writing a version that merges two others';
+      return msg('Writing a version that merges two others');
     case 'check':
-      return `Checking ${version ?? 'the change'}`;
+      return version ? msg('Checking {version}', {version}) : msg('Checking the change');
     case 'dry_run':
-      return `Dry run: labeling ${version ?? 'the change'} on ${examples} examples${parent ? `, against ${parent}` : ''}`;
+      if (!version) return msg('Dry run: labeling the change on {n} examples', {n: examples});
+      return parent ? msg('Dry run: labeling {version} on {n} examples, against {parent}', {version, n: examples, parent}) : msg('Dry run: labeling {version} on {n} examples', {version, n: examples});
     case 'full':
-      return `Labeling ${version ?? 'the change'} on the eval set`;
+      return version ? msg('Labeling {version} on the eval set', {version}) : msg('Labeling the change on the eval set');
     case 'report':
-      return `Scoring ${version ?? 'the change'}`;
+      return version ? msg('Scoring {version}', {version}) : msg('Scoring the change');
     case 'confirm':
-      return `Confirming ${version ?? 'the pass'}: labeling the held-out half again`;
+      return version ? msg('Confirming {version}: labeling the held-out half again', {version}) : msg('Confirming the pass: labeling the held-out half again');
     default:
-      return 'Starting';
+      return msg('Starting');
   }
+}
+
+/** Adds people's comments (from `labelComments`, optimiser half only) to the examples a helper reads. */
+export function withComments(briefs: ExampleBrief[], examples: Example[], comments: Map<string, string[]>): ExampleBrief[] {
+  if (!comments.size) return briefs;
+  const byExt = new Map(examples.filter(e => comments.get(e.id)?.length).map(e => [e.externalId, comments.get(e.id)!]));
+  return briefs.map(b => (byExt.has(b.externalId) ? {...b, comments: byExt.get(b.externalId)!} : b));
 }

@@ -26,7 +26,7 @@ export function browserFiles(): FileStore {
  * Stand-in telemetry sink: nothing leaves the browser. Events are kept in a ring of the last 1,000
  * in local storage (`tsp-telemetry-events`); the latest metrics text is on
  * `globalThis.__tspMetrics`, so both can be inspected in the console. The company's adapter
- * replaces this (see the doc "Telemetry: events and metrics").
+ * replaces this (see docs/design/telemetry.md).
  */
 export function localTelemetrySink(keep = 1000): TelemetrySink {
   const KEY = 'tsp-telemetry-events';

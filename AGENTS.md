@@ -7,7 +7,9 @@ changing, because apps only talk through the contracts in `@tsp/contracts`.
 
 ## Rules
 
-- **English only** in code, comments, docs and commit messages.
+- **English only** in code, comments, docs and commit messages. The one exception is the
+  translation catalogs in `packages/domain/src/locales/` (one file per language, keyed by the
+  English text); nothing else, tests included, holds text in another language.
 - **Nothing internal.** Never commit keys, tokens, internal URLs, internal package scopes or
   internal product names. The public model names (`gpt-5.x`) are fine.
 - **No real examples.** Real data is loaded from `NEXT_PUBLIC_EXAMPLES_URL`; only the made-up
@@ -18,6 +20,10 @@ changing, because apps only talk through the contracts in `@tsp/contracts`.
   `next.config.mjs` points somewhere else. Apps never import each other.
 - **A contract change is its own change.** Changing a type in `packages/contracts` affects the
   internal adapters too: say so in the PR title and description (see the handover guide).
+- **Name branches for what they do.** Use `<type>/<short-kebab-topic>`, where `<type>` is one of
+  `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, or `release` (for example
+  `feat/v1-dataset-governance`, `fix/min-eval-judge`, `release/v1.0.0`). Never push opaque
+  session-id branches such as `claude/project-thread-*`.
 - **No content in telemetry.** Metrics and events carry counts, ids, enums and durations only
   (`packages/contracts/src/telemetry.ts`); never prompt or chat text, features, names or emails.
   The telemetry app enforces it: label values and event props are allowlisted there.
@@ -36,10 +42,11 @@ changing, because apps only talk through the contracts in `@tsp/contracts`.
 | `apps/catalog` | `@tsp/catalog` | Product records (projects, versions, reports, ...): CRUD, version numbers | contracts, domain, platform |
 | `apps/labeling` | `@tsp/labeling` | Labeling tasks and predictions: runs, failures, resume | contracts, domain, platform |
 | `apps/agents` | `@tsp/agents` | Agent presets and runtime, hand-written, no framework | contracts, domain |
+| `apps/optimiser` | `@tsp/optimiser` | The Auto Optimise loop behind `OptimiserContract`; asks the bff through `OptimiserHost` | contracts, domain |
 | `apps/bff` | `@tsp/bff` | What pages call: workflow, decides when labeling starts, builds reports | contracts, domain |
 | `apps/telemetry` | `@tsp/telemetry` | Prometheus-style metrics and product events, sent to the platform's sink | contracts |
 | `apps/web` | `@tsp/web` | Next.js static site. Pages call `@/backend-api` only | contracts, domain, `@/backend-api`, `@/ui`, `@/components` |
-| `apps/web/src/backend-api` | | The composition root: builds every app and wires them | anything |
+| `apps/web/src/backend-api` | | `client.ts`: the `BffClient` pages call. `in-process.ts`: the composition root, builds every app and wires them. `index.ts`: picks the client | anything |
 
 `@tsp/platform-impl` is the one injection point: it resolves to the stand-ins by default and to
 the internal adapters in the internal build. Only the composition root imports it.

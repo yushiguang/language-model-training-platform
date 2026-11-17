@@ -1,75 +1,50 @@
-import type {NodeId, WorkflowFacts} from '@tsp/contracts';
+import type {Msg, NodeId, WorkflowFacts} from '@tsp/contracts';
+import {systemConfig} from './config.ts';
+import {msg, msgText} from './i18n.ts';
 
+/** The four steps of a Prompt Tuning project (spec 1.0.0, 2.1), in order. */
 export const NODES: {id: NodeId; label: string; path: string}[] = [
-  {id: 'setup', label: 'Setup', path: '/setup'},
-  {id: 'dataset', label: 'Dataset', path: '/dataset'},
-  // Acceptance R5-8 (2026-11-11): an ordinary step, not optional or "recommended": scores, mismatch
-  // review and the Optimiser all rest on gold labels.
+  {id: 'prompt_design', label: 'Prompt Design', path: '/prompt-design'},
+  {id: 'dataset', label: 'Eval Dataset', path: '/dataset'},
   {id: 'gold', label: 'Gold Labels', path: '/gold'},
-  {id: 'prompt', label: 'Prompt Engineering', path: '/prompt'},
-  {id: 'training', label: 'Training Set', path: '/training-set'},
+  {id: 'prompt', label: 'Prompt Tuning', path: '/prompt'},
 ];
 
 export interface Gate {
   ready: boolean;
-  /** One line under the button when it is blocked. */
+  /** One line under the button when it is blocked (English). */
   reason: string | null;
+  /** The same line as a catalog key and params (spec 1.1.0, 2.3). */
+  msg: Msg | null;
 }
 
-export function evaluationOn(f: WorkflowFacts): boolean {
-  return !!f.setup?.thresholds;
+/**
+ * Enough gold labels to score at all: the hard minimum, with 2 in each half (the Optimiser learns
+ * from one half, scores come from the other). Scoring never waits for every example.
+ */
+export function canScore(f: Pick<WorkflowFacts, 'examples' | 'goldEvalDone' | 'goldHalves'>): boolean {
+  const {minEvalHard} = systemConfig().dataset;
+  return f.examples >= minEvalHard && f.goldEvalDone >= minEvalHard && f.goldHalves.optimiser >= 2 && f.goldHalves.heldOut >= 2;
 }
+
+const READY: Gate = {ready: true, reason: null, msg: null};
+const blocked = (m: Msg): Gate => ({ready: false, reason: msgText(m), msg: m});
 
 export function gate(node: NodeId, f: WorkflowFacts): Gate {
+  const {minEvalHard} = systemConfig().dataset;
   switch (node) {
-    case 'setup': {
-      const s = f.setup;
-      if (!s?.steps.schema) return {ready: false, reason: 'Approve the labels first.'};
-      if (!s.steps.evaluation) return {ready: false, reason: 'Choose how good the labels must be.'};
-      // One labeling model per project in the MVP (decided 2026-11-09). The list shape stays, so
-      // comparing models can come back without a migration.
-      if (!s.steps.models || s.models.length !== 1) return {ready: false, reason: 'Pick a model.'};
-      return {ready: true, reason: null};
-    }
-    case 'dataset': {
-      const snap = f.snapshot;
-      if (!snap) return {ready: false, reason: 'Add examples to continue.'};
-      if (!snap.split) return {ready: false, reason: 'Set the split sizes to continue.'};
-      const min = f.setup?.thresholds?.minEval ?? 0;
-      if (evaluationOn(f) && snap.split.eval < min) return {ready: false, reason: `The eval set needs at least ${min} examples.`};
-      if (snap.split.train <= 0) return {ready: false, reason: 'Leave some examples for train.'};
-      return {ready: true, reason: null};
-    }
+    case 'prompt_design':
+      return f.versions ? READY : blocked(msg('Approve the first prompt to continue.'));
+    case 'dataset':
+      if (!f.snapshot) return blocked(msg('Add examples to continue.'));
+      if (f.examples < minEvalHard) return blocked(msg('The eval dataset needs at least {n} examples.', {n: minEvalHard}));
+      return READY;
     case 'gold':
-      // Optional node: no gate. Scores start once the eval set is labeled.
-      return {ready: true, reason: null};
-    case 'prompt': {
-      if (!f.versions) return {ready: false, reason: 'Create the first prompt version.'};
-      if (!evaluationOn(f)) return {ready: true, reason: null};
-      const evalSize = f.snapshot?.split?.eval ?? 0;
-      if (f.goldEvalDone < evalSize) return {ready: false, reason: `Scores start when the eval set is labeled (${f.goldEvalDone} of ${evalSize}).`};
-      if (!f.passing.length) return {ready: false, reason: 'No version passes the threshold yet.'};
-      return {ready: true, reason: null};
-    }
-    case 'training':
-      return f.trainingSet?.state === 'done' ? {ready: true, reason: null} : {ready: false, reason: 'Generate the training set first.'};
+      if (!canScore(f)) return blocked(msg('Label at least {n} examples to continue ({done} so far).', {n: minEvalHard, done: f.goldEvalDone}));
+      return READY;
+    case 'prompt':
+      if (!f.versions) return blocked(msg('Create the first prompt version.'));
+      if (!f.passing.length) return blocked(msg('No version passes the threshold yet.'));
+      return READY;
   }
-}
-
-export type NodeStatus = 'done' | 'current' | 'todo' | 'attention' | 'running';
-
-/** The first node not yet approved is current; a failed long job marks its node. */
-export function nodeStatuses(f: WorkflowFacts): Record<NodeId, NodeStatus> {
-  const out = {} as Record<NodeId, NodeStatus>;
-  let foundCurrent = false;
-  for (const n of NODES) {
-    if (f.approved.includes(n.id)) out[n.id] = 'done';
-    else if (!foundCurrent) {
-      out[n.id] = 'current';
-      foundCurrent = true;
-    } else out[n.id] = 'todo';
-  }
-  if (f.trainingSet?.state === 'failed') out.training = 'attention';
-  else if (f.trainingSet?.state === 'running') out.training = 'running';
-  return out;
 }

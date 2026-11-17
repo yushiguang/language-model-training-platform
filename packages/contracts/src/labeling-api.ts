@@ -15,7 +15,7 @@ import type {Answer, EndpointId, Example, FeatureSelection, ModelSettings, Predi
 /** eval and optimiser tasks are started by code; test and training tasks by the user, with a cost confirm. */
 export type TaskPurpose = 'eval' | 'optimiser' | 'test' | 'training';
 export type TaskState = 'queued' | 'running' | 'paused' | 'needs_attention' | 'done' | 'stopped' | 'failed';
-export type TaskStopReason = 'user' | 'budget' | 'failures' | 'closed' | null;
+export type TaskStopReason = 'user' | 'failures' | 'closed' | null;
 
 export interface LabelingTask {
   id: string;
@@ -46,11 +46,6 @@ export interface LabelingTask {
    * created the task. Recorded for metrics and the audit; there is no automatic-spend cap.
    */
   autoCostUsd?: number;
-  /**
-   * Pause when cost passes 120% of this; null = no budget check. The labeling app supports it,
-   * but the MVP sets none: every start runs with no cost limit and the user stops it with Stop.
-   */
-  budgetUsd: number | null;
   /** Examples labeled at once. */
   parallel: number;
   /**
@@ -82,7 +77,6 @@ export interface CreateTaskInput {
   endpoint: EndpointId;
   settings: ModelSettings;
   exampleIds: string[];
-  budgetUsd?: number | null;
   parallel?: number;
   relabelInvalid?: boolean;
   createdBy: string;
@@ -92,16 +86,6 @@ export interface CreateTaskInput {
 export interface RunOptions {
   /** Started by code without a click: this run's cost is added to `autoCostUsd`. */
   auto?: boolean;
-  /**
-   * Budget for this run alone: the run pauses with stopReason 'budget' once its own cost passes
-   * 120% of it. Supported, but unused in the MVP (no cost limits).
-   */
-  budgetUsd?: number;
-  /**
-   * The user chose to continue a task paused for its budget: the budget grows by the share of
-   * examples still to label (at the same estimate per example), so the run can go on.
-   */
-  extendBudget?: boolean;
 }
 
 export interface LabelingContract {
@@ -126,12 +110,14 @@ export interface LabelingContract {
    * Saved predictions for one version, model and settings, one per example: the first valid one,
    * else the first (an invalid answer labeled again under `relabelInvalid` leaves two).
    */
-  predictions(promptVersionId: string, endpoint: EndpointId, settingsHash: string): Promise<Map<string, Prediction>>;
+  predictions(promptVersionId: string, endpoint: EndpointId, settingsHash: string): Promise<Record<string, Prediction>>;
   /**
-   * Labels a few examples with an unsaved template (the prompt agent's try_template). Nothing is
+   * Labels a few examples with an unsaved template (the prompt agent's try_prompt). Nothing is
    * saved: no task, no predictions. Each example is one call through the gateway.
    */
   tryTemplate(input: TryTemplateInput): Promise<TryTemplateRow[]>;
+  /** Stops the project's running tasks, then removes its tasks and their saved answers. */
+  deleteProject(projectId: string): Promise<void>;
 }
 
 export interface TryTemplateInput {

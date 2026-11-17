@@ -28,7 +28,7 @@ example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts
     With `budgetUsd` (the bff no longer passes one) it pauses (stopReason `budget`) once its own
     cost passes 120% of it.
   - `tryTemplate` labels a few examples with an unsaved template (the prompt agent's
-    try_template tool) and saves nothing.
+    try_prompt tool) and saves nothing.
   - Metrics: `tsp_labeling_*` (runs started and ended, resumes, examples, durations, cost,
     cost against the estimate, lock conflicts, stop latency).
 - `locks.ts`: browser Web Locks per task and per prediction; an in-memory version for tests and

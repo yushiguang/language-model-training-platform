@@ -2,18 +2,18 @@ import type {DocUpdatePatch} from './platform-api.ts';
 import type {
   AgentProposal,
   ChatMessage,
+  DatasetRemoval,
   DatasetSnapshot,
   EvalReport,
   Example,
   GateApproval,
   GoldLabel,
+  LabelComment,
   OptimisationRun,
   Project,
   PromptVersion,
-  Recommendation,
   SetupVersion,
   StartRequest,
-  TrainingSet,
 } from './types.ts';
 
 /**
@@ -39,15 +39,15 @@ export interface CatalogRecords {
   dataset_snapshots: DatasetSnapshot;
   examples: Example;
   gold_labels: GoldLabel;
+  dataset_removals: DatasetRemoval;
+  label_comments: LabelComment;
   prompt_versions: PromptVersion;
   eval_reports: EvalReport;
   optimisation_runs: OptimisationRun;
-  training_sets: TrainingSet;
   gate_approvals: GateApproval;
   chat_messages: ChatMessage;
   agent_proposals: AgentProposal;
   start_requests: StartRequest;
-  recommendations: Recommendation;
   audit_log: AuditEntry;
 }
 
@@ -80,4 +80,6 @@ export interface CatalogContract {
   /** Saves a setup version with the next number for its project. */
   createSetupVersion(v: NewSetupVersion): Promise<SetupVersion>;
   audit(projectId: string | null, actor: string, action: string, data?: object): Promise<void>;
+  /** Removes a project and every catalog record it owns (examples by its dataset snapshots). */
+  deleteProject(projectId: string): Promise<void>;
 }
