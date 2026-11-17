@@ -353,6 +353,12 @@ Each item is its own `Contract change:` pull request.
    breaking command-semantics change. Proof: job lifecycle tests (lease expiry, resume, cancel,
    idempotent enqueue) plus the existing labeling and optimiser tests running through the job
    module in-process.
+   **Status (2026-11-17): the job module built** on branch `feat/job-module`: `jobs-api.ts`
+   (`JobsContract`, `JobExecutor`, `JobStorePort` with whole atomic operations, review P1; it
+   replaces the unused `JobQueuePort` sketch, now `Platform.jobStore`), `@sprint/jobs`
+   (`createJobs`: leases, heartbeats, the sweep, retries, cancel, chains, fair order across
+   tenants) and `memoryJobStore` in `@sprint/platform`, with lifecycle tests. The job record's
+   status type is `JobStatus`, since `JobState` already names a run's state on the pages.
 4. Section 5 (model registry, endpoint id widening, limiter store port): breaking contract
    change, coordinated with the hosting platform's adapters per the handover guide. Proof:
    gateway tests over the shared-store limiter (concurrent instances never exceed an endpoint's

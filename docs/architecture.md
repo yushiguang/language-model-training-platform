@@ -7,7 +7,7 @@ The pass rule and the labeling model are Project Settings, not steps. A batch la
 It is a fixed-workflow website with agents built into each step.
 Code decides the next step; agents explain and propose, people approve.
 
-## Nine apps, three packages
+## Ten apps, three packages
 
 ```
 apps/web ──► apps/web/src/backend-api (the BffClient the pages call; in-process.ts is the composition root)
@@ -51,6 +51,7 @@ without the bff or the pages changing.
 | `catalog` | All product collections (`CatalogRecords` in `catalog-api.ts`). Assigns version numbers | `CatalogContract` |
 | `agents` | Agent presets and the turn/handoff logic. Stateless | `AgentRuntimeContract` (`agent-api.ts`) |
 | `optimiser` | The Auto Optimise loop and the `optimisation_runs` records. Asks the workflow (through `OptimiserHost`) to save a version, label examples and build a score | `OptimiserContract` (`optimiser-api.ts`) |
+| `jobs` | Nothing stored itself: jobs live in the injected `JobStorePort`. Runs background work with a lease per job, heartbeats, recovery, retries and cancel; each kind's work is an executor of the app that owns it | `JobsContract` (`jobs-api.ts`) |
 | `workflow` | Nothing stored. Project state, gates, when labeling starts, reports, dataset governance, Ask AI turns, page views and agent tools | `WorkflowContract` (`workflow-api.ts`) |
 | `bff` | Nothing stored, no business decision. The caller's context per call, idempotency keys | `BffContract` (`bff-api.ts`) |
 | `telemetry` | Metrics (Prometheus style, `sprint_*`) and product events; sends them to `Platform.telemetry` | `TelemetryPort` (`telemetry.ts`) |
@@ -100,8 +101,9 @@ changes either way.
 grouped by area; the defaults are `DEFAULT_SYSTEM_CONFIG` in `packages/domain/src/config.ts`.
 Code reads `systemConfig()` at the time of use. A hosting adapter overrides any value through
 `Platform.config`, merged over the defaults at startup. `Platform` also has optional ports for
-per-tenant configuration, permission checks and a job queue (`RequestContext`,
-`TenantConfigPort`, `AuthorizationPort`, `JobQueuePort`), with single-tenant stand-ins.
+per-tenant configuration and permission checks (`RequestContext`, `TenantConfigPort`,
+`AuthorizationPort`), with single-tenant stand-ins, and a job store (`JobStorePort`, stand-in
+`memoryJobStore`).
 
 ## The structured prompt (1.0.0)
 

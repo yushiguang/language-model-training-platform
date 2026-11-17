@@ -79,6 +79,11 @@ export const METRICS = {
   sprint_gate_actions_total: {type: 'counter', help: 'Gate approvals, skips and refusals', labels: ['node', 'action']},
   sprint_auto_starts_total: {type: 'counter', help: 'Automatic paid starts and what was decided', labels: ['what', 'decision']},
   sprint_stale_writes_rejected_total: {type: 'counter', help: 'Writes based on an old read that were refused', labels: ['collection']},
+  // jobs
+  sprint_jobs_enqueued_total: {type: 'counter', help: 'Jobs enqueued (a repeat of a queued or running key is not counted)', labels: ['job_kind']},
+  sprint_jobs_ended_total: {type: 'counter', help: 'Job runs ended, by outcome (lost: another runner took the job over)', labels: ['job_kind', 'outcome']},
+  sprint_job_duration_seconds: {type: 'histogram', help: 'Running time of one job run', labels: ['job_kind'], buckets: BUCKETS.LONG},
+  sprint_jobs_recovered_total: {type: 'counter', help: 'Running jobs whose lease ended, put back in the queue or failed by the sweep', labels: ['outcome']},
   // web
   sprint_web_page_views_total: {type: 'counter', help: 'Page views', labels: ['page']},
   sprint_web_page_load_seconds: {type: 'histogram', help: 'Largest contentful paint', labels: ['page'], buckets: BUCKETS.CALL},
@@ -99,7 +104,8 @@ export type MetricName = keyof typeof METRICS;
  */
 export const LABEL_VALUES: Record<string, readonly string[]> = {
   purpose: ['labeling', 'chat'],
-  outcome: ['ok', 'error', 'rate_limited', 'server', 'timeout', 'rejected', 'filtered', 'aborted', 'gave_up', 'shown', 'accepted', 'cancelled', 'approved', 'discarded', 'joined', 'passes', 'no_new_ideas', 'budget', 'max_rounds', 'stopped', 'failed'],
+  outcome: ['ok', 'error', 'rate_limited', 'server', 'timeout', 'rejected', 'filtered', 'aborted', 'gave_up', 'shown', 'accepted', 'cancelled', 'approved', 'discarded', 'joined', 'passes', 'no_new_ideas', 'budget', 'max_rounds', 'stopped', 'failed', 'done', 'paused', 'lost', 'retried', 'requeued'],
+  job_kind: ['labeling.runTask', 'report.build', 'dataset.sample', 'optimiser.run', 'project.delete', 'batch_labeling.run', 'export.run'],
   reason: ['rate_limited', 'server', 'timeout', 'user', 'failures', 'closed', 'none'],
   kind: ['input', 'output', 'reasoning', 'qpm', 'tpm', 'concurrency', 'script', 'asset', 'backend', 'image', 'schema', 'prompt', 'other'],
   assumed: ['true', 'false'],

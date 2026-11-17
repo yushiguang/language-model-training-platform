@@ -38,6 +38,9 @@
       "@sprint/workflow": [
         "../../apps/workflow/src/index.ts"
       ],
+      "@sprint/jobs": [
+        "../../apps/jobs/src/index.ts"
+      ],
       "@sprint/bff": [
         "../../apps/bff/src/index.ts"
       ],

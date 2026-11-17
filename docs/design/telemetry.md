@@ -18,7 +18,7 @@ changing the apps.
 ## Conventions
 
 - **Names.** Every metric starts with `sprint_`, then the app (`llm_`, `labeling_`, `agent_`,
-  `catalog_`, `bff_`, `web_`), then what is measured. Units are spelled out at the end in base
+  `catalog_`, `bff_`, `jobs_`/`job_`, `web_`), then what is measured. Units are spelled out at the end in base
   units (`_seconds`, `_bytes`, `_usd`, `_ratio`); counters end in `_total`. Snake case only.
   (Renamed from `tsp_`, the repo's first working name, on 2026-11-17, before the metrics reached
   the company's telemetry system.)

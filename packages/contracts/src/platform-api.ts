@@ -2,6 +2,7 @@ import type {TelemetrySink} from './telemetry.ts';
 import type {ClientDiagnostics, EndpointInfo, FeatureValue, Locale, NodeId, PageId} from './types.ts';
 import type {EndpointConfig} from './gateway-api.ts';
 import type {DeepPartial, SystemConfig} from './config.ts';
+import type {JobStorePort} from './jobs-api.ts';
 
 export type {EndpointInfo};
 
@@ -526,21 +527,6 @@ export interface AuthorizationPort {
   allowed(ctx: RequestContext, request: AuthorizationRequest): Promise<boolean>;
 }
 
-/** A piece of background work handed to the host's job queue instead of running in the page. */
-export interface JobRequest {
-  /** The kind of work, for example `labeling.runTask` or `optimiser.run`. */
-  kind: string;
-  /** Plain JSON arguments (ids, never records). */
-  args: Record<string, string | number | boolean | null>;
-  /** The same key never enqueues the same job twice. */
-  idempotencyKey?: string;
-}
-
-export interface JobQueuePort {
-  enqueue(ctx: RequestContext, job: JobRequest): Promise<{jobId: string}>;
-  cancel(ctx: RequestContext, jobId: string): Promise<void>;
-}
-
 export interface Platform {
   db: DocRuntime;
   models: LabelingModels;
@@ -576,8 +562,11 @@ export interface Platform {
   tenantConfig?: TenantConfigPort;
   /** Permission checks. Optional: without it every signed-in user may do everything. */
   authorization?: AuthorizationPort;
-  /** A job queue for background work. Optional: without it work runs in the open page. */
-  jobs?: JobQueuePort;
+  /**
+   * Where background jobs are kept (`jobs-api.ts`). Optional: without it the job module keeps them
+   * in the memory of its own process (`memoryJobStore`), which is right for the browser build.
+   */
+  jobStore?: JobStorePort;
   /**
    * Short-lived shared state with expiry. Optional: without it the workflow keeps it in the
    * memory of its own process, which is right for the browser build and one server replica.

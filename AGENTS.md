@@ -43,6 +43,7 @@ changing, because apps only talk through the contracts in `@sprint/contracts`.
 | `apps/labeling` | `@sprint/labeling` | Labeling tasks and predictions: runs, failures, resume | contracts, domain, platform |
 | `apps/agents` | `@sprint/agents` | Agent presets and runtime, hand-written, no framework | contracts, domain |
 | `apps/optimiser` | `@sprint/optimiser` | The Auto Optimise loop behind `OptimiserContract`; asks the workflow through `OptimiserHost` | contracts, domain |
+| `apps/jobs` | `@sprint/jobs` | The job module: background work as jobs with a lease, heartbeat, recovery, retries, cancel and fair order across tenants; executors come from the apps that own the work, jobs live in an injected `JobStorePort` | contracts, domain |
 | `apps/workflow` | `@sprint/workflow` | The application module behind `WorkflowContract`: project state, gates, when labeling starts, reports, dataset governance, Ask AI turns, page views and agent tools. A factory with no module-level state; every method takes the caller's `RequestContext` | contracts, domain |
 | `apps/bff` | `@sprint/bff` | What pages call (`BffContract`): a thin adapter that builds each call's context and hands it to the workflow | contracts, domain |
 | `apps/telemetry` | `@sprint/telemetry` | Prometheus-style metrics and product events, sent to the platform's sink | contracts |
