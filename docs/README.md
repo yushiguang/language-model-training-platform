@@ -103,6 +103,12 @@ Sprint follows [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MINOR.PA
   per-example failure skipping, add `ExampleMedia.externalUrl` & iframe `referrerPolicy="origin"`,
   gate auto-scoring on `gold` approval, pass dry-run ties through to full evaluation, and advise
   `Rebuild scores` before editing or optimising when scores are out of date.
+- [`specs/2026-11-17-service-deployment-readiness-spec.md`](specs/2026-11-17-service-deployment-readiness-spec.md):
+  **Service deployment readiness**: dual topology (in-process here, RPC in the hosting platform's
+  composition), a thin BFF with the application logic moved to a separate workflow module, one
+  generic job module for all background work, contracts cleaned of signals and callbacks, a
+  platform-supplied model registry, and the agent runtime kept as a reference implementation
+  behind its framework-neutral contract. No product behaviour change.
 
 ## Keeping the portfolio in shape
 
