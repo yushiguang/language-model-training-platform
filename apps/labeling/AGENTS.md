@@ -1,10 +1,15 @@
-# labeling (`@tsp/labeling`)
+# labeling (`@sprint/labeling`)
 
 Runs labeling tasks: one prompt version on one model over a list of examples, one prediction per
 example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts`. Owns the
 `labeling_tasks` and `predictions` collections; nothing else writes them.
 
 - `labeling.ts`: `createLabeling({db, catalog, gateway, locks, resolveUrl, onChange, telemetry})`.
+  `resolveUrl` may return a Promise (a URL signed per call); `toMessages` resolves every image of
+  a prompt at once before the model call.
+- `executor.ts`: `labelingExecutor(labeling)`, the `labeling.runTask` job: runs (or with `retry`,
+  retries the failed examples of) one task; a cancel is Stop. `deleteProject` removes answers and
+  tasks in batches (`DocRepo.deleteWhere`).
   - `runTask` takes the task's lock, rebuilds counters from saved predictions, and runs `parallel`
     (default 4) workers. Each example runs under a lock on its prediction id: if the prediction is
     saved by then (another task for the same version, model and settings), it is reused and not
@@ -19,6 +24,9 @@ example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts
     (every task runs with no cost limit), so this applies only to tasks saved before that.
   - Stop: aborts locally, or sets `stopRequested` and `stopRequestedAt`; the runner reads them on
     a 2 s timer and aborts calls in flight. A Stop pressed before the run started is ignored.
+    The run's model calls share one request id; aborting the run calls the gateway's
+    `cancel(runId)`, so no signal crosses the gateway contract. `tryTemplate` passes the caller's
+    `requestId`, and `cancel(requestId)` stops it.
   - `listTasks` reports a `running` task whose lock nobody holds as `paused` / `closed`.
   - `relabelInvalid` (the final run): an example whose only saved answer is invalid when the task
     first starts is labeled once more. The first run stores which ones in `relabelExampleIds`, so
@@ -29,7 +37,7 @@ example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts
     cost passes 120% of it.
   - `tryTemplate` labels a few examples with an unsaved template (the prompt agent's
     try_prompt tool) and saves nothing.
-  - Metrics: `tsp_labeling_*` (runs started and ended, resumes, examples, durations, cost,
+  - Metrics: `sprint_labeling_*` (runs started and ended, resumes, examples, durations, cost,
     cost against the estimate, lock conflicts, stop latency).
 - `locks.ts`: browser Web Locks per task and per prediction; an in-memory version for tests and
   Node. Two computers are not coordinated (MVP: runs live in one browser).

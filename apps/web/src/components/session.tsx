@@ -1,7 +1,7 @@
 'use client';
 
 import {useEffect, useState, type ReactNode} from 'react';
-import type {RuntimeInfo} from '@tsp/contracts';
+import type {RuntimeInfo} from '@sprint/contracts';
 import {getRuntimeInfo} from '@/backend-api';
 import {Button, Icon} from '@/ui';
 import {t} from '@/i18n';

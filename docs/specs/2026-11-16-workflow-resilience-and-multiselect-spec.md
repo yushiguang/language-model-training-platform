@@ -1,7 +1,7 @@
 # Specification: Single-Label Multi-Select Restoration, Sampling Resilience, Media Fallback, Optimiser Dry-Run Pass-Through, and Rebuild-First Guard
 
 **Date:** 2026-11-16  
-**Target:** External Agent (`@tsp/contracts`, `@tsp/domain`, `@tsp/agents`, `@tsp/optimiser`, `@tsp/bff`, `@tsp/platform`, and `@tsp/web`)  
+**Target:** External Agent (`@sprint/contracts`, `@sprint/domain`, `@sprint/agents`, `@sprint/optimiser`, `@sprint/bff`, `@sprint/platform`, and `@sprint/web`)  
 **Contract Impact:** Breaking `Schema` / `LabelSignature` / `Answer` / `MixUp` update + additive `ExampleMedia.externalUrl` (`Contract change: restore single/multi selection on the single project label and add ExampleMedia.externalUrl`)
 
 ---
@@ -11,7 +11,7 @@
 ### 1.1 Product Rule
 Every project still classifies **exactly one label** (`StructuredPrompt.label: Schema`, never multiple unrelated `fields[]`), **but that single label MUST support both `Single-select` (`kind: 'single'`) and `Multi-select` (`kind: 'multi'`, choosing `min` to `max` values)**. For example, a single-topic project picks 1 category (`single`), whereas a multi-tag project on one taxonomy picks 1 to 3 tags from that label (`multi`). Unrelated dimensions remain separate projects.
 
-### 1.2 Contracts & Domain (`@tsp/contracts`, `@tsp/domain`)
+### 1.2 Contracts & Domain (`@sprint/contracts`, `@sprint/domain`)
 1. **`Schema`, `LabelSignature`, and `Answer` (`packages/contracts/src/types.ts`)**:
    ```ts
    export type LabelKind = 'single' | 'multi';
@@ -54,7 +54,7 @@ Every project still classifies **exactly one label** (`StructuredPrompt.label: S
    - `isRight(gold, predicted)` & `exampleScore(gold, predicted)` (`gepa.ts`): `isRight` checks exact set equality; `exampleScore` returns set F1 / Jaccard overlap in `[0, 1]` (`1` on exact match, `0` on `null` / disjoint, partial credit when `multi` gets some values right so the Pareto front rewards partial multi-select progress).
    - `assignEvalHalves` (`dataset.ts`): stratify each labeled example by its rarest chosen value in `gold[e.id]` (which is exact per-value stratification when `single`).
 
-### 1.3 Editor, Pages, and Helper Prompts (`@tsp/web`, `@tsp/agents`)
+### 1.3 Editor, Pages, and Helper Prompts (`@sprint/web`, `@sprint/agents`)
 - **`StructuredEditor.tsx` (`LabelEditor`)**:
   - Inside the top `Label name` card row, place the `Single-select` / `Multi-select` `<Seg>` switch and, when `kind === 'multi'`, the `Choose [min] to [max]` compact number inputs (plus `Changed` badge if `kind`/`min`/`max` differs from `base`).
   - Keep the **stacked vertical value cards** below (`v.name`, badges, `Move up` / `Move down` / `Remove value`, full-width `<Grow>` `Definition`, and `<Marks>`) unchanged.

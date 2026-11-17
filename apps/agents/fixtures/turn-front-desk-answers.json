@@ -1,0 +1,69 @@
+{
+  "name": "The front desk answers a question about the page itself",
+  "guards": [
+    "the page view is the workspace: no tool is needed for what the page shows"
+  ],
+  "kind": "turn",
+  "request": {
+    "userText": "What is this page for?",
+    "page": {
+      "label": "Prompt Design",
+      "agent": "front_desk",
+      "intent": "answer",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_fixture",
+      "task": "Tag short videos",
+      "prompt": null,
+      "history": [],
+      "pageView": {
+        "page": "prompt_design",
+        "title": "Prompt Design",
+        "summary": "Write the first prompt: what to label and the values.",
+        "data": {}
+      }
+    },
+    "turnId": "turn_fixture",
+    "ctx": {
+      "requestId": "rq_fixture",
+      "user": {
+        "id": "u_fixture",
+        "name": "Fixture user"
+      },
+      "caller": "workflow",
+      "locale": "en"
+    },
+    "locale": "en"
+  },
+  "model": [
+    "{\"reply\":\"Write the first prompt: what to label and the values. Ask me about anything you see, or tell me what to change.\"}"
+  ],
+  "tools": [],
+  "expected": {
+    "invocations": [
+      {
+        "from": "user",
+        "to": "front_desk",
+        "intent": "answer",
+        "note": ""
+      }
+    ],
+    "messages": [
+      {
+        "role": "agent",
+        "agent": "front_desk",
+        "text": "Write the first prompt: what to label and the values. Ask me about anything you see, or tell me what to change."
+      }
+    ],
+    "proposal": null,
+    "toolCalls": [],
+    "modelCalls": [
+      {
+        "agent": "front_desk",
+        "model": "gpt-5.6-terra"
+      }
+    ],
+    "parseFailures": []
+  }
+}

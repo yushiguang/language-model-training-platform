@@ -17,9 +17,9 @@ import {
   type TaskState,
   type TelemetryPort,
   type TryTemplateRow,
-} from '@tsp/contracts';
-import {asAnswerOrNull, hashString, parseOutput, REASON_LINE, renderPrompt, settingsHash, type Part, systemConfig} from '@tsp/domain';
-import {DocRepo, newId} from '@tsp/platform';
+} from '@sprint/contracts';
+import {asAnswerOrNull, hashString, parseOutput, REASON_LINE, renderPrompt, settingsHash, type Part, systemConfig} from '@sprint/domain';
+import {DocRepo, newId} from '@sprint/platform';
 import {browserLocks, type TaskLocks} from './locks.ts';
 
 export interface LabelingDeps {
@@ -27,10 +27,13 @@ export interface LabelingDeps {
   catalog: CatalogContract;
   gateway: LlmGatewayContract;
   locks?: TaskLocks;
-  /** Turns relative image URLs into ones the model can fetch. */
-  resolveUrl?: (url: string) => string;
-  /** Called after every write, so open pages refresh. */
-  onChange?: () => void;
+  /**
+   * Turns a stored image URL into one the model can fetch: a relative URL made absolute, or a
+   * signed URL made for this call (which may take a request, so it may return a Promise).
+   */
+  resolveUrl?: (url: string) => string | Promise<string>;
+  /** Called after every write, with the project written to when known, so open pages refresh. */
+  onChange?: (projectId?: string) => void;
   telemetry?: TelemetryPort;
 }
 
@@ -47,8 +50,9 @@ type ExecOptions = RunOptions & {retry?: boolean};
 /** The site's own last line of every labeling prompt: asks the model for its short reason. */
 const withReason = (parts: Part[]): Part[] => [...parts, {type: 'text', text: `\n\n${REASON_LINE}`}];
 
-export function toMessages(parts: Part[], resolveUrl: (u: string) => string = u => u): ModelMessage[] {
-  const content: ContentPart[] = parts.map(p => (p.type === 'text' ? {type: 'text', text: p.text} : {type: 'image', url: resolveUrl(p.url)}));
+/** The prompt as the model's message; each image URL is resolved for this call, all at once. */
+export async function toMessages(parts: Part[], resolveUrl: (u: string) => string | Promise<string> = u => u): Promise<ModelMessage[]> {
+  const content: ContentPart[] = await Promise.all(parts.map(async (p): Promise<ContentPart> => (p.type === 'text' ? {type: 'text', text: p.text} : {type: 'image', url: await resolveUrl(p.url)})));
   return [{role: 'user', content}];
 }
 
@@ -64,14 +68,14 @@ export const predictionId = (promptVersionId: string, endpoint: EndpointId, hash
 export function createLabeling(deps: LabelingDeps): LabelingContract {
   const repo = new DocRepo(deps.db);
   const locks = deps.locks ?? browserLocks();
-  const emit = () => deps.onChange?.();
+  const emit = (projectId?: string) => deps.onChange?.(projectId);
   const active = new Map<string, AbortController>();
   const tm = deps.telemetry ?? NO_TELEMETRY;
   const running = new Map<string, number>();
   const stopPressed = new Map<string, number>();
   const setRunning = (purpose: string, d: number) => {
     running.set(purpose, (running.get(purpose) ?? 0) + d);
-    tm.gauge('tsp_labeling_tasks_running', running.get(purpose)!, {task_purpose: purpose});
+    tm.gauge('sprint_labeling_tasks_running', running.get(purpose)!, {task_purpose: purpose});
   };
   const defaultTrigger = (t: LabelingTask) => (t.purpose === 'eval' || t.purpose === 'optimiser' ? 'system' : 'user');
 
@@ -80,7 +84,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     const r = await locks.run(lockName(taskId), () => execute(taskId, trigger, opts));
     if (r === null) {
       const t = await getTask(taskId);
-      if (t) tm.counter('tsp_labeling_lock_conflicts_total', {task_purpose: t.purpose});
+      if (t) tm.counter('sprint_labeling_lock_conflicts_total', {task_purpose: t.purpose});
     }
     return r;
   }
@@ -121,15 +125,15 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     const task = found;
     const purpose = task.purpose;
     const how = trigger ?? defaultTrigger(task);
-    tm.counter('tsp_labeling_tasks_started_total', {task_purpose: purpose, trigger: how});
-    if (task.startedAt) tm.counter('tsp_labeling_resumes_total', {task_purpose: purpose, trigger: how});
+    tm.counter('sprint_labeling_tasks_started_total', {task_purpose: purpose, trigger: how});
+    if (task.startedAt) tm.counter('sprint_labeling_resumes_total', {task_purpose: purpose, trigger: how});
     const runStarted = Date.now();
     // A Stop pressed in another tab after this moment is for this run (older ones are ignored).
     const runStartedIso = now();
     const [version, setup] = await Promise.all([deps.catalog.get('prompt_versions', task.promptVersionId), deps.catalog.get('setup_versions', task.setupVersionId)]);
     if (!version || !setup?.schema) {
       await repo.patch<LabelingTask>(TASKS, taskId, {state: 'failed', error: 'The prompt version or schema of this task no longer exists.', finishedAt: now()});
-      emit();
+      emit(task.projectId);
       return getTask(taskId);
     }
     const schema = setup.schema;
@@ -161,11 +165,14 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       tokens: mine.reduce((n, p) => n + (p.tokens ?? 0), 0),
     };
     await repo.patch<LabelingTask>(TASKS, taskId, {...counts, failedExampleIds: [...failedSet], ...(task.relabelInvalid ? {relabelExampleIds: relabelIds} : {}), state: 'running', stopReason: null, error: null, startedAt: task.startedAt ?? now(), finishedAt: null});
-    emit();
+    emit(task.projectId);
 
     const examples = new Map((await deps.catalog.findByIds('examples', pending)).map(e => [e.id, e] as [string, Example]));
     const ctrl = new AbortController();
     active.set(taskId, ctrl);
+    // The run's model calls share one request id; a Stop cancels them at the gateway by id.
+    const runId = newId('lr');
+    ctrl.signal.addEventListener('abort', () => void Promise.resolve().then(() => deps.gateway.cancel(runId)).catch(() => undefined), {once: true});
     setRunning(purpose, 1);
     let stopReason: LabelingTask['stopReason'] = null;
     let inARow = 0;
@@ -204,11 +211,11 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         const res = await deps.gateway
           .label({
             slot: task.endpoint,
-            messages: toMessages(parts, deps.resolveUrl),
+            messages: await toMessages(parts, deps.resolveUrl),
             maxOutputTokens: task.settings.maxOutputTokens,
             temperature: task.settings.temperature,
             traceId: ex.externalId,
-            signal: ctrl.signal,
+            requestId: runId,
           })
           .catch(e => {
             // The safety filter's answer is final: saved as a filtered example, not a failure.
@@ -232,7 +239,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           invalidReason: parsed.reason,
           ...(parsed.note ? {reason: parsed.note} : {}),
           costUsd: res.costUsd,
-          tokens: res.inputTokens + res.outputTokens,
+          tokens: res.inputTokens + res.outputTokens + (res.reasoningTokens ?? 0),
           createdAt: now(),
         };
         await repo.insert(PREDICTIONS, pred);
@@ -251,8 +258,8 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       });
       counts.done++;
       counts.costUsd += pred.costUsd;
-      tm.counter('tsp_labeling_examples_total', {task_purpose: purpose, result: pred.answer ? 'valid' : pred.filtered ? 'filtered' : 'invalid'});
-      if (paid) tm.counter('tsp_labeling_cost_usd_total', {task_purpose: purpose}, pred.costUsd);
+      tm.counter('sprint_labeling_examples_total', {task_purpose: purpose, result: pred.answer ? 'valid' : pred.filtered ? 'filtered' : 'invalid'});
+      if (paid) tm.counter('sprint_labeling_cost_usd_total', {task_purpose: purpose}, pred.costUsd);
       return true;
     };
 
@@ -270,17 +277,17 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
             continue;
           }
           inARow = 0;
-          tm.histogram('tsp_labeling_example_duration_seconds', (Date.now() - exStarted) / 1000, {task_purpose: purpose});
+          tm.histogram('sprint_labeling_example_duration_seconds', (Date.now() - exStarted) / 1000, {task_purpose: purpose});
         } catch (e) {
           if (errorKindOf(e) === 'aborted') break;
-          tm.counter('tsp_labeling_examples_total', {task_purpose: purpose, result: 'failed'});
+          tm.counter('sprint_labeling_examples_total', {task_purpose: purpose, result: 'failed'});
           inARow++;
           counts.failed++;
           lastError = (e as Error).message ?? String(e);
           await repo.patch<LabelingTask>(TASKS, taskId, {failed: DocFieldValue.increment(1), failedExampleIds: DocFieldValue.arrayUnion(exampleId), error: lastError});
         }
         stopReason = overLimit();
-        emit();
+        emit(task.projectId);
       }
     };
 
@@ -307,12 +314,12 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       error = null;
     }
     await repo.patch<LabelingTask>(TASKS, taskId, {state, stopReason, error, stopRequested: false, finishedAt: now()});
-    emit();
-    tm.counter('tsp_labeling_tasks_ended_total', {task_purpose: purpose, state, reason: stopReason ?? 'none'});
+    emit(task.projectId);
+    tm.counter('sprint_labeling_tasks_ended_total', {task_purpose: purpose, state, reason: stopReason ?? 'none'});
     if (state === 'needs_attention') tm.event('run_needs_attention', {task_purpose: purpose, failed: counts.failed, total: task.total});
-    tm.histogram('tsp_labeling_task_duration_seconds', (Date.now() - runStarted) / 1000, {task_purpose: purpose});
+    tm.histogram('sprint_labeling_task_duration_seconds', (Date.now() - runStarted) / 1000, {task_purpose: purpose});
     const pressed = stopPressed.get(taskId);
-    if (state === 'stopped' && pressed) tm.histogram('tsp_labeling_stop_latency_seconds', (Date.now() - pressed) / 1000, {task_purpose: purpose});
+    if (state === 'stopped' && pressed) tm.histogram('sprint_labeling_stop_latency_seconds', (Date.now() - pressed) / 1000, {task_purpose: purpose});
     stopPressed.delete(taskId);
     return getTask(taskId);
   }
@@ -350,7 +357,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         finishedAt: null,
       };
       await repo.insert(TASKS, task);
-      emit();
+      emit(task.projectId);
       return task;
     },
 
@@ -388,7 +395,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         await repo.patch<LabelingTask>(TASKS, t.id, {state: 'paused', stopReason: 'closed'});
         changed = true;
       }
-      if (changed) emit();
+      if (changed) emit(projectId);
       return tasks;
     },
 
@@ -403,11 +410,11 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
             const parts = withReason(renderPrompt(input.template, ex, input.features, input.images));
             const res = await deps.gateway.label({
               slot: input.settings.endpoint,
-              messages: toMessages(parts, deps.resolveUrl),
+              messages: await toMessages(parts, deps.resolveUrl),
               maxOutputTokens: input.settings.maxOutputTokens,
               temperature: input.settings.temperature,
               traceId: ex.externalId,
-              signal: input.signal,
+              ...(input.requestId ? {requestId: input.requestId} : {}),
             });
             const parsed = parseOutput(res.text, input.schema);
             out.push({exampleId: ex.id, answer: parsed.answer, invalidReason: parsed.reason, costUsd: res.costUsd, error: null});
@@ -420,20 +427,22 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       return out.sort((a, b) => order.get(a.exampleId)! - order.get(b.exampleId)!);
     },
 
+    cancel: requestId => deps.gateway.cancel(requestId),
+
     /** Deleting a project: its running tasks stop, then its tasks and their saved answers go. */
     async deleteProject(projectId: string) {
       const tasks = await repo.find<LabelingTask>(TASKS, {projectId});
       for (const t of tasks) active.get(t.id)?.abort();
+      // In bulk: one batched delete per version, model and settings (deployment readiness spec, 3).
       const seen = new Set<string>();
       for (const t of tasks) {
         const key = `${t.promptVersionId}|${t.endpoint}|${t.settingsHash}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          for (const p of await repo.find<Prediction>(PREDICTIONS, {promptVersionId: t.promptVersionId, endpoint: t.endpoint, settingsHash: t.settingsHash})) await repo.delete(PREDICTIONS, p.id);
-        }
-        await repo.delete(TASKS, t.id);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        await repo.deleteWhere(PREDICTIONS, {promptVersionId: t.promptVersionId, endpoint: t.endpoint, settingsHash: t.settingsHash});
       }
-      emit();
+      await repo.deleteWhere(TASKS, {projectId});
+      emit(projectId);
     },
   };
 }

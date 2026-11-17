@@ -29,7 +29,7 @@ let current = null;
 
 (async () => {
   fs.mkdirSync(SHOTS, {recursive: true});
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'tsp-e2e-'));
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'sprint-e2e-'));
   const ctx = await chromium.launchPersistentContext(profile, {viewport: {width: 1920, height: 1080}, deviceScaleFactor: 1});
   const watch = p => {
     p.on('pageerror', e => errors.push(e.message));
@@ -615,13 +615,13 @@ let current = null;
   // gives the ticket id. The stored ticket holds the page and the browser's record, and no prompt.
   await ask(page, 'The Save button does nothing');
   await page.locator('aside.chat .msg-a', {hasText: 'Shall I send it?'}).last().waitFor({timeout: 20000});
-  const sentBefore = await page.evaluate(() => JSON.parse(localStorage.getItem('tsp-tickets') || '[]').length);
+  const sentBefore = await page.evaluate(() => JSON.parse(localStorage.getItem('sprint-tickets') || '[]').length);
   if (sentBefore) throw new Error('a report was sent before the user said yes');
   await shot(page, '8-report-draft');
   await ask(page, 'yes');
   const sentLine = await page.locator('aside.chat .msg-a', {hasText: /T-[A-Z0-9]{6}/}).last().innerText({timeout: 20000});
   await page.locator('aside.chat .evt', {hasText: /You sent a problem report T-/}).waitFor({timeout: 5000});
-  const ticket = await page.evaluate(() => JSON.parse(localStorage.getItem('tsp-tickets') || '[]').at(-1));
+  const ticket = await page.evaluate(() => JSON.parse(localStorage.getItem('sprint-tickets') || '[]').at(-1));
   if (!ticket || ticket.where?.page !== 'prompt' || !ticket.diagnostics?.pages?.length || ticket.content !== null || !ticket.actions?.length) throw new Error(`the stored ticket is not complete: ${JSON.stringify(ticket).slice(0, 400)}`);
   await shot(page, '8b-report-sent');
   log('problem report:', sentLine.replace(/\n/g, ' ').slice(0, 120), '| ticket keeps', Object.keys(ticket).join(','));
@@ -662,7 +662,7 @@ let current = null;
   await zp.getByRole('dialog').waitFor();
   await shot(zp, '9f-zh-settings');
   await zp.keyboard.press('Escape');
-  const missed = await zp.evaluate(() => globalThis.__tspI18nMissing || []);
+  const missed = await zp.evaluate(() => globalThis.__sprintI18nMissing || []);
   if (missed.length) throw new Error(`texts missing from the Chinese catalog: ${missed.join(' | ')}`);
   log('Chinese: no catalog misses; English left on the pages:', [...new Set(english)].slice(0, 12).join(' | ') || 'none');
   await zp.locator('button.avatar-btn').click();
@@ -673,11 +673,11 @@ let current = null;
   await zp.close();
 
   const facts = await page.evaluate(() => {
-    const docs = k => JSON.parse(localStorage.getItem('tsp-doc-v2:' + k) || '[]').map(d => d.data);
+    const docs = k => JSON.parse(localStorage.getItem('sprint-doc:' + k) || '[]').map(d => d.data);
     const project = docs('projects').find(p => p.name === 'Short-video tagging');
     const mine = k => docs(k).filter(d => d.projectId === project.id);
     const versions = mine('prompt_versions');
-    const ids = JSON.parse(localStorage.getItem('tsp-doc:predictions') || '[]').map(d => d.data._appId);
+    const ids = JSON.parse(localStorage.getItem('sprint-doc:predictions') || '[]').map(d => d.data._appId);
     const audit = mine('audit_log').map(a => a.action);
     return {
       projects: docs('projects').length,
@@ -693,7 +693,7 @@ let current = null;
       toolCalls: mine('audit_log').filter(a => a.action === 'agent.tool').map(a => a.data?.name),
       autoStarts: audit.filter(a => a === 'auto_start').length,
       actionLines: mine('chat_messages').filter(m => m.role === 'event' && m.event).length,
-      leftovers: ['training_sets', 'setup'].filter(k => localStorage.getItem('tsp-doc-v2:' + k)),
+      leftovers: ['training_sets', 'setup'].filter(k => localStorage.getItem('sprint-doc:' + k)),
       removals: mine('dataset_removals').map(r => `${r.reason}${r.restoredAt ? ':restored' : ''}`),
       comments: mine('label_comments').length,
       holdoutLocked: !!project.holdoutLocked,
@@ -710,17 +710,17 @@ let current = null;
   );
   // The sink is written every 10 seconds: wait for the last events of this run to land.
   await page.bringToFront();
-  await page.waitForFunction(() => (localStorage.getItem('tsp-telemetry-events') || '').includes('problem_reported'), null, {timeout: 15000}).catch(() => undefined);
+  await page.waitForFunction(() => (localStorage.getItem('sprint-telemetry-events') || '').includes('problem_reported'), null, {timeout: 15000}).catch(() => undefined);
   const tel = await page.evaluate(() => {
-    const ev = JSON.parse(localStorage.getItem('tsp-telemetry-events') || '[]');
+    const ev = JSON.parse(localStorage.getItem('sprint-telemetry-events') || '[]');
     const names = {};
     for (const e of ev) names[e.event] = (names[e.event] || 0) + 1;
     const leaks = ev.filter(e => /Short-video tagging|Scratch project|Tag short videos|customer messages/.test(JSON.stringify(e))).length;
-    const text = globalThis.__tspMetrics || '';
+    const text = globalThis.__sprintMetrics || '';
     const series = [...new Set(text.split('\n').filter(l => l && !l.startsWith('#')).map(l => l.split(/[{ ]/)[0].replace(/_(bucket|sum|count)$/, '')))];
     // Labels whose values come from the running apps: none should fall back to "other".
     const undeclared = [...new Set([...text.matchAll(/\b(endpoint|model|method|op|collection)="other"/g)].map(m => m[1]))];
-    return {events: ev.length, names, leaks, undeclared, metricNames: series.length, sample: series.filter(s => /tsp_(llm_requests|labeling_examples|agent_turns|bff_calls|web_page_views|auto_starts)/.test(s))};
+    return {events: ev.length, names, leaks, undeclared, metricNames: series.length, sample: series.filter(s => /sprint_(llm_requests|labeling_examples|agent_turns|bff_calls|web_page_views|auto_starts)/.test(s))};
   });
   log('telemetry:', JSON.stringify(tel));
   log('console errors:', errors.length ? errors : 'none');

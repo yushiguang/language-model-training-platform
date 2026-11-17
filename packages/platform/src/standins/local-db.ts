@@ -12,7 +12,7 @@ import type {
   DocWhereOp,
   DocWriteBatch,
   StoredDoc,
-} from '@tsp/contracts';
+} from '@sprint/contracts';
 
 function isFilterExpression(val: unknown): val is DocFilterExpression {
   return typeof val === 'object' && val !== null && ('type' in val) && (((val as any).type === 'field') || ((val as any).type === 'and') || ((val as any).type === 'or'));
@@ -123,7 +123,7 @@ function applyPatch<T extends object>(current: T, patch: DocUpdatePatch<T>): T {
  * Supports all 11 filter operators, composite AND/OR filters, atomic `DocFieldValue`
  * updates, pagination, polling subscriptions, and batch writes.
  */
-export function localDocRuntime(prefix = 'tsp-doc', dropPrefixes: string[] = []): DocRuntime {
+export function localDocRuntime(prefix = 'sprint-doc', dropPrefixes: string[] = []): DocRuntime {
   // Records saved under an older storage shape are test data: they are removed, not migrated.
   if (dropPrefixes.length && typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
     try {

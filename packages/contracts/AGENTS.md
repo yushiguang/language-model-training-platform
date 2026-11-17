@@ -1,7 +1,7 @@
-# contracts (`@tsp/contracts`)
+# contracts (`@sprint/contracts`)
 
 Types and every contract between apps and with the hosting platform. No logic (pure rules live in
-`@tsp/domain`).
+`@sprint/domain`).
 
 | File | Contract |
 |---|---|

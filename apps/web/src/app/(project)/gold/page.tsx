@@ -3,8 +3,8 @@
 import {useGo} from '@/components/nav';
 import {useSearchParams} from 'next/navigation';
 import {Fragment, Suspense, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import type {Answer, Example, ExampleMedia, LabelComment, MismatchList, MismatchReview, RemovalReason} from '@tsp/contracts';
-import {FEATURES, featureText, gate, inLabelOrder, labelBounds, sameAnswer, versionLabel} from '@tsp/domain';
+import type {Answer, Example, ExampleMedia, LabelComment, MismatchList, MismatchReview, RemovalReason} from '@sprint/contracts';
+import {FEATURES, featureText, gate, inLabelOrder, labelBounds, sameAnswer, versionLabel} from '@sprint/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {useSettings} from '@/components/ProjectSettings';
@@ -368,6 +368,7 @@ const IMAGE_KEYS = new Set(Object.values(FEATURES).flatMap(list => list.filter(d
 const FEATURE_LABEL = new Map(Object.values(FEATURES).flatMap(list => list.map(d => [d.key, d.label] as const)));
 
 function ExampleCard({ex, n, extra, onRemove}: {ex: Example; n: number; extra?: ReactNode; onRemove: (reason: RemovalReason) => Promise<void>}) {
+  const {projectId} = useProject();
   const [media, setMedia] = useState<ExampleMedia | null | undefined>(undefined);
   const [removing, setRemoving] = useState<RemovalReason | null>(null);
   const [picked, setPicked] = useState(0);
@@ -377,13 +378,13 @@ function ExampleCard({ex, n, extra, onRemove}: {ex: Example; n: number; extra?: 
     setMedia(undefined);
     setPicked(0);
     setView('player');
-    void exampleMedia(ex.id)
+    void exampleMedia(projectId, ex.id)
       .then(m => live && setMedia(m))
       .catch(() => live && setMedia(null));
     return () => {
       live = false;
     };
-  }, [ex.id]);
+  }, [ex.id, projectId]);
   const stills = media ? [...(media.coverUrl ? [media.coverUrl] : []), ...media.imageUrls.filter(u => u !== media.coverUrl)] : [];
   const f = (k: string) => {
     return featureText(ex.features[k]).trim();
@@ -546,7 +547,7 @@ function ModelAnswer({
       const candidates = versionId ? state.versions.filter(v => v.id === versionId) : [...state.versions].reverse();
       for (const v of candidates)
         for (const m of state.setup!.models) {
-          const p = (await predictionsFor(v.id, m.endpoint, m))[ex.id];
+          const p = (await predictionsFor(v.projectId, v.id, m.endpoint, m))[ex.id];
           if (p) {
             if (live) onFound(p.answer);
             if (live) setFound({answer: p.answer, invalid: p.invalidReason, reason: p.reason ?? null, label: versionLabel(v), endpoint: state.endpoints.find(e => e.id === m.endpoint)?.name ?? m.endpoint});

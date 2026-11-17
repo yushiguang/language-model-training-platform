@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {LabelCallRequest, LabelCallResult, LlmGatewayContract, Schema} from '@tsp/contracts';
-import {createCatalog} from '@tsp/catalog';
-import {toFeatures} from '@tsp/domain';
-import {localDocRuntime} from '@tsp/platform';
+import type {LabelCallRequest, LabelCallResult, LlmGatewayContract, Schema} from '@sprint/contracts';
+import {createCatalog} from '@sprint/catalog';
+import {toFeatures} from '@sprint/domain';
+import {localDocRuntime} from '@sprint/platform';
 import {createLabeling} from './labeling.ts';
 import {memoryLocks} from './locks.ts';
 
@@ -26,6 +26,7 @@ function fakeGateway(answer: (req: LabelCallRequest) => Promise<string>, stats =
     agentModel: () => {
       throw new Error('not used');
     },
+    cancel: async () => {},
     async label(req): Promise<LabelCallResult> {
       stats.calls++;
       stats.inFlight++;
@@ -129,7 +130,7 @@ test('one runner per task: a second run returns null; Stop stops it; a closed ru
   // A task left "running" by a closed page (no lock held) is reported as paused.
   await createCatalog(db); // no-op, keeps the same store
   const t2 = await lab.createTask(input(ids, v));
-  const {DocRepo} = await import('@tsp/platform');
+  const {DocRepo} = await import('@sprint/platform');
   await new DocRepo(db).patch('labeling_tasks', t2.id, {state: 'running'});
   const listed = (await lab.listTasks('pr_1')).find(x => x.id === t2.id);
   assert.equal(listed?.state, 'paused');
@@ -146,6 +147,50 @@ test('tryTemplate labels a few examples with an unsaved template and saves nothi
   assert.equal((await labeling.listTasks('pr_1')).length, 0);
   // Nothing saved under the version that exists either.
   assert.equal(Object.keys(await labeling.predictions(v.id, 'A', 'any')).length, 0);
+});
+
+test('a try is stopped by its request id: the calls carry the id, and cancel reaches the gateway (spec 4.1)', async () => {
+  const {db, catalog, ids} = await setup(2, 'try-cancel');
+  const withId: (string | undefined)[] = [];
+  const cancelled: string[] = [];
+  const gateway: LlmGatewayContract = {
+    ...fakeGateway(async req => (withId.push(req.requestId), '{"format": ["Vlog"]}')),
+    cancel: async id => void cancelled.push(id),
+  };
+  const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks()});
+  const examples = await catalog.findByIds('examples', ids);
+  await labeling.tryTemplate({template: 'Draft {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], schema, settings: {endpoint: 'A', maxOutputTokens: 100, temperature: 0}, examples, requestId: 'rq_try'});
+  assert.deepEqual(withId, ['rq_try', 'rq_try']);
+  await labeling.cancel('rq_try');
+  assert.deepEqual(cancelled, ['rq_try']);
+});
+
+test('image URLs may be resolved asynchronously (a signed URL per call), and every call gets its own (spec 4.5)', async () => {
+  const {db, catalog, v, ids} = await setup(2, 'signed-urls');
+  const seen: string[] = [];
+  let signed = 0;
+  const resolveUrl = async (url: string) => {
+    await new Promise(r => setTimeout(r, 1));
+    return `https://files.example/${url}?sig=${++signed}`;
+  };
+  const gateway = fakeGateway(async req => {
+    for (const m of req.messages) for (const c of m.content as {type: string; url?: string}[]) if (c.type === 'image') seen.push(c.url!);
+    return '{"format": ["Vlog"]}';
+  });
+  const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks(), resolveUrl});
+  const images = [{url: 'logo.png', name: 'logo.png', size: 1}];
+  const examples = await catalog.findByIds('examples', ids);
+  const rows = await labeling.tryTemplate({template: 'Draft {{Description}} [Image 1]', features: {video: ['Description'], photo_text: [], metadata: []}, images, schema, settings: {endpoint: 'A', maxOutputTokens: 100, temperature: 0}, examples});
+  assert.ok(rows.every(r => r.error === null && r.answer?.join() === 'Vlog'));
+  assert.equal(seen.length, 2);
+  assert.ok(seen.every(u => /^https:\/\/files\.example\/logo\.png\?sig=\d$/.test(u)));
+  assert.equal(new Set(seen).size, 2, 'each call signs its own URL');
+  // A saved run resolves the same way.
+  await catalog.patch('prompt_versions', v.id, {template: 'Label {{Description}} [Image 1]', images});
+  const task = await labeling.createTask(input(ids, v));
+  await labeling.runTask(task.id);
+  assert.equal(seen.length, 4);
+  assert.ok(seen.slice(2).every(u => u.startsWith('https://files.example/logo.png?sig=')));
 });
 
 test('relabelInvalid: an example whose only answer is invalid is labeled once more, and the valid answer wins', async () => {
@@ -203,28 +248,31 @@ test('two tasks for the same version, model and settings never pay twice for an 
   const [ra, rb] = await Promise.all([lab.runTask(a.id), lab.runTask(b.id)]);
   assert.equal(stats.calls, 12, 'each example labeled once');
   assert.deepEqual([ra?.done, rb?.done], [12, 12]);
-  const {DocRepo} = await import('@tsp/platform');
+  const {DocRepo} = await import('@sprint/platform');
   const docs = await new DocRepo(db).find('predictions', {promptVersionId: v.id});
   assert.equal(docs.length, 12, 'one saved prediction per example');
 });
 
 test('a Stop from another tab is seen during a long model call, and an old Stop is ignored', async () => {
   const {db, catalog, v, ids} = await setup(4, 'lab-stop');
-  // A call that only ends when it is aborted.
+  // A call that only ends when it is cancelled by its request id (no signal crosses the contract).
+  const open = new Map<string, (() => void)[]>();
   const gateway: LlmGatewayContract = {
     ...fakeGateway(async () => '{"format": "Vlog"}'),
     label: req =>
       new Promise((_, reject) => {
-        const open = setTimeout(() => reject(new Error('never stopped')), 10_000); // like an open request
-        req.signal?.addEventListener('abort', () => (clearTimeout(open), reject(new DOMException('Stopped', 'AbortError'))), {once: true});
+        const timer = setTimeout(() => reject(new Error('never stopped')), 10_000); // like an open request
+        const stop = () => (clearTimeout(timer), reject(new DOMException('Stopped', 'AbortError')));
+        open.set(req.requestId ?? '', [...(open.get(req.requestId ?? '') ?? []), stop]);
       }),
+    cancel: async id => (open.get(id) ?? []).forEach(stop => stop()),
   };
   const tab1 = createLabeling({db, catalog, gateway, locks: memoryLocks()});
   const tab2 = createLabeling({db, catalog, gateway, locks: memoryLocks()});
   const t = await tab1.createTask(input(ids, v));
   // A Stop pressed before this run started is not for it.
   await tab2.stopTask(t.id);
-  const {DocRepo} = await import('@tsp/platform');
+  const {DocRepo} = await import('@sprint/platform');
   await new DocRepo(db).patch('labeling_tasks', t.id, {stopRequestedAt: '2000-01-01T00:00:00.000Z'});
   const run = tab1.runTask(t.id);
   await new Promise(r => setTimeout(r, 2300));
@@ -283,7 +331,7 @@ test('relabelInvalid does not try again an invalid answer the same task saved be
 });
 
 test("every labeling prompt ends with the site's reason line, and the model's reason is kept with the answer", async () => {
-  const {REASON_LINE} = await import('@tsp/domain');
+  const {REASON_LINE} = await import('@sprint/domain');
   const {db, catalog, v, ids} = await setup(2, 'lab-reason');
   const asked: string[] = [];
   const gateway = fakeGateway(async req => {

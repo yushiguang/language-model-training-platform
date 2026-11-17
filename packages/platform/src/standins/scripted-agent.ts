@@ -1,13 +1,13 @@
 import {
-  AVAILABLE_LLM_MODELS,
   type AgentChatOptions,
   type AgentCompletionResult,
   type AgentModel,
   type LlmStreamChunk,
   type ModelMessage,
-} from '@tsp/contracts';
-import {SAMPLE_STRUCTURED, addRule, addToDefinition, fixTarget, hasRule, nextRuleGroupId, ruleFor, schemaOf} from '@tsp/domain';
-import type {LabelValue, MixUp, RuleGroup, Schema, StructuredPrompt} from '@tsp/contracts';
+} from '@sprint/contracts';
+import {STAND_IN_MODELS} from './models.ts';
+import {SAMPLE_STRUCTURED, addRule, addToDefinition, fixTarget, hasRule, nextRuleGroupId, ruleFor, schemaOf} from '@sprint/domain';
+import type {LabelValue, MixUp, RuleGroup, Schema, StructuredPrompt} from '@sprint/contracts';
 
 /**
  * Stand-in agent model. It answers each agent request with fixed, sensible JSON so the whole
@@ -254,6 +254,14 @@ function evaluationAgent(r: Req) {
 }
 
 const FALLBACK_RULE = 'Read the description and the on-screen text before judging; when unsure, prefer the more common value.';
+const FALLBACK_RULES = [
+  FALLBACK_RULE,
+  'Judge the post by what it shows, not by its hashtags alone, unless the text states its purpose.',
+  'When the cover and the description disagree, prefer what the description says.',
+  'Check the on-screen text before the title when the title is only a few words.',
+  'Never choose a value only because a single word in the title matches its name.',
+  'If the post mixes two purposes, prefer the one that takes most of the post.',
+];
 
 function reflect(r: Req) {
   const mixUps: MixUp[] = r.context.mixUps ?? [];
@@ -265,6 +273,10 @@ function reflect(r: Req) {
     if (hasRule(prompt, rule) || tried.includes(change)) continue;
     return {prompt: addToDefinition(prompt, fixTarget(m), rule), change};
   }
+  // With every mix-up tried, try the next general rule the prompt does not have yet, so a later run
+  // still has a change to make (the stand-in model scores each added rule).
+  const next = FALLBACK_RULES.find(f => !hasRule(prompt, f) && !tried.includes(f));
+  if (next) return {prompt: addRule(prompt, GENERAL, next), change: next};
   return {prompt: hasRule(prompt, FALLBACK_RULE) ? prompt : addRule(prompt, GENERAL, FALLBACK_RULE), change: FALLBACK_RULE};
 }
 
@@ -383,7 +395,7 @@ export function scriptedAgent(): AgentModel {
   };
 
   return {
-    models: () => AVAILABLE_LLM_MODELS,
+    models: () => STAND_IN_MODELS,
     chat: (messages: ModelMessage[], _opts?: AgentChatOptions) => runText(messages),
     async complete(messages: ModelMessage[], opts?: AgentChatOptions): Promise<AgentCompletionResult> {
       const text = await runText(messages);

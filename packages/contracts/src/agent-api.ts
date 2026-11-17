@@ -1,4 +1,4 @@
-import type {AgentModel, RawExample} from './platform-api.ts';
+import type {AgentModel, RawExample, RequestContext} from './platform-api.ts';
 import type {
   AgentPreset,
   Answer,
@@ -15,7 +15,7 @@ import type {
 } from './types.ts';
 
 /**
- * Contract 2: BFF <-> Agent Runtime Service (`@tsp/contracts/agent-api`).
+ * Contract 2: BFF <-> Agent Runtime Service (`@sprint/contracts/agent-api`).
  *
  * The BFF service (`apps/bff`) owns persistence, state orchestration, and database records.
  * The Agent service (`apps/agents`) is a stateless, DB-free runtime that receives a serialisable
@@ -77,13 +77,31 @@ export type AgentToolName =
   /** Drafts a problem report, or sends the draft (`send: true`) once the user has agreed. */
   | 'report_problem';
 
-export interface AgentToolCall {
+/** What a helper asks for: a tool by name, with its arguments. */
+export interface AgentToolRequest {
   agent: AgentPreset;
   name: AgentToolName;
   args: Record<string, unknown>;
 }
 
-/** Runs read tools for the agent runtime. In-process now; a callback to the bff's API when split. */
+/**
+ * One tool call as it reaches the tool host (deployment readiness spec, 6): the request plus
+ * everything the host needs to check it, from the call itself and never from a process's memory.
+ * The runtime copies `projectId`, `turnId` and `ctx` from the request it is serving.
+ */
+export interface AgentToolCall extends AgentToolRequest {
+  projectId: string;
+  /** The Ask AI turn the call belongs to; null outside a turn (the Optimiser, Improve with AI). */
+  turnId: string | null;
+  /** The context of the request the runtime is serving. Within a turn, the turn's own wins. */
+  ctx: RequestContext;
+}
+
+/**
+ * Runs the helpers' tools: one host for every project, in `@sprint/workflow`. It enforces every
+ * rule that protects data, whatever the runtime does (review P4; see docs/architecture.md, "Agent
+ * guards"). In-process now; a call over RPC when the runtime runs elsewhere.
+ */
 export interface AgentToolHost {
   call(call: AgentToolCall): Promise<unknown>;
 }
@@ -120,9 +138,12 @@ export type AgentTurnProgress = (p: AgentTurnEvent) => void;
 /**
  * Where the runtime publishes live progress (spec 1.0.0, 7.1.3): a port injected at
  * construction, not a callback passed with each call. `turnId` is the one the request carried.
+ * The receiver writes each event to shared state and the catalog (deployment readiness spec, 6),
+ * so it may run in any instance. The runtime sends a turn's events one at a time, in order, and
+ * answers the turn only after the last one landed.
  */
 export interface AgentProgressPort {
-  publish(projectId: string, turnId: string, event: AgentTurnEvent): void;
+  publish(projectId: string, turnId: string, event: AgentTurnEvent): void | Promise<void>;
 }
 
 /** A structured prompt the Prompt helper proposes; the user approves or saves it on the page. */
@@ -195,7 +216,6 @@ export interface OptimiserReflectInput {
   examples?: ExampleBrief[];
   /** Merge only: the second version. */
   other?: {prompt: StructuredPrompt; change: string};
-  signal?: AbortSignal;
 }
 
 export interface OptimiserReflectOutput {
@@ -234,8 +254,8 @@ export interface DraftImprovementOutput {
 export interface AgentRuntimeDeps {
   /** The model the helpers run on (the gateway's agent model). */
   llm: AgentModel;
-  /** The read and start-work tools of one project, run as the signed-in user. */
-  tools(projectId: string): AgentToolHost;
+  /** The helpers' tools, for every project; each call carries its project, turn and context. */
+  tools: AgentToolHost;
   /** Live progress of Ask AI turns; without it, turns report nothing while they run. */
   progress?: AgentProgressPort;
 }
@@ -243,17 +263,21 @@ export interface AgentRuntimeDeps {
 /** One Ask AI turn: the input plus the id its progress is published under. */
 export interface AgentTurnRequest extends AgentTurnInput {
   turnId: string;
+  /** Who asked: passed on with every tool call of the turn. */
+  ctx: RequestContext;
 }
 
 /** One Optimiser change (or merge), for a project; `requestId` lets the caller cancel it. */
-export interface OptimiserReflectRequest extends Omit<OptimiserReflectInput, 'signal'> {
+export interface OptimiserReflectRequest extends OptimiserReflectInput {
   projectId: string;
   requestId?: string;
+  ctx: RequestContext;
 }
 
 /** Improve with AI, for a project. */
 export interface DraftImprovementRequest extends DraftImprovementInput {
   projectId: string;
+  ctx: RequestContext;
 }
 
 /** The agent runtime as the bff sees it (implemented by `apps/agents`, `createAgentRuntime`). */

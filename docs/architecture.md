@@ -7,27 +7,44 @@ The pass rule and the labeling model are Project Settings, not steps. A batch la
 It is a fixed-workflow website with agents built into each step.
 Code decides the next step; agents explain and propose, people approve.
 
-## Nine apps, three packages
+## Ten apps, three packages
 
 ```
 apps/web ──► apps/web/src/backend-api (the BffClient the pages call; in-process.ts is the composition root)
                  │ builds and wires:
-                 ├── apps/bff ──────────┬──► catalog      (product records)
-                 │   (what pages call)  ├──► labeling     (tasks, predictions) ──► llm-gateway
-                 │                      ├──► agents       (presets, runtime)   ──► llm-gateway
-                 │                      ├──► optimiser    (Auto Optimise runs) ──► catalog, labeling, agents
-                 │                      └──► llm-gateway  (endpoint list, agent model)
+                 ├── apps/bff (what pages call: builds each call's RequestContext)
+                 │     └──► apps/workflow (WorkflowContract, through a JSON loopback in-process)
+                 │            ├──► catalog      (product records)
+                 │            ├──► labeling     (tasks, predictions) ──► llm-gateway
+                 │            ├──► agents       (presets, runtime)   ──► llm-gateway
+                 │            ├──► optimiser    (Auto Optimise runs) ──► catalog, labeling, agents
+                 │            ├──► jobs         (JobsContract: the workflow queues work, reads it back)
+                 │            └──► llm-gateway  (endpoint list, agent model)
+                 ├── jobs (runs the queued work: executors of labeling, optimiser and workflow)
                  ├── telemetry (one port, given to every app above) ──► the platform's sink
-                 └── @tsp/platform-impl (stand-ins, or the internal adapters)
-                       document store · labeling models · agent model · identity · files · examples · telemetry sink
+                 └── @sprint/platform-impl (stand-ins, or the internal adapters)
+                       document store · labeling models · agent model · identity · files · examples · shared state · telemetry sink
 
 All apps depend only on packages/contracts (types, contracts) and packages/domain (pure rules).
 catalog and labeling also use packages/platform for DocRepo over the document store.
 ```
 
-Apps never import each other. The bff receives the other apps as contract objects through
-`configureBff()`; labeling receives the catalog and the gateway through `createLabeling()`. The
+Apps never import each other. The workflow receives the other apps as contract objects through
+`createWorkflow()` and `connect()`; the bff receives the workflow and the identity through
+`createBffApi()`; labeling receives the catalog and the gateway through `createLabeling()`. The
 composition root is the only place that knows which implementation sits behind each contract.
+
+**A thin bff, a stateless workflow (deployment readiness spec, 2).** The bff only finds out who
+the caller is, builds a `RequestContext` per call (request id, user, caller, language, time zone,
+app version) and keeps a repeated start from running twice. Everything a CLI or tool channel would
+also need is in `@sprint/workflow`, whose every method takes that context first. The workflow is a
+factory with no module-level state: who acts comes from the context of each call, never from a
+process-wide user, and short-lived state every instance must see (the live turn, the helper that
+answers, the running turn's context, problem-report drafts) sits behind `SharedStatePort` with a
+TTL (`Platform.sharedState`; the stand-in is a map in the page). In the browser the bff calls the
+workflow through `loopback` (`packages/platform`): context, arguments, results and errors go
+through JSON as they would over RPC, so the browser check proves the workflow can move behind RPC
+without the bff or the pages changing.
 
 | App | Owns | Contract |
 |---|---|---|
@@ -35,9 +52,11 @@ composition root is the only place that knows which implementation sits behind e
 | `labeling` | Collections `labeling_tasks`, `predictions`. Runs tasks | `LabelingContract` (`labeling-api.ts`) |
 | `catalog` | All product collections (`CatalogRecords` in `catalog-api.ts`). Assigns version numbers | `CatalogContract` |
 | `agents` | Agent presets and the turn/handoff logic. Stateless | `AgentRuntimeContract` (`agent-api.ts`) |
-| `optimiser` | The Auto Optimise loop and the `optimisation_runs` records. Asks the bff (through `OptimiserHost`) to save a version, label examples and build a score | `OptimiserContract` (`optimiser-api.ts`) |
-| `bff` | Nothing stored. Workflow, gates, when labeling starts, reports | `BffContract` (`bff-api.ts`) |
-| `telemetry` | Metrics (Prometheus style, `tsp_*`) and product events; sends them to `Platform.telemetry` | `TelemetryPort` (`telemetry.ts`) |
+| `optimiser` | The Auto Optimise loop and the `optimisation_runs` records. Asks the workflow (through `OptimiserHost`) to save a version, label examples and build a score | `OptimiserContract` (`optimiser-api.ts`) |
+| `jobs` | Nothing stored itself: jobs live in the injected `JobStorePort`. Runs background work with a lease per job, heartbeats, recovery, retries and cancel; each kind's work is an executor of the app that owns it | `JobsContract` (`jobs-api.ts`) |
+| `workflow` | Nothing stored. Project state, gates, when labeling starts, reports, dataset governance, Ask AI turns, page views and agent tools | `WorkflowContract` (`workflow-api.ts`) |
+| `bff` | Nothing stored, no business decision. The caller's context per call, idempotency keys | `BffContract` (`bff-api.ts`) |
+| `telemetry` | Metrics (Prometheus style, `sprint_*`) and product events; sends them to `Platform.telemetry` | `TelemetryPort` (`telemetry.ts`) |
 | `web` | Pages and components | calls `@/backend-api` (`BffClient`) |
 
 ### Contracts are ready for an interface definition language
@@ -52,22 +71,50 @@ Since 1.0.0 phase 1 every service contract is written so it maps one to one to a
   with an optional `idempotencyKey`: the same key never starts the same work twice.
 - Live updates are not methods: a client listens on an `EventStreamPort` (in-process the
   services' bus, over HTTP Server-Sent Events or polling).
-- `apps/bff/src/api.ts` (`createBffApi`) is the bff as its contract. Services behind it still
-  pass records to each other.
-- No callbacks or signals cross a contract (phase 3). The agent runtime is built once with
-  `createAgentRuntime({llm, tools, progress})`: the model, a project's tools and an
-  `AgentProgressPort` for Ask AI's live line are injected, so `runTurn`, `reflectPrompt` and
-  `draftImprovement` take and return plain data. A run's Stop reaches a running change through
-  `cancel(requestId)`.
+- **Revisions (review G9).** Every change to a project gives it a new revision, kept in shared
+  state so every replica sees it (`emitChange(projectId)`; labeling and the Optimiser report their
+  writes with the project). It is a fresh random id, not a count: shared state has no atomic
+  increment, so two replicas counting at once could write the same number and hide a change.
+  Writes to one project within 200 ms give one revision (a labeling run does not write it per
+  example); a read in the same instance writes a waiting one first. `ProjectState.revision` is read
+  before the rest of the state. `projectStatus(projectId)` is the light read a remote client polls:
+  the revision, sampling, labeling runs with their counts and Optimiser runs without their rounds,
+  never examples, gold labels or reports; it reads the whole state again only when the revision
+  moved.
+- `apps/bff/src/api.ts` (`createBffApi`) is the bff as its contract, and
+  `apps/workflow/src/workflow.ts` (`createWorkflow`) the workflow as its own. Services inside the
+  workflow still pass records to each other.
+- No callbacks or signals cross a service contract (phase 3, and deployment readiness spec 4.1).
+  The agent runtime is built once with `createAgentRuntime({llm, tools, progress})`: the model,
+  the workflow's one tool host (`Workflow.toolHost`) and an `AgentProgressPort` for Ask AI's live
+  line are injected, so `runTurn`, `reflectPrompt` and `draftImprovement` take and return plain
+  data. Each request carries the caller's `ctx`, and every tool call the runtime makes carries
+  `projectId`, `turnId` (null outside an Ask AI turn) and that `ctx` (`AgentToolCall`), so a tool
+  host in another process gets all it needs from the call (deployment readiness spec, 6). A turn's
+  record (project, caller, page, language, browser record) is in shared state under `turn:{turnId}`
+  while it runs; progress events are written to the chat and to the live line in shared state by
+  whichever instance receives them, and the runtime answers a turn only after its last event
+  landed. `sendUserMessage` returns `{turnId}` once the message is saved and the turn started; the
+  turn runs on in the instance that accepted it (not as a job), and the page follows it with
+  `getAgentLive` and the chat. A failed turn ends its live line and says so in the chat. Work is stopped by id: the
+  caller passes a `requestId` and calls `cancel(requestId)` on the agent runtime (an Optimiser
+  change), the gateway (`label`; a labeling run gives all its calls one id, so Stop cancels them
+  together) or labeling (`tryTemplate`). Signals stay inside the process that owns the work.
+  Platform ports (`ChatRequest`, `AgentChatOptions`) keep their `signal`: they are called
+  in-process by the gateway and never cross our RPC, and without it a stopped call would keep its
+  request to the model open. `ExampleSource.sample` keeps its progress callback and signal too:
+  only the `dataset.sample` job's executor calls it, in the process that runs the job.
 - Example features are `FeatureValue {text?, items?}` (text, or a list such as image URLs), read
   with `featureText` and `featureItems` (`packages/domain/src/template.ts`). Files and older
   records with plain strings and arrays are read through `toFeatures`.
 
 `apps/web/src/backend-api` has three files: `client.ts` (the `BffClient` interface pages use:
 the contract plus live listeners, file uploads and page telemetry), `in-process.ts` (the default
-client and composition root: every service runs in the page on `@tsp/platform-impl`) and
-`index.ts` (picks the client). A microservice deployment adds an HTTP client and exports it from
-`index.ts`; no page changes.
+client and composition root: every service runs in the page on `@sprint/platform-impl`) and
+`index.ts` (takes the client from `@sprint/client-impl`). That alias is a build-time switch like
+`@sprint/platform-impl`: the in-process client by default, or the module `SPRINT_CLIENT_IMPL`
+names, such as an HTTP client for a server deployment, which bundles no backend app. No page
+changes either way.
 
 ### One place for every tunable number
 
@@ -75,8 +122,39 @@ client and composition root: every service runs in the page on `@tsp/platform-im
 grouped by area; the defaults are `DEFAULT_SYSTEM_CONFIG` in `packages/domain/src/config.ts`.
 Code reads `systemConfig()` at the time of use. A hosting adapter overrides any value through
 `Platform.config`, merged over the defaults at startup. `Platform` also has optional ports for
-per-tenant configuration, permission checks and a job queue (`RequestContext`,
-`TenantConfigPort`, `AuthorizationPort`, `JobQueuePort`), with single-tenant stand-ins.
+per-tenant configuration and permission checks (`RequestContext`, `TenantConfigPort`,
+`AuthorizationPort`), with single-tenant stand-ins, and a job store (`JobStorePort`, stand-in
+`memoryJobStore`).
+
+### Background work is jobs (deployment readiness spec, 3)
+
+Every piece of work that outlives a request is a job of `@sprint/jobs`: `labeling.runTask`
+(executor in `@sprint/labeling`), `optimiser.run` (`@sprint/optimiser`), and `report.build`,
+`dataset.sample` and `project.delete` (`@sprint/workflow`). The workflow decides what should run
+and queues it with the caller's context; the job module runs it with a lease per job, heartbeats,
+recovery of a dead runner's jobs, retries and cancel. A job holds ids only; the domain record
+(the labeling task, the Optimiser run) keeps the state, so an executor resumes from it.
+
+- **Commands return once queued.** `scoreVersion` returns the tasks it queued (each labeling job
+  is followed by `report.build`), `startOptimiser` and `retryOptimiser` the run's id,
+  `startSampleDataset` and `appendSample` the sampling as the Dataset page shows it, and
+  `deleteProject` returns once the project is marked `deleting`. Pages read progress back through
+  `loadProjectState`, as they did while work ran.
+- **Keys.** While a job with the same idempotency key is queued or running, queueing it again
+  returns it (`label:<task>`, `report:<version>:<model>`, `optimiser:<project>`,
+  `delete:<project>`), so the page tick, a click and a helper's start tool never start work twice.
+- **Sampling** progress is the job's stored progress (`ProjectState.samplingTask` is projected
+  from it). Loading an uploaded file's features stays inside its request, with its progress and
+  Stop in shared state (`loading:{projectId}`).
+- **Deleting a project** hides it from every read at once (`Project.deleting`); the
+  `project.delete` job cancels the project's other jobs and removes its records in batches
+  (`DocRepo.deleteWhere`), never one awaited request per record.
+- **Who drives.** In the browser the open page's `tick` queues due work (it never runs work in the
+  request). A server sets `tickFromPages: false`, and a cron job calls `workflow.sweep()` (queue
+  due work for every project) and the job module's `sweep()` (recover expired leases).
+- In the browser the job store is this tab's memory (`memoryJobStore`) and the tab runs its own
+  jobs as soon as they are queued, so every flow behaves as before; labeling and the Optimiser keep
+  their browser locks, so two tabs never run the same task or run.
 
 ## The structured prompt (1.0.0)
 
@@ -121,14 +199,22 @@ prompt saved with several fields reads its first field as the label.
   on calls in flight, and a first-in first-out queue. A call waits until it fits; it is never sent
   over the limit. Tokens are estimated before the call (text / 4, 800 per image, plus the output
   cap) and corrected with the real usage after. Reasoning tokens count toward TPM. After a 429 the
-  limiter halves its rate and recovers after a quiet window.
+  limiter halves its rate and recovers after a quiet window. The counts live in a
+  `LimiterStorePort` (spec 5): with a shared store every replica of every caller shares one budget
+  per endpoint. A call's slot is leased and renewed while it runs, so a process that dies frees
+  its slots when the lease ends; a waiter's place in the queue expires when it stops asking.
+- **Models.** Chat models come from the registry the platform supplies (`AgentModel.models()`):
+  opaque ids, capabilities, prices, an active flag. Requests may set a reasoning effort (dropped
+  when the model does not list it), a response format, native tools (refused on a model without
+  them) and a timeout per try (a late try is retried as timed out). Reasoning tokens are counted
+  apart and billed at the output price.
 - **Retries.** Busy (429), server and timeout errors are retried after 2, 4, 8 and 16 s. Rejected
   requests (other 4xx) and stops are not retried.
 
 ## Labeling: tasks
 
 A labeling task runs one prompt version on one model (with fixed settings) over a list of
-examples and stores one prediction per example. The bff creates tasks for four reasons: scoring a
+examples and stores one prediction per example. The workflow creates tasks for four reasons: scoring a
 new version on the eval set (system), the Optimiser's dry runs, eval-set labeling and the second
 labeling that confirms a pass (system). All of
 them start by themselves (below).
@@ -164,15 +250,15 @@ createTask ──► runTask (browser lock "labeling:<task>"; a second tab gets 
 
 - **Predictions are shared.** The prediction id is a hash of version + model + settings + example,
   so a task for the same combination reuses what is saved; only missing examples are labeled.
-- **Resume.** The MVP runner is the open page (datasets are 50 to 100 examples). Closing the page
-  stops the runner; the task stays `running` with no lock held, and the next read reports it as
-  `paused` with reason `closed`. Scoring and optimiser tasks resume by themselves on the next page
-  tick. Retry failed clears the failed list and runs
-  again.
+- **Resume.** A task runs as a `labeling.runTask` job; in the browser the open page is the
+  runner. Closing the page stops the runner; the task stays `running` with no lock held, and the
+  next read reports it as `paused` with reason `closed`. Scoring and optimiser tasks resume by
+  themselves on the next page tick (which queues a new job). Retry failed clears the failed list
+  and runs again.
 - **Other tabs.** Writes are announced to other tabs of the site, and pages re-read every 5 s
   while something runs, so a second tab follows a run and sees it pause.
-- **Later (not in the MVP):** a worker outside the browser, ordered claims with heartbeats so
-  several runners can share a task, and shared quota records across runners.
+- **Later:** several runners sharing one task, and shared quota records across runners. A worker
+  outside the browser is a job runner (`@sprint/jobs` with a shared `JobStorePort`).
 
 ## The Optimiser and the helpers
 
@@ -183,7 +269,30 @@ Both have their own design docs, which hold the design and the as-built detail:
   `apps/optimiser/src/optimiser.ts`.
 - [design/helpers.md](design/helpers.md): the helpers in Ask AI (agent presets, page views, read
   and start tools, what they may never see). Presets and runtime in `apps/agents`, page views and
-  tools in `apps/bff/src/services/page-views.ts`.
+  tools in `apps/workflow/src/services/page-views.ts`.
+
+### Where each agent guard lives (review P4)
+
+The rules that protect data hold in the tool host (`agentToolHost` in
+`apps/workflow/src/services/page-views.ts`), so they hold whatever runtime sends the call; the
+runtime and the golden fixtures hold the rules about what a helper answers. The fixtures
+(`apps/agents/fixtures/*.json`, format in its README) are plain JSON cases: request, model
+replies, tool answers and the expected output. Any agent runtime is accepted against them, and
+`apps/agents/src/fixtures.test.ts` replays them on the reference runtime.
+
+| Guard | Where it is enforced |
+|---|---|
+| A helper calls only the tools its preset lists (`PRESET_TOOLS`, `mayCallTool` in `packages/domain/src/agent-guards.ts`) | Tool host (refuses); the runtime also offers each helper its own tools only |
+| The project exists and is not being deleted | Tool host |
+| A call for a turn runs as that turn's user and only on that turn's project; an ended turn lends no one | Tool host (`turnOf` in `services/turns.ts`) |
+| No helper reads the held-out half (`visibleToAgents`); the first read of examples locks the halves | Tool host |
+| Start tools start work at once and say so in the chat | Tool host (`services/starts.ts`) |
+| A problem report is sent only after the user answered its draft | Tool host (`services/problems.ts`) |
+| Proposals never save themselves: a draft is saved as a version only by the user | Workflow (`sendUserMessage` stores a proposal; no tool saves a version) |
+| Handoffs go only to known specialists with a known intent (`HANDOFF_TARGETS`) | Runtime; fixtures (`apps/agents/fixtures`) |
+| Improve with AI and the Optimiser change wording only (`rewordOnly`) | Runtime and the Optimiser; fixtures |
+| Nothing is carried over silently on prompt import (unmapped parts are listed) | Runtime; fixtures |
+| An answer that is not JSON is retried once, then shown as plain text or a short apology | Runtime; fixtures |
 
 ## Scores, gold labels and what starts by itself
 
@@ -200,8 +309,9 @@ per version for the Mismatches list.
 
 **Auto-start manager** (2026-11-11). `dueStarts(state)` says what should be running; `tick` starts
 it. The project provider (`apps/web/src/components/ProjectContext.tsx`) runs `tick` on every
-change event and on a 60 s sweep, on every project page. Starts are keyed (`once()` plus the
-labeling app's lock per task), so extra runs are safe. Every auto task also has a button that
+change event and on a 60 s sweep, on every project page. `tick` only queues jobs; starts are keyed
+(job idempotency keys, `once()` while a task is created, and the labeling app's lock per task), so
+extra runs are safe. Every auto task also has a button that
 sends the same start (Score/Resume, Optimiser Resume/Retry). In a microservice
 system the same split holds: one workflow service owns `dueStarts`, woken by events and a sweep.
 
@@ -218,15 +328,15 @@ optimiser-half examples to the Optimiser and Improve with AI. Since 1.0.0 the "W
 `LabelComment` (below), and the helpers get every comment on an optimiser-half example as
 `ExampleBrief.comments`. A change saves a new gold label, so the evaluation context changes
 and reports are rebuilt from saved answers: nothing is labeled again
-(`apps/bff/src/services/mismatches.ts`). Prompt Tuning' AI Suggestion points to the tab right
+(`apps/workflow/src/services/mismatches.ts`). Prompt Tuning' AI Suggestion points to the tab right
 after the first score (before any review or Optimiser run) and when Auto Optimise ends without a
 pass; never while the Optimiser runs or after a pass. Helpers give the counts only, never which
 side is right.
 
-**The eval dataset changes (1.0.0, spec 4).** `apps/bff/src/services/governance.ts`:
+**The eval dataset changes (1.0.0, spec 4).** `apps/workflow/src/services/governance.ts`:
 
 - *Halves.* `assignEvalHalves` (`packages/domain/src/dataset.ts`) puts gold-labeled examples in
-  the two halves by their rarest value, so a rare value lands in both. The bff balances the halves
+  the two halves by their rarest value, so a rare value lands in both. The workflow balances the halves
   when Gold Labels is left (`approveNode('gold')`) and once more just before a helper or the
   Optimiser first reads examples (`lockHoldout`: the read tools that return examples, `try_prompt`,
   Improve with AI, Auto Optimise). From then on `Project.holdoutLocked` is set and no example ever
@@ -264,7 +374,7 @@ domain make (action lines, the AI Suggestion card, the Optimiser's now line, gat
 reasons a prompt cannot be saved, a helper's live line) carry a `Msg` with their English text, so
 the page can show them in the user's language while helpers and logs read English. Helpers answer
 in the user's language (`AgentTurnInput.locale` adds one line to their system prompt, with the
-site's own Chinese words). The choice lives in the browser (`tsp-locale`); the static export is
+site's own Chinese words). The choice lives in the browser (`sprint-locale`); the static export is
 built in English and switches after the first paint. A test lists every key the source uses and
 fails on any the Chinese catalog lacks.
 
@@ -300,28 +410,33 @@ application `id` to the store's document id.
 | Versions are major.minor and never overwritten; the catalog assigns the numbers | `packages/domain/src/versions.ts`, `apps/catalog/src/catalog.ts` |
 | Gates between steps; Gold Labels is an ordinary step (R5-8) | `packages/domain/src/gates.ts` |
 | The recommended next step (the best score wins; cost only breaks a tie) | `packages/domain/src/workflow.ts` |
-| Agent prompts, handoffs (to known specialists only), read tools per preset | `apps/agents/src/presets.ts`, `apps/agents/src/runtime.ts` |
-| What an agent sees of each page (page views) and the read tools' implementation | `apps/bff/src/services/page-views.ts` |
+| Agent prompts and handoffs (to known specialists only) | `apps/agents/src/presets.ts`, `apps/agents/src/runtime.ts` |
+| Tools per preset, start tools, handoff targets | `packages/domain/src/agent-guards.ts` |
+| What an agent sees of each page (page views) and the read tools' implementation | `apps/workflow/src/services/page-views.ts` |
 | No helper reads the held-out half (`visibleToAgents`) | `packages/domain/src/gepa.ts`, used in `page-views.ts`, `starts.ts`, `agents.ts` |
-| When labeling starts, reports scored on the held-out half of the eval set | `apps/bff/src/services/evaluation.ts`, `work.ts` |
+| When labeling starts, reports scored on the held-out half of the eval set | `apps/workflow/src/services/evaluation.ts`, `work.ts` |
 | Optimiser: Pareto front, parent, merge pair, dry-run pick and comparison | `packages/domain/src/gepa.ts` |
-| Confirming a pass (second labeling of the held-out half) | `confirmScore` in `apps/bff/src/services/evaluation.ts` |
-| Mismatches between saved answers and gold labels; keep or change | `apps/bff/src/services/mismatches.ts` |
+| Confirming a pass (second labeling of the held-out half) | `confirmScore` in `apps/workflow/src/services/evaluation.ts` |
+| Mismatches between saved answers and gold labels; keep or change | `apps/workflow/src/services/mismatches.ts` |
 | Halves, label balance and which examples a prune removes | `packages/domain/src/dataset.ts` |
-| Adding, removing, restoring and pruning examples; the holdout lock; comments | `apps/bff/src/services/governance.ts` |
+| Adding, removing, restoring and pruning examples; the holdout lock; comments | `apps/workflow/src/services/governance.ts` |
 | Optimiser loop: rounds, retries, Failed and Retry, the end of a run after a confirmed pass | `apps/optimiser/src/optimiser.ts` |
-| Improve with AI (a draft with marked changes, nothing labeled) | `improveWithAi` in `apps/bff/src/services/agents.ts` |
+| Improve with AI (a draft with marked changes, nothing labeled) | `improveWithAi` in `apps/workflow/src/services/agents.ts` |
 | The structured prompt: compiling to text, the label signature, wording-only changes | `packages/domain/src/structured.ts` |
 | The fixed AI Suggestion cards on Prompt Tuning (T1 to T6) | `aiSuggestion` in `packages/domain/src/workflow.ts` |
-| Project Settings (pass rule, labeling model) and their confirmation | `apps/bff/src/services/settings.ts` |
-| What starts without a click | `packages/domain/src/auto-start.ts`, `tick` in `apps/bff/src/services/work.ts` |
-| Agent start tools | `apps/bff/src/services/starts.ts` |
+| Project Settings (pass rule, labeling model) and their confirmation | `apps/workflow/src/services/settings.ts` |
+| What starts without a click | `packages/domain/src/auto-start.ts`, `tick` in `apps/workflow/src/services/work.ts` |
+| Agent start tools | `apps/workflow/src/services/starts.ts` |
 | Metric and event names, labels and props | `packages/contracts/src/telemetry.ts` |
 
 ## Known limits of this version
 
-- Services behind `createBffApi` still pass records to each other (only the contracts are plain
+- Services inside the workflow still pass records to each other (only the contracts are plain
   JSON).
-- Dataset sampling still runs in the page's memory.
-- The Optimiser loop holds a browser lock per project and model, so a second tab cannot run it
-  twice; like labeling, it runs only while its page is open.
+- The progress handlers of running Ask AI turns stay in the memory of the workflow instance that
+  started the turn, until the agent service (spec 6) takes them over.
+- In the browser build, jobs run in the open page and its job store is that tab's memory: closing
+  the page drops what was queued there, and the next page tick queues due work again. The
+  Optimiser loop holds a browser lock per project and model, so a second tab cannot run it twice.
+- A job whose runner lost its lease (several runners only) is not stopped mid-step: labeling's lock
+  per task and the Optimiser's lock keep the runner that took it over off it until it ends.

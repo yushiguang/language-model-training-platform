@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {TelemetryEvent} from '@tsp/contracts';
+import type {TelemetryEvent} from '@sprint/contracts';
 import {createTelemetry} from './telemetry.ts';
 
 const sink = () => {
@@ -12,22 +12,22 @@ test('renders Prometheus text with app and env labels, and cumulative histogram 
   const {sink: k} = sink();
   const t = createTelemetry({sink: k, env: 'test', flushMs: 0});
   t.allowLabelValues('endpoint', ['chat-terra']);
-  t.counter('tsp_llm_calls_total', {endpoint: 'chat-terra', purpose: 'chat', outcome: 'ok'});
-  t.counter('tsp_llm_calls_total', {endpoint: 'chat-terra', purpose: 'chat', outcome: 'ok'}, 2);
-  t.histogram('tsp_llm_call_duration_seconds', 0.7, {endpoint: 'chat-terra', purpose: 'chat'});
-  t.histogram('tsp_llm_call_duration_seconds', 3, {endpoint: 'chat-terra', purpose: 'chat'});
+  t.counter('sprint_llm_calls_total', {endpoint: 'chat-terra', purpose: 'chat', outcome: 'ok'});
+  t.counter('sprint_llm_calls_total', {endpoint: 'chat-terra', purpose: 'chat', outcome: 'ok'}, 2);
+  t.histogram('sprint_llm_call_duration_seconds', 0.7, {endpoint: 'chat-terra', purpose: 'chat'});
+  t.histogram('sprint_llm_call_duration_seconds', 3, {endpoint: 'chat-terra', purpose: 'chat'});
   const text = t.render();
-  assert.match(text, /# TYPE tsp_llm_calls_total counter/);
-  assert.match(text, /tsp_llm_calls_total\{app="llm_gateway",env="test",endpoint="chat-terra",purpose="chat",outcome="ok"\} 3/);
-  assert.match(text, /tsp_llm_call_duration_seconds_bucket\{[^}]*le="1"\} 1/);
-  assert.match(text, /tsp_llm_call_duration_seconds_bucket\{[^}]*le="4"\} 2/);
-  assert.match(text, /tsp_llm_call_duration_seconds_count\{[^}]*\} 2/);
+  assert.match(text, /# TYPE sprint_llm_calls_total counter/);
+  assert.match(text, /sprint_llm_calls_total\{app="llm_gateway",env="test",endpoint="chat-terra",purpose="chat",outcome="ok"\} 3/);
+  assert.match(text, /sprint_llm_call_duration_seconds_bucket\{[^}]*le="1"\} 1/);
+  assert.match(text, /sprint_llm_call_duration_seconds_bucket\{[^}]*le="4"\} 2/);
+  assert.match(text, /sprint_llm_call_duration_seconds_count\{[^}]*\} 2/);
 });
 
 test('labels not declared are dropped and id-like values become "other"', () => {
   const {sink: k} = sink();
   const t = createTelemetry({sink: k, flushMs: 0});
-  t.counter('tsp_web_page_views_total', {page: 'pr_0123456789abcdef', projectId: 'pr_1'} as never);
+  t.counter('sprint_web_page_views_total', {page: 'pr_0123456789abcdef', projectId: 'pr_1'} as never);
   const text = t.render();
   assert.match(text, /page="other"/);
   assert.ok(!text.includes('projectId'));
@@ -58,10 +58,10 @@ test('label values must be declared: an email, an id or an undeclared endpoint b
   const {sink: k} = sink();
   const t = createTelemetry({sink: k, flushMs: 0});
   t.allowLabelValues('endpoint', ['labeling-A', 'pr_1', 'someone@example.com']);
-  t.counter('tsp_llm_calls_total', {endpoint: 'labeling-A', purpose: 'labeling', outcome: 'ok'});
-  t.counter('tsp_llm_calls_total', {endpoint: 'pr_1', purpose: 'labeling', outcome: 'ok'});
-  t.counter('tsp_llm_calls_total', {endpoint: 'someone@example.com', purpose: 'labeling', outcome: 'ok'});
-  t.counter('tsp_llm_calls_total', {endpoint: 'labeling-B', purpose: 'labeling', outcome: 'not a value'});
+  t.counter('sprint_llm_calls_total', {endpoint: 'labeling-A', purpose: 'labeling', outcome: 'ok'});
+  t.counter('sprint_llm_calls_total', {endpoint: 'pr_1', purpose: 'labeling', outcome: 'ok'});
+  t.counter('sprint_llm_calls_total', {endpoint: 'someone@example.com', purpose: 'labeling', outcome: 'ok'});
+  t.counter('sprint_llm_calls_total', {endpoint: 'labeling-B', purpose: 'labeling', outcome: 'not a value'});
   const text = t.render();
   assert.match(text, /endpoint="labeling-A",purpose="labeling",outcome="ok"\} 1/);
   assert.match(text, /endpoint="other",purpose="labeling",outcome="ok"\} 2/, 'ids and emails are never allowed, even when declared');
@@ -85,10 +85,10 @@ test('event props are allowlisted: unknown keys dropped, text replaced, numbers 
 test('a counter ignores Infinity and NaN, so the exposition stays valid', () => {
   const {sink: k} = sink();
   const t = createTelemetry({sink: k, flushMs: 0});
-  t.counter('tsp_labeling_cost_usd_total', {task_purpose: 'eval'}, Infinity);
-  t.counter('tsp_labeling_cost_usd_total', {task_purpose: 'eval'}, NaN);
-  t.counter('tsp_labeling_cost_usd_total', {task_purpose: 'eval'}, 0.5);
-  assert.match(t.render(), /tsp_labeling_cost_usd_total\{[^}]*\} 0.5\n/);
+  t.counter('sprint_labeling_cost_usd_total', {task_purpose: 'eval'}, Infinity);
+  t.counter('sprint_labeling_cost_usd_total', {task_purpose: 'eval'}, NaN);
+  t.counter('sprint_labeling_cost_usd_total', {task_purpose: 'eval'}, 0.5);
+  assert.match(t.render(), /sprint_labeling_cost_usd_total\{[^}]*\} 0.5\n/);
 });
 
 test('a flush asked for during a flush also sends what was buffered meanwhile', async () => {

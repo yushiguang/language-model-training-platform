@@ -1,6 +1,6 @@
-import {NO_TELEMETRY, type CatalogContract, type CatalogKind, type CatalogRecords, type DocRuntime, type NewPromptVersion, type NewSetupVersion, type PromptVersion, type SetupVersion, type TelemetryPort} from '@tsp/contracts';
-import {nextVersion} from '@tsp/domain';
-import {DocRepo, newId} from '@tsp/platform';
+import {NO_TELEMETRY, type CatalogContract, type CatalogKind, type CatalogRecords, type DocRuntime, type NewPromptVersion, type NewSetupVersion, type PromptVersion, type SetupVersion, type TelemetryPort} from '@sprint/contracts';
+import {nextVersion} from '@sprint/domain';
+import {DocRepo, newId} from '@sprint/platform';
 
 const now = () => new Date().toISOString();
 
@@ -95,10 +95,11 @@ export function createCatalog(db: DocRuntime, opts: {telemetry?: TelemetryPort} 
      * first; the project record goes last, so a delete cut short can be run again.
      */
     async deleteProject(projectId) {
+      // In bulk: batch requests, never one awaited request per record (deployment readiness spec, 3).
       const snapshots = await repo.find<{id: string}>('dataset_snapshots', {projectId});
-      for (const snap of snapshots) for (const ex of await repo.find<{id: string}>('examples', {snapshotId: snap.id})) await repo.delete('examples', ex.id);
-      for (const kind of OWNED) for (const rec of await repo.find<{id: string}>(kind, {projectId})) await repo.delete(kind, rec.id);
-      await repo.delete('projects', projectId);
+      for (const snap of snapshots) await repo.deleteWhere('examples', {snapshotId: snap.id});
+      for (const kind of OWNED) await repo.deleteWhere(kind, {projectId});
+      await repo.deleteWhere('projects', {id: projectId});
       await repo.insert('audit_log', {id: catalogId('audit_log'), projectId: null, actor: 'system', action: 'project.delete', data: {projectId}, createdAt: now()});
     },
   };
@@ -107,7 +108,7 @@ export function createCatalog(db: DocRuntime, opts: {telemetry?: TelemetryPort} 
 
 const KIND_OF: Partial<Record<keyof CatalogContract, CatalogKind>> = {createPromptVersion: 'prompt_versions', createSetupVersion: 'setup_versions', audit: 'audit_log', deleteProject: 'projects'};
 
-/** Counts and times every catalog operation (`tsp_catalog_*`), without changing what it does. */
+/** Counts and times every catalog operation (`sprint_catalog_*`), without changing what it does. */
 function instrument(c: CatalogContract, tm: TelemetryPort): CatalogContract {
   if (tm === NO_TELEMETRY) return c;
   tm.allowLabelValues('op', Object.keys(c));
@@ -118,15 +119,15 @@ function instrument(c: CatalogContract, tm: TelemetryPort): CatalogContract {
       const started = Date.now();
       try {
         const r = await fn(...args);
-        tm.counter('tsp_catalog_operations_total', {collection, op, outcome: 'ok'});
-        if (Array.isArray(r) && (op === 'find' || op === 'findByIds')) tm.histogram('tsp_catalog_documents_returned', r.length, {collection});
+        tm.counter('sprint_catalog_operations_total', {collection, op, outcome: 'ok'});
+        if (Array.isArray(r) && (op === 'find' || op === 'findByIds')) tm.histogram('sprint_catalog_documents_returned', r.length, {collection});
         return r;
       } catch (e) {
-        tm.counter('tsp_catalog_operations_total', {collection, op, outcome: 'error'});
-        tm.counter('tsp_storage_errors_total', {kind: 'other'});
+        tm.counter('sprint_catalog_operations_total', {collection, op, outcome: 'error'});
+        tm.counter('sprint_storage_errors_total', {kind: 'other'});
         throw e;
       } finally {
-        tm.histogram('tsp_catalog_operation_duration_seconds', (Date.now() - started) / 1000, {collection, op});
+        tm.histogram('sprint_catalog_operation_duration_seconds', (Date.now() - started) / 1000, {collection, op});
       }
     };
   }

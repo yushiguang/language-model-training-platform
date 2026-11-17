@@ -8,7 +8,11 @@ export type ExampleType = 'video' | 'photo_text';
 export type LabelKind = 'single' | 'multi';
 export type FeatureGroup = ExampleType | 'metadata';
 export type Split = 'eval' | 'test' | 'train';
-export type EndpointId = 'A' | 'B';
+/**
+ * A labeling endpoint's id, as the registry names it (deployment readiness spec, 5). Opaque: the
+ * stand-ins register `A` and `B`; a hosting platform registers its own.
+ */
+export type EndpointId = string;
 export type Actor = 'user' | 'prompt_agent' | 'optimiser' | 'system';
 
 export interface LabelValue {
@@ -71,7 +75,7 @@ export interface RuleGroup {
 }
 
 /**
- * A prompt as the user edits it (1.0.0): parts, not free text. `compilePrompt` in `@tsp/domain`
+ * A prompt as the user edits it (1.0.0): parts, not free text. `compilePrompt` in `@sprint/domain`
  * turns it into the text the model reads, the same way every time. Stored on every version.
  */
 export interface StructuredPrompt {
@@ -170,6 +174,11 @@ export interface Project {
    * example's half ever changes; before it, halves may be balanced again by gold label.
    */
   holdoutLocked?: boolean;
+  /**
+   * Delete project was accepted: no read returns the project any more, and a `project.delete` job
+   * removes its records (deployment readiness spec, 3).
+   */
+  deleting?: boolean;
   setupVersionId: string | null;
   snapshotId: string | null;
   /** Nodes whose Next step was pressed. Code moves the workflow, never the agent. */
@@ -179,7 +188,7 @@ export interface Project {
 /**
  * One feature of an example (spec 1.0.0, 7.1): plain text, or a list (image URLs, hashtags).
  * An explicit struct instead of a `string | string[]` union, so it maps to an IDL. Read it with
- * `featureText` / `featureItems` from `@tsp/domain`.
+ * `featureText` / `featureItems` from `@sprint/domain`.
  */
 export interface FeatureValue {
   text?: string;
@@ -356,7 +365,7 @@ export interface Prediction {
 
 export type JobState = 'running' | 'paused' | 'done' | 'failed' | 'stopped';
 
-/** Page view of one eval or optimiser labeling task (see `@tsp/contracts` labeling-api). */
+/** Page view of one eval or optimiser labeling task (see `@sprint/contracts` labeling-api). */
 export interface LabelingRun {
   id: string;
   projectId: string;
@@ -711,7 +720,7 @@ export interface SamplingTask {
 // ---------------------------------------------------------------------------------------------
 // Views shared by the bff and the web app.
 
-/** The facts the gate checks read (see `@tsp/domain` gates). */
+/** The facts the gate checks read (see `@sprint/domain` gates). */
 export interface WorkflowFacts {
   setup: SetupVersion | null;
   snapshot: DatasetSnapshot | null;
@@ -759,6 +768,31 @@ export interface ProjectState {
    * within the caps (from `auto_spend` audit records).
    */
   otherAutoSpendUsd?: number;
+  /**
+   * The project's revision when this state was read (review G9): read before anything else, so a
+   * write during the read gives a newer one. See `ProjectStatus.revision`.
+   */
+  revision?: string;
+}
+
+/**
+ * The light read of a project (review G9): what changes while work runs, without the dataset,
+ * gold labels, versions or reports. A client on a server polls it and reads the whole
+ * `ProjectState` again only when `revision` is not the one it holds.
+ */
+export interface ProjectStatus {
+  projectId: string;
+  /**
+   * Changes with every saved change to the project (dataset, gold labels, versions, reports, runs,
+   * chat). An opaque value: compare it for equality only.
+   */
+  revision: string;
+  /** Sampling or upload in progress, as on the Dataset page. */
+  samplingTask: SamplingTask | null;
+  /** Eval and optimiser labeling, with their counts. */
+  runs: LabelingRun[];
+  /** Optimiser runs, without their rounds. */
+  optimisation: Omit<OptimisationRun, 'history'>[];
 }
 
 

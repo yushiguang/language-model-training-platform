@@ -1,5 +1,5 @@
 'use client';
-import {systemConfig} from '@tsp/domain';
+import {systemConfig} from '@sprint/domain';
 
 import {useSearchParams} from 'next/navigation';
 import {createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode} from 'react';

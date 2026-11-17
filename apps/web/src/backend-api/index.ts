@@ -25,16 +25,18 @@ import type {
   Schema,
   SetupVersion,
   StructuredPrompt,
-} from '@tsp/contracts';
+} from '@sprint/contracts';
 import type {BffClient} from './client';
-import {inProcessClient} from './in-process';
+import {client as chosen} from '@sprint/client-impl';
 
 /**
- * The backend as the pages see it: one `BffClient`. This file is the only place that picks which
- * client that is. Today it is the in-process one (every service runs in the page); a microservice
- * deployment exports an HTTP client here instead, and no page changes.
+ * The backend as the pages see it: one `BffClient`, from `@sprint/client-impl` (deployment readiness
+ * spec, 4.4). The build picks the module: the in-process client by default (every service runs in
+ * the page, `in-process.ts`), or the module SPRINT_CLIENT_IMPL names, such as an HTTP client for a
+ * server deployment. Nothing here imports the in-process module itself, so a server build does not
+ * bundle any backend app into the static site. No page changes either way.
  */
-export const client: BffClient = inProcessClient;
+export const client: BffClient = chosen;
 
 export const {
   getRuntimeInfo,
@@ -43,6 +45,7 @@ export const {
   createProject,
   getProject,
   loadProjectState,
+  projectStatus,
   approveNode,
   tick,
   deleteProject,
@@ -85,7 +88,6 @@ export const {
   subscribeAgentLive,
   agentLive,
   isAgentBusy,
-  answeringAgent,
   uploadAsset,
   prepareChatAttachment,
   uploadDatasetFile,

@@ -1,4 +1,4 @@
-import type {ChatRequest, ChatResult, EndpointInfo, LabelingModels, LlmStreamChunk, ModelMessage} from '@tsp/contracts';
+import type {ChatRequest, ChatResult, EndpointInfo, LabelingModels, LlmStreamChunk, ModelMessage} from '@sprint/contracts';
 import {loadSampleFile} from './sample-examples.ts';
 
 /**
@@ -50,7 +50,10 @@ async function answer(req: ChatRequest): Promise<ChatResult> {
   const truth0 = (await loadSampleFile('')).labels.find(l => l.externalId === req.traceId)?.answer;
   const rules = text.split('\n').filter(l => /\b(before|unless|never|only|check|if|always|prefer|when|not)\b/i.test(l)).length;
   const base = req.endpoint === 'A' ? 0.72 : 0.66;
-  const q = Math.min(0.985, base + 0.035 * Math.max(0, rules - 2) + (text.includes('Return one JSON object only') ? 0.02 : 0));
+  // The first few added rules help a little (a draft, Improve with AI); later ones (Optimiser rounds)
+  // help more, so a run that keeps changes can reach the pass rule instead of tying round after round.
+  const added = Math.max(0, rules - 2);
+  const q = Math.min(0.985, base + 0.035 * Math.min(added, 3) + 0.07 * Math.max(0, added - 3) + (text.includes('Return one JSON object only') ? 0.02 : 0));
   // The draws depend on the example, not on the prompt's text: a prompt with more rules only turns
   // wrong answers right, so the stand-in Optimiser's progress is not lost to a reshuffle.
   const r = rng(`${req.endpoint}|${req.traceId}|${req.temperature ?? 0}`);

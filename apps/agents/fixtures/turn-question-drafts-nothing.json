@@ -1,0 +1,89 @@
+{
+  "name": "A question about the prompt gets an answer and no draft",
+  "guards": [
+    "a question, or an answer that leaves the prompt as it is, proposes nothing"
+  ],
+  "kind": "turn",
+  "request": {
+    "userText": "What does this prompt do with Clips?",
+    "page": {
+      "label": "Edit prompt",
+      "agent": "prompt_agent",
+      "intent": "revise_prompt",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_fixture",
+      "task": "Tag short videos",
+      "prompt": {
+        "taskSummary": "Label the post.",
+        "features": {
+          "video": [
+            "Description"
+          ],
+          "photo_text": [],
+          "metadata": []
+        },
+        "label": {
+          "name": "format",
+          "kind": "single",
+          "values": [
+            {
+              "name": "Vlog",
+              "definition": "a day in a life"
+            },
+            {
+              "name": "Clip",
+              "definition": "a cut from a longer video"
+            }
+          ]
+        },
+        "ruleGroups": [],
+        "images": []
+      },
+      "history": [],
+      "pageView": null
+    },
+    "turnId": "turn_fixture",
+    "ctx": {
+      "requestId": "rq_fixture",
+      "user": {
+        "id": "u_fixture",
+        "name": "Fixture user"
+      },
+      "caller": "workflow",
+      "locale": "en"
+    },
+    "locale": "en"
+  },
+  "model": [
+    "{\"reply\":\"The prompt's label is format, with 2 values: Vlog, Clip. I changed nothing; tell me what to change and I'll draft it.\"}"
+  ],
+  "tools": [],
+  "expected": {
+    "invocations": [
+      {
+        "from": "user",
+        "to": "prompt_agent",
+        "intent": "revise_prompt",
+        "note": ""
+      }
+    ],
+    "messages": [
+      {
+        "role": "agent",
+        "agent": "prompt_agent",
+        "text": "The prompt's label is format, with 2 values: Vlog, Clip. I changed nothing; tell me what to change and I'll draft it."
+      }
+    ],
+    "proposal": null,
+    "toolCalls": [],
+    "modelCalls": [
+      {
+        "agent": "prompt_agent",
+        "model": "gpt-5.6-terra"
+      }
+    ],
+    "parseFailures": []
+  }
+}

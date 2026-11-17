@@ -1,4 +1,4 @@
-import type {Locale, Msg} from '@tsp/contracts';
+import type {Locale, Msg} from '@sprint/contracts';
 import {ZH, ZH_NAME} from './locales/zh.ts';
 
 /**

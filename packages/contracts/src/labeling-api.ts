@@ -116,6 +116,8 @@ export interface LabelingContract {
    * saved: no task, no predictions. Each example is one call through the gateway.
    */
   tryTemplate(input: TryTemplateInput): Promise<TryTemplateRow[]>;
+  /** Stops a try started with this `requestId`. */
+  cancel(requestId: string): Promise<void>;
   /** Stops the project's running tasks, then removes its tasks and their saved answers. */
   deleteProject(projectId: string): Promise<void>;
 }
@@ -127,7 +129,8 @@ export interface TryTemplateInput {
   schema: Schema;
   settings: ModelSettings;
   examples: Example[];
-  signal?: AbortSignal;
+  /** Lets the caller stop the try with `cancel(requestId)`. */
+  requestId?: string;
 }
 
 export interface TryTemplateRow {

@@ -1,4 +1,4 @@
-import type {Msg, NodeId, WorkflowFacts} from '@tsp/contracts';
+import type {Msg, NodeId, WorkflowFacts} from '@sprint/contracts';
 import {systemConfig} from './config.ts';
 import {msg, msgText} from './i18n.ts';
 

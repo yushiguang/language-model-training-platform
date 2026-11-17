@@ -1,5 +1,5 @@
-import type {EventName, EventProps, TelemetryPort} from '@tsp/contracts';
-import {pageFromPath} from '@tsp/domain';
+import type {EventName, EventProps, TelemetryPort} from '@sprint/contracts';
+import {pageFromPath} from '@sprint/domain';
 
 /**
  * Browser-side telemetry: page views, page load and interaction times, script errors and failed
@@ -26,9 +26,9 @@ export function webTelemetry(tm: TelemetryPort) {
     window.addEventListener('error', e => {
       // A missing image or script reports on its element, not as a script error.
       const kind = e.target && e.target !== window ? 'asset' : 'script';
-      tm.counter('tsp_web_errors_total', {page: page ?? 'other', kind});
+      tm.counter('sprint_web_errors_total', {page: page ?? 'other', kind});
     }, true);
-    window.addEventListener('unhandledrejection', () => tm.counter('tsp_web_errors_total', {page: page ?? 'other', kind: 'script'}));
+    window.addEventListener('unhandledrejection', () => tm.counter('sprint_web_errors_total', {page: page ?? 'other', kind: 'script'}));
     const markInput = () => {
       const t = Date.now();
       if (lastInput && t - lastInput > 60_000) idleMs += t - lastInput - 60_000;
@@ -41,10 +41,10 @@ export function webTelemetry(tm: TelemetryPort) {
     });
     observe('largest-contentful-paint', entries => {
       const last = entries[entries.length - 1];
-      if (last) tm.histogram('tsp_web_page_load_seconds', last.startTime / 1000, {page: page ?? 'other'});
+      if (last) tm.histogram('sprint_web_page_load_seconds', last.startTime / 1000, {page: page ?? 'other'});
     });
     observe('event', entries => {
-      for (const e of entries) if (e.duration >= 40) tm.histogram('tsp_web_interaction_seconds', e.duration / 1000, {page: page ?? 'other'});
+      for (const e of entries) if (e.duration >= 40) tm.histogram('sprint_web_interaction_seconds', e.duration / 1000, {page: page ?? 'other'});
     });
   }
 
@@ -57,7 +57,7 @@ export function webTelemetry(tm: TelemetryPort) {
       leave();
       const params = new URLSearchParams(search);
       tm.setContext({projectId: params.get('p'), page: next});
-      tm.counter('tsp_web_page_views_total', {page: next});
+      tm.counter('sprint_web_page_views_total', {page: next});
       const slot = params.get('slot');
       tm.event('page_viewed', {
         from_page: page,
@@ -72,10 +72,10 @@ export function webTelemetry(tm: TelemetryPort) {
       tm.event(event, props);
     },
     backendError() {
-      tm.counter('tsp_web_errors_total', {page: page ?? 'other', kind: 'backend'});
+      tm.counter('sprint_web_errors_total', {page: page ?? 'other', kind: 'backend'});
     },
     crossTab() {
-      tm.counter('tsp_web_cross_tab_updates_total', {});
+      tm.counter('sprint_web_cross_tab_updates_total', {});
     },
   };
 }

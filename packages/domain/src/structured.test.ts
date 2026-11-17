@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {StructuredPrompt} from '@tsp/contracts';
+import type {StructuredPrompt} from '@sprint/contracts';
 import {addRule, addToDefinition, checkStructured, checkTemplate, compilePrompt, emptyStructuredPrompt, normalizeStructured, partsToText, readStructured, renderPrompt, rewordOnly, SAMPLE_SCHEMA, sameSignature, signatureOf, structuredChangeSummary, structuredFromSchema, tidyStructured, parseOutput, schemaOf, toFeatures} from './index.ts';
 
 const TICKED = {video: ['Description', 'OCR_Text', 'ASR'], photo_text: ['Title', 'Description', 'OCR_Text'], metadata: []};

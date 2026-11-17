@@ -1,0 +1,78 @@
+{
+  "name": "Two broken answers end in a short apology, never broken output",
+  "guards": [
+    "broken output is never shown"
+  ],
+  "kind": "turn",
+  "request": {
+    "userText": "hello",
+    "page": {
+      "label": "Projects",
+      "agent": "front_desk",
+      "intent": "answer",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_fixture",
+      "task": "Tag short videos",
+      "prompt": null,
+      "history": [],
+      "pageView": null
+    },
+    "turnId": "turn_fixture",
+    "ctx": {
+      "requestId": "rq_fixture",
+      "user": {
+        "id": "u_fixture",
+        "name": "Fixture user"
+      },
+      "caller": "workflow",
+      "locale": "en"
+    },
+    "locale": "en"
+  },
+  "model": [
+    "{\"reply\": \"Hel",
+    "{\"reply\": \"Hel"
+  ],
+  "tools": [],
+  "expected": {
+    "invocations": [
+      {
+        "from": "user",
+        "to": "front_desk",
+        "intent": "answer",
+        "note": ""
+      }
+    ],
+    "messages": [
+      {
+        "role": "agent",
+        "agent": "front_desk",
+        "text": "Sorry, my answer came out garbled. Please ask again."
+      }
+    ],
+    "proposal": null,
+    "toolCalls": [],
+    "modelCalls": [
+      {
+        "agent": "front_desk",
+        "model": "gpt-5.6-terra"
+      },
+      {
+        "agent": "front_desk",
+        "model": "gpt-5.6-terra"
+      }
+    ],
+    "parseFailures": [
+      {
+        "agent": "front_desk",
+        "intent": "answer"
+      },
+      {
+        "agent": "front_desk",
+        "intent": "answer"
+      }
+    ]
+  }
+}

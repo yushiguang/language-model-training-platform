@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {StructuredPrompt} from '@tsp/contracts';
-import {scriptedAgent} from '@tsp/platform';
-import {translate} from '@tsp/domain';
+import type {AgentToolCall, StructuredPrompt} from '@sprint/contracts';
+import {scriptedAgent} from '@sprint/platform';
+import {translate} from '@sprint/domain';
 import {draftImprovement, importIntent, partialReply, reflectPrompt, runAgentTurn} from './runtime.ts';
 import {languageLine, PRESETS, systemPrompt} from './presets.ts';
 import {createAgentRuntime} from './index.ts';
@@ -292,26 +292,40 @@ test('a reply that is not JSON is asked again once, then never shown as broken o
   assert.deepEqual((await turn(replies(['Hello there.']))).messages.map(m => m.text), ['Hello there.']);
 });
 
-test('createAgentRuntime: calls are plain data; progress goes to the injected port under the turn id, tools by project, and cancel stops a request', async () => {
+test('createAgentRuntime: calls are plain data; progress goes to the injected port in order under the turn id, every tool call carries its project, turn and context, and cancel stops a request', async () => {
   const published: string[] = [];
-  const toolsFor: string[] = [];
+  const toolCalls: AgentToolCall[] = [];
+  const ctx = {requestId: 'rq_9', user: {id: 'u_1', name: 'Ann'}, caller: 'bff'};
   const rt = createAgentRuntime({
     llm: scriptedAgent(),
-    tools: projectId => (toolsFor.push(projectId), {call: async () => ({})}),
-    progress: {publish: (projectId, turnId, e) => published.push(`${projectId}/${turnId}/${'message' in e ? 'message' : 'working' in e ? 'working' : 'reply'}`)},
+    tools: {call: async c => (toolCalls.push(c), c.name === 'report_problem' ? {draft: {summary: 'Saving does nothing'}, attached: ['the page'], notAttached: ['examples']} : {})},
+    // A slow receiver: the runtime still sends one event at a time and answers after the last.
+    progress: {publish: async (projectId, turnId, e) => {
+      await new Promise(r => setTimeout(r, 1));
+      published.push(`${projectId}/${turnId}/${'message' in e ? 'message' : 'working' in e ? 'working' : 'reply'}`);
+    }},
   });
-  const req = {userText: 'Please add value "News" to primary_value', page: {label: 'Prompt Design', agent: 'front_desk' as const, intent: 'answer', context: {}}, workspace: {projectId: 'pr_9', task: '', prompt: null, history: [], pageView: null}, turnId: 't_1'};
+  const req = {userText: 'Please add value "News" to primary_value', page: {label: 'Prompt Design', agent: 'front_desk' as const, intent: 'answer', context: {}}, workspace: {projectId: 'pr_9', task: '', prompt: null, history: [], pageView: null}, turnId: 't_1', ctx};
   assert.doesNotThrow(() => JSON.parse(JSON.stringify(req)), 'the request is plain JSON');
   const out = await rt.runTurn(req);
   assert.ok(out.invocations.length >= 1);
-  assert.ok(published.length > 0 && published.every(p => p.startsWith('pr_9/t_1/')));
-  assert.deepEqual([...new Set(toolsFor)], ['pr_9']);
+  const count = published.length;
+  assert.ok(count > 0 && published.every(p => p.startsWith('pr_9/t_1/')));
+  await new Promise(r => setTimeout(r, 10));
+  assert.equal(published.length, count, 'every event landed before the turn answered');
+  // A turn that calls a tool (a problem report is drafted with report_problem).
+  await rt.runTurn({...req, userText: 'Saving does nothing', turnId: 't_2'});
+  assert.ok(toolCalls.length > 0);
+  for (const c of toolCalls) {
+    assert.deepEqual([c.projectId, c.turnId, c.ctx], ['pr_9', 't_2', ctx]);
+    assert.doesNotThrow(() => JSON.parse(JSON.stringify(c)), 'a tool call is plain JSON');
+  }
   // A slow reflect that the caller cancels by id.
   const slow = createAgentRuntime({
     llm: {chat: (_m: unknown, o: {signal?: AbortSignal}) => new Promise((_, rej) => o.signal?.addEventListener('abort', () => rej(new DOMException('Stopped', 'AbortError'))))} as unknown as Parameters<typeof createAgentRuntime>[0]['llm'],
-    tools: () => ({call: async () => ({})}),
+    tools: {call: async () => ({})},
   });
-  const p = slow.reflectPrompt({projectId: 'pr_9', requestId: 'rq_1', prompt: optPrompt, triedChanges: [], mixUps: [], macroF1: 0.5, lowestValue: null});
+  const p = slow.reflectPrompt({projectId: 'pr_9', requestId: 'rq_1', ctx, prompt: optPrompt, triedChanges: [], mixUps: [], macroF1: 0.5, lowestValue: null});
   await slow.cancel('rq_1');
   await assert.rejects(p);
 });

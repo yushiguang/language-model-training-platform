@@ -2,8 +2,8 @@
 
 import {useGo} from '@/components/nav';
 import {useEffect, useRef, useState} from 'react';
-import type {PageContext, Schema} from '@tsp/contracts';
-import {gate, labelBalance, systemConfig} from '@tsp/domain';
+import type {PageContext, Schema} from '@sprint/contracts';
+import {gate, labelBalance, systemConfig} from '@sprint/domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {appendDatasetFile, appendSample, approveNode, getSamplePoolSize, pruneDataset, restoreExamples, startSampleDataset, stopSampleDataset, uploadDatasetFile, type ProjectState, type RemovalReason} from '@/backend-api';

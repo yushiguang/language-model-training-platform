@@ -1,0 +1,113 @@
+{
+  "name": "Off the report page, the Scores helper reads the report with a tool and explains it",
+  "guards": [
+    "tool calls carry the turn's project, turn id and caller"
+  ],
+  "kind": "turn",
+  "request": {
+    "userText": "Is v1.2 good enough?",
+    "page": {
+      "label": "Prompt versions",
+      "agent": "evaluation_agent",
+      "intent": "explain_report",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_fixture",
+      "task": "Tag short videos",
+      "prompt": null,
+      "history": [],
+      "pageView": {
+        "page": "prompt",
+        "title": "Prompt versions",
+        "summary": "",
+        "data": {}
+      }
+    },
+    "turnId": "turn_fixture",
+    "ctx": {
+      "requestId": "rq_fixture",
+      "user": {
+        "id": "u_fixture",
+        "name": "Fixture user"
+      },
+      "caller": "workflow",
+      "locale": "en"
+    },
+    "locale": "en"
+  },
+  "model": [
+    "{\"tool\":{\"name\":\"get_report\",\"args\":{\"version\":\"v1.2\"}}}",
+    "{\"reply\":\"v1.2 on A has a Macro-F1 of 0.74. It is below the bar on Lowest field macro-F1 (0.71, needs at least 0.80).\"}"
+  ],
+  "tools": [
+    {
+      "agent": "evaluation_agent",
+      "name": "get_report",
+      "args": {
+        "version": "v1.2"
+      },
+      "result": {
+        "report": {
+          "version": "v1.2",
+          "model": "A",
+          "macroF1": 0.74,
+          "passed": false,
+          "lowestField": {
+            "field": "format",
+            "macroF1": 0.71
+          },
+          "lowestValue": null,
+          "checks": [
+            {
+              "label": "Lowest field macro-F1",
+              "actual": "0.71",
+              "need": "≥ 0.80",
+              "met": false
+            }
+          ],
+          "topMixUps": []
+        }
+      }
+    }
+  ],
+  "expected": {
+    "invocations": [
+      {
+        "from": "user",
+        "to": "evaluation_agent",
+        "intent": "explain_report",
+        "note": ""
+      }
+    ],
+    "messages": [
+      {
+        "role": "agent",
+        "agent": "evaluation_agent",
+        "text": "v1.2 on A has a Macro-F1 of 0.74. It is below the bar on Lowest field macro-F1 (0.71, needs at least 0.80)."
+      }
+    ],
+    "proposal": null,
+    "toolCalls": [
+      {
+        "agent": "evaluation_agent",
+        "name": "get_report",
+        "args": {
+          "version": "v1.2"
+        },
+        "ok": true
+      }
+    ],
+    "modelCalls": [
+      {
+        "agent": "evaluation_agent",
+        "model": "gpt-5.6-terra"
+      },
+      {
+        "agent": "evaluation_agent",
+        "model": "gpt-5.6-terra"
+      }
+    ],
+    "parseFailures": []
+  }
+}

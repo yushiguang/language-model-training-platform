@@ -1,0 +1,74 @@
+{
+  "name": "An answer that is not JSON is asked for once more",
+  "guards": [
+    "an answer that is not one JSON object is retried once"
+  ],
+  "kind": "turn",
+  "request": {
+    "userText": "hello",
+    "page": {
+      "label": "Projects",
+      "agent": "front_desk",
+      "intent": "answer",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_fixture",
+      "task": "Tag short videos",
+      "prompt": null,
+      "history": [],
+      "pageView": null
+    },
+    "turnId": "turn_fixture",
+    "ctx": {
+      "requestId": "rq_fixture",
+      "user": {
+        "id": "u_fixture",
+        "name": "Fixture user"
+      },
+      "caller": "workflow",
+      "locale": "en"
+    },
+    "locale": "en"
+  },
+  "model": [
+    "{\"reply\": \"Hel",
+    "{\"reply\":\"Hello.\"}"
+  ],
+  "tools": [],
+  "expected": {
+    "invocations": [
+      {
+        "from": "user",
+        "to": "front_desk",
+        "intent": "answer",
+        "note": ""
+      }
+    ],
+    "messages": [
+      {
+        "role": "agent",
+        "agent": "front_desk",
+        "text": "Hello."
+      }
+    ],
+    "proposal": null,
+    "toolCalls": [],
+    "modelCalls": [
+      {
+        "agent": "front_desk",
+        "model": "gpt-5.6-terra"
+      },
+      {
+        "agent": "front_desk",
+        "model": "gpt-5.6-terra"
+      }
+    ],
+    "parseFailures": [
+      {
+        "agent": "front_desk",
+        "intent": "answer"
+      }
+    ]
+  }
+}

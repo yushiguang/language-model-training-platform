@@ -1,7 +1,7 @@
 # Specification: Single-Label Project Scope, Stacked Label Cards, Agent System Alignment, and Chat/UI Refinements
 
 **Date:** 2026-11-16  
-**Target:** External Agent (architectural review + implementation across `@tsp/contracts`, `@tsp/domain`, `@tsp/agents`, `@tsp/optimiser`, `@tsp/bff`, `@tsp/platform`, and `@tsp/web`)  
+**Target:** External Agent (architectural review + implementation across `@sprint/contracts`, `@sprint/domain`, `@sprint/agents`, `@sprint/optimiser`, `@sprint/bff`, `@sprint/platform`, and `@sprint/web`)  
 **Contract Impact:** Breaking `StructuredPrompt`, `Schema`, `Answer`, `Metrics`, `AgentRuntimeContract`, and `BffContract` simplification (`Contract change: single mutually-exclusive label per project, plain string answers, and locale on DraftImprovementInput`)
 
 ---
@@ -12,7 +12,7 @@ Section 1 of this specification introduces a deliberate product and domain-model
 
 Before or as you execute this change, **please conduct a second architectural review** of Section 1 against the whole codebase:
 - If you agree with the design and find no hidden edge cases, proceed directly to full implementation and record the key architectural reasoning in `docs/decisions.md` and `docs/architecture.md`.
-- If you identify any structural flaw, subtle invariant issue, or strictly cleaner representation in `@tsp/contracts` / `@tsp/domain`, document your counter-proposal or adjustment clearly in `docs/tmp/2026-11-16-single-label-review.md` (or apply the cleaner refinement if backwards-compatible with the product rules below and note it in the commit message).
+- If you identify any structural flaw, subtle invariant issue, or strictly cleaner representation in `@sprint/contracts` / `@sprint/domain`, document your counter-proposal or adjustment clearly in `docs/tmp/2026-11-16-single-label-review.md` (or apply the cleaner refinement if backwards-compatible with the product rules below and note it in the commit message).
 
 ---
 
@@ -32,7 +32,7 @@ Hands-on optimization runs and beta testing established that **the quality and c
 
 ### 1.2 Contract Simplification (`packages/contracts`)
 
-Flatten the multi-field and multi-select structures across `@tsp/contracts`:
+Flatten the multi-field and multi-select structures across `@sprint/contracts`:
 
 1. **`Schema`, `LabelSignature`, and `StructuredPrompt` (`types.ts`)**:
    - Remove `FieldKind` (`'single' | 'multi'`), `min`, `max`, `LabelField`, `LabelSignatureField`, and `StructuredFieldPrompt`.
@@ -111,7 +111,7 @@ Return one JSON object only, with the exact key "{label.name}" and exactly one a
 ```
 *(When `v.definition` is empty, emit `<label value="..."/>`; when non-empty—whether one line or multi-line bullets—indent or wrap cleanly inside `<label value="...">\n...\n  </label>` so multi-paragraph definitions read clearly in `View full prompt`.)*
 
-### 1.4 Page & Workflow Simplifications Across `@tsp/web`
+### 1.4 Page & Workflow Simplifications Across `@sprint/web`
 
 1. **`Prompt Design` & `Edit prompt` (`StructuredEditor.tsx`)**:
    - Remove the two-column `Fields` sidebar (`grid-split sp-fields`), `Add field` / `Remove field`, `Single-select / Multi-select` segmented toggle, and `Choose min to max` inputs.
@@ -151,7 +151,7 @@ Return one JSON object only, with the exact key "{label.name}" and exactly one a
 
 ---
 
-## 3. Agent System & Working Prompt Alignment (`@tsp/agents`, `@tsp/bff`)
+## 3. Agent System & Working Prompt Alignment (`@sprint/agents`, `@sprint/bff`)
 
 Testing `Prompt helper` on real multimodal moderation prompts exposed three mismatches between our new structured prompt model and the existing agent routing / system prompts:
 

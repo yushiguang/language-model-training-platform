@@ -1,21 +1,24 @@
-import type {BffContract, ChatAttachment, GoldLine} from '@tsp/contracts';
-import {configureSystem, systemConfig} from '@tsp/domain';
-import {createCatalog} from '@tsp/catalog';
-import {createTelemetry} from '@tsp/telemetry';
-import {createGateway} from '@tsp/llm-gateway';
-import {browserLocks, createLabeling} from '@tsp/labeling';
-import {createAgentRuntime} from '@tsp/agents';
-import {createPlatform} from '@tsp/platform-impl';
-import {createOptimiser} from '@tsp/optimiser';
-import {agentLive, agentProgress, agentTools, answeringAgent, bffEvents, configureBff, createBffApi, emitChange, isAgentBusy, onChange, optimiserHost} from '@tsp/bff';
+import type {AgentLive, BffContract, ChatAttachment, GoldLine} from '@sprint/contracts';
+import {configureSystem, systemConfig} from '@sprint/domain';
+import {createCatalog} from '@sprint/catalog';
+import {createTelemetry} from '@sprint/telemetry';
+import {createGateway} from '@sprint/llm-gateway';
+import {browserLocks, createLabeling, labelingExecutor} from '@sprint/labeling';
+import {createAgentRuntime} from '@sprint/agents';
+import {createPlatform} from '@sprint/platform-impl';
+import {loopback, memoryJobStore, memoryLimiterStore, memorySharedState} from '@sprint/platform';
+import {createJobs} from '@sprint/jobs';
+import {createOptimiser, optimiserExecutor} from '@sprint/optimiser';
+import {createWorkflow} from '@sprint/workflow';
+import {createBffApi} from '@sprint/bff';
 import type {BffClient} from './client';
 import {webTelemetry} from './web-telemetry';
 import {callFailed, callId, pageOpened, snapshot} from './diagnostics';
 
 /**
  * Composition root. The only place that knows which implementation sits behind each contract:
- * `@tsp/platform-impl` is the stand-ins by default and the internal adapters when the build sets
- * TSP_PLATFORM_IMPL (see docs/handover/integration.md).
+ * `@sprint/platform-impl` is the stand-ins by default and the internal adapters when the build sets
+ * SPRINT_PLATFORM_IMPL (see docs/handover/integration.md).
  */
 const platform = createPlatform();
 const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? '0.1.0';
@@ -25,20 +28,40 @@ configureSystem(platform.config);
 const telemetry = createTelemetry({
   sink: platform.telemetry ?? {pushMetrics: async () => {}, pushEvents: async () => {}},
   appVersion: APP_VERSION,
-  env: process.env.NEXT_PUBLIC_TSP_ENV ?? 'dev',
+  env: process.env.NEXT_PUBLIC_SPRINT_ENV ?? 'dev',
 });
-const gateway = createGateway(platform, {telemetry});
+// One process: the limits are counted here unless the platform shares a store (spec 5).
+const gateway = createGateway(platform, {telemetry, limiterStore: platform.limiterStore ?? memoryLimiterStore()});
 const catalog = createCatalog(platform.db, {telemetry});
-const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: emitChange, telemetry});
+const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: projectId => workflow.changed(projectId), telemetry});
+/**
+ * Background work (scoring, reports, sampling, Optimiser runs, deleting a project) runs as jobs.
+ * In the browser this page is the runner: jobs start as soon as they are queued, kept in the
+ * platform's job store (by default this tab's memory, so a closed page drops its queue and the
+ * pages' tick picks the work up again, as before).
+ */
+const jobs = createJobs({store: platform.jobStore ?? memoryJobStore(), telemetry});
+/** The application module, with no state of its own; short-lived shared state goes to the platform's store. */
+const workflow = createWorkflow({jobs: jobs.api, catalog, labeling, gateway, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, tickets: platform.tickets, appVersion: APP_VERSION, standIns: platform.standIns, telemetry, locks: browserLocks(), sharedState: platform.sharedState ?? memorySharedState()});
 /** The helpers, built once with their model, the project tools and where live progress goes. */
-const agentRuntime = createAgentRuntime({llm: gateway.agentModel(), tools: agentTools, progress: agentProgress});
-const optimiser = createOptimiser({catalog, labeling, agents: agentRuntime, host: optimiserHost(), locks: browserLocks(), telemetry, onChange: emitChange});
-configureBff({catalog, labeling, gateway, agents: agentRuntime, optimiser, identity: platform.identity, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, tickets: platform.tickets, appVersion: APP_VERSION, standIns: platform.standIns, telemetry, locks: browserLocks()});
+const agentRuntime = createAgentRuntime({llm: gateway.agentModel(), tools: workflow.toolHost, progress: workflow.agentProgress});
+const optimiser = createOptimiser({catalog, labeling, agents: agentRuntime, host: workflow.optimiserHost, locks: browserLocks(), telemetry, onChange: projectId => workflow.changed(projectId)});
+workflow.connect({agents: agentRuntime, optimiser});
+// Executors tell open pages when their records change, as before; a job's own life does not, so a
+// job that changes nothing never makes the pages read again (and tick again).
+for (const e of [labelingExecutor(labeling), optimiserExecutor(optimiser), ...workflow.executors]) jobs.register(e);
+/**
+ * The bff calls the workflow through a loopback: every call's context, arguments, result and
+ * error go through JSON as they would over RPC, so the browser check proves the workflow can be
+ * moved behind RPC without the bff or the pages changing.
+ */
+const api = createBffApi({workflow: loopback(workflow.api), identity: platform.identity, appVersion: APP_VERSION, timeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone});
+const events = workflow.events;
 const web = webTelemetry(telemetry);
 void platform.identity.currentUser().then(u => telemetry.setContext({userId: u.id}));
 
 /**
- * Every bff call is counted and timed (`tsp_bff_calls_total`, `tsp_bff_call_duration_seconds`);
+ * Every bff call is counted and timed (`sprint_bff_calls_total`, `sprint_bff_call_duration_seconds`);
  * a failed call also counts as a backend error on the page, and goes into the browser's record
  * for problem reports with its call id (an HTTP client sends that id as `X-Request-Id`).
  */
@@ -50,9 +73,9 @@ function timed<A extends unknown[], R>(method: string, fn: (...a: A) => R): (...
     const end = (outcome: 'ok' | 'error', error?: unknown) => {
       if (outcome === 'error') callFailed(method, id, error);
       const seconds = (Date.now() - started) / 1000;
-      telemetry.counter('tsp_bff_calls_total', {method, outcome});
-      telemetry.histogram('tsp_bff_call_duration_seconds', seconds, {method});
-      if (method === 'loadProjectState') telemetry.histogram('tsp_bff_project_state_load_seconds', seconds);
+      telemetry.counter('sprint_bff_calls_total', {method, outcome});
+      telemetry.histogram('sprint_bff_call_duration_seconds', seconds, {method});
+      if (method === 'loadProjectState') telemetry.histogram('sprint_bff_project_state_load_seconds', seconds);
       if (outcome === 'error') web.backendError();
     };
     try {
@@ -74,9 +97,6 @@ function absoluteUrl(url: string): string {
   return new URL(url, location.origin + (process.env.NEXT_PUBLIC_BASE_PATH ?? '') + '/').toString();
 }
 
-const api = createBffApi();
-const events = bffEvents();
-
 /** Every contract method, counted and timed. */
 const timedApi = Object.fromEntries(Object.entries(api).map(([name, fn]) => [name, timed(name, fn as (...a: unknown[]) => unknown)])) as unknown as BffContract;
 
@@ -86,7 +106,8 @@ const timedApi = Object.fromEntries(Object.entries(api).map(([name, fn]) => [nam
  * with polling or Server-Sent Events.
  */
 function subscribeChanges(listener: () => void): () => void {
-  const off = onChange(listener);
+  const off = events.subscribe('changes', listener);
+  localChanges.add(listener);
   const fromOtherTab = () => {
     web.crossTab();
     listener();
@@ -94,6 +115,7 @@ function subscribeChanges(listener: () => void): () => void {
   tabs?.addEventListener('message', fromOtherTab);
   return () => {
     off();
+    localChanges.delete(listener);
     tabs?.removeEventListener('message', fromOtherTab);
   };
 }
@@ -102,9 +124,9 @@ function subscribeChanges(listener: () => void): () => void {
  * Other tabs of the same site hear about writes too, so a second tab shows a run's progress.
  * (Stand-in for the store's own change feed; the real storage runtime can use `subscribe`.)
  */
-const tabs = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('tsp-changes') : null;
+const tabs = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('sprint-changes') : null;
 let tabNotice: ReturnType<typeof setTimeout> | null = null;
-onChange(() => {
+events.subscribe('changes', () => {
   if (!tabs || tabNotice) return;
   tabNotice = setTimeout(() => {
     tabNotice = null;
@@ -112,24 +134,95 @@ onChange(() => {
   }, 200);
 });
 
+/** Pages that listen for changes this client makes itself (a turn it sent ended). */
+const localChanges = new Set<() => void>();
+
+/**
+ * Ask AI's live line, read synchronously by the page: the turn running now, per project, as last
+ * read through the contract. `agent_live` carries no data, so on each one the projects a page
+ * looks at are read again (`getAgentLive`); an older read never overwrites a newer one.
+ */
+const live = new Map<string, AgentLive | null>();
+const liveListeners = new Set<() => void>();
+const liveReads = new Map<string, number>();
+function readLive(projectId: string) {
+  const n = (liveReads.get(projectId) ?? 0) + 1;
+  liveReads.set(projectId, n);
+  void timedApi.getAgentLive(projectId).then(
+    l => {
+      if (liveReads.get(projectId) !== n) return;
+      live.set(projectId, l);
+      liveListeners.forEach(fn => fn());
+    },
+    () => undefined,
+  );
+}
+events.subscribe('agent_live', () => [...live.keys()].forEach(readLive));
+function agentLive(projectId: string): AgentLive | null {
+  if (!live.has(projectId)) {
+    live.set(projectId, null);
+    readLive(projectId);
+  }
+  return live.get(projectId) ?? null;
+}
+
+/** Turns this client has asked for that have not answered yet, per project: Ask AI is busy meanwhile. */
+const asking = new Map<string, number>();
+async function asked<T>(projectId: string, call: () => Promise<T>): Promise<T> {
+  asking.set(projectId, (asking.get(projectId) ?? 0) + 1);
+  try {
+    return await call();
+  } finally {
+    asking.set(projectId, (asking.get(projectId) ?? 1) - 1);
+    localChanges.forEach(fn => fn());
+  }
+}
+/**
+ * Resolves when no turn is live on the project. `sendUserMessage` returns once the turn started;
+ * Ask AI stays busy until the turn ended, as it did when the call waited for the answer.
+ */
+async function turnEnded(projectId: string): Promise<void> {
+  while (await timedApi.getAgentLive(projectId)) {
+    await new Promise<void>(resolve => {
+      const done = () => {
+        clearTimeout(t);
+        liveListeners.delete(done);
+        resolve();
+      };
+      const t = setTimeout(done, 1000);
+      liveListeners.add(done);
+    });
+  }
+}
+const isAgentBusy = (projectId: string) => (asking.get(projectId) ?? 0) > 0 || !!agentLive(projectId);
+
 async function uploadAsset(file: File): Promise<{url: string}> {
-  telemetry.histogram('tsp_files_upload_bytes', file.size, {kind: file.type.startsWith('image/') ? 'image' : 'other'});
+  telemetry.histogram('sprint_files_upload_bytes', file.size, {kind: file.type.startsWith('image/') ? 'image' : 'other'});
   return platform.files.upload(file, file.name);
 }
 
 /**
- * The in-process client: every service runs in this page, on `@tsp/platform-impl` (the stand-ins
- * by default). The whole product can be accepted in a local browser this way.
+ * The in-process client: every service runs in this page, on `@sprint/platform-impl` (the stand-ins
+ * by default). The whole product can be accepted in a local browser this way. It is the default
+ * module behind `@sprint/client-impl`; any other client module exports `client` the same way.
  */
-export const inProcessClient: BffClient = {
+export const client: BffClient = {
   ...timedApi,
   // Each Ask AI message carries the browser's record, for a problem report (spec 1.1.0, 3.2).
-  sendUserMessage: req => timedApi.sendUserMessage({...req, client: req.client ?? snapshot()}),
+  sendUserMessage: req =>
+    asked(req.projectId, async () => {
+      const out = await timedApi.sendUserMessage({...req, client: req.client ?? snapshot()});
+      await turnEnded(req.projectId);
+      return out;
+    }),
+  improveWithAi: (projectId, versionId, locale) => asked(projectId, () => timedApi.improveWithAi(projectId, versionId, locale)),
   subscribeChanges,
-  subscribeAgentLive: listener => events.subscribe('agent_live', listener),
+  subscribeAgentLive(listener) {
+    liveListeners.add(listener);
+    return () => void liveListeners.delete(listener);
+  },
   agentLive,
   isAgentBusy,
-  answeringAgent,
   uploadAsset,
   async prepareChatAttachment(file): Promise<ChatAttachment> {
     if (file.type.startsWith('image/')) {

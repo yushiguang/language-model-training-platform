@@ -1,4 +1,4 @@
-import type {PageId} from '@tsp/contracts';
+import type {PageId} from '@sprint/contracts';
 
 /** Maps a URL path (with or without a base path) to a page. */
 export function pageFromPath(path: string): PageId {

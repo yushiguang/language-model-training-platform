@@ -1,18 +1,34 @@
+import type {LimiterLimits, LimiterStats, LimiterStorePort} from '@sprint/contracts';
+import {newId} from '@sprint/domain';
+
 /**
- * Rate limiter for one endpoint: requests per minute, tokens per minute and calls in flight.
+ * Rate limiter for one endpoint: requests per minute, tokens per minute and calls in flight
+ * (deployment readiness spec, 5). The counts live in a `LimiterStorePort` that every replica of
+ * every caller shares, so an endpoint has one budget however many processes call it.
  *
  * A call first reserves its estimated tokens; when it finishes, the reservation is corrected to
- * the real usage. A call that would go over QPM or TPM waits in a FIFO queue until the window
- * frees up; nothing is ever sent over the limit. After a 429 the limiter halves its concurrency
- * and holds all calls for the time the endpoint asked; each quiet window adds one call back.
+ * the real usage. A call that would go over QPM or TPM waits in the store's FIFO queue until the
+ * window frees up; nothing is ever sent over the limit. After a 429 the endpoint's concurrency is
+ * halved and every call is held for the time the endpoint asked; each quiet window adds one call
+ * back. A permit's slot is leased and renewed while the call runs, so a process that dies frees
+ * its slots when the lease ends.
+ *
+ * Waiters in this process wake at once when a slot here frees up; for slots freed by another
+ * process they ask the store again every `pollMs`, or when the store says the window frees.
  */
-
 export interface LimiterOptions {
+  store: LimiterStorePort;
+  /** The endpoint's key in the store (its registry id). */
+  key: string;
   qpm: number;
   tpm: number;
   maxConcurrency: number;
   /** Length of the rate window. One minute in production; shorter in tests. */
   windowMs?: number;
+  /** How long a permit holds its slot without a renewal (default 60 s; renewed every third). */
+  leaseMs?: number;
+  /** How often a waiter asks the store again when nothing here wakes it (default 250 ms). */
+  pollMs?: number;
   now?: () => number;
 }
 
@@ -21,143 +37,106 @@ export interface Permit {
   release(actualTokens?: number): void;
 }
 
-interface Entry {
-  at: number;
-  tokens: number;
-}
-
-interface Waiter {
-  tokens: number;
-  resolve: (p: Permit) => void;
-  reject: (e: unknown) => void;
-  signal?: AbortSignal;
-  onAbort?: () => void;
-}
-
 export class EndpointLimiter {
   readonly qpm: number;
   readonly tpm: number;
   readonly maxConcurrency: number;
-  private readonly windowMs: number;
+  private readonly store: LimiterStorePort;
+  private readonly key: string;
+  private readonly limits: LimiterLimits;
+  private readonly leaseMs: number;
+  private readonly pollMs: number;
   private readonly now: () => number;
-  private window: Entry[] = [];
-  private inFlight = 0;
-  private concurrency: number;
-  private holdUntil = 0;
-  private lastPenalty = 0;
-  private queue: Waiter[] = [];
-  private timer: ReturnType<typeof setTimeout> | null = null;
-  /** When the pending timer fires. */
-  private timerAt = 0;
+  /** Store writes from this limiter, in order: a hold lands before the release that follows it. */
+  private chain: Promise<unknown> = Promise.resolve();
+  /** Waiters here, woken when a slot here frees up. */
+  private wakers = new Set<() => void>();
 
   constructor(o: LimiterOptions) {
     this.qpm = o.qpm;
     this.tpm = o.tpm;
     this.maxConcurrency = Math.max(1, o.maxConcurrency);
-    this.concurrency = this.maxConcurrency;
-    this.windowMs = o.windowMs ?? 60_000;
+    this.store = o.store;
+    this.key = o.key;
+    this.limits = {qpm: o.qpm, tpm: o.tpm, maxConcurrency: this.maxConcurrency, windowMs: o.windowMs ?? 60_000};
+    this.leaseMs = o.leaseMs ?? 60_000;
+    this.pollMs = o.pollMs ?? 250;
     this.now = o.now ?? Date.now;
   }
 
-  /** Current state, for tests and diagnostics. */
-  stats() {
-    this.prune();
-    return {
-      inFlight: this.inFlight,
-      concurrency: this.concurrency,
-      requestsInWindow: this.window.length,
-      tokensInWindow: this.window.reduce((n, e) => n + e.tokens, 0),
-      waiting: this.queue.length,
-    };
+  /** One store call after the ones before it. */
+  private op<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.chain.then(fn, fn);
+    this.chain = next.catch(() => undefined);
+    return next;
   }
 
-  acquire(estimatedTokens: number, signal?: AbortSignal): Promise<Permit> {
-    if (signal?.aborted) return Promise.reject(new DOMException('Stopped', 'AbortError'));
-    return new Promise<Permit>((resolve, reject) => {
-      const w: Waiter = {tokens: Math.max(1, Math.round(estimatedTokens)), resolve, reject, signal};
-      if (signal) {
-        w.onAbort = () => {
-          this.queue = this.queue.filter(x => x !== w);
-          reject(new DOMException('Stopped', 'AbortError'));
-          // The waiter behind it may fit now.
-          this.pump();
-        };
-        signal.addEventListener('abort', w.onAbort, {once: true});
+  private wakeAll() {
+    for (const w of [...this.wakers]) w();
+  }
+
+  /** Current state across every process, for gauges and tests. */
+  stats(): Promise<LimiterStats> {
+    return this.op(() => this.store.stats(this.key, this.limits, this.now()));
+  }
+
+  async acquire(estimatedTokens: number, signal?: AbortSignal): Promise<Permit> {
+    const stopped = () => new DOMException('Stopped', 'AbortError');
+    if (signal?.aborted) throw stopped();
+    const ticket = newId('wait');
+    const tokens = Math.max(1, Math.round(estimatedTokens));
+    try {
+      for (;;) {
+        const r = await this.op(() => this.store.tryAcquire(this.key, {ticket, tokens, limits: this.limits, leaseMs: this.leaseMs, ticketTtlMs: this.pollMs * 4, now: this.now()}));
+        if (r.granted) return this.permit(r.permitId);
+        if (signal?.aborted) throw stopped();
+        await this.wait(r.waitMs < 0 ? this.pollMs : Math.min(Math.max(1, r.waitMs), this.pollMs), signal);
+        if (signal?.aborted) throw stopped();
       }
-      this.queue.push(w);
-      this.pump();
+    } catch (e) {
+      // The waiter behind this one may go now.
+      await this.op(() => this.store.leave(this.key, ticket)).catch(() => undefined);
+      this.wakeAll();
+      throw e;
+    }
+  }
+
+  /** Waits `ms`, or less when a slot here frees up or the caller stops. */
+  private wait(ms: number, signal?: AbortSignal) {
+    return new Promise<void>(resolve => {
+      const done = () => {
+        clearTimeout(t);
+        this.wakers.delete(done);
+        signal?.removeEventListener('abort', done);
+        resolve();
+      };
+      const t = setTimeout(done, ms);
+      this.wakers.add(done);
+      signal?.addEventListener('abort', done, {once: true});
     });
   }
 
-  /** The endpoint said "too many requests": slow down and hold calls for a while. */
-  onRateLimited(retryAfterMs: number) {
-    const t = this.now();
-    this.concurrency = Math.max(1, Math.floor(this.concurrency / 2));
-    this.holdUntil = Math.max(this.holdUntil, t + retryAfterMs);
-    this.lastPenalty = t;
-    this.schedule(retryAfterMs);
+  private permit(permitId: string): Permit {
+    // A long call renews its lease, so its slot is not handed out under it.
+    const renewal = setInterval(() => void this.op(() => this.store.renew(this.key, permitId, this.leaseMs, this.now())).catch(() => undefined), Math.max(10, Math.floor(this.leaseMs / 3)));
+    let released = false;
+    return {
+      release: (actual?: number) => {
+        if (released) return;
+        released = true;
+        clearInterval(renewal);
+        void this.op(() => this.store.release(this.key, permitId, actual != null && actual >= 0 ? actual : null, this.now()))
+          .catch(() => undefined)
+          .then(() => this.wakeAll());
+      },
+    };
   }
 
-  private prune() {
-    const cutoff = this.now() - this.windowMs;
-    while (this.window.length && this.window[0].at <= cutoff) this.window.shift();
-  }
-
-  private recover() {
-    const t = this.now();
-    if (this.concurrency < this.maxConcurrency && t - this.lastPenalty >= this.windowMs) {
-      this.concurrency++;
-      this.lastPenalty = t;
-    }
-  }
-
-  private fits(tokens: number): boolean {
-    if (this.inFlight >= this.concurrency) return false;
-    if (this.window.length >= this.qpm) return false;
-    const used = this.window.reduce((n, e) => n + e.tokens, 0);
-    // A single call larger than the whole TPM may still go alone, so it never waits forever.
-    return used + tokens <= this.tpm || (used === 0 && this.inFlight === 0);
-  }
-
-  private pump() {
-    this.prune();
-    this.recover();
-    const t = this.now();
-    if (t < this.holdUntil) return this.schedule(this.holdUntil - t);
-    while (this.queue.length && this.fits(this.queue[0].tokens)) {
-      const w = this.queue.shift()!;
-      if (w.signal && w.onAbort) w.signal.removeEventListener('abort', w.onAbort);
-      const entry: Entry = {at: this.now(), tokens: w.tokens};
-      this.window.push(entry);
-      this.inFlight++;
-      let released = false;
-      w.resolve({
-        release: (actual?: number) => {
-          if (released) return;
-          released = true;
-          if (actual != null && actual >= 0) entry.tokens = actual;
-          this.inFlight--;
-          this.pump();
-        },
-      });
-    }
-    // Still waiting on the window (not on a call in flight): wake when the oldest entry expires.
-    if (this.queue.length && this.inFlight < this.concurrency && this.window.length) {
-      this.schedule(this.window[0].at + this.windowMs - this.now() + 1);
-    }
-  }
-
-  /** Wakes the queue in `ms`. An earlier wakeup wins: a pending later timer is replaced. */
-  private schedule(ms: number) {
-    const at = this.now() + Math.max(1, ms);
-    if (this.timer) {
-      if (this.timerAt <= at) return;
-      clearTimeout(this.timer);
-    }
-    this.timerAt = at;
-    this.timer = setTimeout(() => {
-      this.timer = null;
-      this.pump();
-    }, Math.max(1, ms));
+  /** The endpoint said "too many requests": slow down and hold calls for a while, in every process. */
+  onRateLimited(retryAfterMs: number): Promise<void> {
+    const out = this.op(() => this.store.penalize(this.key, retryAfterMs, this.limits, this.now()));
+    // Waiters here sleep until the hold ends instead of on their old wakeup.
+    void out.then(() => this.wakeAll(), () => undefined);
+    return out;
   }
 }

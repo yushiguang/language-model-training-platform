@@ -1,4 +1,4 @@
-# telemetry (`@tsp/telemetry`)
+# telemetry (`@sprint/telemetry`)
 
 Metrics and product events. Contract: `TelemetryPort` and the catalogues `METRICS` and
 `EventProps` in `packages/contracts/src/telemetry.ts`; the conventions and the rules for
@@ -7,7 +7,7 @@ changing them are in `docs/design/telemetry.md`. This app keeps them and sends t
 
 - `telemetry.ts`: `createTelemetry({sink, appVersion, env, flushMs, maxBuffered})` returns a
   `TelemetryPort`.
-  - Metrics are Prometheus style (`tsp_*`): counters, gauges and cumulative histograms kept in
+  - Metrics are Prometheus style (`sprint_*`): counters, gauges and cumulative histograms kept in
     memory; `render()` gives the text exposition. The port adds `app` (from the name prefix) and
     `env`. Only declared labels are kept, and only values listed for that label in
     `LABEL_VALUES`; anything else becomes `other`, so label sets stay small and an id or email
@@ -26,7 +26,7 @@ changing them are in `docs/design/telemetry.md`. This app keeps them and sends t
 Who calls it: the composition root builds one port and passes it to the llm-gateway, catalog,
 labeling and bff (`telemetry` option); pages use `pageViewed` and `track` from `@/backend-api`.
 The sink is `Platform.telemetry` (stand-in: `localTelemetrySink`, events in `localStorage`
-under `tsp-telemetry-events`, metrics text on `globalThis.__tspMetrics`).
+under `sprint-telemetry-events`, metrics text on `globalThis.__sprintMetrics`).
 
 Rules: never collect content: no prompt text, chat text, example features, names or emails.
 Props are counts, ids, enums and durations. The audit log stays in the catalog. Imports:

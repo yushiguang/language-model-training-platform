@@ -1,12 +1,13 @@
 import type {TelemetrySink} from './telemetry.ts';
-import type {ClientDiagnostics, EndpointInfo, FeatureValue, Locale, NodeId, PageId} from './types.ts';
+import type {ClientDiagnostics, EndpointId, EndpointInfo, FeatureValue, Locale, NodeId, PageId} from './types.ts';
 import type {EndpointConfig} from './gateway-api.ts';
 import type {DeepPartial, SystemConfig} from './config.ts';
+import type {JobStorePort} from './jobs-api.ts';
 
 export type {EndpointInfo};
 
 /**
- * Contract 3: Platform Runtime API (`@tsp/contracts/platform-api`).
+ * Contract 3: Platform Runtime API (`@sprint/contracts/platform-api`).
  *
  * Defines the complete set of capabilities exposed by the underlying hosting platform
  * (document database, online labeling models, agent LLM gateway, SSO identity, file storage,
@@ -18,71 +19,46 @@ export type {EndpointInfo};
  */
 
 // ---------------------------------------------------------------------------------------------
-// Supported LLM models exposed to the Agent Runtime (`apps/agents`) and Labeling presets.
+// The model registry (deployment readiness spec, 5): the models the hosting platform serves to the
+// agent runtime (`apps/agents`) and the gateway's chat endpoints. Model ids are opaque strings the
+// registry defines; nothing in this repository lists them as a type.
 
-export type LlmModelId = 'gpt-5.4' | 'gpt-5.5' | 'gpt-5.6-luna' | 'gpt-5.6-terra';
+/** How hard a reasoning model thinks before it answers, where the model lets the caller choose. */
+export type ReasoningEffort = 'minimal' | 'low' | 'medium' | 'high';
 
-export interface LlmModelInfo {
-  id: LlmModelId;
-  name: string;
-  tier: 'fast' | 'balanced' | 'reasoning';
-  description: string;
-  supportsTemperature: boolean;
-  /** USD per million input tokens (for cost estimation). */
-  priceIn: number;
-  /** USD per million output tokens (for cost estimation). */
-  priceOut: number;
-  /** True when the model is active on the runtime gateway. */
-  available: boolean;
+/** A model's speed and quality class, which the gateway's fallback and assumed limits use. */
+export type ModelTier = 'fast' | 'balanced' | 'reasoning';
+
+/** What a model can take and do. */
+export interface ModelCapabilities {
+  /** Takes images in a message. */
+  vision: boolean;
+  /** Calls tools natively (`AgentChatOptions.tools`). */
+  tools: boolean;
+  /** The reasoning effort levels it accepts; empty when it cannot be set. */
+  reasoningEffort: ReasoningEffort[];
+  /** The most tokens a call may hold, input and output together. */
+  contextTokens: number;
+  /** Takes a sampling temperature. */
+  temperature: boolean;
 }
 
-/**
- * Complete catalog of LLM models supported by the hosting runtime.
- * `apps/agents` can inspect this list (via `AVAILABLE_LLM_MODELS` or `llm.models()`) and choose
- * which model to pass in `llm.chat(messages, {model})` for each agent preset or reasoning step.
- */
-export const AVAILABLE_LLM_MODELS: LlmModelInfo[] = [
-  {
-    id: 'gpt-5.6-terra',
-    name: 'gpt-5.6-terra',
-    tier: 'reasoning',
-    description: 'Highest-quality reasoning model for schema design, prompt drafting, and optimiser reflection.',
-    supportsTemperature: false,
-    priceIn: 1.25,
-    priceOut: 5.0,
-    available: true,
-  },
-  {
-    id: 'gpt-5.6-luna',
-    name: 'gpt-5.6-luna',
-    tier: 'balanced',
-    description: 'Balanced quality and latency model for multi-turn agent tasks and evaluation analysis.',
-    supportsTemperature: false,
-    priceIn: 1.0,
-    priceOut: 4.0,
-    available: true,
-  },
-  {
-    id: 'gpt-5.4',
-    name: 'gpt-5.4',
-    tier: 'fast',
-    description: 'Fast, lower-cost model suitable for front-desk routing and high-volume labeling.',
-    supportsTemperature: false,
-    priceIn: 0.75,
-    priceOut: 3.0,
-    available: true,
-  },
-  {
-    id: 'gpt-5.5',
-    name: 'gpt-5.5',
-    tier: 'balanced',
-    description: 'SDK-listed model identifier (currently inactive on the gateway; prefer gpt-5.6-terra or gpt-5.6-luna).',
-    supportsTemperature: false,
-    priceIn: 1.1,
-    priceOut: 4.4,
-    available: false,
-  },
-];
+/** One model in the registry. */
+export interface LlmModelInfo {
+  /** The registry's opaque id; agent presets name a model by it. */
+  id: string;
+  /** Display name. */
+  name: string;
+  tier: ModelTier;
+  description: string;
+  capabilities: ModelCapabilities;
+  /** USD per million input tokens (for cost accounting). */
+  priceIn: number;
+  /** USD per million output tokens, reasoning tokens included. */
+  priceOut: number;
+  /** False while the platform does not serve it: calls fall back to another model. */
+  active: boolean;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Storage: a schemaless document-collection runtime supporting structured queries, atomic field
@@ -280,13 +256,49 @@ export type LlmStreamChunk =
   | {type: 'done'; createdAt: string}
   | {type: 'error'; message: string};
 
+/**
+ * A tool the model may call natively (spec 5), as an alternative to the JSON-in-the-answer tool
+ * protocol the agents use today. Only for models whose registry entry says `capabilities.tools`.
+ */
+export interface ToolDefinition {
+  name: string;
+  description: string;
+  /** The arguments, as a JSON Schema object. */
+  parameters: Record<string, unknown>;
+}
+
+/** A native tool call the model asked for. */
+export interface ToolCall {
+  /** The model's id for the call, to send its result back under. */
+  id: string;
+  name: string;
+  /** The arguments as the model wrote them (JSON text); the caller parses and checks them. */
+  arguments: string;
+}
+
+/**
+ * What shape the answer must take: plain text, one JSON object, or JSON matching a schema.
+ * A model service that cannot hold the answer to a schema may treat `json_schema` as `json_object`.
+ */
+export type ResponseFormat = {type: 'text'} | {type: 'json_object'} | {type: 'json_schema'; name: string; schema: Record<string, unknown>};
+
 export interface ChatRequest {
-  endpoint: 'A' | 'B';
+  /** The labeling endpoint's id, as `LabelingModels.endpoints()` lists it. */
+  endpoint: EndpointId;
   messages: ModelMessage[];
   maxOutputTokens: number;
   temperature: number | null;
   /** Opaque trace id (the example id). Real adapters may log it; they must not send it to the model. */
   traceId?: string;
+  /** How hard a reasoning model thinks; left out, the model's default. */
+  reasoningEffort?: ReasoningEffort;
+  /** What shape the answer must take; left out, plain text. */
+  responseFormat?: ResponseFormat;
+  /**
+   * The most this call may take, in ms. The adapter may pass it on (an HTTP timeout); the gateway
+   * also stops waiting after it and counts the call as timed out (retried like a busy reply).
+   */
+  timeoutMs?: number;
   signal?: AbortSignal;
 }
 
@@ -294,7 +306,10 @@ export interface ChatResult {
   text: string;
   thinking?: string;
   inputTokens: number;
+  /** Tokens of the answer, reasoning tokens not included. */
   outputTokens: number;
+  /** Tokens the model spent reasoning, billed at the output price. Left out when none. */
+  reasoningTokens?: number;
 }
 
 export interface LabelingModels {
@@ -307,14 +322,28 @@ export interface LabelingModels {
 
 export interface AgentChatOptions {
   /**
-   * Target model ID selected by the agent runtime (from `AVAILABLE_LLM_MODELS`).
-   * If omitted, the adapter uses its default active model (`gpt-5.4`).
+   * The registry id of the model to use (`AgentModel.models()`). An unknown or inactive id, or
+   * none, falls back to an active reasoning model, then to any active model (the gateway decides).
    */
-  model?: LlmModelId;
-  /** When true, instructs the model to respond with a single valid JSON object. */
+  model?: string;
+  /** When true, instructs the model to respond with a single valid JSON object (`responseFormat` json_object). */
   json?: boolean;
+  /** What shape the answer must take; wins over `json`. */
+  responseFormat?: ResponseFormat;
   /** Optional cap on output tokens. */
   maxOutputTokens?: number;
+  /**
+   * How hard a reasoning model thinks. Dropped when the model's registry entry does not list the
+   * level, so a preset never fails because its model changed.
+   */
+  reasoningEffort?: ReasoningEffort;
+  /**
+   * Native tools (`complete` only). The answer's `toolCalls` holds the calls the model asked for.
+   * Refused (`rejected`) on a model whose registry entry has no `capabilities.tools`.
+   */
+  tools?: ToolDefinition[];
+  /** The most this call may take, in ms; see `ChatRequest.timeoutMs`. A stream passes it to the model service only. */
+  timeoutMs?: number;
   signal?: AbortSignal;
 }
 
@@ -327,12 +356,17 @@ export interface AgentCompletionResult {
   stopReason?: string;
   usage?: {
     inputTokens: number;
+    /** Reasoning tokens not included. */
     outputTokens: number;
+    /** Tokens the model spent reasoning, billed at the output price. */
+    reasoningTokens?: number;
   };
+  /** The native tool calls the model asked for, when `tools` were given. */
+  toolCalls?: ToolCall[];
 }
 
 export interface AgentModel {
-  /** Returns the catalog of LLM models supported by the runtime. */
+  /** The model registry the hosting platform supplies (spec 5). */
   models(): LlmModelInfo[];
   /** Returns the model's text. With json: true the model is asked for one JSON object. */
   chat(messages: ModelMessage[], opts?: AgentChatOptions): Promise<string>;
@@ -452,19 +486,121 @@ export interface LinkedDocument {
  * docs/handover/integration.md, "Document links".
  */
 export interface DocumentSource {
-  /** The document at `url` as the signed-in user may see it; null when it cannot be read. */
-  read(url: string): Promise<LinkedDocument | null>;
+  /**
+   * The document at `url` as the caller (`ctx.user`) may see it; null when it cannot be read.
+   * The context is the Ask AI turn's, so a helper reads with the rights of the person it answers,
+   * never with a service account (deployment readiness review, gap G3).
+   */
+  read(ctx: RequestContext, url: string): Promise<LinkedDocument | null>;
 }
 
 // ---------------------------------------------------------------------------------------------
 // Enterprise extension ports (spec 1.0.0, section 7.1). All optional: the single-tenant stand-ins
-// in `@tsp/platform` allow everything and run jobs in the page.
+// in `@sprint/platform` allow everything and run jobs in the page.
 
-/** Who a service call is made for. Carried in request structs once services are split. */
+/** The person a call is made for, as the channel (the bff) authenticated them. */
+export interface CallerUser {
+  id: string;
+  name: string;
+  email?: string;
+}
+
+/**
+ * Who a service call is made for and how it travels (deployment readiness spec, 2). Every
+ * `WorkflowContract` method takes one as its first argument; the bff builds it from the
+ * authenticated request, one per call. It carries ids and the caller, never a copy of a project:
+ * a service loads the records itself, so they are never stale and a client cannot forge them.
+ * Product events are stamped from it (request, user, project, page, app version) so a user's
+ * actions can be followed across services; telemetry still carries ids and counts only.
+ */
 export interface RequestContext {
+  /** One id per call, passed on to every hop (logs, problem reports, traces). */
+  requestId: string;
+  user: CallerUser;
   tenantId?: string;
-  userId?: string;
-  requestId?: string;
+  /** The language the user reads the site in. */
+  locale?: Locale;
+  /** The user's IANA time zone, for times written in messages. */
+  timeZone?: string;
+  /** The service that makes the call (`bff`, `optimiser`, `worker`), for service-to-service auth. */
+  caller?: string;
+  /** Epoch milliseconds after which the caller has given up: every hop stops work past it. */
+  deadline?: number;
+  /** The site version the user has open, to spot a page older than the server. */
+  appVersion?: string;
+  /** The W3C `traceparent` of the call, when the hosting platform traces requests. */
+  traceParent?: string;
+}
+
+/**
+ * Short-lived state shared by every replica of a service (deployment readiness spec, 2): the
+ * running Ask AI turn's live line, the helper answering on a page, a problem-report draft, the
+ * turn's page and browser record. Values are plain JSON; each key expires after its TTL. A server
+ * deployment backs it with a key-value store with expiry; the browser build keeps it in memory.
+ */
+export interface SharedStatePort {
+  get<T>(key: string): Promise<T | null>;
+  /** Writes `value` under `key`; it is gone after `ttlMs`. */
+  set<T>(key: string, value: T, ttlMs: number): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+
+/** One endpoint's limits, as the gateway's registry has them. */
+export interface LimiterLimits {
+  /** Requests per window. */
+  qpm: number;
+  /** Tokens per window (input, output and reasoning). */
+  tpm: number;
+  /** Calls in flight at most (before a busy reply halves it). */
+  maxConcurrency: number;
+  /** The sliding window, one minute in production. */
+  windowMs: number;
+}
+
+/** A waiter's try: a permit, or not yet (with when trying again may succeed, -1 unknown). */
+export type LimiterTry = {granted: true; permitId: string} | {granted: false; waitMs: number};
+
+export interface LimiterStats {
+  inFlight: number;
+  /** The cap on calls in flight now (lowered after a busy reply, back up one per quiet window). */
+  concurrency: number;
+  requestsInWindow: number;
+  tokensInWindow: number;
+  /** Waiters in the queue, from every process. */
+  waiting: number;
+}
+
+/**
+ * The gateway's rate-limiter state for every endpoint, shared by every replica of every caller
+ * (deployment readiness spec, 5), so one endpoint has one budget. Each method is one atomic step
+ * on one endpoint's state (`key`): a Redis implementation runs each as a script; SQL as one
+ * transaction. `@sprint/platform` has the in-memory one (`memoryLimiterStore`).
+ *
+ * Semantics, the same as one process's limiter: a sliding window of requests and tokens (QPM,
+ * TPM), a cap on calls in flight, one FIFO queue of waiters, and after a busy reply half the
+ * concurrency and a hold, with one call back per quiet window. A permit holds its slot until its
+ * lease ends: a process that dies without releasing never wedges the endpoint. A waiter's ticket
+ * expires the same way when the waiter stops asking. `now` is the caller's clock; a shared store
+ * may use its own instead, so the replicas' clocks need not agree.
+ */
+export interface LimiterStorePort {
+  /**
+   * Drops what expired (window entries, permits whose lease ended, tickets not asked for within
+   * `ticketTtlMs`), puts `ticket` in the queue or refreshes it, and grants a permit when the
+   * ticket is first, the endpoint is not on hold, and `tokens` fit the window and a slot is free.
+   * A single call larger than the whole TPM may go alone. The permit's lease ends at
+   * `now + leaseMs`.
+   */
+  tryAcquire(key: string, req: {ticket: string; tokens: number; limits: LimiterLimits; leaseMs: number; ticketTtlMs: number; now: number}): Promise<LimiterTry>;
+  /** Takes a waiter out of the queue (it was stopped). */
+  leave(key: string, ticket: string): Promise<void>;
+  /** Frees the permit's slot and corrects its window entry to the real token count, when known. */
+  release(key: string, permitId: string, actualTokens: number | null, now: number): Promise<void>;
+  /** Extends a permit's lease (a long call); false when the lease had already ended. */
+  renew(key: string, permitId: string, leaseMs: number, now: number): Promise<boolean>;
+  /** A busy reply: halves the concurrency and holds every call until `now + retryAfterMs`. */
+  penalize(key: string, retryAfterMs: number, limits: LimiterLimits, now: number): Promise<void>;
+  stats(key: string, limits: LimiterLimits, now: number): Promise<LimiterStats>;
 }
 
 /** Per-tenant overrides of the system configuration. */
@@ -480,21 +616,6 @@ export interface AuthorizationRequest {
 
 export interface AuthorizationPort {
   allowed(ctx: RequestContext, request: AuthorizationRequest): Promise<boolean>;
-}
-
-/** A piece of background work handed to the host's job queue instead of running in the page. */
-export interface JobRequest {
-  /** The kind of work, for example `labeling.runTask` or `optimiser.run`. */
-  kind: string;
-  /** Plain JSON arguments (ids, never records). */
-  args: Record<string, string | number | boolean | null>;
-  /** The same key never enqueues the same job twice. */
-  idempotencyKey?: string;
-}
-
-export interface JobQueuePort {
-  enqueue(ctx: RequestContext, job: JobRequest): Promise<{jobId: string}>;
-  cancel(ctx: RequestContext, jobId: string): Promise<void>;
 }
 
 export interface Platform {
@@ -532,8 +653,21 @@ export interface Platform {
   tenantConfig?: TenantConfigPort;
   /** Permission checks. Optional: without it every signed-in user may do everything. */
   authorization?: AuthorizationPort;
-  /** A job queue for background work. Optional: without it work runs in the open page. */
-  jobs?: JobQueuePort;
+  /**
+   * Where background jobs are kept (`jobs-api.ts`). Optional: without it the job module keeps them
+   * in the memory of its own process (`memoryJobStore`), which is right for the browser build.
+   */
+  jobStore?: JobStorePort;
+  /**
+   * Where the gateway's rate limits are counted (spec 5). Optional: without it each process counts
+   * its own (`memoryLimiterStore`), right for the browser build and one gateway process.
+   */
+  limiterStore?: LimiterStorePort;
+  /**
+   * Short-lived shared state with expiry. Optional: without it the workflow keeps it in the
+   * memory of its own process, which is right for the browser build and one server replica.
+   */
+  sharedState?: SharedStatePort;
   /**
    * Where problem reports go (spec 1.1.0, 3.3). Optional: without it the helpers say reports
    * cannot be sent here. See docs/handover/integration.md, "Problem reports".

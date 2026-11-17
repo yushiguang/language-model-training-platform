@@ -1,0 +1,107 @@
+{
+  "name": "The Optimiser reads feature descriptions through the tool host before its change",
+  "guards": [
+    "the Optimiser reads feature descriptions only (read_feature_info), as the Prompt helper",
+    "tool calls outside a turn carry the project, no turn id and the caller"
+  ],
+  "kind": "reflect",
+  "request": {
+    "projectId": "pr_fixture",
+    "ctx": {
+      "requestId": "rq_fixture",
+      "user": {
+        "id": "u_fixture",
+        "name": "Fixture user"
+      },
+      "caller": "workflow",
+      "locale": "en"
+    },
+    "prompt": {
+      "taskSummary": "Label the post.",
+      "features": {
+        "video": [
+          "Description"
+        ],
+        "photo_text": [],
+        "metadata": []
+      },
+      "label": {
+        "name": "format",
+        "kind": "single",
+        "values": [
+          {
+            "name": "Vlog",
+            "definition": "a day in a life"
+          },
+          {
+            "name": "Clip",
+            "definition": "a cut from a longer video"
+          }
+        ]
+      },
+      "ruleGroups": [],
+      "images": []
+    },
+    "triedChanges": [],
+    "mixUps": [
+      {
+        "kind": "confused",
+        "gold": "Clip",
+        "predicted": "Vlog",
+        "count": 5,
+        "exampleIds": []
+      }
+    ],
+    "macroF1": 0.5,
+    "lowestValue": null
+  },
+  "model": [
+    "{\"tool\":{\"name\":\"read_feature_info\",\"args\":{\"keys\":[\"OCR_Text\"]}}}",
+    "{\"prompt\":{\"taskSummary\":\"Label the post.\",\"features\":{\"video\":[\"Description\"],\"photo_text\":[],\"metadata\":[]},\"label\":{\"name\":\"format\",\"kind\":\"single\",\"values\":[{\"name\":\"Vlog\",\"definition\":\"- a day in a life\\n- Does not apply when the post fits Clip better (a cut from a longer video).\"},{\"name\":\"Clip\",\"definition\":\"a cut from a longer video\"}]},\"ruleGroups\":[],\"images\":[]},\"change\":\"Vlog: Does not apply when the post fits Clip better (a cut from a longer video).\"}"
+  ],
+  "tools": [
+    {
+      "agent": "prompt_agent",
+      "name": "read_feature_info",
+      "args": {
+        "keys": [
+          "OCR_Text"
+        ]
+      },
+      "result": {
+        "OCR_Text": {
+          "description": "Text read from the video frames."
+        }
+      }
+    }
+  ],
+  "expected": {
+    "prompt": {
+      "taskSummary": "Label the post.",
+      "features": {
+        "video": [
+          "Description"
+        ],
+        "photo_text": [],
+        "metadata": []
+      },
+      "label": {
+        "name": "format",
+        "kind": "single",
+        "values": [
+          {
+            "name": "Vlog",
+            "definition": "- a day in a life\n- Does not apply when the post fits Clip better (a cut from a longer video)."
+          },
+          {
+            "name": "Clip",
+            "definition": "a cut from a longer video"
+          }
+        ]
+      },
+      "ruleGroups": [],
+      "images": []
+    },
+    "change": "Vlog: Does not apply when the post fits Clip better (a cut from a longer video)."
+  }
+}

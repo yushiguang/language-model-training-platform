@@ -1,0 +1,87 @@
+{
+  "name": "A tool error goes back to the helper as a message it can act on",
+  "guards": [
+    "a failed tool call is recorded as not ok and the turn goes on"
+  ],
+  "kind": "turn",
+  "request": {
+    "userText": "Show me v9",
+    "page": {
+      "label": "Projects",
+      "agent": "front_desk",
+      "intent": "answer",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_fixture",
+      "task": "Tag short videos",
+      "prompt": null,
+      "history": [],
+      "pageView": null
+    },
+    "turnId": "turn_fixture",
+    "ctx": {
+      "requestId": "rq_fixture",
+      "user": {
+        "id": "u_fixture",
+        "name": "Fixture user"
+      },
+      "caller": "workflow",
+      "locale": "en"
+    },
+    "locale": "en"
+  },
+  "model": [
+    "{\"tool\":{\"name\":\"get_version\",\"args\":{\"version\":\"v9\"}}}",
+    "{\"reply\":\"There is no v9. The project has v1.\"}"
+  ],
+  "tools": [
+    {
+      "agent": "front_desk",
+      "name": "get_version",
+      "args": {
+        "version": "v9"
+      },
+      "error": "There is no version \"v9\". Versions: v1."
+    }
+  ],
+  "expected": {
+    "invocations": [
+      {
+        "from": "user",
+        "to": "front_desk",
+        "intent": "answer",
+        "note": ""
+      }
+    ],
+    "messages": [
+      {
+        "role": "agent",
+        "agent": "front_desk",
+        "text": "There is no v9. The project has v1."
+      }
+    ],
+    "proposal": null,
+    "toolCalls": [
+      {
+        "agent": "front_desk",
+        "name": "get_version",
+        "args": {
+          "version": "v9"
+        },
+        "ok": false
+      }
+    ],
+    "modelCalls": [
+      {
+        "agent": "front_desk",
+        "model": "gpt-5.6-terra"
+      },
+      {
+        "agent": "front_desk",
+        "model": "gpt-5.6-terra"
+      }
+    ],
+    "parseFailures": []
+  }
+}

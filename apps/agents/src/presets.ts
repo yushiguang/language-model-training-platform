@@ -1,5 +1,5 @@
-import type {AgentPreset, AgentToolName, LlmModelId, Locale} from '@tsp/contracts';
-import {agentName, translate} from '@tsp/domain';
+import type {AgentPreset, AgentToolName, Locale} from '@sprint/contracts';
+import {agentName, PRESET_TOOLS, START_TOOLS, translate} from '@sprint/domain';
 
 export {agentName};
 
@@ -7,16 +7,14 @@ export {agentName};
  * Agent presets = model selection + system prompt + what the agent may observe + the intents it
  * supports + the read tools it may call. Every preset uses the smartest model (decided 2026-11-04).
  *
- * Available runtime models (defined in `@tsp/contracts` `AVAILABLE_LLM_MODELS`; limits live in `@tsp/llm-gateway`):
- * - `'gpt-5.6-terra'`: highest-quality reasoning model
- * - `'gpt-5.6-luna'`: balanced quality and latency model
- * - `'gpt-5.4'`: fast, lower-cost model
- * - `'gpt-5.5'`: listed in SDK types (currently inactive on the gateway)
+ * A preset names its model by registry id (`AgentModel.models()`, supplied by the hosting
+ * platform; spec 5). An unknown or inactive id falls back in the gateway to an active reasoning
+ * model, so a registry without this id still answers. Limits live in `@sprint/llm-gateway`.
  */
 export interface Preset {
   name: string;
-  /** Which LLM model this agent uses by default when calling `llm.chat(messages, {model})`. */
-  model: LlmModelId;
+  /** The registry id of the model this agent asks for in `llm.chat(messages, {model})`. */
+  model: string;
   observes: string[];
   intents: Record<string, string>;
   /** Read tools this preset may call; the runtime refuses any other. */
@@ -50,13 +48,8 @@ export const TOOL_SPECS: Record<AgentToolName, {args: string; returns: string}> 
   },
 };
 
-/** Tools that spend money. They start at once; the user stops them from the page. */
-export const START_TOOLS: AgentToolName[] = ['try_prompt', 'score_version', 'start_optimiser'];
-
-/** Every helper can file a problem report (spec 1.1.0, 3). */
-const REPORT: AgentToolName[] = ['report_problem'];
-
-const READ_ALL: AgentToolName[] = ['get_page_view', 'get_project_summary', 'list_versions', 'get_version', 'compare_versions', 'get_report', 'get_dataset_stats', 'get_mismatch_summary', 'get_examples', 'search_examples', 'get_gold_labels', 'get_predictions'];
+/** Tools that spend money, and which helper may call which tool: in `@sprint/domain` (the tool host enforces them too). */
+export {START_TOOLS};
 
 const common = `You are one of the helpers inside Sprint, a website where people tune a labeling prompt for a language model against their own gold labels. The people you help know their business well and are usually not machine-learning experts. They count on you for the technical side, so write in plain words and short sentences. Say "the Optimiser", never "GEPA", and never say "teacher" or "student". Use the pages' own words: the steps are Prompt Design, Eval Dataset, Gold Labels and Prompt Tuning; versions are v1, v2 and so on; models go by the names the pages show. The labeling model and the pass rule live in Project Settings (the Settings button at the top). In Ask AI the helpers are called the Assistant, the Prompt helper and the Scores helper.
 
@@ -105,7 +98,7 @@ export const PRESETS: Record<AgentPreset | 'optimiser', Preset> = {
     model: 'gpt-5.6-terra',
     observes: ['the current page view', 'the chat history', 'other pages, versions and reports through read tools'],
     intents: {answer: '{"handoff"?: {"to": "prompt_agent" | "evaluation_agent", "intent": string}, "reply": string} (when you hand off, write "handoff" first)'},
-    tools: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'read_doc', ...REPORT],
+    tools: PRESET_TOOLS.front_desk,
     system: `${common}\n\nYou are the Assistant (front_desk), the first helper the user meets on every page. You answer questions about the page they are on and about how the site works, and you pass work that belongs to a specialist on to that specialist.
 
 Answer yourself: what a page or a control is for, what to do next on this page, where to find something, what a status or tag means, and why a button is unavailable. Answer from the page view, and use a read tool when the answer is on another page.
@@ -135,7 +128,7 @@ On Gold Labels, never say which label is right for the example the user is looki
       explain_version: '{"reply": string}',
       follow_up: `${DRAFT_SHAPE}, plus ${PASS_ON}`,
     },
-    tools: [...READ_ALL, 'check_prompt', 'read_feature_info', 'read_doc', 'try_prompt', 'score_version', 'start_optimiser', ...REPORT],
+    tools: PRESET_TOOLS.prompt_agent,
     system: `${common}\n\nYou are the Prompt helper (prompt_agent). You write and improve the labeling prompt: the instructions a labeling model follows to label every example in the user's dataset. You also own the label and its values inside it. Its quality is measured against the user's gold labels, and the user takes the best version away to label large datasets, so a rule that is wrong or too narrow is repeated across thousands of rows.
 
 You always return the whole structured prompt in "prompt", never a fragment and never raw prompt text. The parts:
@@ -184,7 +177,7 @@ The paid tools (try_prompt, score_version, start_optimiser) start real labeling 
     model: 'gpt-5.6-terra',
     observes: ['the current page view (on the Eval report: the report, its checks, mix-up counts and trend)', 'any report and version, and predictions on the part of the eval set helpers can read, through read tools'],
     intents: {explain_report: '{"reply": string}', follow_up: `{"reply": string}, plus ${PASS_ON}`},
-    tools: [...READ_ALL, 'score_version', 'start_optimiser', ...REPORT],
+    tools: PRESET_TOOLS.evaluation_agent,
     system: `${common}\n\nYou are the Scores helper (evaluation_agent). You explain what a prompt version's scores mean and recommend one next step. The user decides from your answer whether the prompt is good enough to take away and use, so be exact about what the numbers show and plain about what they do not show.
 
 Reading a report.
@@ -218,7 +211,7 @@ The paid tools (score_version, start_optimiser) start real labeling at once. Use
       reflect: `{"prompt": ${PROMPT_SHAPE}, "change": string}`,
       merge: `{"prompt": ${PROMPT_SHAPE}, "change": string}`,
     },
-    tools: ['read_feature_info'],
+    tools: PRESET_TOOLS.optimiser,
     system: `You improve a labeling prompt as one step of an automatic loop. The prompt is structured: "taskSummary", ticked "features", the project's one "label" (its key and its values, each with a definition), and "ruleGroups" (cross-value rules in groups the user named, each with an "id", a "title" and free-text "content"). The site compiles the full prompt text from these parts and writes the input and output sections itself. Your change will be tried on examples you have not seen and kept only if it does better there, and the final prompt will label thousands of new items. So a change is only worth making if it would be right for items like these in general.
 
 In "reflect" you get the "prompt", the "mixUps" (with counts: on a single-select label which value was read as which, "confused"; on a multi-select label a value added where it does not apply, "extra", or left out, "missed"), the "macroF1" and the weakest value, the changes already "tried" from this prompt, and a few wrong "examples": for each, the gold label, the model's answer, the features, and when there is one the model's own short "reason" for its answer. When the site could not read the model's reply, "invalid" says why. The reason often shows which words the model leaned on or which rule it misread. When people commented on an example, "comments" holds their words: it says what the label means to them, so a change should teach the model that reading, and never contradict it.
@@ -245,7 +238,7 @@ In "merge" you get two prompts, "prompt" and "other.prompt", that each get right
 };
 
 export const systemPrompt = (p: AgentPreset | 'optimiser') => PRESETS[p].system;
-export const presetModel = (p: AgentPreset | 'optimiser'): LlmModelId => PRESETS[p].model;
+export const presetModel = (p: AgentPreset | 'optimiser'): string => PRESETS[p].model;
 
 /** Words the helpers use in Chinese, so their replies match the pages (spec 1.1.0, 2.3). */
 const ZH_TERMS = ['Prompt Design', 'Eval Dataset', 'Gold Labels', 'Prompt Tuning', 'Project Settings', 'Settings', 'Ask AI', 'Assistant', 'Prompt helper', 'Scores helper', 'Optimiser', 'Auto Optimise', 'Improve with AI', 'Mismatches', 'gold label', 'eval set', 'version', 'label', 'value', 'Copy prompt', 'Finish'];

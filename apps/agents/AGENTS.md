@@ -1,15 +1,19 @@
 # Agent Runtime Service Guide (`apps/agents`)
 
-`apps/agents` (`@tsp/agents`) is the standalone Agent Runtime service for Sprint, the training set platform.
+`apps/agents` (`@sprint/agents`) is the standalone Agent Runtime service for Sprint, the training set platform.
 It is owned and evolved by coding agents working in the public repository, and will later be
 deployed as a dedicated microservice (or ported to Go alongside the BFF).
 
 ## Responsibilities
 
 1. **Multi-agent orchestration (`src/runtime.ts`)**:
-   - Implements `runAgentTurn(input: AgentTurnInput, llm: AgentModel, tools?: AgentToolHost): Promise<AgentTurnOutput>`
-     and `reflectPrompt(input: OptimiserReflectInput, llm: AgentModel): Promise<OptimiserReflectOutput>`
-     defined in `@tsp/contracts/agent-api`.
+   - `createAgentRuntime({llm, tools, progress})` (`src/index.ts`) is the `AgentRuntimeContract`
+     in `@sprint/contracts/agent-api`. Each request carries the caller's `ctx`; every tool call
+     goes to the one injected `AgentToolHost` with `projectId`, `turnId` and `ctx`
+     (`AgentToolCall`). A turn's progress events go to the `AgentProgressPort` one at a time, in
+     order, and the turn answers after the last one landed. Inside, `runAgentTurn`,
+     `reflectPrompt` and `draftImprovement` (`src/runtime.ts`) call tools through a bound
+     `ToolCaller`.
    - Routes user messages starting from the page's active agent (`input.page.agent`), handles
      `front_desk` handoffs to specialist agents, and extracts structured `schema` or `prompt`
      proposals.
@@ -19,7 +23,8 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
      specs in `TOOL_SPECS`). The agent model has no native function calling, so a tool call is
      an answer `{"tool": {"name", "args"}}`; the runtime runs it through `tools.call(...)` and
      sends `{"tool_result": {...}}` back as the next user message. At most `MAX_TOOL_CALLS` (4)
-     calls per turn; a tool not on the preset's list is refused; results are cut at 12,000
+     calls per turn; a tool not on the preset's list is refused here and again by the host
+     (`PRESET_TOOLS` and `mayCallTool` in `@sprint/domain`); results are cut at 12,000
      characters. Changes are still proposals in the answer.
    - **Start tools** (`START_TOOLS`: `try_prompt`, `score_version`, `start_optimiser`) spend
      money and are marked PAID in the prompt. The host runs them at once (no cost limit, no
@@ -33,28 +38,33 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
    - `optimiser`: Proposes targeted single-rule improvements during the GEPA-style optimiser loop.
 3. **Validation**: a handoff goes only to a known specialist with a known intent; anything else
    is ignored and the front desk answers itself. A returned prompt is read with `readStructured`; Improve with AI and the
-   Optimiser are held to wording-only changes with `rewordOnly` (both from `@tsp/domain`).
+   Optimiser are held to wording-only changes with `rewordOnly` (both from `@sprint/domain`).
 
 ## Strict Boundary Rules
 
-- **Stateless and storage-free**: imports `@tsp/contracts` and `@tsp/domain` only (the boundary check enforces it). All project
+- **Stateless and storage-free**: imports `@sprint/contracts` and `@sprint/domain` only (the boundary check enforces it). All project
   state (`task`, `schema`, `history`, `attachedExamples`, `pageView`) arrives via
   `AgentTurnInput.workspace`, anything more comes through the read tools the bff lends, and all
   side effects (messages to append, proposals to save) are returned in `AgentTurnOutput` for the
-  BFF to persist. In a split deployment the tool host is a callback to the bff's API.
+  BFF to persist. In a split deployment the tool host is a call to the workflow's API; a tool
+  call is plain JSON and carries its project, turn and caller.
 - **Model calls**: only through the `llm: AgentModel` parameter. The bff passes the llm-gateway's
   agent model, which keeps calls under the chat endpoint's QPM/TPM and retries busy replies:
   - `llm.chat(messages, {model, json, maxOutputTokens, signal})`: returns plain text.
   - `llm.complete(messages, {model, json, maxOutputTokens, signal})`: returns `{text, thinking, model, stopReason, usage}` including reasoning traces.
   - `llm.chatStream(messages, {model, json, maxOutputTokens, signal})`: yields incremental `LlmStreamChunk` events (`delta`, `thinking`, `done`, `error`).
-  The full catalog of models supported by the runtime is exported from `@tsp/contracts` as
-  `AVAILABLE_LLM_MODELS` (and returned by `llm.models()`):
-  - `'gpt-5.6-terra'` (`reasoning` tier, active): highest-quality reasoning model for complex schema design, prompt drafting, and optimiser reflection.
-  - `'gpt-5.6-luna'` (`balanced` tier, active): balanced quality and latency model for multi-turn agent tasks and evaluation analysis.
-  - `'gpt-5.4'` (`fast` tier, active): fast, lower-cost model suitable for front-desk routing and quick turns.
-  - `'gpt-5.5'` (`balanced` tier, currently inactive on gateway; falls back to `'gpt-5.6-terra'`).
+  The models come from a registry the hosting platform supplies (`llm.models()`, deployment
+  readiness spec 5): each entry has an opaque id, a name, a tier, capabilities (vision, tools,
+  reasoning effort levels, context length, temperature), prices and an active flag. A preset
+  names its model by registry id; an unknown or inactive id falls back in the gateway to an
+  active reasoning model. The stand-in registry (`STAND_IN_MODELS` in `@sprint/platform`) lists
+  `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-5.4` and the inactive `gpt-5.5`.
   Every preset uses `'gpt-5.6-terra'` (decided 2026-11-04: chat needs the smartest model).
   Change a preset's model in `src/presets.ts` only with the product owner's agreement.
 - **English only**: Write all prompts, comments, and tests in English.
-- **Testing**: unit tests in `src/agents.test.ts`; run `npm test` from the repo root.
+- **Testing**: unit tests in `src/agents.test.ts`; run `npm test` from the repo root. The golden
+  fixtures (`fixtures/*.json`, format in `fixtures/README.md`) are plain JSON cases any agent
+  runtime must pass; `src/fixtures.test.ts` replays them here. A change to the prompts, the
+  answer protocol or the guards that changes a case is re-recorded with
+  `scripts/record-fixtures.ts`, and the diff is read before committing.
 - **No framework**: agents are hand-written on purpose; keep it that way unless agreed.

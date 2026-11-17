@@ -1,16 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, EndpointInfo, ExampleSource, FileStore, Identity, LabelCallResult, LlmGatewayContract} from '@tsp/contracts';
-import {createCatalog} from '@tsp/catalog';
-import {createLabeling, memoryLocks} from '@tsp/labeling';
-import {localDocRuntime} from '@tsp/platform';
+import type {AgentRuntimeContract, EndpointInfo, ExampleSource, FileStore, Identity, LabelCallResult, LlmGatewayContract, RequestContext, WorkflowContract} from '@sprint/contracts';
+import {createCatalog} from '@sprint/catalog';
+import {createLabeling, labelingExecutor, memoryLocks} from '@sprint/labeling';
+import {createJobs} from '@sprint/jobs';
+import {localDocRuntime, loopback, memoryJobStore, memorySharedState} from '@sprint/platform';
+import {createWorkflow} from '@sprint/workflow';
 import {createBffApi} from './api.ts';
-import {configureBff} from './services/app.ts';
 
 const endpoint: EndpointInfo = {id: 'A', name: 'Model A', description: '', badge: '', cost: 'Lower', speed: 'Faster', supportsTemperature: true, priceIn: 0, priceOut: 200};
 const structured = (rules = '') => ({taskSummary: 'Label this', features: {video: ['Description'], photo_text: [], metadata: []}, label: {name: 'format', kind: 'single' as const, values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}, ruleGroups: rules ? [{id: 'rg1', title: 'Rules', content: rules}] : [], images: []});
 
-/** A bff with one project: a schema, 4 eval examples with gold labels, and a fake model. */
+/** A bff over a workflow (through the loopback) with one project: a schema, 4 eval examples with gold labels, and a fake model. */
 async function world(prefix: string, identity: Identity = {currentUser: async () => ({id: 'u_1', name: 'Tester'})}) {
   const db = localDocRuntime(prefix);
   const catalog = createCatalog(db);
@@ -18,17 +19,26 @@ async function world(prefix: string, identity: Identity = {currentUser: async ()
     endpoints: () => [endpoint],
     labelingEndpoints: () => [endpoint],
     agentModel: () => ({}),
+    cancel: async () => {},
     label: async (): Promise<LabelCallResult> => ({text: '{"format": "Vlog"}', inputTokens: 0, outputTokens: 150, costUsd: 0.03, endpointId: 'labeling-A', attempts: 1}),
   } as unknown as LlmGatewayContract;
   const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks()});
-  configureBff({catalog, labeling, gateway, agents: {} as AgentRuntimeContract, identity, files: {} as FileStore, examples: {} as ExampleSource, standIns: []});
+  const jobs = createJobs({store: memoryJobStore()});
+  const wf = createWorkflow({catalog, labeling, gateway, files: {} as FileStore, examples: {} as ExampleSource, standIns: [], sharedState: memorySharedState(), jobs: jobs.api});
+  wf.connect({agents: {} as AgentRuntimeContract});
+  for (const e of [labelingExecutor(labeling), ...wf.executors]) jobs.register(e);
+  // Every context the workflow receives, in order.
+  const contexts: RequestContext[] = [];
+  const workflow = new Proxy(loopback(wf.api), {
+    get: (t, k) => (ctx: RequestContext, ...args: unknown[]) => (contexts.push(ctx), (t[k as keyof WorkflowContract] as (...a: unknown[]) => unknown)(ctx, ...args)),
+  });
   const projectId = `pr_${prefix}`;
   await catalog.insert('setup_versions', {id: `sv_${prefix}`, projectId, number: 1, schemaVersion: 1, task: '', schema: {name: 'format', kind: 'single' as const, values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]}, thresholds: null, models: [{endpoint: 'A', maxOutputTokens: 150, temperature: null}], steps: {schema: true, evaluation: true, models: true}, createdAt: '', createdBy: ''});
   await catalog.insert('dataset_snapshots', {id: `ds_${prefix}`, projectId, number: 1, source: 'sample', sourceName: 'test', createdAt: '', counts: {rows: 4, valid: 4, invalid: 0, video: 4, photoText: 0}, split: {eval: 4, test: 0, train: 0}});
   await catalog.insertMany('examples', Array.from({length: 4}, (_, i) => ({id: `ex_${prefix}_${i}`, snapshotId: `ds_${prefix}`, externalId: String(i), type: 'video' as const, title: '', features: {}, split: 'eval' as const, optimiserHalf: i % 2 === 0})));
   for (let i = 0; i < 4; i++) await catalog.insert('gold_labels', {id: `gl_${prefix}_${i}`, projectId, exampleId: `ex_${prefix}_${i}`, schemaVersion: 1, answer: ['Vlog'], source: 'labeled', revealed: false, createdAt: '', createdBy: 'Tester'});
   await catalog.insert('projects', {id: projectId, name: 'p', createdAt: '', createdBy: '', kind: 'prompt_tuning', settingsConfirmed: true, setupVersionId: `sv_${prefix}`, snapshotId: `ds_${prefix}`, approvedNodes: []});
-  return {api: createBffApi(), catalog, projectId};
+  return {api: createBffApi({workflow, identity, appVersion: '9.9.9'}), catalog, projectId, contexts};
 }
 
 async function until(cond: () => Promise<boolean>, what: string) {
@@ -48,19 +58,34 @@ test('contract: a version is created and scored from ids alone, and the same key
   const again = await api.createVersion({...req, idempotencyKey: 'k2', parentId: a.id, structured: structured('Prefer Vlog.'), kind: 'minor'});
   assert.equal(again.parentId, a.id);
 
-  await api.scoreVersion({projectId, promptVersionId: a.id});
+  const started = await api.scoreVersion({projectId, promptVersionId: a.id});
+  assert.equal(started.runIds.length, 1, 'returns once the labeling is queued, with its task');
   await until(async () => ((await api.loadProjectState(projectId))?.reports.length ?? 0) > 0, 'the score');
-  const preds = await api.predictionsFor(a.id, 'A', {endpoint: 'A', maxOutputTokens: 150, temperature: null});
+  const preds = await api.predictionsFor(projectId, a.id, 'A', {endpoint: 'A', maxOutputTokens: 150, temperature: null});
   assert.equal(Object.keys(preds).length, 4);
 });
 
 test('contract: ids of another project are refused', async () => {
   const one = await world('api2');
   const two = await world('api3');
-  // The second world's bff is the configured one; the first project's records are in another store.
+  // Each bff has its own workflow and store: the first project's records are not in the second's.
   await assert.rejects(two.api.scoreVersion({projectId: two.projectId, promptVersionId: 'pv_missing'}), /does not exist/);
   await assert.rejects(two.api.closeProposal({projectId: two.projectId, proposalId: 'ap_missing', decision: 'approved'}), /does not exist/);
   await assert.rejects(two.api.tick({projectId: one.projectId}).then(() => two.api.createVersion({projectId: one.projectId, structured: structured(), parentId: null, madeBy: 'user', change: '', kind: 'major'})), /does not exist/);
+});
+
+test('contract: a call naming a project only reaches records of that project (review G2)', async () => {
+  const {api, projectId} = await world('api-g2');
+  const v = await api.createVersion({projectId, structured: structured(), parentId: null, madeBy: 'user', change: '', kind: 'major'});
+  const {runIds} = await api.scoreVersion({projectId, promptVersionId: v.id});
+  await until(async () => ((await api.loadProjectState(projectId))?.reports.length ?? 0) > 0, 'the score');
+  const other = await api.createProject('Other');
+  const settings = {endpoint: 'A' as const, maxOutputTokens: 150, temperature: null};
+  await assert.rejects(api.predictionsFor(other.id, v.id, 'A', settings), /does not exist/);
+  await assert.rejects(api.exampleMedia(other.id, `ex_api-g2_0`), /does not exist/);
+  assert.equal(await api.exampleMedia(projectId, `ex_api-g2_0`), null, 'no media source here, but the example is the project\'s');
+  await assert.rejects(api.stopRun({projectId: other.id, runId: runIds[0]}), /does not exist/);
+  // The Optimiser's runs: see the Retry test in apps/workflow (this bff has no Optimiser).
 });
 
 test('contract: every response is plain JSON (it survives a round trip unchanged)', async () => {
@@ -72,7 +97,7 @@ test('contract: every response is plain JSON (it survives a round trip unchanged
     getRuntimeInfo: await api.getRuntimeInfo(),
     listProjects: await api.listProjects(),
     loadProjectState: await api.loadProjectState(projectId),
-    predictionsFor: await api.predictionsFor(v.id, 'A', {endpoint: 'A', maxOutputTokens: 150, temperature: null}),
+    predictionsFor: await api.predictionsFor(projectId, v.id, 'A', {endpoint: 'A', maxOutputTokens: 150, temperature: null}),
     mismatches: await api.mismatches(projectId),
     chatHistory: await api.chatHistory(projectId),
     proposals: await api.proposals(projectId),
@@ -102,4 +127,28 @@ test('contract: Sign out is offered only when the platform can end the session (
   assert.deepEqual(JSON.parse(JSON.stringify(info)), info, 'plain JSON');
   await sso.api.signOut();
   assert.equal(out, 1);
+});
+
+test('contract: each call carries a context with its own request id, the signed-in user and the app version', async () => {
+  const {api, projectId, contexts} = await world('ctx1');
+  await api.loadProjectState(projectId);
+  await api.sendUserMessage({projectId, text: '', page: {label: 'x', agent: 'front_desk', intent: 'answer', context: {}}, locale: 'zh'}).catch(() => undefined);
+  assert.equal(contexts.length, 2);
+  assert.notEqual(contexts[0].requestId, contexts[1].requestId);
+  for (const c of contexts) assert.deepEqual([c.user, c.caller, c.appVersion], [{id: 'u_1', name: 'Tester'}, 'bff', '9.9.9']);
+  assert.equal(contexts[1].locale, 'zh', "a message carries the user's language");
+});
+
+test('contract: a failed sign-in check is asked again on the next call; a good one is kept', async () => {
+  let asked = 0;
+  const {api} = await world('ctx2', {
+    currentUser: async () => {
+      if (++asked === 1) throw new Error('not signed in');
+      return {id: 'u_2', name: 'Later'};
+    },
+  });
+  await assert.rejects(api.listProjects(), /not signed in/);
+  assert.deepEqual((await api.getRuntimeInfo()).user, {id: 'u_2', name: 'Later'});
+  await api.listProjects();
+  assert.equal(asked, 2);
 });

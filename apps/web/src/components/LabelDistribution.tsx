@@ -1,6 +1,6 @@
 'use client';
 
-import type {Answer, Schema} from '@tsp/contracts';
+import type {Answer, Schema} from '@sprint/contracts';
 import {Card, Hov} from '@/ui';
 import {t} from '@/i18n';
 

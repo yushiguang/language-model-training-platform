@@ -1,0 +1,144 @@
+{
+  "name": "The front desk hands a prompt change to the Prompt helper, which drafts it",
+  "guards": [
+    "handoffs go only to known specialists, and the join line says who answers",
+    "a draft is a proposal: the turn saves nothing"
+  ],
+  "kind": "turn",
+  "request": {
+    "userText": "Please add value \"News\" to primary_value",
+    "page": {
+      "label": "Prompt Design",
+      "agent": "front_desk",
+      "intent": "answer",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_fixture",
+      "task": "Tag short videos",
+      "prompt": null,
+      "history": [],
+      "pageView": null
+    },
+    "turnId": "turn_fixture",
+    "ctx": {
+      "requestId": "rq_fixture",
+      "user": {
+        "id": "u_fixture",
+        "name": "Fixture user"
+      },
+      "caller": "workflow",
+      "locale": "en"
+    },
+    "locale": "en"
+  },
+  "model": [
+    "{\"handoff\":{\"to\":\"prompt_agent\",\"intent\":\"revise_prompt\"},\"reply\":\"I'll bring in the Prompt helper for that.\"}",
+    "{\"reply\":\"I drafted a prompt from your description: the label primary_value with 4 values, each with a definition, and the input features they need. It is on the page: edit anything, then press Approve at the top right.\",\"prompt\":{\"taskSummary\":\"You are a content analyst for a short-video platform. Read the post and tag it.\",\"features\":{\"video\":[\"Description\",\"OCR_Text\",\"ASR\",\"Creator_Nick_Name\",\"Creator_Bio\"],\"photo_text\":[\"Title\",\"Description\",\"OCR_Text\",\"ASR\",\"Creator_Nick_Name\",\"Creator_Bio\"],\"metadata\":[\"Country_Code\",\"Language\"]},\"label\":{\"name\":\"primary_value\",\"kind\":\"single\",\"values\":[{\"name\":\"Entertainment\",\"definition\":\"fun, emotion or story; nothing usable left afterwards\"},{\"name\":\"Practical\",\"definition\":\"something the viewer can act on\"},{\"name\":\"Discussion\",\"definition\":\"the poster's own added view, inviting replies (a clip with no added comment is not Discussion)\"},{\"name\":\"Ecosystem issue\",\"definition\":\"spam, misleading claims, or selling something without saying it is an ad\"}]},\"ruleGroups\":[],\"images\":[]},\"change\":\"First draft\"}"
+  ],
+  "tools": [],
+  "expected": {
+    "invocations": [
+      {
+        "from": "user",
+        "to": "front_desk",
+        "intent": "answer",
+        "note": ""
+      },
+      {
+        "from": "front_desk",
+        "to": "prompt_agent",
+        "intent": "revise_prompt",
+        "note": "Handed off by the front desk"
+      }
+    ],
+    "messages": [
+      {
+        "role": "event",
+        "agent": null,
+        "event": "join",
+        "text": "Prompt helper joined to answer",
+        "msg": {
+          "key": "{who} joined to answer",
+          "params": {
+            "who": "Prompt helper"
+          }
+        }
+      },
+      {
+        "role": "agent",
+        "agent": "prompt_agent",
+        "text": "I drafted a prompt from your description: the label primary_value with 4 values, each with a definition, and the input features they need. It is on the page: edit anything, then press Approve at the top right."
+      }
+    ],
+    "proposal": {
+      "kind": "prompt",
+      "agent": "prompt_agent",
+      "brief": "Please add value \"News\" to primary_value",
+      "payload": {
+        "structured": {
+          "taskSummary": "You are a content analyst for a short-video platform. Read the post and tag it.",
+          "features": {
+            "video": [
+              "Description",
+              "OCR_Text",
+              "ASR",
+              "Creator_Nick_Name",
+              "Creator_Bio"
+            ],
+            "photo_text": [
+              "Title",
+              "Description",
+              "OCR_Text",
+              "ASR",
+              "Creator_Nick_Name",
+              "Creator_Bio"
+            ],
+            "metadata": [
+              "Country_Code",
+              "Language"
+            ]
+          },
+          "label": {
+            "name": "primary_value",
+            "kind": "single",
+            "values": [
+              {
+                "name": "Entertainment",
+                "definition": "fun, emotion or story; nothing usable left afterwards"
+              },
+              {
+                "name": "Practical",
+                "definition": "something the viewer can act on"
+              },
+              {
+                "name": "Discussion",
+                "definition": "the poster's own added view, inviting replies (a clip with no added comment is not Discussion)"
+              },
+              {
+                "name": "Ecosystem issue",
+                "definition": "spam, misleading claims, or selling something without saying it is an ad"
+              }
+            ]
+          },
+          "ruleGroups": [],
+          "images": []
+        },
+        "change": "First draft",
+        "unmapped": []
+      }
+    },
+    "toolCalls": [],
+    "modelCalls": [
+      {
+        "agent": "front_desk",
+        "model": "gpt-5.6-terra"
+      },
+      {
+        "agent": "prompt_agent",
+        "model": "gpt-5.6-terra"
+      }
+    ],
+    "parseFailures": []
+  }
+}

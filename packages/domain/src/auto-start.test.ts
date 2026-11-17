@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {ProjectState} from '@tsp/contracts';
+import type {ProjectState} from '@sprint/contracts';
 import {autoSpendUsd, dueStarts} from './auto-start.ts';
 
 const version = {id: 'pv_1', template: 'Label {{Title}}', features: {video: [], photo_text: [], metadata: []}, images: [], madeBy: 'user', createdAt: '2026-11-04T00:00:00Z', schemaVersion: 1} as unknown as ProjectState['versions'][number];

@@ -12,6 +12,8 @@
     "apps/labeling",
     "apps/agents",
     "apps/optimiser",
+    "apps/jobs",
+    "apps/workflow",
     "apps/bff",
     "apps/telemetry",
     "apps/web"

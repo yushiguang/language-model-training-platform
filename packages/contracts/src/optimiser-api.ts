@@ -2,7 +2,7 @@ import type {LabelingTask} from './labeling-api.ts';
 import type {ChatEvent, ChatLink, EndpointId, EvalReport, MixUp, Msg, OptimisationRun, ProjectState, PromptVersion, StructuredPrompt} from './types.ts';
 
 /**
- * Contract: the Optimiser service (`@tsp/optimiser`, spec 1.0.0 section 7.2). It owns the
+ * Contract: the Optimiser service (`@sprint/optimiser`, spec 1.0.0 section 7.2). It owns the
  * optimisation loop (GEPA; docs/design/optimiser.md) and the `optimisation_runs` records.
  * Plain JSON in and out; ids, never records.
  */
@@ -19,14 +19,17 @@ export interface StartRunRequest {
 
 export interface OptimiserContract {
   /**
-   * Starts a run, or goes on with the project's open (running or paused) run. Resolves when the
-   * run ends; null when another runner already holds this project's run.
+   * Saves a new run, or returns the project's open (running or paused) run. Does not run it: the
+   * caller queues an `optimiser.run` job, whose executor calls `execute`.
    */
-  startRun(req: StartRunRequest): Promise<OptimisationRun | null>;
+  startRun(req: StartRunRequest): Promise<OptimisationRun>;
+  /**
+   * Runs a saved run, or goes on from the step a failed or paused run stopped at. Resolves when the
+   * run ends; null when another runner already works on it.
+   */
+  execute(runId: string): Promise<OptimisationRun | null>;
   /** The user's Stop: ends the run and the labeling it is doing. */
   stopRun(runId: string): Promise<void>;
-  /** Goes on from the step a failed or paused run stopped at. Resolves when the run ends. */
-  retryRun(runId: string): Promise<void>;
   getRun(runId: string): Promise<OptimisationRun | null>;
   /** A project's runs, newest first. */
   listRuns(projectId: string): Promise<OptimisationRun[]>;

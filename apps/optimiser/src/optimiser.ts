@@ -1,6 +1,6 @@
-import type {AgentRuntimeContract, Answer, CatalogContract, EndpointId, Example, ExampleBrief, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@tsp/contracts';
-import {NO_TELEMETRY} from '@tsp/contracts';
-import {checkStructured, msg, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withComments, wrongExamples, type PoolEntry} from '@tsp/domain';
+import type {AgentRuntimeContract, Answer, CatalogContract, EndpointId, Example, ExampleBrief, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@sprint/contracts';
+import {NO_TELEMETRY} from '@sprint/contracts';
+import {checkStructured, msg, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withComments, wrongExamples, type PoolEntry} from '@sprint/domain';
 
 /**
  * The Optimiser (GEPA, ported to TypeScript; docs/design/optimiser.md). Runs from
@@ -47,8 +47,8 @@ export interface OptimiserDeps {
   /** Keeps a second tab from running the same run; without it, only this runner is covered. */
   locks?: LockPort;
   telemetry?: TelemetryPort;
-  /** Called after every write, so open pages read again. */
-  onChange?: () => void;
+  /** Called after every write, with the run's project, so open pages read again. */
+  onChange?: (projectId: string) => void;
   /** The random picks (parent, dry-run examples). Tests pass a fixed one. */
   random?: () => number;
 }
@@ -137,7 +137,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
   const {catalog, labeling, agents, host} = deps;
   const locks = deps.locks ?? memoryLocks();
   const tm = deps.telemetry ?? NO_TELEMETRY;
-  const onChange = deps.onChange ?? (() => {});
+  const onChange = deps.onChange ?? ((_projectId: string) => {});
   const random = () => (deps.random ?? Math.random)();
   /** Runs this runner is working on, and whether it is starting one. */
   const active = new Map<string, {ctrl: AbortController; projectId: string}>();
@@ -200,7 +200,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       Object.assign(run, extra);
       const {id: _id, ...rest} = run;
       await catalog.patch('optimisation_runs', run.id, rest);
-      onChange();
+      onChange(run.projectId);
     };
     await save();
     tm.event('optimiser_started', {slot: endpoint, trigger: run.auto ? 'auto' : 'user', resumed: !!opts.resumed, max_rounds: run.maxRounds});
@@ -217,7 +217,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
         } catch (e) {
           if (signal.aborted || isAbort(e)) throw aborted();
           last = e;
-          tm.counter('tsp_optimiser_step_failures_total', {step: name});
+          tm.counter('sprint_optimiser_step_failures_total', {step: name});
         }
       }
       const what = `${STEP_NAME[name]}${version ? ` ${versionLabel(version)}` : ''}`;
@@ -360,6 +360,8 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
               agents.reflectPrompt({
                 projectId,
                 requestId,
+                // The Optimiser's own context: its tool calls run as the Optimiser, not as a person.
+                ctx: {requestId: requestId ?? newId('rq'), user: {id: 'optimiser', name: 'Optimiser'}, caller: 'optimiser'},
                 mode: other ? 'merge' : 'change',
                 prompt: parent.structured,
                 triedChanges: run.history.filter(h => h.parentId === parent.id && h.change).map(h => h.change),
@@ -389,7 +391,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
           });
           if (verdict !== 'ok') {
             wasted++;
-            tm.counter('tsp_optimiser_candidates_total', {slot: endpoint, result: verdict});
+            tm.counter('sprint_optimiser_candidates_total', {slot: endpoint, result: verdict});
             await putRound({...round, outcome: verdict, step: undefined});
             continue;
           }
@@ -426,7 +428,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
           const {better: _better, tied, regressed, ...dryRun} = result;
           if (regressed) {
             wasted++;
-            tm.counter('tsp_optimiser_candidates_total', {slot: endpoint, result: 'dropped'});
+            tm.counter('sprint_optimiser_candidates_total', {slot: endpoint, result: 'dropped'});
             await putRound({...round, outcome: 'dropped', dryRun, step: undefined});
             continue;
           }
@@ -458,7 +460,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
         if (gain) wasted = 0;
         else wasted++;
         keptSinceMerge = round.kind === 'merge' ? 0 : keptSinceMerge + 1;
-        tm.counter('tsp_optimiser_candidates_total', {slot: endpoint, result: gain ? 'kept' : 'no_gain'});
+        tm.counter('sprint_optimiser_candidates_total', {slot: endpoint, result: gain ? 'kept' : 'no_gain'});
         await putRound({...round, outcome: 'kept', score: s.report.metrics.macroF1, passed: s.passed, confirm, gain, step: undefined});
         if (s.passed && confirm?.passed) {
           passedVersion = cand;
@@ -482,7 +484,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       await save({finishedAt: nowIso(), step: null, stepStartedAt: null, stepVersionId: null});
       const outcome = run.state === 'done' ? (run.stopReason ?? 'max_rounds') : run.state;
       const kept = run.history.filter(h => h.outcome === 'kept');
-      tm.counter('tsp_optimiser_runs_total', {slot: endpoint, outcome});
+      tm.counter('sprint_optimiser_runs_total', {slot: endpoint, outcome});
       if (run.state === 'stopped') tm.event('optimiser_stopped_by_user', {slot: endpoint, candidates: run.candidates, cost_usd: run.costUsd});
       tm.event('optimiser_ended', {
         slot: endpoint,
@@ -501,15 +503,22 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
     async startRun({projectId, endpoint, maxRounds, startVersionId, auto}) {
       const cfg = systemConfig().optimiser;
       const rounds = Math.max(1, Math.min(cfg.maxRoundsCap, Math.round(maxRounds) || cfg.defaultMaxRounds));
+      const open = (await catalog.find('optimisation_runs', {projectId}, 'startedAt desc')).find(o => o.state === 'running' || o.state === 'paused');
+      if (open) return open;
+      const run = await newRun(projectId, endpoint, rounds, {auto, startVersionId});
+      if (!auto) await host.postEvent({projectId, event: 'start', actor: 'user', what: msg('started the Optimiser for up to {rounds} rounds', {rounds}), link: {path: '/prompt'}});
+      onChange(projectId);
+      return run;
+    },
+
+    async execute(runId) {
+      const run = await catalog.get('optimisation_runs', runId);
+      if (!run || !['failed', 'paused', 'running'].includes(run.state) || active.has(runId)) return null;
+      // A new run has no rounds yet; anything else goes on from where it stopped.
+      const resumed = run.state !== 'running' || run.round > 0 || run.history.length > 0;
       const out = await once(() =>
         // The lock covers every tab of this browser: a second tab never runs the same work twice.
-        locks.run(optimiserLock(projectId, endpoint), async () => {
-          const open = (await catalog.find('optimisation_runs', {projectId}, 'startedAt desc')).find(o => o.state === 'running' || o.state === 'paused');
-          if (open) return runLoop(open, {resumed: true});
-          const run = await newRun(projectId, endpoint, rounds, {auto, startVersionId});
-          if (!auto) await host.postEvent({projectId, event: 'start', actor: 'user', what: msg('started the Optimiser for up to {rounds} rounds', {rounds}), link: {path: '/prompt'}});
-          return runLoop(run);
-        }),
+        locks.run(optimiserLock(run.projectId, run.endpoint), () => runLoop(run, {resumed})),
       );
       return out ?? null;
     },
@@ -523,12 +532,6 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       if (!run) return;
       for (const t of await labeling.listTasks(run.projectId)) if (t.purpose === 'optimiser' && t.state === 'running') await labeling.stopTask(t.id);
       await host.postEvent({projectId: run.projectId, event: 'stop', actor: 'user', what: msg('stopped the Optimiser'), link: {path: '/prompt'}});
-    },
-
-    async retryRun(runId) {
-      const run = await catalog.get('optimisation_runs', runId);
-      if (!run || !['failed', 'paused', 'running'].includes(run.state) || active.has(runId)) return;
-      await once(() => locks.run(optimiserLock(run.projectId, run.endpoint), () => runLoop(run, {resumed: true})));
     },
 
     getRun: runId => catalog.get('optimisation_runs', runId),

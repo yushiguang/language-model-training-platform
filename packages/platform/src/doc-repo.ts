@@ -6,8 +6,8 @@ import {
   type DocRuntime,
   type DocSubscriptionHandlers,
   type DocUpdatePatch,
-} from '@tsp/contracts';
-import {newId} from '@tsp/domain';
+} from '@sprint/contracts';
+import {newId} from '@sprint/domain';
 
 export {DocFieldValue, DocFilter};
 
@@ -217,6 +217,27 @@ export class DocRepo {
     }
   }
 
+  /**
+   * Deletes every record matching `where`, in batch requests of `chunk` deletes (deployment
+   * readiness spec, 3: deleting a project never waits on one request per record). Not atomic: a
+   * failed batch throws, and running it again deletes what is left. Returns how many went.
+   */
+  async deleteWhere(kind: Kind, where: Record<string, unknown> | DocFilterExpression, chunk = 200): Promise<number> {
+    const docs = await this.db.collection<StoredRecord<{id: string}>>(kind).find(mapWhereInput(where));
+    for (let i = 0; i < docs.length; i += chunk) {
+      const batch = this.db.batch();
+      for (const d of docs.slice(i, i + chunk)) batch.delete(kind, d.docId);
+      const {results} = await batch.commit();
+      const failed = results.filter(r => r.status === 'error');
+      if (failed.length) throw new Error(`${failed.length} of ${Math.min(chunk, docs.length - i)} deletes from ${kind} failed`);
+    }
+    for (const d of docs) {
+      const appId = (d.data as {_appId?: string; id?: string})._appId ?? (d.data as {id?: string}).id;
+      if (appId) this.docIds.delete(this.cacheKey(kind, appId));
+    }
+    return docs.length;
+  }
+
   /** Partial updates of many records in one batch request. Not atomic: check the results. */
   async patchMany<T extends {id: string}>(kind: Kind, patches: {id: string; patch: DocUpdatePatch<T>}[]): Promise<void> {
     if (!patches.length) return;
@@ -233,4 +254,4 @@ export class DocRepo {
   }
 }
 
-export {newId} from '@tsp/domain';
+export {newId} from '@sprint/domain';

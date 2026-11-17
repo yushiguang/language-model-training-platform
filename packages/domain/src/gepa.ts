@@ -1,5 +1,5 @@
 import {systemConfig} from './config.ts';
-import type {Answer, DryRunResult, Example, ExampleBrief, Msg, OptimisationRun, OptimiserRound, Prediction, PromptVersion} from '@tsp/contracts';
+import type {Answer, DryRunResult, Example, ExampleBrief, Msg, OptimisationRun, OptimiserRound, Prediction, PromptVersion} from '@sprint/contracts';
 import {msg, msgText} from './i18n.ts';
 import {featureItems, featureText, placeholderKeys} from './template.ts';
 import {isImageKey} from './catalogue.ts';
