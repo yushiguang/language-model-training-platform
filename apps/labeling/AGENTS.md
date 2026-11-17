@@ -7,6 +7,9 @@ example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts
 - `labeling.ts`: `createLabeling({db, catalog, gateway, locks, resolveUrl, onChange, telemetry})`.
   `resolveUrl` may return a Promise (a URL signed per call); `toMessages` resolves every image of
   a prompt at once before the model call.
+- `executor.ts`: `labelingExecutor(labeling)`, the `labeling.runTask` job: runs (or with `retry`,
+  retries the failed examples of) one task; a cancel is Stop. `deleteProject` removes answers and
+  tasks in batches (`DocRepo.deleteWhere`).
   - `runTask` takes the task's lock, rebuilds counters from saved predictions, and runs `parallel`
     (default 4) workers. Each example runs under a lock on its prediction id: if the prediction is
     saved by then (another task for the same version, model and settings), it is reused and not

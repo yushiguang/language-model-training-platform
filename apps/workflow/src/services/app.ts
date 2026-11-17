@@ -1,4 +1,4 @@
-import {NO_TELEMETRY, type TicketPort, type AgentRuntimeContract, type AgentTurnProgress, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SamplingTask, type SharedStatePort, type TelemetryPort} from '@sprint/contracts';
+import {NO_TELEMETRY, type TicketPort, type AgentRuntimeContract, type AgentTurnProgress, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@sprint/contracts';
 import {newId} from '@sprint/domain';
 
 /**
@@ -36,6 +36,17 @@ export interface WorkflowDeps {
    * answers, problem-report drafts), with TTL expiry. `@sprint/platform` has an in-memory stand-in.
    */
   sharedState: SharedStatePort;
+  /**
+   * Where background work goes (`@sprint/jobs`): scoring, reports, sampling, Optimiser runs and
+   * project deletion are jobs; the workflow only enqueues and reads them back.
+   */
+  jobs: JobsContract;
+  /**
+   * Whether the pages' `tick` checks what should run (default true: the browser build). A server
+   * deployment sets false and calls `sweep()` from a cron job instead, so a page never becomes a
+   * second driver (review G8).
+   */
+  tickFromPages?: boolean;
 }
 
 /** Built after the workflow, since they call back into it (`connect`). */
@@ -59,13 +70,11 @@ export interface Instance extends WorkflowDeps, Connected {
   once<T>(key: string, fn: () => Promise<T>): Promise<T | null>;
   busy(key: string): boolean;
   /**
-   * Work that holds something that cannot be serialised (a callback, an AbortController), so it
-   * stays with the instance that started it. The job module (spec 3) and the agent runtime
-   * (spec 6) take these over.
+   * State that stays with this instance: running turns' progress handlers (until the agent service,
+   * spec 6) and two caches of facts that can be worked out again.
    */
   local: {
     turnProgress: Map<string, AgentTurnProgress>;
-    sampling: Map<string, {task: SamplingTask; ctrl: AbortController}>;
     /** Reports that cannot be built from saved answers, as "versionId|endpoint|contextId" (R5-4). */
     cannotBuild: Set<string>;
     /** Saved answers on the whole eval set, by version, model and settings (R5-5). */
@@ -112,7 +121,7 @@ export function createInstance(deps: WorkflowDeps): Instance & {connect(c: Conne
       }
     },
     busy: key => starting.has(key),
-    local: {turnProgress: new Map(), sampling: new Map(), cannotBuild: new Set(), fullAnswers: new Map()},
+    local: {turnProgress: new Map(), cannotBuild: new Set(), fullAnswers: new Map()},
     // The scope reads the instance live (not a copy), so services connected later are seen.
     scope: ctx => Object.assign(Object.create(inst) as Scope, {ctx, user: async () => ctx.user}),
     connect(c) {

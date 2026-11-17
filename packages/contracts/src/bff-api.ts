@@ -24,6 +24,7 @@ import type {
   RemovalReason,
   Schema,
   ProjectSettings,
+  SamplingTask,
   StructuredPrompt,
 } from './types.ts';
 import type {ExampleMedia, FeatureInfo} from './platform-api.ts';
@@ -182,6 +183,17 @@ export interface SaveSettingsRequest extends ProjectSettings {
   projectId: string;
 }
 
+/** A run (a labeling task or an Optimiser run) of a project: the project id lets every call check ownership (review G2). */
+export interface RunRequest {
+  projectId: string;
+  runId: string;
+}
+
+/** What a start created: the labeling tasks (runs) it queued, one per model. */
+export interface StartedRuns {
+  runIds: string[];
+}
+
 export interface DeleteProjectRequest {
   projectId: string;
 }
@@ -218,8 +230,9 @@ export interface BffContract {
   tick(req: TickRequest): Promise<void>;
 
   /**
-   * Deletes a project for good: stops its sampling, labeling and Optimiser runs first, then removes
-   * every record it owns (dataset, gold labels, versions, answers, reports, runs, chat).
+   * Deletes a project for good. Returns once accepted: the project is gone from every read at
+   * once, and a `project.delete` job stops its sampling, labeling and Optimiser runs, then removes
+   * every record it owns (dataset, gold labels, versions, answers, reports, runs, chat) in bulk.
    */
   deleteProject(req: DeleteProjectRequest): Promise<void>;
   /** Renames a project (from Project Settings); returns the name as saved. */
@@ -231,8 +244,12 @@ export interface BffContract {
   // Dataset & Gold labels
   getSamplePoolSize(): Promise<number>;
   /** The media of one example, or null (no media source, or none for this example). */
-  exampleMedia(exampleId: string): Promise<ExampleMedia | null>;
-  startSampleDataset(projectId: string, count: number): Promise<DatasetSnapshot | null>;
+  exampleMedia(projectId: string, exampleId: string): Promise<ExampleMedia | null>;
+  /**
+   * Samples a new eval dataset. Returns once queued (a `dataset.sample` job): progress is read
+   * back as `ProjectState.samplingTask`, and the dataset appears when it is saved.
+   */
+  startSampleDataset(projectId: string, count: number): Promise<SamplingTask>;
   stopSampleDataset(projectId: string): Promise<void>;
   uploadDatasetText(projectId: string, name: string, text: string): Promise<DatasetUploadResult>;
   saveGold(projectId: string, exampleId: string, schemaVersion: number, answer: Answer, revealed: boolean, source?: GoldLabel['source']): Promise<GoldLabel>;
@@ -241,8 +258,11 @@ export interface BffContract {
   /** Examples where versions disagree with the gold label, for one version (left out: the best). */
   mismatches(projectId: string, promptVersionId?: string | null): Promise<MismatchList>;
   reviewGold(req: ReviewGoldRequest): Promise<void>;
-  /** Adds new, unseen examples to the eval dataset at random; existing examples and gold labels stay. */
-  appendSample(req: AppendSampleRequest): Promise<number>;
+  /**
+   * Adds new, unseen examples to the eval dataset at random; existing examples and gold labels
+   * stay. Returns once queued, like `startSampleDataset`.
+   */
+  appendSample(req: AppendSampleRequest): Promise<SamplingTask>;
   /** Adds the examples of an uploaded file to the eval dataset; ids already in it are skipped. */
   appendUpload(projectId: string, name: string, text: string): Promise<DatasetUploadResult & {added?: number; duplicates?: number}>;
   /** Removes examples (soft delete, each with a `DatasetRemoval`). */
@@ -262,20 +282,27 @@ export interface BffContract {
    * change to the label signature (field or value names, kind, bounds) bumps the schema version.
    */
   createVersion(req: CreateVersionRequest): Promise<PromptVersion>;
-  /** A click on Score, Resume or Rerun: always starts (the user's start). */
-  scoreVersion(req: ScoreVersionRequest): Promise<void>;
-  stopRun(runId: string): Promise<void>;
-  /** Auto Optimise: the user starts a run of up to `maxRounds` changes on the project's model. */
-  startOptimiser(req: StartOptimiserRequest): Promise<void>;
-  stopOptimiser(runId: string): Promise<void>;
-  /** Retry on a Failed (or paused) run: resumes from the step that failed. */
-  retryOptimiser(runId: string): Promise<void>;
+  /**
+   * A click on Score, Resume or Rerun: always starts (the user's start). Returns once the labeling
+   * is queued (a `labeling.runTask` job per model, then `report.build`), with the tasks' ids;
+   * progress and the report are read back through `loadProjectState`.
+   */
+  scoreVersion(req: ScoreVersionRequest): Promise<StartedRuns>;
+  stopRun(req: RunRequest): Promise<void>;
+  /**
+   * Auto Optimise: the user starts a run of up to `maxRounds` changes on the project's model (or
+   * goes on with the open one). Returns once queued (an `optimiser.run` job), with the run's id.
+   */
+  startOptimiser(req: StartOptimiserRequest): Promise<{runId: string}>;
+  stopOptimiser(req: RunRequest): Promise<void>;
+  /** Retry on a Failed (or paused) run: queues it again; it resumes from the step that failed. */
+  retryOptimiser(req: RunRequest): Promise<{runId: string}>;
   /** Improve with AI: the Prompt helper drafts changes to a version and puts them in the editor (no labeling). */
   improveWithAi(projectId: string, promptVersionId: string, locale?: Locale): Promise<void>;
   /** Feature descriptions by key, for hover text (empty without a source). */
   featureInfo(keys: string[]): Promise<Record<string, FeatureInfo>>;
   /** A version's saved answers on one model, by example id. */
-  predictionsFor(promptVersionId: string, endpoint: EndpointId, settings: ModelSettings): Promise<Record<string, Prediction>>;
+  predictionsFor(projectId: string, promptVersionId: string, endpoint: EndpointId, settings: ModelSettings): Promise<Record<string, Prediction>>;
 
   // Assistant & proposals
   chatHistory(projectId: string): Promise<ChatMessage[]>;

@@ -414,7 +414,7 @@ function OptimiserPanel({state, run, box, onShow}: {state: ProjectState; run: Op
     ) : (
       <Badge text={run.state === 'stopped' ? t('Stopped') : t('Paused')} icon={false} />
     );
-  const act = over ? undefined : run.state === 'running' ? <Button label={t('Stop')} icon="stop" onClick={() => stopOptimiser(run.id)} /> : <Button label={run.state === 'failed' ? t('Retry') : t('Resume')} kind="primary" onClick={() => void retryOptimiser(run.id)} />;
+  const act = over ? undefined : run.state === 'running' ? <Button label={t('Stop')} icon="stop" onClick={() => stopOptimiser({projectId: run.projectId, runId: run.id})} /> : <Button label={run.state === 'failed' ? t('Retry') : t('Resume')} kind="primary" onClick={() => void retryOptimiser({projectId: run.projectId, runId: run.id})} />;
   const half = state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && !!state.gold[e.id]).length;
   const task = run.stepVersionId ? state.runs.find(r => r.promptVersionId === run.stepVersionId && r.endpoint === run.endpoint && r.state === 'running') : undefined;
   // Best so far: the highest score among the start version and the changes this run kept.
@@ -601,7 +601,7 @@ function RunningCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
           {t('Created {time}', {time: dateTime(v.createdAt)})}
         </span>
         <div style={{marginLeft: 'auto'}}>
-          <Button label={t('Stop')} icon="stop" onClick={() => Promise.all(runs.map(r => stopRun(r.id)))} />
+          <Button label={t('Stop')} icon="stop" onClick={() => Promise.all(runs.map(r => stopRun({projectId: r.projectId, runId: r.id})))} />
         </div>
       </div>
       <Progress done={done} total={total} />
@@ -633,7 +633,7 @@ function NoGoldCard({state, v, box}: {state: ProjectState; v: PromptVersion; box
     if (!settings) return;
     const evalIds = new Set(state.examples.filter(e => e.split === 'eval').map(e => e.id));
     let live = true;
-    void predictionsFor(v.id, run.endpoint, settings).then(m => live && setAnswers(Object.values(m).filter(p => evalIds.has(p.exampleId)).map(p => p.answer)));
+    void predictionsFor(v.projectId, v.id, run.endpoint, settings).then(m => live && setAnswers(Object.values(m).filter(p => evalIds.has(p.exampleId)).map(p => p.answer)));
     return () => void (live = false);
   }, [v.id, run.endpoint]); // eslint-disable-line react-hooks/exhaustive-deps
   const filtered = run.filtered ?? 0;

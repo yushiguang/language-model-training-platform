@@ -501,15 +501,22 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
     async startRun({projectId, endpoint, maxRounds, startVersionId, auto}) {
       const cfg = systemConfig().optimiser;
       const rounds = Math.max(1, Math.min(cfg.maxRoundsCap, Math.round(maxRounds) || cfg.defaultMaxRounds));
+      const open = (await catalog.find('optimisation_runs', {projectId}, 'startedAt desc')).find(o => o.state === 'running' || o.state === 'paused');
+      if (open) return open;
+      const run = await newRun(projectId, endpoint, rounds, {auto, startVersionId});
+      if (!auto) await host.postEvent({projectId, event: 'start', actor: 'user', what: msg('started the Optimiser for up to {rounds} rounds', {rounds}), link: {path: '/prompt'}});
+      onChange();
+      return run;
+    },
+
+    async execute(runId) {
+      const run = await catalog.get('optimisation_runs', runId);
+      if (!run || !['failed', 'paused', 'running'].includes(run.state) || active.has(runId)) return null;
+      // A new run has no rounds yet; anything else goes on from where it stopped.
+      const resumed = run.state !== 'running' || run.round > 0 || run.history.length > 0;
       const out = await once(() =>
         // The lock covers every tab of this browser: a second tab never runs the same work twice.
-        locks.run(optimiserLock(projectId, endpoint), async () => {
-          const open = (await catalog.find('optimisation_runs', {projectId}, 'startedAt desc')).find(o => o.state === 'running' || o.state === 'paused');
-          if (open) return runLoop(open, {resumed: true});
-          const run = await newRun(projectId, endpoint, rounds, {auto, startVersionId});
-          if (!auto) await host.postEvent({projectId, event: 'start', actor: 'user', what: msg('started the Optimiser for up to {rounds} rounds', {rounds}), link: {path: '/prompt'}});
-          return runLoop(run);
-        }),
+        locks.run(optimiserLock(run.projectId, run.endpoint), () => runLoop(run, {resumed})),
       );
       return out ?? null;
     },
@@ -523,12 +530,6 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       if (!run) return;
       for (const t of await labeling.listTasks(run.projectId)) if (t.purpose === 'optimiser' && t.state === 'running') await labeling.stopTask(t.id);
       await host.postEvent({projectId: run.projectId, event: 'stop', actor: 'user', what: msg('stopped the Optimiser'), link: {path: '/prompt'}});
-    },
-
-    async retryRun(runId) {
-      const run = await catalog.get('optimisation_runs', runId);
-      if (!run || !['failed', 'paused', 'running'].includes(run.state) || active.has(runId)) return;
-      await once(() => locks.run(optimiserLock(run.projectId, run.endpoint), () => runLoop(run, {resumed: true})));
     },
 
     getRun: runId => catalog.get('optimisation_runs', runId),

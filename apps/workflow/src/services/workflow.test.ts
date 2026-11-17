@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {AgentRuntimeContract, ClientDiagnostics, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission} from '@sprint/contracts';
 import {createCatalog} from '@sprint/catalog';
-import {createLabeling, memoryLocks} from '@sprint/labeling';
-import {createOptimiser} from '@sprint/optimiser';
-import {DocRepo, localDocRuntime, memorySharedState} from '@sprint/platform';
+import {createLabeling, labelingExecutor, memoryLocks} from '@sprint/labeling';
+import {createOptimiser, optimiserExecutor} from '@sprint/optimiser';
+import {DocRepo, localDocRuntime, memoryJobStore, memorySharedState} from '@sprint/platform';
+import {createJobs} from '@sprint/jobs';
 import {createInstance, systemContext} from './app.ts';
 import {optimiserHost} from './optimiser-host.ts';
+import {workflowExecutors} from './executors.ts';
 import {agentProgress} from './agents.ts';
 import {loadProjectState, renameProject} from './projects.ts';
 import {reportProblem} from './problems.ts';
@@ -63,7 +65,10 @@ async function world(prefix: string, opts: WorldOpts = {}) {
   } as unknown as LlmGatewayContract;
   const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks()});
   const agents = opts.agents ?? ({} as AgentRuntimeContract);
+  // Background work runs through the job module, in this process, as in the browser build.
+  const jobs = createJobs({store: memoryJobStore()});
   const inst = createInstance({
+    jobs: jobs.api,
     catalog,
     labeling,
     gateway,
@@ -76,6 +81,7 @@ async function world(prefix: string, opts: WorldOpts = {}) {
   });
   const optimiser = createOptimiser({catalog, labeling, agents, host: optimiserHost(inst.scope(systemContext('optimiser'))), onChange: inst.emitChange, random: () => optimiserRandom()});
   inst.connect({agents, optimiser});
+  for (const e of [labelingExecutor(labeling), optimiserExecutor(optimiser), ...workflowExecutors(inst)]) jobs.register(e);
   /** The scope the tests act in: one signed-in user. */
   const ws = inst.scope({requestId: 'rq_test', user: {id: 'u_1', name: 'Tester'}, caller: 'test'});
   const projectId = `pr_${prefix}`;
@@ -93,7 +99,7 @@ async function world(prefix: string, opts: WorldOpts = {}) {
     return catalog.createPromptVersion({projectId, structured, template: compilePrompt(structured), features: structured.features, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
   };
   const state = async () => (await loadProjectState(ws, projectId))!;
-  return {db, catalog, labeling, projectId, calls, seen, newVersion, state, inst, ws};
+  return {db, catalog, labeling, projectId, calls, seen, newVersion, state, inst, ws, jobs};
 }
 
 async function until(cond: () => Promise<boolean>, what: string) {
@@ -238,8 +244,11 @@ test('Delete project removes its records everywhere and leaves other projects al
   const other = await createProject(w.ws, 'Other');
   await createVersion(w.ws, other.id, {structured: sp(), parent: null, madeBy: 'user', change: '', kind: 'major'});
   await deleteProject(w.ws, w.projectId);
+  // Accepted: the project is gone from every read at once; its records go in the background.
   assert.equal(await loadProjectState(w.ws, w.projectId), null);
   assert.deepEqual((await listProjects(w.ws)).map(p => p.id), [other.id]);
+  await w.jobs.idle();
+  assert.equal(await w.catalog.get('projects', w.projectId), null);
   for (const kind of ['prompt_versions', 'eval_reports', 'gold_labels', 'chat_messages', 'setup_versions'] as const) assert.equal((await w.catalog.find(kind, {projectId: w.projectId})).length, 0, kind);
   assert.equal((await w.catalog.find('examples', {snapshotId: 'ds_b11'})).length, 0);
   assert.equal((await w.labeling.listTasks(w.projectId)).length, 0);
@@ -315,6 +324,7 @@ test('Auto Optimise: dry run, full labeling, stops when a version passes; versio
   await w.newVersion();
   const {startOptimiser} = await import('./work.ts');
   await startOptimiser(w.ws, w.projectId, 10);
+  await w.jobs.idle();
   const s = await w.state();
   const run = s.optimisation[0];
   assert.equal(run.state, 'done');
@@ -340,6 +350,7 @@ test('Auto Optimise: a tie in the dry run goes on to full labeling; 3 with no ga
   await w.newVersion();
   const {startOptimiser} = await import('./work.ts');
   await startOptimiser(w.ws, w.projectId, 10);
+  await w.jobs.idle();
   const s = await w.state();
   const run = s.optimisation[0];
   assert.equal(run.stopReason, 'no_new_ideas');
@@ -361,6 +372,7 @@ test('Auto Optimise: a change that scores lower in the dry run is dropped, unlab
   await w.newVersion();
   const {startOptimiser} = await import('./work.ts');
   await startOptimiser(w.ws, w.projectId, 10);
+  await w.jobs.idle();
   const s = await w.state();
   const run = s.optimisation[0];
   assert.equal(run.stopReason, 'no_new_ideas');
@@ -375,11 +387,17 @@ test('Auto Optimise: a step that fails 3 times fails the run with the step named
   await w.newVersion();
   const {startOptimiser, retryOptimiser} = await import('./work.ts');
   await startOptimiser(w.ws, w.projectId, 10);
+  await w.jobs.idle();
   let run = (await w.state()).optimisation[0];
   assert.equal(run.state, 'failed');
   assert.equal(run.error, 'Writing a change to v1 failed after 3 tries: boom');
   assert.deepEqual(run.history.map(h => [h.outcome, h.step]), [['failed', 'reflect']]);
-  await retryOptimiser(w.ws, run.id);
+  // Another project's id reaches no run of this one (review G2).
+  const {stopOptimiser} = await import('./work.ts');
+  await assert.rejects(retryOptimiser(w.ws, 'pr_other', run.id), /does not exist/);
+  await assert.rejects(stopOptimiser(w.ws, 'pr_other', run.id), /does not exist/);
+  await retryOptimiser(w.ws, w.projectId, run.id);
+  await w.jobs.idle();
   run = (await w.state()).optimisation[0];
   assert.equal(run.state, 'done');
   assert.equal(run.stopReason, 'passes');
@@ -391,6 +409,7 @@ test('Auto Optimise: the round limit ends the run', async () => {
   await w.newVersion();
   const {startOptimiser} = await import('./work.ts');
   await startOptimiser(w.ws, w.projectId, 1);
+  await w.jobs.idle();
   const run = (await w.state()).optimisation[0];
   assert.equal(run.stopReason, 'max_rounds');
   assert.equal(run.round, 1);
@@ -406,6 +425,7 @@ test('Auto Optimise starts from the chosen version, and the helper reads wrong e
   await w.newVersion();
   const {startOptimiser} = await import('./work.ts');
   await startOptimiser(w.ws, w.projectId, 1, v1.id);
+  await w.jobs.idle();
   const run = (await w.state()).optimisation[0];
   assert.equal(run.startVersionId, v1.id);
   assert.equal(run.history[0].parentId, v1.id);
@@ -423,6 +443,7 @@ test('Auto Optimise: a pass is confirmed by labeling the held-out half again bef
   await w.newVersion();
   const {startOptimiser} = await import('./work.ts');
   await startOptimiser(w.ws, w.projectId, 10);
+  await w.jobs.idle();
   const run = (await w.state()).optimisation[0];
   assert.equal(run.stopReason, 'passes');
   assert.deepEqual(run.history.at(-1)?.confirm, {score: 1, passed: true});
@@ -450,6 +471,7 @@ test('Auto Optimise: a pass that the second labeling does not confirm does not e
   await w.newVersion();
   const {startOptimiser} = await import('./work.ts');
   await startOptimiser(w.ws, w.projectId, 3);
+  await w.jobs.idle();
   const s = await w.state();
   const run = s.optimisation[0];
   assert.notEqual(run.stopReason, 'passes');
@@ -642,6 +664,7 @@ test("Auto Optimise: the pool holds the user's other scored versions too, and th
   optimiserRandom = () => 0.99; // the last version of the front
   try {
     await startOptimiser(w.ws, w.projectId, 2, v1.id);
+    await w.jobs.idle();
   } finally {
     optimiserRandom = () => 0;
   }
@@ -835,10 +858,11 @@ test('problem report (1.1.0): without a ticket port the helper is told to send t
   assert.match(res.error, /cannot be sent/);
 });
 
-test('sampling: the progress stays on until the dataset is saved; a save that fails twice is skipped and counted apart, and the halves stay even', async () => {
+test('sampling: a job whose progress stays on until the dataset is saved; a save that fails twice is skipped and counted apart, and the halves stay even', async () => {
   const w = await world('b-sample', {gold: null});
   const {startSampleDataset, getSamplingTask, appendSample} = await import('./dataset.ts');
-  const app = w.ws;
+  // The job runs in a scope of its own: the fakes go on the instance every scope reads.
+  const app = w.inst;
   const raws = Array.from({length: 10}, (_, i) => ({externalId: `s${i}`, type: 'video' as const, title: '', features: {}}));
   const tries = new Map<string, number>();
   const during: (boolean | undefined)[] = [];
@@ -849,7 +873,7 @@ test('sampling: the progress stays on until the dataset is saved; a save that fa
     catalog: Object.assign(Object.create(app.catalog), {
       insert: async (kind: string, rec: {externalId: string}) => {
         if (kind === 'examples') {
-          during.push(getSamplingTask(w.ws, w.projectId)?.saving);
+          during.push((await getSamplingTask(w.ws, w.projectId))?.saving);
           const n = (tries.get(rec.externalId) ?? 0) + 1;
           tries.set(rec.externalId, n);
           if (failAll || rec.externalId === 's3' || (rec.externalId === 's5' && n === 1)) throw new Error('write failed');
@@ -858,23 +882,32 @@ test('sampling: the progress stays on until the dataset is saved; a save that fa
       },
     }),
   });
-  const snap = (await startSampleDataset(w.ws, w.projectId, 10))!;
+  const task = await startSampleDataset(w.ws, w.projectId, 10);
+  assert.deepEqual([task.state, task.total, task.kind], ['running', 10, 'sample'], 'the command returns once the job is queued');
+  await w.jobs.idle();
   assert.ok(during.length === 12 && during.every(Boolean), 'the page shows saving, never the empty start, while examples are saved');
-  assert.equal(getSamplingTask(w.ws, w.projectId), null);
+  assert.equal(await getSamplingTask(w.ws, w.projectId), null);
+  const snap = (await app.catalog.get('dataset_snapshots', (await app.catalog.get('projects', w.projectId))!.snapshotId!))!;
   assert.deepEqual([snap.counts.rows, snap.counts.valid, snap.counts.invalid, snap.counts.notSaved], [10, 9, 0, 1]);
   assert.equal(tries.get('s5'), 2, 'a failed write is tried once more');
   const saved = await app.catalog.find('examples', {snapshotId: snap.id});
   assert.equal(saved.length, 9);
   const opt = saved.filter(e => e.optimiserHalf).length;
   assert.ok(Math.abs(2 * opt - saved.length) <= 1, 'the halves are even over the saved examples');
-  // Nothing saved fails the task, and no dataset is made.
+  // Nothing saved fails the job, with the reason, and no dataset is made.
   failAll = true;
-  await assert.rejects(startSampleDataset(w.ws, w.projectId, 3), /None of the examples could be saved/);
-  assert.equal(getSamplingTask(w.ws, w.projectId), null);
+  const failing = await startSampleDataset(w.ws, w.projectId, 3);
+  await w.jobs.idle();
+  const job = await w.jobs.api.get(w.ws.ctx, failing.id);
+  assert.equal(job?.state, 'failed');
+  assert.match(job?.error ?? '', /None of the examples could be saved/);
+  assert.equal(await getSamplingTask(w.ws, w.projectId), null);
   assert.equal((await app.catalog.get('projects', w.projectId))!.snapshotId, snap.id);
   // Adding: the same rules.
   failAll = false;
   raws.push(...Array.from({length: 4}, (_, i) => ({externalId: `a${i}`, type: 'video' as const, title: '', features: {}})));
   raws.splice(3, 1);
-  assert.equal(await appendSample(w.ws, w.projectId, 4), 4);
+  await appendSample(w.ws, w.projectId, 4);
+  await w.jobs.idle();
+  assert.equal((await app.catalog.find('examples', {snapshotId: snap.id})).length, 13);
 });

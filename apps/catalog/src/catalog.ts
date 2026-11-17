@@ -95,10 +95,11 @@ export function createCatalog(db: DocRuntime, opts: {telemetry?: TelemetryPort} 
      * first; the project record goes last, so a delete cut short can be run again.
      */
     async deleteProject(projectId) {
+      // In bulk: batch requests, never one awaited request per record (deployment readiness spec, 3).
       const snapshots = await repo.find<{id: string}>('dataset_snapshots', {projectId});
-      for (const snap of snapshots) for (const ex of await repo.find<{id: string}>('examples', {snapshotId: snap.id})) await repo.delete('examples', ex.id);
-      for (const kind of OWNED) for (const rec of await repo.find<{id: string}>(kind, {projectId})) await repo.delete(kind, rec.id);
-      await repo.delete('projects', projectId);
+      for (const snap of snapshots) await repo.deleteWhere('examples', {snapshotId: snap.id});
+      for (const kind of OWNED) await repo.deleteWhere(kind, {projectId});
+      await repo.deleteWhere('projects', {id: projectId});
       await repo.insert('audit_log', {id: catalogId('audit_log'), projectId: null, actor: 'system', action: 'project.delete', data: {projectId}, createdAt: now()});
     },
   };

@@ -46,7 +46,7 @@ test('a job runs as soon as it is enqueued, reports progress, and ends done; the
   assert.equal(again.id, a.id, 'a repeat of a queued or running key is the same job');
   await until(() => m.runs.length === 1, 'the run');
   assert.deepEqual(m.runs[0].job.ctx, {requestId: 'rq_1', user: {id: 'u_1', name: 'Ann'}, caller: 'test'}, 'the job runs as its caller');
-  m.runs[0].ctl.progress({done: 3, total: 10});
+  await m.runs[0].ctl.progress({done: 3, total: 10});
   await until(async () => (await jobs.api.get(ctx(), a.id))?.progress?.done === 3, 'the progress');
   assert.equal((await jobs.api.get(ctx(), a.id))?.state, 'running');
   m.runs[0].end({state: 'done'});
@@ -73,6 +73,7 @@ test('cancel: a queued job is cancelled at once; a running one stops through its
   assert.equal((await jobs.api.get(ctx(), second.id))?.state, 'cancelled', 'never started');
   await jobs.api.cancel(ctx(), first.id);
   assert.equal(m.runs[0].ctl.signal.aborted, true);
+  assert.equal(m.runs[0].ctl.cancelled(), true, 'a cancel, not a lost lease');
   await jobs.idle();
   assert.equal((await jobs.api.get(ctx(), first.id))?.state, 'cancelled');
   assert.equal(m.runs.length, 1, 'the cancelled queued job never ran');
@@ -135,6 +136,7 @@ test('a lost lease aborts the work: the runner sees on its heartbeat that anothe
   await store.recoverExpired(new Date(now).toISOString(), 3);
   await store.claimNext(['report.build'], 'other', 1000, new Date(now).toISOString());
   await until(() => m.runs[0].ctl.signal.aborted, 'the slow runner stops');
+  assert.equal(m.runs[0].ctl.cancelled(), false, 'a lost lease is not a cancel: the work is not stopped for good');
   await slow.idle();
   assert.equal((await store.get(job.id))?.lease?.owner, 'other');
 });

@@ -1,34 +1,51 @@
-import type {Answer, DatasetSnapshot, DatasetUploadResult, Example, ExampleMedia, GoldLabel, RawExample, SamplingTask, Schema} from '@sprint/contracts';
+import type {Answer, DatasetSnapshot, DatasetUploadResult, Example, ExampleMedia, GoldLabel, Job, JobControl, JobOutcome, RawExample, SamplingTask, Schema} from '@sprint/contracts';
 import {hashString, newId, readGoldAnswer, toFeatures} from '@sprint/domain';
 import {now, type Scope} from './app.ts';
 import {appendExamples, insertExamplesSettled} from './governance.ts';
 
-export function getSamplingTask(w: Scope, projectId: string): SamplingTask | null {
-  return w.local.sampling.get(projectId)?.task ?? null;
-}
-
-export function stopSampleDataset(w: Scope, projectId: string): void {
-  const entry = w.local.sampling.get(projectId);
-  if (entry) {
-    entry.ctrl.abort();
-    w.local.sampling.delete(projectId);
-    w.emitChange();
-  }
-}
-
 /**
- * Ends a sampling or loading task once its examples are saved (resilience spec, 3.1): the page
- * keeps its progress until the dataset is there, and never shows the empty start in between.
+ * Sampling runs as a `dataset.sample` job (deployment readiness spec, 3): the Dataset page's
+ * progress is the job's stored progress, never a map in one process, so it shows whichever
+ * process runs the job. Loading the features of an uploaded file stays inside its request (the
+ * page waits for the result); its progress and Stop sit in shared state (`loading:{projectId}`).
  */
-function release(w: Scope, projectId: string, task: SamplingTask): void {
-  if (w.local.sampling.get(projectId)?.task === task) w.local.sampling.delete(projectId);
-  w.emitChange();
+const LOADING_TTL_MS = 10 * 60_000;
+const loadingKey = (projectId: string) => `loading:${projectId}`;
+interface Loading {
+  task: SamplingTask;
+  stop: boolean;
 }
 
-/** Marks a task as saving: all items are in, and Stop is gone. */
-function saving(w: Scope, task: SamplingTask): void {
-  task.fetched = task.total;
-  task.saving = true;
+const activeSamples = (w: Scope, projectId: string) => w.jobs.list(w.ctx, {projectId, kinds: ['dataset.sample'], states: ['queued', 'running']});
+
+/** A sampling job as the Dataset page shows it. */
+function samplingView(job: Job): SamplingTask {
+  const total = Number(job.args.n);
+  return {
+    id: job.id,
+    projectId: job.projectId!,
+    kind: 'sample',
+    total,
+    fetched: Math.min(total, job.progress?.done ?? 0),
+    startedAt: job.createdAt,
+    state: 'running',
+    error: null,
+    ...(job.progress?.saving ? {saving: true} : {}),
+  };
+}
+
+export async function getSamplingTask(w: Scope, projectId: string): Promise<SamplingTask | null> {
+  const loading = await w.shared.get<Loading>(loadingKey(projectId));
+  if (loading) return loading.task;
+  const [job] = await activeSamples(w, projectId);
+  return job ? samplingView(job) : null;
+}
+
+/** Stop on the Dataset page: cancels the sampling job, or stops loading an upload's features. */
+export async function stopSampleDataset(w: Scope, projectId: string): Promise<void> {
+  for (const job of await activeSamples(w, projectId)) await w.jobs.cancel(w.ctx, job.id);
+  const loading = await w.shared.get<Loading>(loadingKey(projectId));
+  if (loading) await w.shared.set(loadingKey(projectId), {...loading, stop: true}, LOADING_TTL_MS);
   w.emitChange();
 }
 
@@ -80,66 +97,75 @@ async function saveSnapshot(w: Scope, projectId: string, all: RawExample[], sour
   return snap;
 }
 
+/** Queues a `dataset.sample` job; a sampling already running in the project stops first. */
+async function queueSample(w: Scope, projectId: string, n: number, append: boolean): Promise<SamplingTask> {
+  if (!(await w.catalog.get('projects', projectId))) throw new Error('This project does not exist.');
+  await stopSampleDataset(w, projectId);
+  const job = await w.jobs.enqueue(w.ctx, {kind: 'dataset.sample', projectId, args: {n, append}});
+  w.emitChange();
+  return samplingView(job);
+}
+
+/** Samples a new eval dataset of `n` examples: returns once queued. */
+export function startSampleDataset(w: Scope, projectId: string, n: number): Promise<SamplingTask> {
+  return queueSample(w, projectId, n, false);
+}
+
 /**
  * Adds `n` sampled examples to the eval dataset (spec 1.0.0, 4.3), none of them already in it
- * (removed ones count as in it). Returns how many were added; 0 when stopped.
+ * (removed ones count as in it): returns once queued.
  */
-export async function appendSample(w: Scope, projectId: string, n: number): Promise<number> {
+export function appendSample(w: Scope, projectId: string, n: number): Promise<SamplingTask> {
+  return queueSample(w, projectId, n, true);
+}
+
+/**
+ * The `dataset.sample` executor: asks the example source for `n` examples (more when adding, so
+ * repeats can be dropped), with progress and Stop, then saves them as a new dataset or adds them.
+ * The job stays running until the examples are saved (resilience spec, 3.1), so the page never
+ * shows the empty start in between. Stopped while the last page came in: nothing is saved.
+ */
+export async function runSample(w: Scope, job: Job, ctl: JobControl): Promise<JobOutcome> {
+  // The progress lives on the job: every move is a change the Dataset page reads again.
+  const progress = async (p: Parameters<JobControl['progress']>[0]) => {
+    await ctl.progress(p);
+    w.emitChange();
+  };
+  try {
+    return await sample(w, job, ctl, progress);
+  } finally {
+    w.emitChange();
+  }
+}
+
+async function sample(w: Scope, job: Job, ctl: JobControl, progress: JobControl['progress']): Promise<JobOutcome> {
+  const projectId = job.projectId!;
+  const n = Number(job.args.n);
+  const append = job.args.append === true;
   const {catalog} = w;
   const project = await catalog.get('projects', projectId);
-  const known = project?.snapshotId ? new Set((await catalog.find('examples', {snapshotId: project.snapshotId})).map(e => e.externalId)) : new Set<string>();
-  const got = await sampleTask(w, projectId, n, known.size);
-  if (!got) return 0;
-  try {
-    saving(w, got.task);
-    const fresh = got.raws.filter(r => !known.has(r.externalId)).slice(0, n);
-    return (await appendExamples(w, projectId, fresh, 'sample')).added;
-  } finally {
-    release(w, projectId, got.task);
-  }
-}
-
-/**
- * The sampling task with its progress and Stop; `extra` more are asked for so repeats can be
- * dropped. On success the task stays on until the caller has saved the examples and calls
- * `release` (resilience spec, 3.1).
- */
-async function sampleTask(w: Scope, projectId: string, n: number, extra = 0): Promise<{raws: RawExample[]; task: SamplingTask} | null> {
-  stopSampleDataset(w, projectId);
-  const ctrl = new AbortController();
-  const task: SamplingTask = {id: newId('sm'), projectId, total: n, fetched: 0, startedAt: now(), state: 'running', error: null};
-  w.local.sampling.set(projectId, {task, ctrl});
+  if (!project || project.deleting) return {state: 'cancelled', error: 'The project was deleted.'};
+  const known = append && project.snapshotId ? new Set((await catalog.find('examples', {snapshotId: project.snapshotId})).map(e => e.externalId)) : new Set<string>();
+  await progress({done: 0, total: n});
   w.tm.event('sample_started', {requested: n});
   const sampleStarted = Date.now();
-  const ended = (outcome: 'done' | 'stopped' | 'failed') => w.tm.event('sample_finished', {fetched: task.fetched, seconds: Math.round((Date.now() - sampleStarted) / 1000), outcome});
-  w.emitChange();
+  let fetched = 0;
+  const ended = (outcome: 'done' | 'stopped' | 'failed') => w.tm.event('sample_finished', {fetched, seconds: Math.round((Date.now() - sampleStarted) / 1000), outcome});
+  let raws: RawExample[];
   try {
-    const raws = await w.examples.sample(n + extra, fetched => ((task.fetched = Math.min(n, fetched)), w.emitChange()), ctrl.signal);
-    ended('done');
-    // Stopped while the last page came in: nothing is saved.
-    if (ctrl.signal.aborted) return null;
-    return {raws, task};
+    raws = await w.examples.sample(n + known.size, got => ((fetched = Math.min(n, got)), void progress({done: fetched, total: n})), ctl.signal);
   } catch (e) {
-    ended((e as Error).name === 'AbortError' ? 'stopped' : 'failed');
-    release(w, projectId, task);
-    if ((e as Error).name === 'AbortError') return null;
+    const stopped = (e as Error).name === 'AbortError' || ctl.signal.aborted;
+    ended(stopped ? 'stopped' : 'failed');
+    if (stopped) return {state: 'cancelled', error: 'Stopped.'};
     throw e;
   }
-}
-
-/**
- * Starts a stateful sampling task inside the backend. Progress is pushed via state updates
- * rather than a client callback so the contract stays serialisable over HTTP.
- */
-export async function startSampleDataset(w: Scope, projectId: string, n: number): Promise<DatasetSnapshot | null> {
-  const got = await sampleTask(w, projectId, n);
-  if (!got) return null;
-  try {
-    saving(w, got.task);
-    return await saveSnapshot(w, projectId, got.raws, 'sample', 'Sampled from the platform');
-  } finally {
-    release(w, projectId, got.task);
-  }
+  ended('done');
+  if (ctl.signal.aborted) return {state: 'cancelled', error: 'Stopped.'};
+  await progress({done: n, total: n, saving: true});
+  if (append) await appendExamples(w, projectId, raws.filter(r => !known.has(r.externalId)).slice(0, n), 'sample');
+  else await saveSnapshot(w, projectId, raws, 'sample', 'Sampled from the platform');
+  return {state: 'done'};
 }
 
 export async function getSamplePoolSize(w: Scope): Promise<number> {
@@ -147,11 +173,12 @@ export async function getSamplePoolSize(w: Scope): Promise<number> {
 }
 
 /** The media of one example (Gold Labels), or null without a media source. */
-export async function exampleMedia(w: Scope, exampleId: string): Promise<ExampleMedia | null> {
+export async function exampleMedia(w: Scope, projectId: string, exampleId: string): Promise<ExampleMedia | null> {
   const {catalog, media} = w;
-  if (!media) return null;
   const ex = await catalog.get('examples', exampleId);
-  return ex ? media.media(ex.externalId, ex.type) : null;
+  const snap = ex ? await catalog.get('dataset_snapshots', ex.snapshotId) : null;
+  if (!ex || snap?.projectId !== projectId) throw new Error('This example does not exist.');
+  return media ? media.media(ex.externalId, ex.type) : null;
 }
 
 export function hasBundledGold(w: Scope): boolean {
@@ -218,39 +245,51 @@ export async function uploadDatasetText(w: Scope, projectId: string, name: strin
       return {error: 'No usable rows in this file.'};
     }
     w.tm.event('dataset_uploaded', {rows: raws.length + invalid, valid: raws.length, invalid, video: raws.filter(r => r.type === 'video').length, photo_text: raws.filter(r => r.type !== 'video').length});
-    if (task) saving(w, task);
+    if (task) await setLoading(w, projectId, {...task, fetched: task.total, saving: true});
     // Adding to an eval dataset there (spec 1.0.0, 4.3) keeps every example, half and gold label.
     if (append) return await appendExamples(w, projectId, raws, 'upload', invalid);
     return {snapshot: await saveSnapshot(w, projectId, raws, 'upload', name, invalid)};
   } finally {
-    if (task) release(w, projectId, task);
+    if (task) await endLoading(w, projectId);
   }
 }
 
+async function setLoading(w: Scope, projectId: string, task: SamplingTask): Promise<boolean> {
+  const was = await w.shared.get<Loading>(loadingKey(projectId));
+  if (was?.stop) return false;
+  await w.shared.set(loadingKey(projectId), {task, stop: false}, LOADING_TTL_MS);
+  w.emitChange();
+  return true;
+}
+
+async function endLoading(w: Scope, projectId: string): Promise<void> {
+  await w.shared.delete(loadingKey(projectId));
+  w.emitChange();
+}
+
 /**
- * Looks the IDs up in chunks, as a task the Dataset page shows with its progress and Stop. On
- * success the task stays on until the caller has saved the examples and calls `release`.
+ * Looks the IDs up in chunks, as a task the Dataset page shows with its progress and Stop (in
+ * shared state, so Stop works from whichever process the page reaches). On success the task stays
+ * on until the caller has saved the examples and calls `endLoading`.
  */
 async function loadFeatures(w: Scope, projectId: string, fileName: string, ids: string[]): Promise<{raws: RawExample[]; task: SamplingTask} | null> {
-  stopSampleDataset(w, projectId);
-  const ctrl = new AbortController();
+  await stopSampleDataset(w, projectId);
+  await w.shared.delete(loadingKey(projectId));
   const task: SamplingTask = {id: newId('sm'), projectId, kind: 'upload', fileName, total: ids.length, fetched: 0, startedAt: now(), state: 'running', error: null};
-  w.local.sampling.set(projectId, {task, ctrl});
-  w.emitChange();
+  await setLoading(w, projectId, task);
   const out: RawExample[] = [];
   try {
     for (let i = 0; i < ids.length; i += 10) {
-      if (ctrl.signal.aborted) {
-        release(w, projectId, task);
+      out.push(...(await w.examples.lookup(ids.slice(i, i + 10))));
+      // Stop pressed: the next chunk is not asked for, and nothing is saved.
+      if (!(await setLoading(w, projectId, {...task, fetched: Math.min(ids.length, i + 10)}))) {
+        await endLoading(w, projectId);
         return null;
       }
-      out.push(...(await w.examples.lookup(ids.slice(i, i + 10))));
-      task.fetched = Math.min(ids.length, i + 10);
-      w.emitChange();
     }
     return {raws: out, task};
   } catch (e) {
-    release(w, projectId, task);
+    await endLoading(w, projectId);
     throw e;
   }
 }

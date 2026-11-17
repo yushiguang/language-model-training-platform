@@ -1,7 +1,7 @@
-import {DocFieldValue, type GateApproval, type LabelComment, type NodeId, type Project, type ProjectState, type WorkflowFacts} from '@sprint/contracts';
+import {DocFieldValue, type GateApproval, type Job, type JobOutcome, type LabelComment, type NodeId, type Project, type ProjectState, type WorkflowFacts} from '@sprint/contracts';
 import {asAnswerOrNull, compareVersions, contextIdFor, gate, judge, newId, scoresUpdating, systemConfig} from '@sprint/domain';
 import {now, type Scope} from './app.ts';
-import {getSamplingTask, stopSampleDataset} from './dataset.ts';
+import {getSamplingTask} from './dataset.ts';
 import {latestGold} from './evaluation.ts';
 import {runView} from './views.ts';
 import {initSettings} from './settings.ts';
@@ -9,8 +9,9 @@ import {balanceHalves} from './governance.ts';
 
 export type {ProjectState};
 
+/** Projects, newest first; one whose deletion was accepted is gone at once. */
 export async function listProjects(w: Scope): Promise<Project[]> {
-  return w.catalog.find('projects', {}, 'createdAt desc');
+  return (await w.catalog.find('projects', {}, 'createdAt desc')).filter(p => !p.deleting);
 }
 
 export async function createProject(w: Scope, name: string): Promise<Project> {
@@ -49,7 +50,8 @@ export async function renameProject(w: Scope, projectId: string, name: string): 
 }
 
 export async function getProject(w: Scope, id: string): Promise<Project | null> {
-  return w.catalog.get('projects', id);
+  const p = await w.catalog.get('projects', id);
+  return p && !p.deleting ? p : null;
 }
 
 export async function loadProjectState(w: Scope, projectId: string): Promise<ProjectState | null> {
@@ -115,7 +117,7 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
     facts,
     contextId,
     endpoints: gateway.labelingEndpoints(),
-    samplingTask: getSamplingTask(w, projectId),
+    samplingTask: await getSamplingTask(w, projectId),
     removals,
     comments,
     otherAutoSpendUsd: autoSpend.reduce((n, a) => n + Number((a.data as {costUsd?: number}).costUsd ?? 0), 0),
@@ -153,18 +155,32 @@ export async function approveNode(w: Scope, projectId: string, node: NodeId): Pr
 
 
 /**
- * Deletes a project for good (spec 1.0.0, 2.4): its sampling, Optimiser runs and labeling tasks
- * stop first, then labeling drops its tasks and answers and the catalog drops every record.
+ * Deletes a project for good (spec 1.0.0, 2.4). Accept and queue (deployment readiness spec, 3):
+ * the project is marked as being deleted, so no read returns it any more, and a `project.delete`
+ * job stops its work and removes its records in bulk.
  */
 export async function deleteProject(w: Scope, projectId: string): Promise<void> {
-  const {catalog, labeling, optimiser, user} = w;
+  const {catalog, user} = w;
   const state = await loadProjectState(w, projectId);
   if (!state) throw new Error('This project does not exist.');
-  stopSampleDataset(w, projectId);
-  await optimiser?.deleteProject(projectId);
-  await labeling.deleteProject(projectId);
-  await catalog.deleteProject(projectId);
+  await catalog.patch('projects', projectId, {deleting: true});
   await catalog.audit(null, (await user()).name, 'project.deleted', {projectId});
   w.tm.event('project_deleted', {versions: state.versions.length, examples: state.examples.length, gold_labels: Object.keys(state.gold).length});
+  await w.jobs.enqueue(w.ctx, {kind: 'project.delete', projectId, args: {}, idempotencyKey: `delete:${projectId}`});
   w.emitChange();
+}
+
+/**
+ * The `project.delete` executor: cancels the project's other jobs, stops its Optimiser runs and
+ * labeling, then labeling drops its tasks and answers and the catalog every record, in batches.
+ * Safe to run again: what was deleted stays deleted.
+ */
+export async function runDelete(w: Scope, job: Job): Promise<JobOutcome> {
+  const projectId = job.projectId!;
+  for (const other of await w.jobs.list(w.ctx, {projectId, states: ['queued', 'running']})) if (other.id !== job.id) await w.jobs.cancel(w.ctx, other.id);
+  await w.optimiser?.deleteProject(projectId);
+  await w.labeling.deleteProject(projectId);
+  await w.catalog.deleteProject(projectId);
+  w.emitChange();
+  return {state: 'done'};
 }

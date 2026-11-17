@@ -81,7 +81,7 @@ function plan(w: Scope, state: ProjectState, tool: StartTool, args: Record<strin
         link: {path: '/prompt'},
         estimateUsd: evalEstimate(state, v, endpoint),
         run: async () => {
-          void scoreVersion(w, projectId, v, endpoint, {auto: true});
+          await scoreVersion(w, projectId, v, endpoint, {auto: true});
           return {started: true, note: 'Scoring runs on the eval set; the report appears when it finishes.'};
         },
       };
@@ -95,7 +95,7 @@ function plan(w: Scope, state: ProjectState, tool: StartTool, args: Record<strin
         link: {path: '/prompt'},
         estimateUsd: optimiserEstimate(state, endpoint, rounds),
         run: async () => {
-          void startOptimiser(w, projectId, rounds, undefined, {auto: true});
+          await startOptimiser(w, projectId, rounds, undefined, {auto: true});
           return {started: true, note: `The Optimiser tries up to ${rounds} changes; each one appears on Prompt versions, with its dry run or scores.`};
         },
       };

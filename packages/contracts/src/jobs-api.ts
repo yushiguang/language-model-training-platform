@@ -89,8 +89,13 @@ export interface JobControl {
   readonly job: Job;
   /** Aborted when the job is cancelled or its lease is lost: stop at the next safe point. */
   readonly signal: AbortSignal;
-  /** Saves progress (sent with the next heartbeat). */
-  progress(p: JobProgress): void;
+  /** Saves progress with a heartbeat; resolves once it is in the store. */
+  progress(p: JobProgress): Promise<void>;
+  /**
+   * True when `signal` was aborted by a cancel (the user's Stop); false when the lease was lost
+   * (another runner took the job over, and resumes it from the saved records).
+   */
+  cancelled(): boolean;
 }
 
 /**

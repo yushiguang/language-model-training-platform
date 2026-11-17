@@ -148,10 +148,12 @@ export function createJobs(deps: JobsDeps): Jobs {
     const ctl: JobControl = {
       job,
       signal: r.ctrl.signal,
-      progress(p) {
+      async progress(p) {
         r.progress = p;
-        void beat(r).then(emit);
+        await beat(r);
+        emit();
       },
+      cancelled: () => r.cancelled,
     };
     emit();
     void (async () => {

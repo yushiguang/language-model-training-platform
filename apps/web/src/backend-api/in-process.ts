@@ -3,11 +3,12 @@ import {configureSystem, systemConfig} from '@sprint/domain';
 import {createCatalog} from '@sprint/catalog';
 import {createTelemetry} from '@sprint/telemetry';
 import {createGateway} from '@sprint/llm-gateway';
-import {browserLocks, createLabeling} from '@sprint/labeling';
+import {browserLocks, createLabeling, labelingExecutor} from '@sprint/labeling';
 import {createAgentRuntime} from '@sprint/agents';
 import {createPlatform} from '@sprint/platform-impl';
-import {loopback, memorySharedState} from '@sprint/platform';
-import {createOptimiser} from '@sprint/optimiser';
+import {loopback, memoryJobStore, memorySharedState} from '@sprint/platform';
+import {createJobs} from '@sprint/jobs';
+import {createOptimiser, optimiserExecutor} from '@sprint/optimiser';
 import {createWorkflow} from '@sprint/workflow';
 import {createBffApi} from '@sprint/bff';
 import type {BffClient} from './client';
@@ -32,12 +33,22 @@ const telemetry = createTelemetry({
 const gateway = createGateway(platform, {telemetry});
 const catalog = createCatalog(platform.db, {telemetry});
 const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: () => workflow.changed(), telemetry});
+/**
+ * Background work (scoring, reports, sampling, Optimiser runs, deleting a project) runs as jobs.
+ * In the browser this page is the runner: jobs start as soon as they are queued, kept in the
+ * platform's job store (by default this tab's memory, so a closed page drops its queue and the
+ * pages' tick picks the work up again, as before).
+ */
+const jobs = createJobs({store: platform.jobStore ?? memoryJobStore(), telemetry});
 /** The application module, with no state of its own; short-lived shared state goes to the platform's store. */
-const workflow = createWorkflow({catalog, labeling, gateway, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, tickets: platform.tickets, appVersion: APP_VERSION, standIns: platform.standIns, telemetry, locks: browserLocks(), sharedState: platform.sharedState ?? memorySharedState()});
+const workflow = createWorkflow({jobs: jobs.api, catalog, labeling, gateway, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, tickets: platform.tickets, appVersion: APP_VERSION, standIns: platform.standIns, telemetry, locks: browserLocks(), sharedState: platform.sharedState ?? memorySharedState()});
 /** The helpers, built once with their model, the project tools and where live progress goes. */
 const agentRuntime = createAgentRuntime({llm: gateway.agentModel(), tools: projectId => workflow.agentTools(projectId), progress: workflow.agentProgress});
 const optimiser = createOptimiser({catalog, labeling, agents: agentRuntime, host: workflow.optimiserHost, locks: browserLocks(), telemetry, onChange: () => workflow.changed()});
 workflow.connect({agents: agentRuntime, optimiser});
+// Executors tell open pages when their records change, as before; a job's own life does not, so a
+// job that changes nothing never makes the pages read again (and tick again).
+for (const e of [labelingExecutor(labeling), optimiserExecutor(optimiser), ...workflow.executors]) jobs.register(e);
 /**
  * The bff calls the workflow through a loopback: every call's context, arguments, result and
  * error go through JSON as they would over RPC, so the browser check proves the workflow can be

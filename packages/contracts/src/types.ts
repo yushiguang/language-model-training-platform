@@ -170,6 +170,11 @@ export interface Project {
    * example's half ever changes; before it, halves may be balanced again by gold label.
    */
   holdoutLocked?: boolean;
+  /**
+   * Delete project was accepted: no read returns the project any more, and a `project.delete` job
+   * removes its records (deployment readiness spec, 3).
+   */
+  deleting?: boolean;
   setupVersionId: string | null;
   snapshotId: string | null;
   /** Nodes whose Next step was pressed. Code moves the workflow, never the agent. */

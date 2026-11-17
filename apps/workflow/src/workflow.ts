@@ -1,4 +1,4 @@
-import type {AgentProgressPort, AgentToolHost, EventStreamPort, EventTopic, OptimiserHost, RequestContext, WorkflowContract} from '@sprint/contracts';
+import type {AgentProgressPort, AgentToolHost, EventStreamPort, EventTopic, JobExecutor, OptimiserHost, RequestContext, WorkflowContract} from '@sprint/contracts';
 import {createInstance, systemContext, type Connected, type Scope, type WorkflowDeps} from './services/app.ts';
 import * as agents from './services/agents.ts';
 import * as dataset from './services/dataset.ts';
@@ -11,6 +11,7 @@ import * as settings from './services/settings.ts';
 import * as work from './services/work.ts';
 import {agentTools} from './services/page-views.ts';
 import {optimiserHost} from './services/optimiser-host.ts';
+import {workflowExecutors} from './services/executors.ts';
 
 /**
  * The application module (`@sprint/workflow`, deployment readiness spec, 2): everything a channel
@@ -36,6 +37,16 @@ export interface Workflow {
   optimiserHost: OptimiserHost;
   /** Hands over the services built after the workflow, since they call back into it. */
   connect(c: Connected): void;
+  /**
+   * The work the workflow owns, for the job module of the process that runs jobs:
+   * `report.build`, `dataset.sample` and `project.delete`. Each runs as the job's caller.
+   */
+  executors: JobExecutor[];
+  /**
+   * A server's cron job (review G8): checks every project for work that should run and queues it,
+   * as the pages' `tick` does in the browser build.
+   */
+  sweep(): Promise<void>;
 }
 
 export function createWorkflow(deps: WorkflowDeps): Workflow {
@@ -81,9 +92,9 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     saveSettings: (ctx, {projectId, ...s}) => settings.saveSettings(at(ctx), projectId, s),
 
     getSamplePoolSize: ctx => dataset.getSamplePoolSize(at(ctx)),
-    exampleMedia: (ctx, exampleId) => dataset.exampleMedia(at(ctx), exampleId),
+    exampleMedia: (ctx, projectId, exampleId) => dataset.exampleMedia(at(ctx), projectId, exampleId),
     startSampleDataset: (ctx, projectId, n) => dataset.startSampleDataset(at(ctx), projectId, n),
-    stopSampleDataset: async (ctx, projectId) => dataset.stopSampleDataset(at(ctx), projectId),
+    stopSampleDataset: (ctx, projectId) => dataset.stopSampleDataset(at(ctx), projectId),
     uploadDatasetText: (ctx, projectId, name, text) => dataset.uploadDatasetText(at(ctx), projectId, name, text),
     appendSample: (ctx, r) => dataset.appendSample(at(ctx), r.projectId, r.count),
     appendUpload: (ctx, projectId, name, text) => dataset.uploadDatasetText(at(ctx), projectId, name, text, true),
@@ -116,15 +127,19 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     },
     async scoreVersion(ctx, r) {
       const w = at(ctx);
-      await work.scoreVersion(w, r.projectId, await versionOf(w, r.projectId, r.promptVersionId), r.endpoint);
+      return work.scoreVersion(w, r.projectId, await versionOf(w, r.projectId, r.promptVersionId), r.endpoint);
     },
-    stopRun: async (ctx, runId) => evaluation.stopRun(at(ctx), runId),
+    stopRun: (ctx, r) => evaluation.stopRun(at(ctx), r.projectId, r.runId),
     startOptimiser: (ctx, r) => work.startOptimiser(at(ctx), r.projectId, r.maxRounds, r.startVersionId),
-    stopOptimiser: async (ctx, runId) => work.stopOptimiser(at(ctx), runId),
-    retryOptimiser: (ctx, runId) => work.retryOptimiser(at(ctx), runId),
+    stopOptimiser: (ctx, r) => work.stopOptimiser(at(ctx), r.projectId, r.runId),
+    retryOptimiser: (ctx, r) => work.retryOptimiser(at(ctx), r.projectId, r.runId),
     improveWithAi: (ctx, projectId, versionId, locale) => agents.improveWithAi(at(ctx), projectId, versionId, locale),
     featureInfo: (ctx, keys) => prompts.featureInfo(at(ctx), keys),
-    predictionsFor: async (ctx, versionId, endpoint, s) => Object.fromEntries(await evaluation.predictionsFor(at(ctx), versionId, endpoint, s)),
+    async predictionsFor(ctx, projectId, versionId, endpoint, s) {
+      const w = at(ctx);
+      await versionOf(w, projectId, versionId);
+      return Object.fromEntries(await evaluation.predictionsFor(w, versionId, endpoint, s));
+    },
 
     chatHistory: (ctx, projectId) => agents.chatHistory(at(ctx), projectId),
     getAgentLive: (ctx, projectId) => agents.agentLive(at(ctx), projectId),
@@ -151,5 +166,13 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     // The Optimiser's loop is not a person's call: it runs as the Optimiser.
     optimiserHost: optimiserHost(inst.scope(systemContext('optimiser'))),
     connect: c => inst.connect(c),
+    executors: workflowExecutors(inst),
+    async sweep() {
+      const w = at(systemContext('sweep'));
+      for (const p of await projects.listProjects(w)) {
+        const state = await projects.loadProjectState(w, p.id);
+        if (state) await work.drive(w, state);
+      }
+    },
   };
 }

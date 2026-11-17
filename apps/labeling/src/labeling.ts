@@ -433,15 +433,15 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     async deleteProject(projectId: string) {
       const tasks = await repo.find<LabelingTask>(TASKS, {projectId});
       for (const t of tasks) active.get(t.id)?.abort();
+      // In bulk: one batched delete per version, model and settings (deployment readiness spec, 3).
       const seen = new Set<string>();
       for (const t of tasks) {
         const key = `${t.promptVersionId}|${t.endpoint}|${t.settingsHash}`;
-        if (!seen.has(key)) {
-          seen.add(key);
-          for (const p of await repo.find<Prediction>(PREDICTIONS, {promptVersionId: t.promptVersionId, endpoint: t.endpoint, settingsHash: t.settingsHash})) await repo.delete(PREDICTIONS, p.id);
-        }
-        await repo.delete(TASKS, t.id);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        await repo.deleteWhere(PREDICTIONS, {promptVersionId: t.promptVersionId, endpoint: t.endpoint, settingsHash: t.settingsHash});
       }
+      await repo.deleteWhere(TASKS, {projectId});
       emit();
     },
   };

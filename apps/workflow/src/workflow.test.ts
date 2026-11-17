@@ -3,7 +3,8 @@ import test from 'node:test';
 import type {AgentRuntimeContract, AgentTurnInput, CallerUser, DocumentSource, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, PageContext, RequestContext, TicketSubmission, WorkflowContract} from '@sprint/contracts';
 import {createCatalog} from '@sprint/catalog';
 import {createLabeling, memoryLocks} from '@sprint/labeling';
-import {localDocRuntime, loopback, memorySharedState} from '@sprint/platform';
+import {createJobs} from '@sprint/jobs';
+import {localDocRuntime, loopback, memoryJobStore, memorySharedState} from '@sprint/platform';
 import {createWorkflow} from './workflow.ts';
 
 /**
@@ -40,6 +41,7 @@ function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) =
     examples: {} as ExampleSource,
     standIns: [],
     sharedState: memorySharedState(),
+    jobs: createJobs({store: memoryJobStore()}).api,
     ...(documents ? {documents} : {}),
     tickets: {submit: async t => (tickets.push(t), {ticketId: `T-${tickets.length}`})},
   });

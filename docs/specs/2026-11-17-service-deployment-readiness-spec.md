@@ -359,6 +359,16 @@ Each item is its own `Contract change:` pull request.
    (`createJobs`: leases, heartbeats, the sweep, retries, cancel, chains, fair order across
    tenants) and `memoryJobStore` in `@sprint/platform`, with lifecycle tests. The job record's
    status type is `JobStatus`, since `JobState` already names a run's state on the pages.
+   **Executors and commands built (2026-11-17)** on branch `feat/background-work-as-jobs`
+   (breaking `BffContract` change): `labeling.runTask`, `optimiser.run`, `report.build`,
+   `dataset.sample` and `project.delete` executors; `scoreVersion` returns `{runIds}`,
+   `startOptimiser` and `retryOptimiser` `{runId}`, `startSampleDataset` and `appendSample` the
+   `SamplingTask` they queued, and `deleteProject` returns once accepted (`Project.deleting`), with
+   bulk deletes (`DocRepo.deleteWhere`). `OptimiserContract.startRun` only saves the run, and
+   `execute` replaces `retryRun`. Review G2: `exampleMedia`, `predictionsFor`, `stopRun`,
+   `stopOptimiser` and `retryOptimiser` take the project id, and the workflow checks the record
+   belongs to it. Review G8: `tick` only queues work; `tickFromPages: false` makes it a no-op for
+   a server, which calls `Workflow.sweep()` from a cron job. Sampling progress is the job's.
 4. Section 5 (model registry, endpoint id widening, limiter store port): breaking contract
    change, coordinated with the hosting platform's adapters per the handover guide. Proof:
    gateway tests over the shared-store limiter (concurrent instances never exceed an endpoint's

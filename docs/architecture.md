@@ -18,7 +18,9 @@ apps/web ──► apps/web/src/backend-api (the BffClient the pages call; in-pr
                  │            ├──► labeling     (tasks, predictions) ──► llm-gateway
                  │            ├──► agents       (presets, runtime)   ──► llm-gateway
                  │            ├──► optimiser    (Auto Optimise runs) ──► catalog, labeling, agents
+                 │            ├──► jobs         (JobsContract: the workflow queues work, reads it back)
                  │            └──► llm-gateway  (endpoint list, agent model)
+                 ├── jobs (runs the queued work: executors of labeling, optimiser and workflow)
                  ├── telemetry (one port, given to every app above) ──► the platform's sink
                  └── @sprint/platform-impl (stand-ins, or the internal adapters)
                        document store · labeling models · agent model · identity · files · examples · shared state · telemetry sink
@@ -81,8 +83,8 @@ Since 1.0.0 phase 1 every service contract is written so it maps one to one to a
   together) or labeling (`tryTemplate`). Signals stay inside the process that owns the work.
   Platform ports (`ChatRequest`, `AgentChatOptions`) keep their `signal`: they are called
   in-process by the gateway and never cross our RPC, and without it a stopped call would keep its
-  request to the model open. `ExampleSource.sample` keeps its progress callback and signal until
-  sampling runs as a job (spec 3).
+  request to the model open. `ExampleSource.sample` keeps its progress callback and signal too:
+  only the `dataset.sample` job's executor calls it, in the process that runs the job.
 - Example features are `FeatureValue {text?, items?}` (text, or a list such as image URLs), read
   with `featureText` and `featureItems` (`packages/domain/src/template.ts`). Files and older
   records with plain strings and arrays are read through `toFeatures`.
@@ -104,6 +106,36 @@ Code reads `systemConfig()` at the time of use. A hosting adapter overrides any 
 per-tenant configuration and permission checks (`RequestContext`, `TenantConfigPort`,
 `AuthorizationPort`), with single-tenant stand-ins, and a job store (`JobStorePort`, stand-in
 `memoryJobStore`).
+
+### Background work is jobs (deployment readiness spec, 3)
+
+Every piece of work that outlives a request is a job of `@sprint/jobs`: `labeling.runTask`
+(executor in `@sprint/labeling`), `optimiser.run` (`@sprint/optimiser`), and `report.build`,
+`dataset.sample` and `project.delete` (`@sprint/workflow`). The workflow decides what should run
+and queues it with the caller's context; the job module runs it with a lease per job, heartbeats,
+recovery of a dead runner's jobs, retries and cancel. A job holds ids only; the domain record
+(the labeling task, the Optimiser run) keeps the state, so an executor resumes from it.
+
+- **Commands return once queued.** `scoreVersion` returns the tasks it queued (each labeling job
+  is followed by `report.build`), `startOptimiser` and `retryOptimiser` the run's id,
+  `startSampleDataset` and `appendSample` the sampling as the Dataset page shows it, and
+  `deleteProject` returns once the project is marked `deleting`. Pages read progress back through
+  `loadProjectState`, as they did while work ran.
+- **Keys.** While a job with the same idempotency key is queued or running, queueing it again
+  returns it (`label:<task>`, `report:<version>:<model>`, `optimiser:<project>`,
+  `delete:<project>`), so the page tick, a click and a helper's start tool never start work twice.
+- **Sampling** progress is the job's stored progress (`ProjectState.samplingTask` is projected
+  from it). Loading an uploaded file's features stays inside its request, with its progress and
+  Stop in shared state (`loading:{projectId}`).
+- **Deleting a project** hides it from every read at once (`Project.deleting`); the
+  `project.delete` job cancels the project's other jobs and removes its records in batches
+  (`DocRepo.deleteWhere`), never one awaited request per record.
+- **Who drives.** In the browser the open page's `tick` queues due work (it never runs work in the
+  request). A server sets `tickFromPages: false`, and a cron job calls `workflow.sweep()` (queue
+  due work for every project) and the job module's `sweep()` (recover expired leases).
+- In the browser the job store is this tab's memory (`memoryJobStore`) and the tab runs its own
+  jobs as soon as they are queued, so every flow behaves as before; labeling and the Optimiser keep
+  their browser locks, so two tabs never run the same task or run.
 
 ## The structured prompt (1.0.0)
 
@@ -191,15 +223,15 @@ createTask ──► runTask (browser lock "labeling:<task>"; a second tab gets 
 
 - **Predictions are shared.** The prediction id is a hash of version + model + settings + example,
   so a task for the same combination reuses what is saved; only missing examples are labeled.
-- **Resume.** The MVP runner is the open page (datasets are 50 to 100 examples). Closing the page
-  stops the runner; the task stays `running` with no lock held, and the next read reports it as
-  `paused` with reason `closed`. Scoring and optimiser tasks resume by themselves on the next page
-  tick. Retry failed clears the failed list and runs
-  again.
+- **Resume.** A task runs as a `labeling.runTask` job; in the browser the open page is the
+  runner. Closing the page stops the runner; the task stays `running` with no lock held, and the
+  next read reports it as `paused` with reason `closed`. Scoring and optimiser tasks resume by
+  themselves on the next page tick (which queues a new job). Retry failed clears the failed list
+  and runs again.
 - **Other tabs.** Writes are announced to other tabs of the site, and pages re-read every 5 s
   while something runs, so a second tab follows a run and sees it pause.
-- **Later (not in the MVP):** a worker outside the browser, ordered claims with heartbeats so
-  several runners can share a task, and shared quota records across runners.
+- **Later:** several runners sharing one task, and shared quota records across runners. A worker
+  outside the browser is a job runner (`@sprint/jobs` with a shared `JobStorePort`).
 
 ## The Optimiser and the helpers
 
@@ -227,8 +259,9 @@ per version for the Mismatches list.
 
 **Auto-start manager** (2026-11-11). `dueStarts(state)` says what should be running; `tick` starts
 it. The project provider (`apps/web/src/components/ProjectContext.tsx`) runs `tick` on every
-change event and on a 60 s sweep, on every project page. Starts are keyed (`once()` plus the
-labeling app's lock per task), so extra runs are safe. Every auto task also has a button that
+change event and on a 60 s sweep, on every project page. `tick` only queues jobs; starts are keyed
+(job idempotency keys, `once()` while a task is created, and the labeling app's lock per task), so
+extra runs are safe. Every auto task also has a button that
 sends the same start (Score/Resume, Optimiser Resume/Retry). In a microservice
 system the same split holds: one workflow service owns `dueStarts`, woken by events and a sweep.
 
@@ -349,8 +382,10 @@ application `id` to the store's document id.
 
 - Services inside the workflow still pass records to each other (only the contracts are plain
   JSON).
-- Dataset sampling still runs in the memory of the workflow instance that started it, and so do
-  the progress handlers of running Ask AI turns, until the job module (spec 3) and the agent
-  service (spec 6) take them over.
-- The Optimiser loop holds a browser lock per project and model, so a second tab cannot run it
-  twice; like labeling, it runs only while its page is open.
+- The progress handlers of running Ask AI turns stay in the memory of the workflow instance that
+  started the turn, until the agent service (spec 6) takes them over.
+- In the browser build, jobs run in the open page and its job store is that tab's memory: closing
+  the page drops what was queued there, and the next page tick queues due work again. The
+  Optimiser loop holds a browser lock per project and model, so a second tab cannot run it twice.
+- A job whose runner lost its lease (several runners only) is not stopped mid-step: labeling's lock
+  per task and the Optimiser's lock keep the runner that took it over off it until it ends.

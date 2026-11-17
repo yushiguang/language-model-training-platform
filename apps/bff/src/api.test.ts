@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {AgentRuntimeContract, EndpointInfo, ExampleSource, FileStore, Identity, LabelCallResult, LlmGatewayContract, RequestContext, WorkflowContract} from '@sprint/contracts';
 import {createCatalog} from '@sprint/catalog';
-import {createLabeling, memoryLocks} from '@sprint/labeling';
-import {localDocRuntime, loopback, memorySharedState} from '@sprint/platform';
+import {createLabeling, labelingExecutor, memoryLocks} from '@sprint/labeling';
+import {createJobs} from '@sprint/jobs';
+import {localDocRuntime, loopback, memoryJobStore, memorySharedState} from '@sprint/platform';
 import {createWorkflow} from '@sprint/workflow';
 import {createBffApi} from './api.ts';
 
@@ -22,8 +23,10 @@ async function world(prefix: string, identity: Identity = {currentUser: async ()
     label: async (): Promise<LabelCallResult> => ({text: '{"format": "Vlog"}', inputTokens: 0, outputTokens: 150, costUsd: 0.03, endpointId: 'labeling-A', attempts: 1}),
   } as unknown as LlmGatewayContract;
   const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks()});
-  const wf = createWorkflow({catalog, labeling, gateway, files: {} as FileStore, examples: {} as ExampleSource, standIns: [], sharedState: memorySharedState()});
+  const jobs = createJobs({store: memoryJobStore()});
+  const wf = createWorkflow({catalog, labeling, gateway, files: {} as FileStore, examples: {} as ExampleSource, standIns: [], sharedState: memorySharedState(), jobs: jobs.api});
   wf.connect({agents: {} as AgentRuntimeContract});
+  for (const e of [labelingExecutor(labeling), ...wf.executors]) jobs.register(e);
   // Every context the workflow receives, in order.
   const contexts: RequestContext[] = [];
   const workflow = new Proxy(loopback(wf.api), {
@@ -55,9 +58,10 @@ test('contract: a version is created and scored from ids alone, and the same key
   const again = await api.createVersion({...req, idempotencyKey: 'k2', parentId: a.id, structured: structured('Prefer Vlog.'), kind: 'minor'});
   assert.equal(again.parentId, a.id);
 
-  await api.scoreVersion({projectId, promptVersionId: a.id});
+  const started = await api.scoreVersion({projectId, promptVersionId: a.id});
+  assert.equal(started.runIds.length, 1, 'returns once the labeling is queued, with its task');
   await until(async () => ((await api.loadProjectState(projectId))?.reports.length ?? 0) > 0, 'the score');
-  const preds = await api.predictionsFor(a.id, 'A', {endpoint: 'A', maxOutputTokens: 150, temperature: null});
+  const preds = await api.predictionsFor(projectId, a.id, 'A', {endpoint: 'A', maxOutputTokens: 150, temperature: null});
   assert.equal(Object.keys(preds).length, 4);
 });
 
@@ -70,6 +74,20 @@ test('contract: ids of another project are refused', async () => {
   await assert.rejects(two.api.tick({projectId: one.projectId}).then(() => two.api.createVersion({projectId: one.projectId, structured: structured(), parentId: null, madeBy: 'user', change: '', kind: 'major'})), /does not exist/);
 });
 
+test('contract: a call naming a project only reaches records of that project (review G2)', async () => {
+  const {api, projectId} = await world('api-g2');
+  const v = await api.createVersion({projectId, structured: structured(), parentId: null, madeBy: 'user', change: '', kind: 'major'});
+  const {runIds} = await api.scoreVersion({projectId, promptVersionId: v.id});
+  await until(async () => ((await api.loadProjectState(projectId))?.reports.length ?? 0) > 0, 'the score');
+  const other = await api.createProject('Other');
+  const settings = {endpoint: 'A' as const, maxOutputTokens: 150, temperature: null};
+  await assert.rejects(api.predictionsFor(other.id, v.id, 'A', settings), /does not exist/);
+  await assert.rejects(api.exampleMedia(other.id, `ex_api-g2_0`), /does not exist/);
+  assert.equal(await api.exampleMedia(projectId, `ex_api-g2_0`), null, 'no media source here, but the example is the project\'s');
+  await assert.rejects(api.stopRun({projectId: other.id, runId: runIds[0]}), /does not exist/);
+  // The Optimiser's runs: see the Retry test in apps/workflow (this bff has no Optimiser).
+});
+
 test('contract: every response is plain JSON (it survives a round trip unchanged)', async () => {
   const {api, projectId} = await world('api4');
   const v = await api.createVersion({projectId, structured: structured(), parentId: null, madeBy: 'user', change: 'First prompt', kind: 'major'});
@@ -79,7 +97,7 @@ test('contract: every response is plain JSON (it survives a round trip unchanged
     getRuntimeInfo: await api.getRuntimeInfo(),
     listProjects: await api.listProjects(),
     loadProjectState: await api.loadProjectState(projectId),
-    predictionsFor: await api.predictionsFor(v.id, 'A', {endpoint: 'A', maxOutputTokens: 150, temperature: null}),
+    predictionsFor: await api.predictionsFor(projectId, v.id, 'A', {endpoint: 'A', maxOutputTokens: 150, temperature: null}),
     mismatches: await api.mismatches(projectId),
     chatHistory: await api.chatHistory(projectId),
     proposals: await api.proposals(projectId),

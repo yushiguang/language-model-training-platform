@@ -14,14 +14,14 @@ export async function latestGold(w: Scope, projectId: string, schemaVersion: num
   return {current, stale};
 }
 
-const settingsFor = (setup: SetupVersion, endpoint: EndpointId): ModelSettings => {
+export const settingsFor = (setup: SetupVersion, endpoint: EndpointId): ModelSettings => {
   const s = setup.models.find(m => m.endpoint === endpoint);
   if (!s) throw new Error(`Model ${endpoint} is not the project's labeling model.`);
   return s;
 };
 
 /** The existing task that labels these examples with this version, model and settings, if any. */
-async function findTask(w: Scope, projectId: string, version: PromptVersion, endpoint: EndpointId, hash: string, exampleIds: string[], purposes: TaskPurpose[]): Promise<LabelingTask | null> {
+export async function findTask(w: Scope, projectId: string, version: PromptVersion, endpoint: EndpointId, hash: string, exampleIds: string[], purposes: TaskPurpose[]): Promise<LabelingTask | null> {
   const want = new Set(exampleIds);
   const tasks = await w.labeling.listTasks(projectId);
   return (
@@ -95,12 +95,16 @@ export async function labelExamples(w: Scope,
   return labeling.runTask(task.id, trigger, run);
 }
 
-/** The user's Stop on scoring or on the test set's model answers; saved as an action line. */
-export function stopRun(w: Scope, runId: string): void {
+/**
+ * The user's Stop on scoring or on the test set's model answers; saved as an action line. The
+ * task's own stop flag reaches a runner in any process; a job still queued is cancelled too.
+ */
+export async function stopRun(w: Scope, projectId: string, runId: string): Promise<void> {
   const {labeling, catalog} = w;
+  const t = await labeling.getTask(runId);
+  if (!t || t.projectId !== projectId) throw new Error('This run does not exist.');
+  for (const job of await w.jobs.list(w.ctx, {projectId, kinds: ['labeling.runTask'], states: ['queued']})) if (job.args.taskId === runId) await w.jobs.cancel(w.ctx, job.id);
   void labeling.stopTask(runId).then(async () => {
-    const t = await labeling.getTask(runId);
-    if (!t) return;
     const v = await catalog.get('prompt_versions', t.promptVersionId);
     if (t.purpose === 'eval') await postEvent(w, t.projectId, 'stop', 'user', v ? msg('stopped scoring {version}', {version: versionLabel(v)}) : msg('stopped scoring a version'), {path: '/prompt'});
   });

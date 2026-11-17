@@ -218,9 +218,20 @@ takes the caller's `RequestContext` first on every method, and one call crosses 
 (`packages/platform/src/standins/loopback.ts`), which puts every call through JSON the same way,
 so a server only has to carry those envelopes. The browser then calls the server through the
 module behind `@sprint/client-impl` (above). Give the server's workflow a shared
-`Platform.sharedState`, so every instance sees the same live turn and drafts. Until the job module
-(spec 3) and the agent service (spec 6) land, sampling and an Ask AI turn's progress stay with the
-instance that started them. See "Known limits" in `docs/architecture.md`.
+`Platform.sharedState`, so every instance sees the same live turn and drafts.
+
+Background work is jobs (`docs/architecture.md`, "Background work is jobs"). A server deployment:
+
+- builds one `createJobs({store})` per process over a shared `JobStorePort` (`Platform.jobStore`),
+  passes its `api` to `createWorkflow({jobs})`, and sets `tickFromPages: false`;
+- in the worker unit only: registers the executors (`labelingExecutor(labeling)`,
+  `optimiserExecutor(optimiser)`, and `workflow.executors`) with `runOnEnqueue: false`, and calls
+  `jobs.poll(ms)`; the bff units only enqueue;
+- runs a cron job that calls `jobs.sweep()` (expired leases back to the queue) and
+  `workflow.sweep()` (due work for every project), as the pages' tick does in the browser.
+
+Until the agent service (spec 6) lands, an Ask AI turn's progress stays with the instance that
+started it. See "Known limits" in `docs/architecture.md`.
 
 ## Verify
 
