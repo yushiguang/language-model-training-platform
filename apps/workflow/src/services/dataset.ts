@@ -23,15 +23,22 @@ function samplingView(job: Job): SamplingTask {
     total,
     fetched: Math.min(total, job.progress?.done ?? 0),
     startedAt: job.createdAt,
-    state: 'running',
-    error: null,
+    state: job.state === 'failed' ? 'failed' : 'running',
+    error: job.state === 'failed' ? job.error : null,
     ...(job.progress?.saving ? {saving: true} : {}),
   };
 }
 
+/**
+ * The take running in the project, or the last one when it failed (its error shows on the Dataset
+ * page until the next take). A take that ended done or stopped shows nothing.
+ */
 export async function getSamplingTask(w: Scope, projectId: string): Promise<SamplingTask | null> {
-  const [job] = await activeSamples(w, projectId);
-  return job ? samplingView(job) : null;
+  const [active] = await activeSamples(w, projectId);
+  if (active) return samplingView(active);
+  const ended = await w.jobs.list(w.ctx, {projectId, kinds: ['dataset.sample'], states: ['done', 'failed', 'cancelled']});
+  const last = ended.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))[0];
+  return last?.state === 'failed' ? samplingView(last) : null;
 }
 
 /** Stop on the Dataset page: cancels the job. */
@@ -100,7 +107,12 @@ export async function takeExamples(w: Scope, projectId: string, picks: SourcePic
   if (!project) throw new Error('This project does not exist.');
   await checkPicks(w, picks);
   await stopSampleDataset(w, projectId);
-  const job = await w.jobs.enqueue(w.ctx, {kind: 'dataset.sample', projectId, args: {picks: JSON.stringify(picks.map(p => ({sourceId: p.sourceId, count: p.count})))}});
+  // A stopped take ends at its runner's next look: the new one waits, so two never run at once.
+  for (let i = 0; (await activeSamples(w, projectId)).length; i++) {
+    if (i >= 100) throw new Error('The last take is still stopping. Try again in a moment.');
+    await new Promise(res => setTimeout(res, 100));
+  }
+  const job = await w.jobs.enqueue(w.ctx, {kind: 'dataset.sample', projectId, args: {picks: JSON.stringify(picks.map(p => ({sourceId: p.sourceId, count: p.count})))}, idempotencyKey: `sample:${projectId}`});
   w.emitChange(projectId);
   return samplingView(job);
 }
@@ -139,14 +151,16 @@ async function take(w: Scope, job: Job, ctl: JobControl, progress: JobControl['p
   const started = Date.now();
   let fetched = 0;
   const ended = (outcome: 'done' | 'stopped' | 'failed') => w.tm.event('sample_finished', {fetched, seconds: Math.round((Date.now() - started) / 1000), outcome});
-  const cuts: string[] = [];
+  const cuts: {id: string; sourceId: string; items: Set<string>}[] = [];
   const wanted: {externalId: string; sourceId: string; fileId: string}[] = [];
   const names: string[] = [];
   const raws: Taken[] = [];
+  // Set once the examples are in: a failure after it keeps the segments, since their items are.
+  let saved = false;
   try {
     for (const p of picks) {
       const {cut, items} = await allocate(w, projectId, p, known);
-      cuts.push(cut.id);
+      cuts.push({id: cut.id, sourceId: p.sourceId, items: new Set(items.map(i => i.externalId))});
       names.push((await catalog.get('data_sources', p.sourceId))?.name ?? p.sourceId);
       wanted.push(...items.map(i => ({...i, sourceId: p.sourceId})));
     }
@@ -163,24 +177,39 @@ async function take(w: Scope, job: Job, ctl: JobControl, progress: JobControl['p
     }
     if (ctl.signal.aborted) {
       ended('stopped');
-      await retireCuts(w, projectId, cuts);
+      await retireCuts(w, projectId, cuts.map(c => c.id));
       return {state: 'cancelled', error: 'Stopped.'};
     }
-    ended('done');
+    if (!wanted.length) {
+      // Every position was already in the dataset: nothing to add, and that is not a failure.
+      if (append) {
+        saved = true;
+        ended('done');
+        return {state: 'done'};
+      }
+      throw new Error('No items could be taken from these data sources yet. Try again when their files are imported.');
+    }
     // Items the example service does not know (gone, or not a video or photo post) are counted.
     const notFound = wanted.length - raws.length;
     if (!raws.length) throw new Error('None of these items could be found. Check the data source file.');
     await progress({done: n, total: n, saving: true});
     if (append) await appendExamples(w, projectId, raws, 'sources', notFound);
     else await saveSnapshot(w, projectId, raws, 'sources', names.join(', '), notFound);
-    // Each segment records how many of its items went in.
-    const per = new Map<string, number>();
-    for (const r of raws) per.set(r.sourceId!, (per.get(r.sourceId!) ?? 0) + 1);
-    await catalog.patchMany('source_cuts', cuts.map((id, k) => ({id, patch: {taken: per.get(picks[k].sourceId) ?? 0}})));
+    saved = true;
+    ended('done');
+    // Each segment records how many of its items went in: the examples actually saved. A record
+    // only (the Dataset page counts the examples themselves), so a failure here fails nothing.
+    try {
+      const snapshotId = (await catalog.get('projects', projectId))?.snapshotId;
+      const examples = snapshotId ? await catalog.find('examples', {snapshotId}) : [];
+      await catalog.patchMany('source_cuts', cuts.map(c => ({id: c.id, patch: {taken: examples.filter(e => e.sourceId === c.sourceId && c.items.has(e.externalId)).length}})));
+    } catch {
+      // The cuts keep the counts they were made with.
+    }
     return {state: 'done'};
   } catch (e) {
-    await retireCuts(w, projectId, cuts);
-    const stopped = (e as Error).name === 'AbortError' || ctl.signal.aborted;
+    if (!saved) await retireCuts(w, projectId, cuts.map(c => c.id));
+    const stopped = !saved && ((e as Error).name === 'AbortError' || ctl.signal.aborted);
     ended(stopped ? 'stopped' : 'failed');
     if (stopped) return {state: 'cancelled', error: 'Stopped.'};
     throw e;

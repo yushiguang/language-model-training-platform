@@ -2,13 +2,13 @@
 
 import {useGo} from '@/components/nav';
 import Link from 'next/link';
-import {useState} from 'react';
+import {useState, type ReactNode} from 'react';
 import type {PageContext, Schema} from '@yushiguang/sprint-contracts';
 import {gate, labelBalance, systemConfig} from '@yushiguang/sprint-domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {approveNode, createDataSourceFile, pruneDataset, restoreExamples, stopSampleDataset, takeExamples, type DataSourceSummary, type ProjectState, type RemovalReason} from '@/backend-api';
-import {SOURCE_ACCEPT, sourceHint, useDataSources} from '@/components/sources';
+import {SOURCE_ACCEPT, sourceError, sourceHint, sourceName, useDataSources} from '@/components/sources';
 import {Badge, Banner, Button, Card, Cb, CenterProgress, dateTime, Dialog, Empty, Field, FileInput, Hov, Icon, Metric, Metrics, num, One, PageHead, Progress, Table} from '@/ui';
 import {t, tm} from '@/i18n';
 
@@ -25,6 +25,9 @@ const PAGE: PageContext = {label: 'Eval Dataset', agent: 'front_desk', intent: '
 function Dataset({state}: {state: ProjectState}) {
   const snap = state.snapshot;
   const task = state.samplingTask?.state === 'running' ? state.samplingTask : null;
+  // The last take failed: why, until the next take (design: V-Dataset-Take-Failed).
+  const failed = state.samplingTask?.state === 'failed' ? state.samplingTask : null;
+  const failedBanner = failed ? <TakeFailed error={failed.error} /> : null;
   const head = <PageHead title={t('Eval Dataset')} actions={snap && !task ? <NextButton state={state} /> : undefined} />;
   if (task)
     return (
@@ -41,14 +44,19 @@ function Dataset({state}: {state: ProjectState}) {
   if (!snap)
     return (
       <Frame head={head}>
-        <Start state={state} />
+        <Start state={state} failed={failedBanner} />
       </Frame>
     );
   return (
     <Frame head={head}>
-      <Ready state={state} />
+      <Ready state={state} failed={failedBanner} />
     </Frame>
   );
+}
+
+function TakeFailed({error}: {error: string | null}) {
+  const [list] = useDataSources();
+  return <Banner tone="err" oneLine text={t('Taking examples failed: {why}', {why: sourceError(error || 'the service did not answer', list ?? [])})} style={{margin: 0}} />;
 }
 
 /**
@@ -56,7 +64,7 @@ function Dataset({state}: {state: ProjectState}) {
  * one or more of the team's data sources. With none, a file uploaded here becomes one, for the
  * whole team.
  */
-function Start({state}: {state: ProjectState}) {
+function Start({state, failed}: {state: ProjectState; failed: ReactNode}) {
   const [list] = useDataSources();
   const [upload, setUpload] = useState(false);
   if (!list) return null;
@@ -68,6 +76,7 @@ function Start({state}: {state: ProjectState}) {
     );
   return (
     <Empty title={t('No examples yet')} text={t('Every example here is used to score your prompt. Take examples from one or more of your team’s data sources.')}>
+      {failed && <div style={{width: 542, textAlign: 'left', marginBottom: 16}}>{failed}</div>}
       <PickSources list={list} add={false} onTake={picks => takeExamples({projectId: state.project.id, picks})} />
       {upload ? (
         <div style={{marginTop: 24}}>
@@ -94,10 +103,14 @@ function UploadSource() {
   const create = async () => {
     if (!file) return;
     setErr(null);
-    const res = await createDataSourceFile(name, file);
-    if (res.error) return setErr(res.error);
-    setName('');
-    setFile(null);
+    try {
+      const res = await createDataSourceFile(name, file);
+      if (res.error) return setErr(res.error);
+      setName('');
+      setFile(null);
+    } catch (e) {
+      setErr((e as Error).message || 'Something went wrong. Try again.');
+    }
   };
   return (
     <Card className="form" style={{width: 542, textAlign: 'left'}}>
@@ -129,9 +142,10 @@ function PickSources({list, add, onTake}: {list: DataSourceSummary[]; add: boole
   const usable = list.filter(s => !s.importing && s.notUsed > 0);
   const [take, setTake] = useState<Record<string, string>>(() => (usable[0] ? {[usable[0].id]: takeDefault(usable[0])} : {}));
   const [err, setErr] = useState<string | null>(null);
+  // A ticked source that is importing again or used up is left out of the take.
   const picks = Object.entries(take)
     .map(([sourceId, v]) => ({sourceId, count: parseInt(v) || 0}))
-    .filter(p => list.some(s => s.id === p.sourceId));
+    .filter(p => usable.some(s => s.id === p.sourceId));
   const over = picks.find(p => p.count > (list.find(s => s.id === p.sourceId)?.notUsed ?? 0));
   const total = picks.reduce((n, p) => n + p.count, 0);
   const ok = picks.length > 0 && picks.every(p => p.count > 0) && !over;
@@ -153,16 +167,16 @@ function PickSources({list, add, onTake}: {list: DataSourceSummary[]; add: boole
           return {
             key: s.id,
             cells: [
-              <Cb key="c" state={on ? 'on' : 'off'} label={t('Use {name}', {name: s.name})} onToggle={off ? undefined : () => toggle(s)} />,
-              <One key="n" text={s.builtIn ? t(s.name) : s.name} />,
+              <Cb key="c" state={on ? 'on' : 'off'} label={t('Use {name}', {name: sourceName(s)})} onToggle={off && !on ? undefined : () => toggle(s)} />,
+              <One key="n" text={sourceName(s)} />,
               s.importing ? <Progress key="p" done={s.importing.done} total={s.importing.total} /> : <span key="a" className="t-3">{t('{n} not used', {n: num(s.notUsed)})}</span>,
               <input
                 key="t"
-                className={`input sm${on && over?.sourceId === s.id ? ' bad' : ''}`}
+                className={`input sm${on && !off && over?.sourceId === s.id ? ' bad' : ''}`}
                 style={{width: 80, textAlign: 'center', padding: '0 8px'}}
-                aria-label={t('Examples from {name}', {name: s.name})}
+                aria-label={t('Examples from {name}', {name: sourceName(s)})}
                 placeholder="0"
-                disabled={!on}
+                disabled={!on || off}
                 value={on ? take[s.id] : ''}
                 onChange={e => setTake(cur => ({...cur, [s.id]: e.target.value.replace(/\D/g, '')}))}
               />,
@@ -173,9 +187,9 @@ function PickSources({list, add, onTake}: {list: DataSourceSummary[]; add: boole
       <div className="row" style={{justifyContent: 'space-between'}}>
         <span className={over || err ? 't-err' : 't-3'} role={over || err ? 'alert' : undefined}>
           {over
-            ? t('Only {n} left in {name}.', {n: num(list.find(s => s.id === over.sourceId)!.notUsed), name: list.find(s => s.id === over.sourceId)!.name})
+            ? t('Only {n} left in {name}.', {n: num(list.find(s => s.id === over.sourceId)!.notUsed), name: sourceName(list.find(s => s.id === over.sourceId)!)})
             : err
-              ? t(err)
+              ? sourceError(err, list)
               : add
                 ? t('{n} more examples · items already here are skipped', {n: num(total)})
                 : t('{n} examples · repeats across sources count once', {n: num(total)})}
@@ -222,7 +236,7 @@ function NextButton({state}: {state: ProjectState}) {
  * be added at any time (existing ones keep their half and gold label), removed with a trail and
  * put back, and the label balance shows values with too few gold labels to score fairly.
  */
-function Ready({state}: {state: ProjectState}) {
+function Ready({state, failed}: {state: ProjectState; failed: ReactNode}) {
   const snap = state.snapshot!;
   const {minEvalRecommended} = systemConfig().dataset;
   const evalEx = state.examples.filter(e => e.split === 'eval');
@@ -233,6 +247,7 @@ function Ready({state}: {state: ProjectState}) {
   return (
     <div className="row" style={{gap: 32, alignItems: 'flex-start'}}>
       <div className="col" style={{gap: 16, width: 706, flex: 'none'}}>
+        {failed}
         {few && <Banner text={t('Fewer than {n} examples: scores will be rough until you add more examples.', {n: minEvalRecommended})} style={{margin: 0}} />}
         <Card title={t('Examples')}>
           <Metrics>
@@ -248,8 +263,8 @@ function Ready({state}: {state: ProjectState}) {
               rows={state.datasetSources.map(l => ({
                 key: l.sourceId,
                 cells: [
-                  <Link key="n" className="one" href={`/source/?id=${encodeURIComponent(l.sourceId)}`} title={l.name}>
-                    {t(l.name)}
+                  <Link key="n" className="one" href={`/source/?id=${encodeURIComponent(l.sourceId)}`} title={sourceName(l)}>
+                    {sourceName(l)}
                   </Link>,
                   num(l.examples),
                   <span key="a" className="t-3">

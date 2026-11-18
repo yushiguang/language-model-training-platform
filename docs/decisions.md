@@ -15,6 +15,9 @@ where it matters, why. The code follows these; change a line here when a decisio
 - **The sample data is a built-in data source** of every tenant (`ExampleSource.builtIn`); files cannot be added to it. The global sample pool (`ExampleSource.available` and `sample`, `getSamplePoolSize`) is gone, and so are Upload dataset, Auto sampling, Add from file and Add sampled: every dataset now comes from data sources.
 - **Breaking contract change:** `takeExamples({projectId, picks: [{sourceId, count}]})` replaces `startSampleDataset`, `appendSample`, `uploadDatasetText` and `appendUpload`; `listDataSources`, `getDataSource`, `createDataSource` and `addSourceFile` are new.
 - **Large files still go through the bff** in this version: the file store has no read side yet, so a file is read in the request and staged as chunks. Uploading straight to file storage waits for that.
+- **The tenant is the signed-in user's organization** (`Identity.currentUser().organization`, set as `RequestContext.tenantId` by the bff); with none it is `default`.
+- **An import that fails is tried twice more, then its file is marked failed** (review of #35). What it wrote stays in the source and can be taken; a cut skips the rest of its positions, and uploading the file again adds the rest. An import whose job ended without it is marked failed when the source is next read. Reserving positions is written on the source in the same update as its size, so an import cut short never reserves them twice or loses them.
+- **A failed take shows on the Eval Dataset page** ("Taking examples failed: …") until the next take. Add examples whose items are all in the dataset already succeeds and adds nothing. The per-source counts on the page are the dataset's live examples (removed ones leave them, restored ones come back).
 
 ## 2026-11-18 (Upload labels, #31)
 

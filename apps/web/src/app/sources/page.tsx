@@ -6,7 +6,7 @@ import {TenantIsland} from '@/components/Shell';
 import {SignedIn} from '@/components/session';
 import {useGo} from '@/components/nav';
 import {createDataSourceFile, type DataSourceSummary} from '@/backend-api';
-import {SOURCE_ACCEPT, sourceHint, useDataSources} from '@/components/sources';
+import {SOURCE_ACCEPT, sourceHint, sourceName, useDataSources} from '@/components/sources';
 import {Badge, Banner, Button, Card, dateTime, Field, FileInput, Icon, num, One, PageHead, Progress, Table} from '@/ui';
 import {t} from '@/i18n';
 
@@ -74,8 +74,8 @@ function SourceTable({list}: {list: DataSourceSummary[] | null}) {
         key: s.id,
         cells: [
           <span key="n" className="row" style={{gap: 8, minWidth: 0}}>
-            <Link className="one" href={`/source/?id=${encodeURIComponent(s.id)}`} title={s.name}>
-              {s.builtIn ? t(s.name) : s.name}
+            <Link className="one" href={`/source/?id=${encodeURIComponent(s.id)}`} title={sourceName(s)}>
+              {sourceName(s)}
             </Link>
             {s.builtIn && <Badge text={t('Built in')} icon={false} />}
           </span>,
@@ -101,9 +101,14 @@ function NewSource() {
   const create = async () => {
     if (!file) return;
     setErr(null);
-    const res = await createDataSourceFile(name, file);
-    if (res.error || !res.source) return setErr(res.error ?? 'Something went wrong. Try again.');
-    await go(`/source/?id=${encodeURIComponent(res.source.id)}`);
+    try {
+      const res = await createDataSourceFile(name, file);
+      if (res.error || !res.source) return setErr(res.error ?? 'Something went wrong. Try again.');
+      await go(`/source/?id=${encodeURIComponent(res.source.id)}`);
+    } catch (e) {
+      // A refused call (the service is down, the data source is busy) shows here too.
+      setErr((e as Error).message || 'Something went wrong. Try again.');
+    }
   };
   return (
     <Card title={t('New data source')} className="form" style={{width: 542, flex: 'none'}}>

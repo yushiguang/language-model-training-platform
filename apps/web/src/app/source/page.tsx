@@ -4,7 +4,7 @@ import {useSearchParams} from 'next/navigation';
 import {Suspense, useEffect, useState} from 'react';
 import {TenantIsland} from '@/components/Shell';
 import {SignedIn} from '@/components/session';
-import {SOURCE_ACCEPT, sourceHint} from '@/components/sources';
+import {SOURCE_ACCEPT, sourceHint, sourceName} from '@/components/sources';
 import {addSourceFileFile, getDataSource, subscribeChanges, type DataSourceDetail, type SourceFile} from '@/backend-api';
 import {Badge, Banner, Button, Card, dateTime, FileInput, Hov, Icon, Metric, Metrics, num, One, PageHead, Progress, Table} from '@/ui';
 import {t} from '@/i18n';
@@ -43,7 +43,7 @@ function Source() {
     void load();
     return subscribeChanges(() => void load());
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
-  const title = d ? (d.source.builtIn ? t(d.source.name) : d.source.name) : t('Data Source');
+  const title = d ? sourceName(d.source) : t('Data Source');
   return (
     <div className="k app b">
       <div className="b-body">
@@ -99,7 +99,7 @@ function FileItems({f}: {f: SourceFile}) {
   if (f.state === 'importing') return <Progress done={f.done} total={f.start == null ? f.rows - f.bad - f.repeats : f.items} />;
   if (f.state === 'failed')
     return (
-      <span title={f.error ?? undefined}>
+      <span title={f.error ? t(f.error) : undefined}>
         <Badge text={t('Failed')} tone="err" />
       </span>
     );
@@ -113,9 +113,14 @@ function AddFile({sourceId}: {sourceId: string}) {
   const add = async () => {
     if (!file) return;
     setErr(null);
-    const res = await addSourceFileFile(sourceId, file);
-    if (res.error) return setErr(res.error);
-    setFile(null);
+    try {
+      const res = await addSourceFileFile(sourceId, file);
+      if (res.error) return setErr(res.error);
+      setFile(null);
+    } catch (e) {
+      // A refused call (the service is down, the data source is busy) shows here too.
+      setErr((e as Error).message || 'Something went wrong. Try again.');
+    }
   };
   return (
     <Card title={t('Add a file')} className="form" style={{width: 542, flex: 'none'}}>

@@ -26,3 +26,17 @@ export function useDataSources(): [DataSourceSummary[] | null, string | null, ()
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   return [list, failed, load];
 }
+
+/** A source's name as shown: the built-in sample data's is translated, a team's own never is. */
+export const sourceName = (s: {name: string; builtIn?: boolean}) => (s.builtIn ? t(s.name) : s.name);
+
+/**
+ * A data source error from the server, translated. The count error carries numbers and a name, so
+ * it is matched and translated with them; a built-in source's name in it is translated too.
+ */
+export function sourceError(message: string, list: {name: string; builtIn?: boolean}[] = []): string {
+  const m = /^Only (\d+) unused items are left in (.+); (\d+) were asked for\.$/.exec(message);
+  if (!m) return t(message);
+  const name = list.some(s => s.builtIn && s.name === m[2]) ? t(m[2]) : m[2];
+  return t('Only {n} unused items are left in {name}; {count} were asked for.', {n: Number(m[1]).toLocaleString(), name, count: Number(m[3]).toLocaleString()});
+}

@@ -121,7 +121,7 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
     contextId,
     endpoints: gateway.labelingEndpoints(),
     samplingTask: await getSamplingTask(w, projectId),
-    datasetSources: await datasetSources(w, projectId),
+    datasetSources: await datasetSources(w, projectId, examples),
     removals,
     comments,
     otherAutoSpendUsd: autoSpend.reduce((n, a) => n + Number((a.data as {costUsd?: number}).costUsd ?? 0), 0),

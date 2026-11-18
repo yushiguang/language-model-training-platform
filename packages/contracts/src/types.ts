@@ -686,7 +686,7 @@ export interface PageContext {
 }
 
 /** The pages an agent can see. */
-export type PageId = 'projects' | 'prompt_design' | 'dataset' | 'gold' | 'prompt' | 'prompt_edit';
+export type PageId = 'projects' | 'sources' | 'source' | 'prompt_design' | 'dataset' | 'gold' | 'prompt' | 'prompt_edit';
 
 export interface PageLocation {
   page: PageId;
@@ -741,6 +741,11 @@ export interface DataSource {
   files: number;
   /** Positions handed out to datasets: the next cut starts here (#30). Never goes back. */
   next: number;
+  /**
+   * The last positions reserved for a file, written in the same update as `items`: a run cut short
+   * before the file recorded them copies them from here, so no positions are reserved twice or lost.
+   */
+  reserved?: {fileId: string; start: number; items: number; repeats: number} | null;
   createdAt: string;
   createdBy: string;
   createdById?: string;
@@ -764,7 +769,10 @@ export interface SourceFile {
   /** Its first position in the source's order, set when its import reserves the positions. */
   start?: number;
   state: 'importing' | 'done' | 'failed';
-  /** Importing: items written so far, of `items`. */
+  /**
+   * Items written so far, of `items`. A failed file keeps the items it wrote (they can be taken);
+   * the rest of its positions are skipped, and uploading the file again adds them.
+   */
   done: number;
   error?: string | null;
   uploadedAt: string;
@@ -830,6 +838,8 @@ export interface DataSourceDetail {
 export interface DatasetSourceLine {
   sourceId: string;
   name: string;
+  /** The built-in sample data: its name is translated. */
+  builtIn?: boolean;
   examples: number;
   addedAt: string;
 }

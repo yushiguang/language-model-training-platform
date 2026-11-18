@@ -12,6 +12,13 @@ export const MAX_SOURCE_FILE_ROWS = 100_000;
 const ID_KEYS = ['item_id', 'id', 'external_id', 'externalid', 'video_id'];
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 
+/** A JSONL object's id: the first id key it has, in the order of `ID_KEYS`, in any case. */
+function idOf(o: Record<string, unknown>): unknown {
+  const keys = new Map(Object.keys(o).map(k => [k.toLowerCase(), k]));
+  for (const k of ID_KEYS) if (keys.has(k)) return o[keys.get(k)!];
+  return undefined;
+}
+
 /**
  * One file's ids, in file order. `rows`: the rows read (a header and blank lines are not rows);
  * `bad`: rows with no usable id; `repeats`: rows whose id came earlier in the same file.
@@ -21,10 +28,11 @@ export type ItemIdFile = {ids: string[]; rows: number; bad: number; repeats: num
 /**
  * Reads a data source file: one item id per row (#29).
  *
- * - TXT, or CSV with one column: one id per line; a header such as `item_id` is skipped.
- * - CSV with several columns: the id is the `item_id` (or `id`, `external_id`, `video_id`)
- *   column; the other columns are ignored.
- * - JSONL: `{"item_id": "..."}` per line (or `id`, `externalId`, `video_id`), or a bare JSON string.
+ * - TXT: one id per line; a first line that is only a header such as `item_id` is skipped.
+ * - CSV: the id is the `item_id` (or `id`, `external_id`, `externalId`, `video_id`) column, in any
+ *   case; the other columns are ignored. With one column and no such header, every line is an id.
+ * - JSONL: `{"item_id": "..."}` per line (or any of the keys above, in any case), or a bare JSON
+ *   string or number.
  */
 export function readItemIdFile(name: string, text: string): ItemIdFile {
   if (!/\.(csv|txt|jsonl)$/i.test(name)) return {error: 'Upload a CSV, JSONL or TXT file of item IDs.'};
@@ -35,19 +43,23 @@ export function readItemIdFile(name: string, text: string): ItemIdFile {
     for (const line of lines) {
       try {
         const o = JSON.parse(line) as unknown;
-        const id = typeof o === 'string' || typeof o === 'number' ? o : o && typeof o === 'object' ? (o as Record<string, unknown>).item_id ?? (o as Record<string, unknown>).id ?? (o as Record<string, unknown>).externalId ?? (o as Record<string, unknown>).video_id : undefined;
+        const id = typeof o === 'string' || typeof o === 'number' ? o : o && typeof o === 'object' ? idOf(o as Record<string, unknown>) : undefined;
         if (typeof id === 'string' || typeof id === 'number') cells.push(String(id).trim());
         else bad++;
       } catch {
         bad++;
       }
     }
+  } else if (/\.txt$/i.test(name)) {
+    // A whole line is one id: only a line that is just an id key is a header.
+    const header = ID_KEYS.includes((lines[0] ?? '').trim().toLowerCase());
+    for (const line of header ? lines.slice(1) : lines) cells.push(line.trim());
   } else {
-    const head = csvCells(lines[0] ?? '').map(h => h.toLowerCase());
+    const head = csvCells(lines[0] ?? '').map(h => h.trim().toLowerCase());
     const named = head.findIndex(h => ID_KEYS.includes(h));
-    if (head.length > 1 && named === -1 && /\.csv$/i.test(name)) return {error: 'The file needs an item_id column.'};
+    if (head.length > 1 && named === -1) return {error: 'The file needs an item_id column.'};
     const col = Math.max(0, named);
-    for (const line of named === -1 ? lines : lines.slice(1)) cells.push(((/\.csv$/i.test(name) ? csvCells(line)[col] : line) ?? '').trim());
+    for (const line of named === -1 ? lines : lines.slice(1)) cells.push((csvCells(line)[col] ?? '').trim());
   }
   const rows = cells.length + bad;
   if (rows > MAX_SOURCE_FILE_ROWS) return {error: 'The file has more than 100,000 rows. Split it into smaller files.'};

@@ -682,4 +682,11 @@ export const ZH: Readonly<Record<string, string>> = {
   "Each data source can be picked once.": "每个数据源只能选一次。",
   "None of these items could be found. Check the data source file.": "这些条目都找不到。请检查数据源文件。",
   "Something went wrong. Try again.": "出了点问题，请重试。",
+  "Taking examples failed: {why}": "取样本失败：{why}",
+  "Only {n} unused items are left in {name}; {count} were asked for.": "{name} 只剩 {n} 条未用的条目，但要取 {count} 条。",
+  "The data source is busy. Try again in a minute.": "数据源正忙，请一分钟后重试。",
+  "No items could be taken from these data sources yet. Try again when their files are imported.": "这些数据源暂时取不到条目。请等文件导入完成后再试。",
+  "The import stopped. Upload the file again.": "导入已中断，请重新上传文件。",
+  "The last take is still stopping. Try again in a moment.": "上一次取样本还在停止中，请稍后重试。",
+  "Stopped.": "已停止。",
 };

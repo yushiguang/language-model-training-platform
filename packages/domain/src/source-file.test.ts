@@ -13,6 +13,16 @@ test('data source files (#29): one item id per row in CSV, TXT or JSONL; bad row
   assert.match((readItemIdFile('a.txt', Array.from({length: MAX_SOURCE_FILE_ROWS + 1}, (_, i) => `v${i}`).join('\n')) as {error: string}).error, /more than 100,000 rows/);
 });
 
+test('data source files (review): JSONL takes every id key in any case; a TXT header is only a whole line that is a key', () => {
+  assert.deepEqual(readItemIdFile('a.jsonl', '{"external_id":"v1"}\n{"Item_ID":"v2"}\n{"ExternalId":"v3"}\n{"VIDEO_ID":4}\n'), {ids: ['v1', 'v2', 'v3', '4'], rows: 4, bad: 0, repeats: 0});
+  // The first key in the order item_id, id, external_id wins.
+  assert.deepEqual(readItemIdFile('a.jsonl', '{"id":"b","item_id":"a"}\n'), {ids: ['a'], rows: 1, bad: 0, repeats: 0});
+  // A TXT line with a comma is one (bad) id, never a header with columns.
+  assert.deepEqual(readItemIdFile('a.txt', 'item_id,title\nv1\n'), {ids: ['v1'], rows: 2, bad: 1, repeats: 0});
+  assert.deepEqual(readItemIdFile('a.txt', 'ITEM_ID\nv1\nv2\n'), {ids: ['v1', 'v2'], rows: 2, bad: 0, repeats: 0});
+  assert.deepEqual(readItemIdFile('a.csv', 'Creator, Item_ID\nx, v1\n'), {ids: ['v1'], rows: 1, bad: 0, repeats: 0});
+});
+
 test('seeded shuffle (#30): the same seed gives the same order, another seed another; nothing is lost', () => {
   const ids = Array.from({length: 50}, (_, i) => `v${i}`);
   const a = seededShuffle(ids, 'seed_1');

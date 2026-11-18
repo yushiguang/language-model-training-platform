@@ -119,7 +119,7 @@ export const LABEL_VALUES: Record<string, readonly string[]> = {
   to: ['prompt_agent', 'evaluation_agent'],
   intent: ['answer', 'follow_up', 'draft_prompt', 'import_prompt', 'revise_prompt', 'explain_version', 'explain_report', 'reflect', 'merge', 'improve'],
   tool: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions', 'check_prompt', 'read_feature_info', 'read_doc', 'get_project_summary', 'get_dataset_stats', 'search_examples', 'compare_versions', 'get_mismatch_summary', 'try_prompt', 'score_version', 'start_optimiser', 'report_problem'],
-  page: ['projects', 'prompt_design', 'dataset', 'gold', 'prompt', 'prompt_edit', 'other'],
+  page: ['projects', 'sources', 'source', 'prompt_design', 'dataset', 'gold', 'prompt', 'prompt_edit', 'other'],
   what: ['score', 'resume', 'optimiser', 'try_prompt', 'score_version', 'start_optimiser'],
   decision: ['started'],
   node: ['prompt_design', 'dataset', 'gold', 'prompt'],

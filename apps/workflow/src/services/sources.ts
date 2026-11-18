@@ -1,4 +1,4 @@
-import type {AddSourceFileRequest, CreateDataSourceRequest, DataSource, DataSourceDetail, DataSourceSummary, DatasetSourceLine, Job, JobOutcome, SourceChunk, SourceCut, SourceFile, SourcePick, SourceUploadResult} from '@yushiguang/sprint-contracts';
+import {DocFieldValue, type AddSourceFileRequest, type CreateDataSourceRequest, type DataSource, type DataSourceDetail, type DataSourceSummary, type DatasetSourceLine, type Example, type Job, type JobControl, type JobOutcome, type SourceChunk, type SourceCut, type SourceFile, type SourcePick, type SourceUploadResult} from '@yushiguang/sprint-contracts';
 import {hashString, newId, readItemIdFile, seededShuffle} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 
@@ -67,18 +67,35 @@ function chunksOf(sourceId: string, fileId: string, start: number, ids: string[]
   return out;
 }
 
+/** The files with their positions, taking a reservation not yet copied to its file from the source. */
+function placed(src: DataSource, files: SourceFile[]): SourceFile[] {
+  const r = src.reserved;
+  return files.map(f => (f.start == null && r?.fileId === f.id ? {...f, start: r.start, items: r.items} : f));
+}
+
+/**
+ * Reserved positions with no item written: the rest of each importing or failed file's positions
+ * (a file is written in order from its start). `failed`: never written, so a cut skips them.
+ */
+function holes(src: DataSource, files: SourceFile[]): {from: number; to: number; failed: boolean}[] {
+  return placed(src, files)
+    .filter(f => f.state !== 'done' && f.start != null && f.done < f.items)
+    .map(f => ({from: f.start! + f.done, to: f.start! + f.items, failed: f.state === 'failed'}));
+}
+
 function summary(src: DataSource, files: SourceFile[]): DataSourceSummary {
-  const importing = files.filter(f => f.state === 'importing');
-  // `src.items` counts reserved positions; ones not written yet are not items anyone can take.
-  const unwritten = importing.reduce((n, f) => n + (f.start == null ? 0 : f.items - f.done), 0);
-  const items = src.items - unwritten;
+  const importing = placed(src, files).filter(f => f.state === 'importing');
+  // `src.items` counts reserved positions; ones not written are not items anyone can take.
+  const hs = holes(src, files);
+  const items = src.items - hs.reduce((n, h) => n + h.to - h.from, 0);
+  const unusedHoles = hs.reduce((n, h) => n + Math.max(0, h.to - Math.max(src.next, h.from)), 0);
   return {
     id: src.id,
     name: src.name,
     builtIn: !!src.builtIn,
     files: files.length,
     items,
-    notUsed: Math.max(0, items - src.next),
+    notUsed: Math.max(0, src.items - src.next - unusedHoles),
     createdBy: src.createdBy,
     updatedAt: src.updatedAt,
     // Before its positions are reserved, a file's size is its rows less the bad ones and repeats.
@@ -86,10 +103,28 @@ function summary(src: DataSource, files: SourceFile[]): DataSourceSummary {
   };
 }
 
+/** How long an import may wait for its job before a page treats it as stopped. */
+const STUCK_MS = 2 * 60_000;
+
+/**
+ * Marks imports whose job has ended without them as failed: a job the job module gave up on (its
+ * runner died too often) never reaches `runIngest`'s own failure handling.
+ */
+async function settleStuck(w: Scope, files: SourceFile[]): Promise<boolean> {
+  const old = files.filter(f => f.state === 'importing' && Date.now() - Date.parse(f.uploadedAt) > STUCK_MS);
+  if (!old.length) return false;
+  const active = new Set((await w.jobs.list(w.ctx, {kinds: ['source.ingest'], states: ['queued', 'running']})).map(j => String(j.args.fileId)));
+  const stuck = old.filter(f => !active.has(f.id));
+  for (const f of stuck) await markFailed(w, f.id, 'The import stopped. Upload the file again.').catch(() => undefined);
+  return stuck.length > 0;
+}
+
 export async function listDataSources(w: Scope): Promise<DataSourceSummary[]> {
   await ensureBuiltIn(w);
   const tenantId = tenantOf(w);
-  const [sources, files] = await Promise.all([w.catalog.find('data_sources', {tenantId}), w.catalog.find('source_files', {tenantId})]);
+  const read = () => Promise.all([w.catalog.find('data_sources', {tenantId}), w.catalog.find('source_files', {tenantId})]);
+  let [sources, files] = await read();
+  if (await settleStuck(w, files)) [sources, files] = await read();
   return sources
     .sort((a, b) => Number(!!a.builtIn) - Number(!!b.builtIn) || b.updatedAt.localeCompare(a.updatedAt))
     .map(s => summary(s, files.filter(f => f.sourceId === s.id)));
@@ -99,23 +134,33 @@ export async function getDataSource(w: Scope, sourceId: string): Promise<DataSou
   await ensureBuiltIn(w);
   const src = await w.catalog.get('data_sources', sourceId);
   if (!src || src.tenantId !== tenantOf(w)) return null;
-  const [files, cuts] = await Promise.all([w.catalog.find('source_files', {sourceId}, 'uploadedAt desc'), w.catalog.find('source_cuts', {sourceId})]);
+  const read = () => Promise.all([w.catalog.get('data_sources', sourceId), w.catalog.find('source_files', {sourceId}, 'uploadedAt desc'), w.catalog.find('source_cuts', {sourceId})]);
+  let [fresh, files, cuts] = await read();
+  if (await settleStuck(w, files)) [fresh, files, cuts] = await read();
   const live = cuts.filter(c => !c.retired);
-  return {source: summary(src, files), files, taken: src.next, projects: new Set(live.map(c => c.projectId)).size};
+  const source = summary(fresh!, files);
+  return {source, files: placed(fresh!, files), taken: source.items - source.notUsed, projects: new Set(live.map(c => c.projectId)).size};
 }
 
 export async function createDataSource(w: Scope, req: CreateDataSourceRequest): Promise<SourceUploadResult> {
   const name = req.name.trim();
   if (!name) return {error: 'Give the data source a name.'};
-  const tenantId = tenantOf(w);
-  if ((await w.catalog.find('data_sources', {tenantId})).some(s => s.name.toLowerCase() === name.toLowerCase())) return {error: 'A data source with this name already exists.'};
   const read = readItemIdFile(req.fileName, req.text);
   if ('error' in read) return {error: read.error};
+  // The built-in source is made first, so its name is taken too.
+  await ensureBuiltIn(w);
+  const tenantId = tenantOf(w);
   const user = await w.user();
-  const at = now();
-  const src: DataSource = {id: newId('src'), tenantId, name, items: 0, files: 0, next: 0, createdAt: at, createdBy: user.name, createdById: user.id, updatedAt: at};
-  await w.catalog.insert('data_sources', src);
-  return stageFile(w, src, req.fileName, read);
+  // The name check and the insert hold the tenant's lock: two creates never make one name twice.
+  return withLock(w, `sources:${tenantId}`, async () => {
+    if ((await w.catalog.find('data_sources', {tenantId})).some(s => s.name.toLowerCase() === name.toLowerCase())) return {error: 'A data source with this name already exists.'};
+    const at = now();
+    const src: DataSource = {id: newId('src'), tenantId, name, items: 0, files: 1, next: 0, createdAt: at, createdBy: user.name, createdById: user.id, updatedAt: at};
+    // The file is staged first and the source goes last: a create cut short leaves no empty source.
+    const file = await stageFile(w, src, req.fileName, read);
+    await w.catalog.insert('data_sources', src);
+    return queued(w, src, file, read);
+  });
 }
 
 export async function addSourceFile(w: Scope, req: AddSourceFileRequest): Promise<SourceUploadResult> {
@@ -123,38 +168,62 @@ export async function addSourceFile(w: Scope, req: AddSourceFileRequest): Promis
   if (src.builtIn) return {error: "Files can't be added to the built-in sample data."};
   const read = readItemIdFile(req.fileName, req.text);
   if ('error' in read) return {error: read.error};
-  return stageFile(w, src, req.fileName, read);
+  const file = await stageFile(w, src, req.fileName, read);
+  await w.catalog.patch('data_sources', src.id, {files: DocFieldValue.increment(1), updatedAt: file.uploadedAt});
+  return queued(w, src, file, read);
 }
 
-/** Saves the file's ids as staged chunks and queues its import (`source.ingest`). */
-async function stageFile(w: Scope, src: DataSource, fileName: string, read: {ids: string[]; rows: number; bad: number; repeats: number}): Promise<SourceUploadResult> {
+type ReadFile = {ids: string[]; rows: number; bad: number; repeats: number};
+
+/** Saves the file's ids as staged chunks, and the file. */
+async function stageFile(w: Scope, src: DataSource, fileName: string, read: ReadFile): Promise<SourceFile> {
   const user = await w.user();
   const file: SourceFile = {id: newId('sf'), sourceId: src.id, tenantId: src.tenantId, name: fileName, rows: read.rows, bad: read.bad, repeats: read.repeats, items: 0, seed: newId('seed'), state: 'importing', done: 0, uploadedAt: now(), uploadedBy: user.name};
   await w.catalog.insertMany('source_chunks', chunksOf(src.id, file.id, 0, read.ids, true));
   await w.catalog.insert('source_files', file);
-  await w.catalog.patch('data_sources', src.id, {files: src.files + 1, updatedAt: file.uploadedAt});
+  return file;
+}
+
+/** Queues the file's import (`source.ingest`) once its source is saved. */
+async function queued(w: Scope, src: DataSource, file: SourceFile, read: ReadFile): Promise<SourceUploadResult> {
   await w.jobs.enqueue(w.ctx, {kind: 'source.ingest', projectId: null, args: {fileId: file.id}, idempotencyKey: `source.ingest:${file.id}`});
-  await w.catalog.audit(null, user.name, 'data_source.file_added', {sourceId: src.id, fileId: file.id, rows: read.rows, bad: read.bad, repeats: read.repeats});
+  await w.catalog.audit(null, file.uploadedBy, 'data_source.file_added', {sourceId: src.id, fileId: file.id, rows: read.rows, bad: read.bad, repeats: read.repeats});
   w.tm.event('source_file_uploaded', {rows: read.rows, bad: read.bad, repeats: read.repeats});
   w.emitChange(null);
   const files = await w.catalog.find('source_files', {sourceId: src.id});
   return {source: summary((await w.catalog.get('data_sources', src.id))!, files), file};
 }
 
+/** Times a failed import is tried again before its file is marked failed. */
+export const INGEST_RETRIES = 2;
+
+/**
+ * Copies the source's last reservation to its file when a run stopped between the two writes
+ * (the source's is written first, in the same update as `items`).
+ */
+async function settleReservation(w: Scope, src: DataSource): Promise<void> {
+  const r = src.reserved;
+  if (!r) return;
+  const file = await w.catalog.get('source_files', r.fileId);
+  if (file && file.start == null) await w.catalog.patch('source_files', file.id, {start: r.start, items: r.items, repeats: r.repeats});
+}
+
 /**
  * The `source.ingest` executor: writes a staged file into its source's order. Under the source's
- * lock it reserves the positions (recorded on the file, so a run cut short goes on with the same
- * ones), leaves out ids already in the source, shuffles the rest with the file's seed and writes
- * them in chunks, with progress.
+ * lock it reserves the positions (recorded on the source in the same update as its size, then on
+ * the file, so a run cut short goes on with the same ones), leaves out ids already in the source,
+ * shuffles the rest with the file's seed and writes them in chunks, with progress. A failure is
+ * tried again (`INGEST_RETRIES`); after the last, the file is marked failed, keeping what it wrote.
  */
-export async function runIngest(w: Scope, job: Job): Promise<JobOutcome> {
+export async function runIngest(w: Scope, job: Job, ctl: JobControl): Promise<JobOutcome> {
   const fileId = String(job.args.fileId);
-  let file = await w.catalog.get('source_files', fileId);
-  if (!file || file.state !== 'importing') return {state: 'done'};
+  const first = await w.catalog.get('source_files', fileId);
+  if (!first || first.state !== 'importing') return {state: 'done'};
   try {
-    await withLock(w, `source:${file.sourceId}`, async () => {
-      file = (await w.catalog.get('source_files', fileId))!;
-      const src = (await w.catalog.get('data_sources', file.sourceId))!;
+    const stopped = await withLock(w, `source:${first.sourceId}`, async () => {
+      await settleReservation(w, (await w.catalog.get('data_sources', first.sourceId))!);
+      const [src, file] = await Promise.all([w.catalog.get('data_sources', first.sourceId), w.catalog.get('source_files', fileId)]);
+      if (!src || !file || file.state !== 'importing') return false;
       const chunks = await w.catalog.find('source_chunks', {sourceId: file.sourceId});
       const staged = chunks.filter(c => c.staged && c.fileId === fileId).sort((a, b) => a.start - b.start).flatMap(c => c.ids);
       const start = file.start ?? src.items;
@@ -162,30 +231,54 @@ export async function runIngest(w: Scope, job: Job): Promise<JobOutcome> {
       const there = new Set(chunks.filter(c => !c.staged && c.start < start).flatMap(c => c.ids));
       const order = seededShuffle(staged.filter(id => !there.has(id)), file.seed);
       if (file.start == null) {
-        await w.catalog.patch('source_files', fileId, {start, items: order.length, repeats: file.repeats + staged.length - order.length});
-        await w.catalog.patch('data_sources', src.id, {items: start + order.length});
+        const reserved = {fileId, start, items: order.length, repeats: file.repeats + staged.length - order.length};
+        await w.catalog.patch('data_sources', src.id, {items: start + order.length, reserved});
+        await w.catalog.patch('source_files', fileId, {start, items: reserved.items, repeats: reserved.repeats});
       }
       const written = new Set(chunks.filter(c => !c.staged && c.fileId === fileId).map(c => c.start));
-      const pieces = chunksOf(src.id, fileId, start, order);
       let done = 0;
-      for (const piece of pieces) {
+      for (const piece of chunksOf(src.id, fileId, start, order)) {
+        if (ctl.signal.aborted) return true;
         if (!written.has(piece.start)) await w.catalog.insert('source_chunks', piece);
         done += piece.ids.length;
         await w.catalog.patch('source_files', fileId, {done});
+        await ctl.progress({done, total: order.length});
         w.emitChange(null);
       }
       await w.catalog.patch('source_files', fileId, {state: 'done', done: order.length, error: null});
       await w.catalog.patch('data_sources', src.id, {updatedAt: now()});
       await w.catalog.deleteStagedChunks(fileId);
+      return false;
     });
+    if (!stopped) return {state: 'done'};
+    // A lost lease: the runner that took the job over goes on. A cancel ends the import.
+    if (ctl.cancelled()) await markFailed(w, fileId, 'Stopped.');
+    return {state: 'cancelled', error: 'Stopped.'};
   } catch (e) {
-    // Not tried again: the file shows why it failed, and can be uploaded again.
-    await w.catalog.patch('source_files', fileId, {state: 'failed', error: (e as Error).message});
+    if (job.attempts > INGEST_RETRIES) await markFailed(w, fileId, (e as Error).message).catch(() => undefined);
     throw e;
   } finally {
     w.emitChange(null);
   }
-  return {state: 'done'};
+}
+
+/**
+ * Marks an import failed. The items it wrote stay in the source and can be taken; the rest of its
+ * positions are skipped by cuts (`allocate`), and uploading the file again adds the rest.
+ */
+async function markFailed(w: Scope, fileId: string, error: string): Promise<void> {
+  const file = await w.catalog.get('source_files', fileId);
+  if (!file) return;
+  await withLock(w, `source:${file.sourceId}`, async () => {
+    const src = await w.catalog.get('data_sources', file.sourceId);
+    if (src) await settleReservation(w, src);
+    const latest = await w.catalog.get('source_files', fileId);
+    if (!latest || latest.state !== 'importing') return;
+    const done = (await w.catalog.find('source_chunks', {fileId})).filter(c => !c.staged).reduce((n, c) => n + c.ids.length, 0);
+    await w.catalog.patch('source_files', fileId, {state: 'failed', error, done});
+    await w.catalog.deleteStagedChunks(fileId);
+  });
+  w.emitChange(null);
 }
 
 /**
@@ -196,22 +289,33 @@ export async function runIngest(w: Scope, job: Job): Promise<JobOutcome> {
  */
 export async function allocate(w: Scope, projectId: string, pick: SourcePick, known: Set<string>): Promise<{cut: SourceCut; items: {externalId: string; fileId: string}[]}> {
   return withLock(w, `source:${pick.sourceId}`, async () => {
+    await settleReservation(w, await ownSource(w, pick.sourceId));
     const src = await ownSource(w, pick.sourceId);
-    if (pick.count > src.items - src.next) throw new Error(`Only ${src.items - src.next} unused items are left in ${src.name}; ${pick.count} were asked for.`);
-    const chunks = (await w.catalog.find('source_chunks', {sourceId: src.id})).filter(c => !c.staged).sort((a, b) => a.start - b.start);
+    const [all, files] = await Promise.all([w.catalog.find('source_chunks', {sourceId: src.id}), w.catalog.find('source_files', {sourceId: src.id})]);
+    const left = summary(src, files).notUsed;
+    if (pick.count > left) throw new Error(`Only ${left} unused items are left in ${src.name}; ${pick.count} were asked for.`);
+    const chunks = all.filter(c => !c.staged).sort((a, b) => a.start - b.start);
+    const skip = holes(src, files).filter(h => h.failed);
     const items: {externalId: string; fileId: string}[] = [];
     let pos = src.next;
-    // Positions are read in order; a reserved piece not written yet ends the walk.
-    for (const c of chunks) {
-      if (items.length >= pick.count) break;
-      if (c.start + c.ids.length <= pos) continue;
-      if (c.start > pos) break;
-      for (let i = pos - c.start; i < c.ids.length && items.length < pick.count; i++, pos++) {
-        const id = c.ids[i];
-        if (known.has(id)) continue;
-        known.add(id);
-        items.push({externalId: id, fileId: c.fileId});
+    let k = 0;
+    // Positions are read in order. A failed file's unwritten ones are skipped; an import's not
+    // written yet end the walk.
+    while (items.length < pick.count) {
+      while (k < chunks.length && chunks[k].start + chunks[k].ids.length <= pos) k++;
+      const c = chunks[k];
+      if (c && c.start <= pos) {
+        for (let i = pos - c.start; i < c.ids.length && items.length < pick.count; i++, pos++) {
+          const id = c.ids[i];
+          if (known.has(id)) continue;
+          known.add(id);
+          items.push({externalId: id, fileId: c.fileId});
+        }
+        continue;
       }
+      const hole = skip.find(h => h.from <= pos && pos < h.to);
+      if (!hole) break;
+      pos = hole.to;
     }
     const cut: SourceCut = {id: newId('cut'), sourceId: src.id, projectId, start: src.next, end: pos, taken: items.length, createdAt: now(), createdBy: (await w.user()).name};
     await w.catalog.insert('source_cuts', cut);
@@ -243,17 +347,21 @@ export async function retireCuts(w: Scope, projectId: string, only?: string[]): 
   if (live.length) await w.catalog.patchMany('source_cuts', live.map(c => ({id: c.id, patch: {retired: true}})));
 }
 
-/** Where the project's eval dataset came from, per data source. */
-export async function datasetSources(w: Scope, projectId: string): Promise<DatasetSourceLine[]> {
-  const cuts = (await w.catalog.find('source_cuts', {projectId})).filter(c => !c.retired && c.taken > 0);
-  if (!cuts.length) return [];
-  const by = new Map<string, DatasetSourceLine>();
-  const names = new Map((await w.catalog.findByIds('data_sources', [...new Set(cuts.map(c => c.sourceId))])).map(s => [s.id, s.name]));
-  for (const c of cuts) {
-    const line = by.get(c.sourceId) ?? {sourceId: c.sourceId, name: names.get(c.sourceId) ?? c.sourceId, examples: 0, addedAt: c.createdAt};
-    line.examples += c.taken;
-    if (c.createdAt > line.addedAt) line.addedAt = c.createdAt;
-    by.set(c.sourceId, line);
-  }
-  return [...by.values()].sort((a, b) => a.addedAt.localeCompare(b.addedAt));
+/**
+ * Where the project's eval dataset came from, per data source: its live examples (removed ones
+ * leave the count, restored ones come back), with the time the source's last cut was made.
+ */
+export async function datasetSources(w: Scope, projectId: string, examples: Example[]): Promise<DatasetSourceLine[]> {
+  const count = new Map<string, number>();
+  for (const e of examples) if (e.sourceId && !e.removed) count.set(e.sourceId, (count.get(e.sourceId) ?? 0) + 1);
+  if (!count.size) return [];
+  const [sources, cuts] = await Promise.all([w.catalog.findByIds('data_sources', [...count.keys()]), w.catalog.find('source_cuts', {projectId})]);
+  const added = new Map<string, string>();
+  for (const c of cuts) if (!c.retired && c.createdAt > (added.get(c.sourceId) ?? '')) added.set(c.sourceId, c.createdAt);
+  return [...count]
+    .map(([sourceId, n]) => {
+      const src = sources.find(s => s.id === sourceId);
+      return {sourceId, name: src?.name ?? sourceId, ...(src?.builtIn ? {builtIn: true} : {}), examples: n, addedAt: added.get(sourceId) ?? ''};
+    })
+    .sort((a, b) => a.addedAt.localeCompare(b.addedAt));
 }
