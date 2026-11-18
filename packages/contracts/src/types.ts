@@ -342,6 +342,8 @@ export interface PromptVersion {
 
 export interface Prediction {
   id: string;
+  /** The project of the task that saved it (missing on older records); deleting a project uses it. */
+  projectId?: string;
   promptVersionId: string;
   endpoint: EndpointId;
   settingsHash: string;

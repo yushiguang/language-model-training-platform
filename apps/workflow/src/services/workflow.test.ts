@@ -267,6 +267,24 @@ test('Delete project removes its records everywhere and leaves other projects al
   await assert.rejects(deleteProject(w.ws, w.projectId), /does not exist/);
 });
 
+test('Delete project mid-run: the running labeling ends first, so no answer or task is left behind (#24)', async () => {
+  const w = await world('b11b', {delayMs: 30});
+  const v = await w.newVersion();
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.state()).runs[0]?.done >= 1, 'scoring under way');
+  const {deleteProject, runDelete} = await import('./projects.ts');
+  await deleteProject(w.ws, w.projectId);
+  await w.jobs.idle();
+  assert.equal((await w.labeling.listTasks(w.projectId)).length, 0);
+  const repo = new DocRepo(w.db);
+  assert.equal((await repo.find('predictions' as never, {})).length, 0);
+  assert.equal(Object.keys(await w.labeling.predictions(v.id, 'A', 'x')).length, 0);
+  // Safe to run again, and an answer a late runner elsewhere saved is found by its project.
+  await repo.insert('predictions' as never, {id: 'pd_late', projectId: w.projectId, promptVersionId: v.id, endpoint: 'A', settingsHash: 'h', exampleId: 'ex_b11b_0', output: '', answer: null, invalidReason: null, costUsd: 0, createdAt: ''});
+  await runDelete(w.ws, {id: 'job_again', projectId: w.projectId} as never);
+  assert.equal((await repo.find('predictions' as never, {})).length, 0);
+});
+
 test('a helper that joined keeps answering on its page; on another page the page helper answers, with a line', async () => {
   const seen: string[] = [];
   // The front desk always hands off to the Prompt helper; a specialist answers itself.
