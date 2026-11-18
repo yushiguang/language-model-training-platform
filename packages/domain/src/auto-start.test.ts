@@ -77,3 +77,33 @@ test('the Optimiser is never due by itself, and its labeling waits for Retry', (
   });
   assert.deepEqual(dueStarts(paused), []);
 });
+
+test('frozen features (#32): estimates use average sizes per kind; images count as images (a single URL too), text lists as text', async () => {
+  const {averageExample, evalEstimate, featureSizes, mergeFeatureSizes, renderPrompt, estimateTokens, costForTokens, systemConfig, toFeatures} = await import('./index.ts');
+  // 1 video in 5: two frames, a cover given as a single URL, a transcript. 4 photo posts: three
+  // images, a list of hashtags (text), a title.
+  const video = {type: 'video' as const, features: {...toFeatures({Cover: 'https://img.invalid/c.jpg', ASR: 'y'.repeat(100)}), Frame: {items: ['https://img.invalid/1', 'https://img.invalid/2']}}};
+  const photo = {type: 'photo_text' as const, features: {...toFeatures({Title: 't'.repeat(10)}), Images: {items: ['https://img.invalid/a', 'https://img.invalid/b', 'https://img.invalid/c']}, Hashtags: {items: ['#one', '#two']}}};
+  assert.deepEqual((video.features as Record<string, unknown>).Cover, {text: 'https://img.invalid/c.jpg'}, 'a single URL comes in as text');
+  const list = [video, photo, photo, photo, photo];
+  const sizes = featureSizes(list);
+  assert.deepEqual(sizes.video, {Cover: {chars: 0, items: 1}, ASR: {chars: 100, items: 0}, Frame: {chars: 0, items: 2}}, 'averaged over the videos only');
+  assert.equal(sizes.photo_text?.Images.items, 3);
+  assert.ok((sizes.photo_text?.Hashtags.chars ?? 0) >= 8 && sizes.photo_text?.Hashtags.items === 0, 'a text list counts its text');
+  assert.deepEqual(averageExample('video', sizes).features.Frame?.items?.length, 2, 'a minority kind keeps its images');
+  assert.equal(averageExample('video', sizes).features.Cover?.items?.length, 1);
+  assert.equal(averageExample('photo_text', sizes).features.Cover, undefined, 'no cover on photo posts');
+  assert.ok(typeof averageExample('photo_text', sizes).features.Hashtags?.text === 'string');
+  // The estimate equals pricing each example as it is.
+  const template = 'Label {{Frame}} {{Cover}} {{ASR}} {{Images}} {{Hashtags}} {{Title}}';
+  const sel = {video: ['Frame', 'Cover', 'ASR'], photo_text: ['Images', 'Hashtags', 'Title'], metadata: []};
+  const s = state({snapshot: {split: {eval: 5, test: 0, train: 0}, featureSizes: sizes} as unknown as ProjectState['snapshot'], examples: list.map((e, i) => ({id: `ex_${i}`, split: 'eval', type: e.type})) as unknown as ProjectState['examples']});
+  const out = systemConfig().gateway.evalOutputTokensEstimate;
+  const exact = list.reduce((n, e) => n + costForTokens(s.endpoints, 'A', estimateTokens(renderPrompt(template, e, sel)), out), 0);
+  const estimate = evalEstimate(s, {template, features: sel, images: []}, 'A');
+  assert.ok(Math.abs(estimate - exact) / exact < 0.02, `estimate ${estimate} vs ${exact}`);
+  // Merging weighs each kind by its own examples.
+  const more = featureSizes([{type: 'video', features: {Frame: {items: ['u', 'v', 'w', 'x']}}}]);
+  assert.equal(mergeFeatureSizes(sizes, {video: 1, photo_text: 4}, more, {video: 1}).video?.Frame.items, 3);
+  assert.equal(mergeFeatureSizes(sizes, {video: 1, photo_text: 4}, more, {video: 1}).photo_text?.Images.items, 3);
+});

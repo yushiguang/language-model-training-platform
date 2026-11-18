@@ -14,3 +14,13 @@ test('feature size report (#32): sizes, the share above the threshold and the fi
   assert.deepEqual(r.fieldsOver, [{key: 'ASR', count: 1}]);
   assert.equal(r.fieldShareAbove, 1 / 11);
 });
+
+test('feature size report (#32): null and primitive lines are left out; an item with no or null features has no fields', () => {
+  const {items} = parseLines(['null', '3', '{"externalId": "1", "type": "video"}', '{"externalId": "2", "features": null}', '{"Description": {"text": "bare"}}'].join('\n'));
+  const r = report(items, 1000);
+  assert.equal(r.documents, 3);
+  assert.equal(r.fieldShareAbove, 0);
+  assert.deepEqual(r.fieldsOver, []);
+  // Only the bare features object has a field.
+  assert.equal(report([items[4]], 1).fieldsOver[0].key, 'Description');
+});

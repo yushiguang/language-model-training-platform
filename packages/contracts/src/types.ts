@@ -301,10 +301,11 @@ export interface DatasetSnapshot {
   counts: {rows: number; valid: number; invalid: number; video: number; photoText: number; notSaved?: number; checks?: ItemCheckCounts};
   split: {eval: number; test: number; train: number} | null;
   /**
-   * The average size of each feature over its examples (#32): characters of text and number of
-   * list items. Only for estimates, which can no longer read every example's features.
+   * The average size of each feature per kind of example, over the examples of that kind (#32):
+   * characters of text, or the number of images of an image feature. Only for estimates, which
+   * can no longer read every example's features.
    */
-  featureSizes?: Record<string, FeatureSize>;
+  featureSizes?: Partial<Record<ExampleType, Record<string, FeatureSize>>>;
 }
 
 /** The average size of one feature over a dataset's examples (#32). */

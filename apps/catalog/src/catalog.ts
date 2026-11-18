@@ -103,8 +103,12 @@ export function createCatalog(db: DocRuntime, opts: {telemetry?: TelemetryPort} 
       // In bulk: batch requests, never one awaited request per record (deployment readiness spec, 3).
       const snapshots = await repo.find<{id: string}>('dataset_snapshots', {projectId});
       for (const snap of snapshots) {
-        // Frozen features first (#32): a delete cut short still finds them through the snapshot.
-        await repo.deleteWhere('example_features', {snapshotId: snap.id});
+        // Frozen features first (#32), by their ids from the dataset's index: the features
+        // collection is read by id only, never scanned. A delete cut short still finds them
+        // through the index, which goes after.
+        const index = await repo.find<{externalId: string}>('examples', {snapshotId: snap.id});
+        const docIds = index.map(e => featureDocId(snap.id, e.externalId));
+        for (let i = 0; i < docIds.length; i += 30) await repo.deleteWhere('example_features', {type: 'field', field: 'id', op: 'in', value: docIds.slice(i, i + 30)});
         await repo.deleteWhere('examples', {snapshotId: snap.id});
       }
       for (const kind of OWNED) await repo.deleteWhere(kind, {projectId});
@@ -117,20 +121,20 @@ export function createCatalog(db: DocRuntime, opts: {telemetry?: TelemetryPort} 
     },
 
     async exampleFeatures(examples) {
-      const out = new Map<string, Features>();
+      const out: Record<string, Features> = {};
       const want = examples.map(e => ({exampleId: e.id, docId: featureDocId(e.snapshotId, e.externalId)}));
       const docs = new Map((await contract.findByIds('example_features', want.map(w => w.docId))).map(d => [d.id, d.features]));
       const missing: string[] = [];
       for (const w of want) {
         const f = docs.get(w.docId);
-        if (f) out.set(w.exampleId, f);
+        if (f) out[w.exampleId] = f;
         else missing.push(w.exampleId);
       }
       // Saved before #32: the features are on the example record itself.
       if (missing.length) {
         for (const e of await contract.findByIds('examples', missing)) {
           const legacy = (e as Example & {features?: Features}).features;
-          if (legacy) out.set(e.id, legacy);
+          if (legacy) out[e.id] = legacy;
         }
       }
       return out;

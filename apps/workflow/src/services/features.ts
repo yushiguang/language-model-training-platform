@@ -10,7 +10,7 @@ export async function featuresOf(w: Scope, examples: Pick<Example, 'id' | 'snaps
   const batch = Math.max(1, systemConfig().dataset.featureBatch);
   const out = new Map<string, Features>();
   for (let i = 0; i < examples.length; i += batch) {
-    for (const [id, f] of await w.catalog.exampleFeatures(examples.slice(i, i + batch))) out.set(id, f);
+    for (const [id, f] of Object.entries(await w.catalog.exampleFeatures(examples.slice(i, i + batch)))) out.set(id, f);
   }
   return out;
 }
@@ -35,7 +35,7 @@ const MAX_IDS = 200;
 
 /**
  * Examples' features for the project's own examples only (an id from another project is left
- * out). An example whose features are missing maps to {}.
+ * out). An example whose features document is missing is left out too, so the caller can say so.
  */
 export async function exampleFeatures(w: Scope, projectId: string, exampleIds: string[]): Promise<Record<string, Features>> {
   const ids = [...new Set(exampleIds)];
@@ -45,7 +45,7 @@ export async function exampleFeatures(w: Scope, projectId: string, exampleIds: s
   const snaps = new Map((await w.catalog.findByIds('dataset_snapshots', [...new Set(examples.map(e => e.snapshotId))])).map(s => [s.id, s]));
   const own = examples.filter(e => snaps.get(e.snapshotId)?.projectId === projectId);
   const features = await featuresOf(w, own);
-  return Object.fromEntries(own.map(e => [e.id, features.get(e.id) ?? {}]));
+  return Object.fromEntries(own.filter(e => features.has(e.id)).map(e => [e.id, features.get(e.id)!]));
 }
 
 /** Strips features kept on example records saved before #32: project state never carries them. */

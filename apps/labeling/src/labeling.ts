@@ -54,10 +54,22 @@ function exampleReader(catalog: CatalogContract, ids: string[]): (id: string) =>
   const size = Math.max(1, systemConfig().dataset.featureBatch);
   const batchOf = new Map(ids.map((id, i) => [id, Math.floor(i / size)]));
   const batches = new Map<number, Promise<Map<string, ExampleWithFeatures>>>();
-  const load = async (b: number) => {
+  const read = async (b: number) => {
     const examples = await catalog.findByIds('examples', ids.slice(b * size, (b + 1) * size));
     const features = await catalog.exampleFeatures(examples);
-    return new Map(examples.filter(e => features.has(e.id)).map(e => [e.id, {...e, features: features.get(e.id)!}] as [string, ExampleWithFeatures]));
+    return new Map(examples.filter(e => features[e.id]).map(e => [e.id, {...e, features: features[e.id]}] as [string, ExampleWithFeatures]));
+  };
+  // Every worker on a batch waits on the same read: a passing storage error is tried twice more
+  // before it fails them, so one blip never fails a whole batch of workers at once.
+  const load = async (b: number) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await read(b);
+      } catch (e) {
+        if (attempt >= 2) throw e;
+        await new Promise(res => setTimeout(res, 200 * (attempt + 1)));
+      }
+    }
   };
   return async id => {
     const b = batchOf.get(id);
@@ -243,11 +255,13 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
      * model and settings in this browser never pay for the same example: the second one waits
      * and then reuses the saved answer. Returns false when the lock is busy (try again later).
      */
-    const labelOne = async (exampleId: string, ex: ExampleWithFeatures | null): Promise<boolean> => {
+    const labelOne = async (exampleId: string, example: () => Promise<ExampleWithFeatures | null>): Promise<boolean> => {
       const id = predictionId(task.promptVersionId, task.endpoint, task.settingsHash, exampleId, again(exampleId) ? 2 : 1);
       const r = await locks.run(`labeling:prediction:${id}`, async () => {
         const saved = await repo.get<Prediction>(PREDICTIONS, id);
         if (saved) return {pred: saved, paid: false};
+        // Read only now: a saved answer needs no features, so a batch let go is not read again.
+        const ex = await example();
         if (!ex) throw new Error('The example or its features could not be found.');
         const parts = withReason(renderPrompt(version.template, ex, version.features, version.images));
         const res = await deps.gateway
@@ -313,7 +327,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         const exampleId = pending[next++];
         const exStarted = Date.now();
         try {
-          if (!(await labelOne(exampleId, await examples(exampleId)))) {
+          if (!(await labelOne(exampleId, () => examples(exampleId)))) {
             // Another task in this browser is labeling the same example: come back to it.
             pending.push(exampleId);
             await new Promise(r => setTimeout(r, 200));

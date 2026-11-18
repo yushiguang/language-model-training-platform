@@ -1,5 +1,5 @@
 import type {DatasetRemoval, DatasetSnapshot, Example, ExampleFeatures, ExampleWithFeatures, ItemCheckCounts, LabelComment, RawExample, RemovalReason} from '@yushiguang/sprint-contracts';
-import {addChecks, assignEvalHalves, featureDocId, featureSizes, mergeFeatureSizes, newId, pickToPrune, systemConfig} from '@yushiguang/sprint-domain';
+import {addChecks, assignEvalHalves, checksTotal, featureDocId, featureSizes, mergeFeatureSizes, newId, pickToPrune, systemConfig} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {loadProjectState} from './projects.ts';
 
@@ -52,7 +52,8 @@ export async function insertExamplesSettled(w: Scope, examples: NewExample[], pa
 
 /** The average feature sizes of a dataset with the examples just saved (#32), for estimates. */
 export function frozenFacts(snap: Pick<DatasetSnapshot, 'featureSizes' | 'counts'> | null, saved: NewExample[]): Pick<DatasetSnapshot, 'featureSizes'> {
-  return {featureSizes: mergeFeatureSizes(snap?.featureSizes, snap?.counts.valid ?? 0, featureSizes(saved.map(e => e.features)), saved.length)};
+  const kinds = (list: {type: string}[]) => ({video: list.filter(e => e.type === 'video').length, photo_text: list.filter(e => e.type === 'photo_text').length});
+  return {featureSizes: mergeFeatureSizes(snap?.featureSizes, {video: snap?.counts.video ?? 0, photo_text: snap?.counts.photoText ?? 0}, featureSizes(saved), kinds(saved))};
 }
 
 /**
@@ -149,6 +150,16 @@ export async function appendExamples(
       },
       split: {eval: (snap.split?.eval ?? 0) + saved.length, test: 0, train: 0},
       ...frozenFacts(snap, saved),
+    });
+  } else if (invalid || (checks && checksTotal(checks))) {
+    // Nothing new to add, but items were left out: they are still counted on the dataset.
+    await catalog.patch('dataset_snapshots', snap.id, {
+      counts: {
+        ...snap.counts,
+        rows: snap.counts.rows + invalid,
+        invalid: snap.counts.invalid + invalid,
+        ...(snap.counts.checks || checks ? {checks: addChecks(snap.counts.checks, checks ?? {missing: 0, minorCreator: 0, notRecommendable: 0})} : {}),
+      },
     });
   }
   const notSaved = fresh.length - saved.length;

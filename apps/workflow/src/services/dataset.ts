@@ -210,7 +210,9 @@ async function take(w: Scope, job: Job, ctl: JobControl, progress: JobControl['p
     }
     // Items left out by the checks, or that the example service does not know, are counted.
     const notFound = checksTotal(checks);
-    if (!raws.length) throw new Error('None of these items could be found. Check the data source file.');
+    // Nothing usable: adding to a dataset still records what the checks left out; a new dataset
+    // cannot start empty, and the error says which checks left the items out.
+    if (!raws.length && !append) throw new Error(checks.missing === notFound ? 'None of these items could be found. Check the data source file.' : `None of these items can be used: ${leftOutText(checks)}.`);
     await progress({done: n, total: n, saving: true});
     if (append) await appendExamples(w, projectId, raws, 'sources', notFound, checks);
     else await saveSnapshot(w, projectId, raws, 'sources', names.join(', '), notFound, checks);
@@ -235,6 +237,11 @@ async function take(w: Scope, job: Job, ctl: JobControl, progress: JobControl['p
   }
 }
 
+/** What the checks left out, in words: "2 not found, 1 from a creator under 18". */
+function leftOutText(c: ItemCheckCounts): string {
+  return [c.missing && `${c.missing} not found`, c.minorCreator && `${c.minorCreator} from a creator under 18`, c.notRecommendable && `${c.notRecommendable} not publicly recommendable`].filter(Boolean).join(', ');
+}
+
 /** A call to the example service, tried twice more when it throws; the take fails after that. */
 async function retried<T>(call: () => Promise<T>, signal: AbortSignal): Promise<T> {
   for (let attempt = 0; ; attempt++) {
@@ -243,6 +250,8 @@ async function retried<T>(call: () => Promise<T>, signal: AbortSignal): Promise<
     } catch (e) {
       if (attempt >= 2 || signal.aborted) throw e;
       await new Promise(res => setTimeout(res, 200 * (attempt + 1)));
+      // Stopped while waiting: no further call.
+      if (signal.aborted) throw e;
     }
   }
 }

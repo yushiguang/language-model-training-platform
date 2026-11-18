@@ -25,7 +25,7 @@ async function setup(n: number, prefix: string, without: string[] = []) {
 async function withFeatures(catalog: ReturnType<typeof createCatalog>, ids: string[]) {
   const examples = await catalog.findByIds('examples', ids);
   const features = await catalog.exampleFeatures(examples);
-  return examples.map(e => ({...e, features: features.get(e.id) ?? {}}));
+  return examples.map(e => ({...e, features: features[e.id] ?? {}}));
 }
 
 function fakeGateway(answer: (req: LabelCallRequest) => Promise<string>, stats = {inFlight: 0, maxInFlight: 0, calls: 0}): LlmGatewayContract {
@@ -385,4 +385,20 @@ test('frozen features (#32): a run reads each example\'s features from its docum
   assert.match(prompts.get('7') ?? '', /post 7/);
   assert.match(prompts.get('old') ?? '', /an older post/);
   assert.ok(reads.length >= 3 && reads.every(n => n <= 50), 'features are read a batch at a time');
+});
+
+test('frozen features (#32): a batch read that fails once is tried again; no worker fails on it', async () => {
+  const {db, catalog, v, ids} = await setup(20, 'lab-frozen-retry');
+  let failures = 1;
+  const flaky = Object.assign(Object.create(catalog), {
+    exampleFeatures: async (wanted: Parameters<typeof catalog.exampleFeatures>[0]) => {
+      if (failures-- > 0) throw new Error('storage blip');
+      return catalog.exampleFeatures(wanted);
+    },
+  });
+  const gateway = fakeGateway(async () => '{"format": "Vlog"}');
+  const lab = createLabeling({db, catalog: flaky, gateway, locks: memoryLocks()});
+  const t = await lab.createTask(input(ids, v, {parallel: 4}));
+  const r = await lab.runTask(t.id);
+  assert.deepEqual([r?.done, r?.failed, r?.state], [20, 0, 'done']);
 });

@@ -100,9 +100,9 @@ export interface CatalogContract {
   /** Removes a data source file's staged chunks once its import has written them into the order (#29). */
   deleteStagedChunks(fileId: string): Promise<void>;
   /**
-   * The frozen features of examples (#32), by example id, read by document id in batches. An
+   * The frozen features of examples (#32), by example id (plain JSON), read by document id. An
    * example whose features document is missing is left out. Examples saved before #32 kept
    * their features on the example record; those are returned as they are.
    */
-  exampleFeatures(examples: Pick<Example, 'id' | 'snapshotId' | 'externalId'>[]): Promise<Map<string, Features>>;
+  exampleFeatures(examples: Pick<Example, 'id' | 'snapshotId' | 'externalId'>[]): Promise<Record<string, Features>>;
 }

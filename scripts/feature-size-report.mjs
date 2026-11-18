@@ -25,11 +25,17 @@ export function report(items, threshold = 100_000) {
   let fields = 0;
   let fieldsOver = 0;
   for (const item of items) {
-    const features = item && typeof item === 'object' && item.features && typeof item.features === 'object' ? item.features : item;
+    // A line that is not an object (null, a number) is not an item: it is left out.
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
+    // An item record (it has an `externalId` or a `features` key) holds its features under
+    // `features`, which may be null (kept with none); anything else is a bare features object.
+    const record = 'externalId' in item || 'features' in item;
+    const features = record ? (item.features && typeof item.features === 'object' ? item.features : {}) : item;
     // The document as the store keeps it: the features, the item's kind and when it was fetched.
-    const doc = {id: `ds_xxxxxxxxxxxx:${item.externalId ?? ''}`, snapshotId: 'ds_xxxxxxxxxxxx', externalId: item.externalId ?? '', type: item.type ?? 'video', features, fetchedAt: '2026-01-01T00:00:00.000Z'};
+    const externalId = record ? String(item.externalId ?? '') : '';
+    const doc = {id: `ds_xxxxxxxxxxxx:${externalId}`, snapshotId: 'ds_xxxxxxxxxxxx', externalId, type: record ? (item.type ?? 'video') : 'video', features, fetchedAt: '2026-01-01T00:00:00.000Z'};
     docs.push(bytes(doc));
-    for (const [k, v] of Object.entries(features ?? {})) {
+    for (const [k, v] of Object.entries(features)) {
       fields++;
       if (bytes(v) > threshold) {
         fieldsOver++;

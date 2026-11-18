@@ -437,9 +437,11 @@ export function agentToolHost(inst: Instance): AgentToolHost {
           const words = (typeof args.text === 'string' ? args.text : '').toLowerCase().split(/\s+/).filter(Boolean);
           if (!words.length) throw new Error('Give words to look for.');
           const hay = (e: ExampleWithFeatures) => [e.title, ...Object.entries(e.features).filter(([k]) => !isImageKey(k)).map(([, v]) => featureText(v))].join(' ').toLowerCase();
-          // Frozen features (#32) are read by id, a batch at a time, for the examples searched.
-          const searched = await withFeatures(w, state.examples.filter(e => visibleToAgents(e) && (!args.unlabeledOnly || !state.gold[e.id])), true);
-          const list = searched.filter(e => words.every(x => hay(e).includes(x)));
+          // Frozen features (#32) are read by id, a batch at a time; only the matches are kept.
+          const searched = state.examples.filter(e => visibleToAgents(e) && (!args.unlabeledOnly || !state.gold[e.id]));
+          const batch = Math.max(1, systemConfig().dataset.featureBatch);
+          const list: ExampleWithFeatures[] = [];
+          for (let i = 0; i < searched.length; i += batch) list.push(...(await withFeatures(w, searched.slice(i, i + batch), true)).filter(e => words.every(x => hay(e).includes(x))));
           return {matching: list.length, note: HIDDEN_NOTE, examples: list.slice(0, limitOf(args.limit, 10, 5)).map(e => ({...exampleView(e), gold: state.gold[e.id]?.answer ?? null}))};
         }
         case 'compare_versions':

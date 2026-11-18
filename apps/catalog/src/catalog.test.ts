@@ -44,3 +44,36 @@ test('every catalog kind is a declared telemetry collection, so no metric falls 
   const missing = catalogKinds().filter(k => !LABEL_VALUES.collection.includes(k));
   assert.deepEqual(missing, []);
 });
+
+test('frozen features (#32): exampleFeatures answers plain JSON that survives a loopback; deleting a project removes the features documents by id, never scanning them', async () => {
+  const {loopback} = await import('@yushiguang/sprint-platform');
+  const {featureDocId} = await import('@yushiguang/sprint-domain');
+  const db = localDocRuntime('cat-frozen');
+  // Every read of the features collection, as the store sees it.
+  const featureReads: string[] = [];
+  const watched = {
+    ...db,
+    batch: () => db.batch(),
+    collection<T extends object>(name: string) {
+      const c = db.collection<T>(name);
+      if (name !== 'example_features') return c;
+      return {...c, name: c.name, add: c.add.bind(c), get: c.get.bind(c), set: c.set.bind(c), update: c.update.bind(c), delete: c.delete.bind(c), query: c.query.bind(c), subscribe: c.subscribe.bind(c), find: (where?: Parameters<typeof c.find>[0], order?: Parameters<typeof c.find>[1]) => (featureReads.push(JSON.stringify(where ?? {})), c.find(where, order))};
+    },
+  } as typeof db;
+  const c = createCatalog(watched);
+  await c.insert('projects', {id: 'pr_f', name: 'F', createdAt: '', createdBy: 'me', setupVersionId: null, snapshotId: 'ds_f', approvedNodes: []});
+  await c.insert('dataset_snapshots', {id: 'ds_f', projectId: 'pr_f', number: 1, source: 'sources', sourceName: '', createdAt: '', counts: {rows: 3, valid: 3, invalid: 0, video: 3, photoText: 0}, split: null});
+  const ids = ['a', 'b', 'c'];
+  await c.insertMany('examples', ids.map(x => ({id: `ex_${x}`, snapshotId: 'ds_f', externalId: x, type: 'video' as const, title: '', split: 'eval' as const, optimiserHalf: false})));
+  await c.insertMany('example_features', ids.map(x => ({id: featureDocId('ds_f', x), snapshotId: 'ds_f', externalId: x, type: 'video' as const, features: {Description: {text: `about ${x}`}}, fetchedAt: ''})));
+  const examples = await c.findByIds('examples', ['ex_a', 'ex_b']);
+  const direct = await c.exampleFeatures(examples);
+  const remote = await loopback(c).exampleFeatures(examples);
+  assert.deepEqual(remote, direct, 'the same answer over JSON');
+  assert.deepEqual(remote, {ex_a: {Description: {text: 'about a'}}, ex_b: {Description: {text: 'about b'}}});
+  featureReads.length = 0;
+  await c.deleteProject('pr_f');
+  assert.equal((await c.findByIds('example_features', ids.map(x => featureDocId('ds_f', x)))).length, 0, 'the features are gone');
+  assert.equal((await c.find('examples', {snapshotId: 'ds_f'})).length, 0);
+  assert.ok(featureReads.length > 0 && featureReads.every(q => !q.includes('snapshotId')), `features are found by id only: ${featureReads.join(' ')}`);
+});

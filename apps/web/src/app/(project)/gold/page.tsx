@@ -417,8 +417,17 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
  */
 const SHOWN = new Set(['Title', 'Description', 'OCR_Text', 'ASR', 'Creator_Nick_Name', 'Creator_Bio', 'Hashtags', 'Create_Time', 'Country_Code', 'Language', 'POI_Name', 'POI_Info', 'Interest_V3', 'Summary']);
 const IMAGE_KEYS = new Set(Object.values(FEATURES).flatMap(list => list.filter(d => d.isImage).map(d => d.key)));
-/** Features already read on this page (#32): they never change, so going back shows them at once. */
+/**
+ * Features read lately on this page (#32): they never change, so going back shows them at once.
+ * The oldest is let go past FEATURE_CACHE entries, so a long session holds only a few.
+ */
 const featureCache = new Map<string, Features>();
+const FEATURE_CACHE = 50;
+function remember(id: string, f: Features) {
+  featureCache.delete(id);
+  featureCache.set(id, f);
+  while (featureCache.size > FEATURE_CACHE) featureCache.delete(featureCache.keys().next().value!);
+}
 
 const FEATURE_LABEL = new Map(Object.values(FEATURES).flatMap(list => list.map(d => [d.key, d.label] as const)));
 
@@ -434,11 +443,14 @@ function ExampleCard({ex, n, extra, onRemove}: {ex: Example; n: number; extra?: 
     let live = true;
     const known = featureCache.get(ex.id);
     setFeatures(known);
-    if (!known) {
+    if (known) remember(ex.id, known);
+    else {
       void getExampleFeatures(projectId, [ex.id])
         .then(r => {
-          const f = r[ex.id] ?? {};
-          featureCache.set(ex.id, f);
+          const f = r[ex.id];
+          // A missing features document is an error, never an empty card.
+          if (!f) return live && setFeatures(null);
+          remember(ex.id, f);
           if (live) setFeatures(f);
         })
         .catch(() => live && setFeatures(null));

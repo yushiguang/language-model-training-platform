@@ -312,7 +312,7 @@ export interface BffContract {
   exampleMedia(projectId: string, exampleId: string): Promise<ExampleMedia | null>;
   /**
    * Examples' frozen features by example id (#32): Gold Labels reads the one shown. Project state
-   * carries examples without their features. An example whose features are missing maps to {}.
+   * carries examples without their features. An example whose features document is missing is left out.
    */
   getExampleFeatures(projectId: string, exampleIds: string[]): Promise<Record<string, Features>>;
   /**
