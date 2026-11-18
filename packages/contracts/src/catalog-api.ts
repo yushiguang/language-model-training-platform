@@ -7,6 +7,8 @@ import type {
   DatasetSnapshot,
   EvalReport,
   Example,
+  ExampleFeatures,
+  Features,
   GateApproval,
   GoldLabel,
   LabelComment,
@@ -41,7 +43,10 @@ export interface CatalogRecords {
   projects: Project;
   setup_versions: SetupVersion;
   dataset_snapshots: DatasetSnapshot;
+  /** The index of a dataset's examples: never their features (#32). */
   examples: Example;
+  /** Frozen features, one document per example, read by id only (#32). */
+  example_features: ExampleFeatures;
   gold_labels: GoldLabel;
   dataset_removals: DatasetRemoval;
   label_comments: LabelComment;
@@ -94,4 +99,10 @@ export interface CatalogContract {
   deleteProject(projectId: string): Promise<void>;
   /** Removes a data source file's staged chunks once its import has written them into the order (#29). */
   deleteStagedChunks(fileId: string): Promise<void>;
+  /**
+   * The frozen features of examples (#32), by example id (plain JSON), read by document id. An
+   * example whose features document is missing is left out. Examples saved before #32 kept
+   * their features on the example record; those are returned as they are.
+   */
+  exampleFeatures(examples: Pick<Example, 'id' | 'snapshotId' | 'externalId'>[]): Promise<Record<string, Features>>;
 }

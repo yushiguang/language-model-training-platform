@@ -3,12 +3,12 @@
 import {useGo} from '@/components/nav';
 import {useSearchParams} from 'next/navigation';
 import {Fragment, Suspense, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import type {Answer, Example, ExampleMedia, GoldUploadResult, LabelComment, MismatchList, MismatchReview, RemovalReason} from '@yushiguang/sprint-contracts';
+import type {Answer, Example, ExampleMedia, Features, GoldUploadResult, LabelComment, MismatchList, MismatchReview, RemovalReason} from '@yushiguang/sprint-contracts';
 import {FEATURES, featureText, gate, inLabelOrder, labelBounds, sameAnswer, versionLabel} from '@yushiguang/sprint-domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {useSettings} from '@/components/ProjectSettings';
-import {addComment, approveNode, exampleMedia, mismatches, predictionsFor, removeExamples, reviewGold, saveGold, uploadGoldFile, type ProjectState} from '@/backend-api';
+import {addComment, approveNode, exampleMedia, getExampleFeatures, mismatches, predictionsFor, removeExamples, reviewGold, saveGold, uploadGoldFile, type ProjectState} from '@/backend-api';
 import {Badge, Banner, Button, Card, dateTime, Dialog, Empty, Hov, Icon, num, Opt, PageHead, Seg, Select, Tabs} from '@/ui';
 import {t, tm} from '@/i18n';
 
@@ -417,6 +417,18 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
  */
 const SHOWN = new Set(['Title', 'Description', 'OCR_Text', 'ASR', 'Creator_Nick_Name', 'Creator_Bio', 'Hashtags', 'Create_Time', 'Country_Code', 'Language', 'POI_Name', 'POI_Info', 'Interest_V3', 'Summary']);
 const IMAGE_KEYS = new Set(Object.values(FEATURES).flatMap(list => list.filter(d => d.isImage).map(d => d.key)));
+/**
+ * Features read lately on this page (#32): they never change, so going back shows them at once.
+ * The oldest is let go past FEATURE_CACHE entries, so a long session holds only a few.
+ */
+const featureCache = new Map<string, Features>();
+const FEATURE_CACHE = 50;
+function remember(id: string, f: Features) {
+  featureCache.delete(id);
+  featureCache.set(id, f);
+  while (featureCache.size > FEATURE_CACHE) featureCache.delete(featureCache.keys().next().value!);
+}
+
 const FEATURE_LABEL = new Map(Object.values(FEATURES).flatMap(list => list.map(d => [d.key, d.label] as const)));
 
 function ExampleCard({ex, n, extra, onRemove}: {ex: Example; n: number; extra?: ReactNode; onRemove: (reason: RemovalReason) => Promise<void>}) {
@@ -425,6 +437,28 @@ function ExampleCard({ex, n, extra, onRemove}: {ex: Example; n: number; extra?: 
   const [removing, setRemoving] = useState<RemovalReason | null>(null);
   const [picked, setPicked] = useState(0);
   const [view, setView] = useState<'player' | 'image'>('player');
+  // Frozen features (#32): project state carries examples without them; the shown one is read here.
+  const [features, setFeatures] = useState<Features | null | undefined>(() => featureCache.get(ex.id));
+  useEffect(() => {
+    let live = true;
+    const known = featureCache.get(ex.id);
+    setFeatures(known);
+    if (known) remember(ex.id, known);
+    else {
+      void getExampleFeatures(projectId, [ex.id])
+        .then(r => {
+          const f = r[ex.id];
+          // A missing features document is an error, never an empty card.
+          if (!f) return live && setFeatures(null);
+          remember(ex.id, f);
+          if (live) setFeatures(f);
+        })
+        .catch(() => live && setFeatures(null));
+    }
+    return () => {
+      live = false;
+    };
+  }, [ex.id, projectId]);
   useEffect(() => {
     let live = true;
     setMedia(undefined);
@@ -439,7 +473,7 @@ function ExampleCard({ex, n, extra, onRemove}: {ex: Example; n: number; extra?: 
   }, [ex.id, projectId]);
   const stills = media ? [...(media.coverUrl ? [media.coverUrl] : []), ...media.imageUrls.filter(u => u !== media.coverUrl)] : [];
   const f = (k: string) => {
-    return featureText(ex.features[k]).trim();
+    return featureText(features?.[k]).trim();
   };
   const joined = (...parts: string[]) => parts.filter(Boolean).join(' · ');
   const posted = f('Create_Time');
@@ -457,7 +491,7 @@ function ExampleCard({ex, n, extra, onRemove}: {ex: Example; n: number; extra?: 
       ['Interest', f('Interest_V3')],
       ['Summary', f('Summary')],
       // Every other feature the example has, under its catalogue name, so nothing is hidden.
-      ...Object.keys(ex.features)
+      ...Object.keys(features ?? {})
         .filter(k => !SHOWN.has(k) && !IMAGE_KEYS.has(k) && !/(^|_)(url|urls|id)$/i.test(k))
         .map(k => [FEATURE_LABEL.get(k) ?? k.replace(/_/g, ' '), f(k)]),
     ] as [string, string][]
@@ -542,6 +576,8 @@ function ExampleCard({ex, n, extra, onRemove}: {ex: Example; n: number; extra?: 
           )}
         </div>
       )}
+      {features === undefined && <span className="t-3" role="status" style={{fontSize: 13}}>{t('Loading the features…')}</span>}
+      {features === null && <span className="t-3" style={{fontSize: 13}}>{t('The features could not be loaded.')}</span>}
       <div className="kv">
         {rows.map(([k, v]) => (
           <Fragment key={k}>

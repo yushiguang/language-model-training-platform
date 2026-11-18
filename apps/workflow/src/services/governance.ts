@@ -1,5 +1,5 @@
-import type {DatasetRemoval, DatasetSnapshot, Example, LabelComment, RawExample, RemovalReason} from '@yushiguang/sprint-contracts';
-import {assignEvalHalves, newId, pickToPrune, systemConfig} from '@yushiguang/sprint-domain';
+import type {DatasetRemoval, DatasetSnapshot, Example, ExampleFeatures, ExampleWithFeatures, ItemCheckCounts, LabelComment, RawExample, RemovalReason} from '@yushiguang/sprint-contracts';
+import {addChecks, assignEvalHalves, checksTotal, featureDocId, featureSizes, mergeFeatureSizes, newId, pickToPrune, systemConfig} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {loadProjectState} from './projects.ts';
 
@@ -8,27 +8,39 @@ import {loadProjectState} from './projects.ts';
  * examples without touching the ones there, removal with a trail, batch pruning, and comments.
  */
 
+/** An example to save with its frozen features (#32) and when they were fetched. */
+export type NewExample = ExampleWithFeatures & {fetchedAt?: string};
+
 /**
  * Saves examples a few at a time, each on its own (resilience spec, 3.2): a write that fails is
  * tried once more, then skipped, so one bad item never stops a sample, an upload or an append.
- * Before a retry, and after the last failure, the example is looked up: a write that failed on
+ * Before a retry, and after the last failure, the record is looked up: a write that failed on
  * the way back but was stored counts as saved and is not written twice. Returns the saved ones.
+ *
+ * Each example's features go first, as their own document (#32), then its index record: an
+ * example is never in the dataset without its features. Features saved for an example whose
+ * record then failed are deleted with the project.
  */
-export async function insertExamplesSettled(w: Scope, examples: Example[], parallel = 8): Promise<Example[]> {
+export async function insertExamplesSettled(w: Scope, examples: NewExample[], parallel = 8): Promise<NewExample[]> {
   const {catalog} = w;
-  const stored = async (id: string) => !!(await catalog.get('examples', id).catch(() => null));
-  const saveOne = async (e: Example) => {
+  const settled = async (write: () => Promise<unknown>, stored: () => Promise<boolean>) => {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        await catalog.insert('examples', e);
+        await write();
         return true;
       } catch {
-        if (await stored(e.id)) return true;
+        if (await stored().catch(() => false)) return true;
       }
     }
     return false;
   };
-  const saved: Example[] = [];
+  const saveOne = async (e: NewExample) => {
+    const {features, fetchedAt, ...index} = e;
+    const doc: ExampleFeatures = {id: featureDocId(e.snapshotId, e.externalId), snapshotId: e.snapshotId, externalId: e.externalId, type: e.type, features, fetchedAt: fetchedAt ?? now()};
+    if (!(await settled(() => catalog.insert('example_features', doc), async () => !!(await catalog.get('example_features', doc.id))))) return false;
+    return settled(() => catalog.insert('examples', index as Example), async () => !!(await catalog.get('examples', e.id)));
+  };
+  const saved: NewExample[] = [];
   for (let i = 0; i < examples.length; i += parallel) {
     const batch = examples.slice(i, i + parallel);
     const ok = await Promise.all(batch.map(saveOne));
@@ -36,6 +48,12 @@ export async function insertExamplesSettled(w: Scope, examples: Example[], paral
   }
   if (saved.length < examples.length) w.tm.event('examples_not_saved', {count: examples.length - saved.length});
   return saved;
+}
+
+/** The average feature sizes of a dataset with the examples just saved (#32), for estimates. */
+export function frozenFacts(snap: Pick<DatasetSnapshot, 'featureSizes' | 'counts'> | null, saved: NewExample[]): Pick<DatasetSnapshot, 'featureSizes'> {
+  const kinds = (list: {type: string}[]) => ({video: list.filter(e => e.type === 'video').length, photo_text: list.filter(e => e.type === 'photo_text').length});
+  return {featureSizes: mergeFeatureSizes(snap?.featureSizes, {video: snap?.counts.video ?? 0, photo_text: snap?.counts.photoText ?? 0}, featureSizes(saved), kinds(saved))};
 }
 
 /**
@@ -81,7 +99,14 @@ export async function lockHoldout(w: Scope, projectId: string): Promise<void> {
  * skipped; existing examples, their halves and gold labels stay as they are. New examples take the
  * half that keeps the two even. Without a dataset yet it starts one.
  */
-export async function appendExamples(w: Scope, projectId: string, raws: (RawExample & {sourceId?: string; sourceFileId?: string})[], source: DatasetSnapshot['source'], invalid = 0): Promise<{added: number; duplicates: number; notSaved: number}> {
+export async function appendExamples(
+  w: Scope,
+  projectId: string,
+  raws: (RawExample & {sourceId?: string; sourceFileId?: string; fetchedAt?: string})[],
+  source: DatasetSnapshot['source'],
+  invalid = 0,
+  checks?: ItemCheckCounts,
+): Promise<{added: number; duplicates: number; notSaved: number}> {
   const {catalog, user} = w;
   const project = await catalog.get('projects', projectId);
   const snap = project?.snapshotId ? await catalog.get('dataset_snapshots', project.snapshotId) : null;
@@ -95,14 +120,14 @@ export async function appendExamples(w: Scope, projectId: string, raws: (RawExam
     fresh.push(r);
   }
   const duplicates = raws.length - fresh.length;
-  let saved: Example[] = [];
+  let saved: NewExample[] = [];
   if (fresh.length) {
     const live = existing.filter(e => !e.removed);
-    const added: Example[] = fresh.map(r => ({id: newId('ex'), snapshotId: snap.id, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: 'eval', optimiserHalf: false, ...(r.sourceId ? {sourceId: r.sourceId, sourceFileId: r.sourceFileId} : {})}));
+    const added: NewExample[] = fresh.map(r => ({id: newId('ex'), snapshotId: snap.id, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: 'eval', optimiserHalf: false, ...(r.fetchedAt ? {fetchedAt: r.fetchedAt} : {}), ...(r.sourceId ? {sourceId: r.sourceId, sourceFileId: r.sourceFileId} : {})}));
     const {current: gold} = await (await import('./evaluation.ts')).latestGold(w, projectId, (await catalog.get('setup_versions', project.setupVersionId ?? ''))?.schemaVersion ?? 0);
     // The ones there keep their half (as if locked); only the new ones are placed.
     const goldAnswers = Object.fromEntries(Object.entries(gold).map(([id, g]) => [id, g.answer]));
-    const place = (news: Example[]) => assignEvalHalves([...live.map(e => ({...e, optimiserHalf: e.optimiserHalf as boolean | null})), ...news.map(e => ({...e, optimiserHalf: null}))], goldAnswers, true);
+    const place = (news: NewExample[]) => assignEvalHalves([...live.map(e => ({...e, optimiserHalf: e.optimiserHalf as boolean | null})), ...news.map(e => ({...e, optimiserHalf: null}))], goldAnswers, true);
     const halves = place(added);
     for (const e of added) e.optimiserHalf = halves[e.id];
     saved = await insertExamplesSettled(w, added);
@@ -121,8 +146,20 @@ export async function appendExamples(w: Scope, projectId: string, raws: (RawExam
         video: snap.counts.video + saved.filter(r => r.type === 'video').length,
         photoText: snap.counts.photoText + saved.filter(r => r.type === 'photo_text').length,
         ...(snap.counts.notSaved || saved.length < fresh.length ? {notSaved: (snap.counts.notSaved ?? 0) + fresh.length - saved.length} : {}),
+        ...(snap.counts.checks || checks ? {checks: addChecks(snap.counts.checks, checks ?? {missing: 0, minorCreator: 0, notRecommendable: 0})} : {}),
       },
       split: {eval: (snap.split?.eval ?? 0) + saved.length, test: 0, train: 0},
+      ...frozenFacts(snap, saved),
+    });
+  } else if (invalid || (checks && checksTotal(checks))) {
+    // Nothing new to add, but items were left out: they are still counted on the dataset.
+    await catalog.patch('dataset_snapshots', snap.id, {
+      counts: {
+        ...snap.counts,
+        rows: snap.counts.rows + invalid,
+        invalid: snap.counts.invalid + invalid,
+        ...(snap.counts.checks || checks ? {checks: addChecks(snap.counts.checks, checks ?? {missing: 0, minorCreator: 0, notRecommendable: 0})} : {}),
+      },
     });
   }
   const notSaved = fresh.length - saved.length;

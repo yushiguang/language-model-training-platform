@@ -1287,3 +1287,87 @@ test('Upload labels: rows match examples already in the dataset, bad values are 
   assert.match((await up('labels.txt', '0 Vlog')).error ?? '', /CSV or JSONL/);
   assert.match((await up('labels.csv', 'id,value\n0,Vlog')).error ?? '', /item_id column/);
 });
+
+test('frozen snapshots (#32): a take checks each item, counts what is left out per check, and freezes the features of the rest in one document per example; the examples carry none; reads go by id, for the project\'s own examples only', async () => {
+  const {configureSystem} = await import('@yushiguang/sprint-domain');
+  const w = await world('fz1', {gold: null});
+  const lookups: number[] = [];
+  let failOnce = 1;
+  const problems: Record<string, 'missing' | 'minor_creator' | 'not_recommendable'> = {i01: 'minor_creator', i02: 'not_recommendable', i03: 'missing', i04: 'minor_creator'};
+  const source: ExampleSource = {
+    async lookup(ids) {
+      lookups.push(ids.length);
+      // The feature service fails once: the batch is tried again, the take goes on.
+      if (failOnce-- > 0) throw new Error('feature service down');
+      // i05 passes its checks but no features come back: kept, with none.
+      return ids.filter(id => id !== 'i05').map(externalId => ({externalId, type: 'video' as const, title: `t ${externalId}`, features: {Description: {text: `about ${externalId}`}}}));
+    },
+    async check(ids) {
+      return ids.map(externalId => ({externalId, type: externalId === 'i06' ? ('photo_text' as const) : problems[externalId] ? null : ('video' as const), problem: problems[externalId] ?? null}));
+    },
+  };
+  Object.assign(w.inst, {examples: source});
+  configureSystem({dataset: {featureBatch: 7}});
+  try {
+    const {createProject} = await import('./projects.ts');
+    const {takeExamples} = await import('./dataset.ts');
+    const {exampleFeatures} = await import('./features.ts');
+    const ids = Array.from({length: 20}, (_, i) => `i${String(i).padStart(2, '0')}`);
+    const sourceId = await sourceOf(w, 'Feed', ids);
+    const p = await createProject(w.ws, 'Frozen');
+    await takeExamples(w.ws, p.id, [{sourceId, count: 20}]);
+    await w.jobs.idle();
+    const state = (await loadProjectState(w.ws, p.id))!;
+    const snap = state.snapshot!;
+    assert.deepEqual(snap.counts.checks, {missing: 1, minorCreator: 2, notRecommendable: 1});
+    assert.deepEqual([snap.counts.valid, snap.counts.invalid, state.examples.length], [16, 4, 16]);
+    assert.ok(lookups.every(n => n <= 7), 'features are fetched a batch at a time');
+    assert.ok(state.examples.every(e => !('features' in e)), 'project state carries the index only');
+    assert.equal(state.examples.find(e => e.externalId === 'i06')?.type, 'photo_text', 'the kind comes from the checks');
+    const stored = await w.catalog.find('examples', {snapshotId: snap.id});
+    assert.ok(stored.every(e => !('features' in e)), 'example records hold no features');
+    const docs = await w.catalog.find('example_features', {snapshotId: snap.id});
+    assert.equal(docs.length, 16);
+    assert.ok(docs.every(d => d.id === `${snap.id}:${d.externalId}`));
+    assert.ok((snap.featureSizes?.video?.Description?.chars ?? 0) > 0, 'average sizes are kept for estimates');
+    const i07 = state.examples.find(e => e.externalId === 'i07')!;
+    const i05 = state.examples.find(e => e.externalId === 'i05')!;
+    assert.deepEqual(await exampleFeatures(w.ws, p.id, [i07.id, i05.id]), {[i07.id]: {Description: {text: 'about i07'}}, [i05.id]: {}});
+    // Another project's examples are never read through this one.
+    const other = await createProject(w.ws, 'Other');
+    assert.deepEqual(await exampleFeatures(w.ws, other.id, [i07.id]), {});
+    // Adding more: the counts add up.
+    problems.j01 = 'missing';
+    const more = await sourceOf(w, 'More', ['j00', 'j01', 'j02']);
+    await takeExamples(w.ws, p.id, [{sourceId: more, count: 3}]);
+    await w.jobs.idle();
+    const after = (await loadProjectState(w.ws, p.id))!.snapshot!;
+    assert.deepEqual([after.counts.valid, after.counts.checks], [18, {missing: 2, minorCreator: 2, notRecommendable: 1}]);
+    assert.equal((await w.catalog.find('example_features', {snapshotId: snap.id})).length, 18);
+  } finally {
+    configureSystem();
+  }
+});
+
+test('frozen snapshots (#32): adding items that are all in the dataset already still counts what the checks left out', async () => {
+  const w = await world('fz2', {gold: null});
+  const {appendExamples} = await import('./governance.ts');
+  const before = (await loadProjectState(w.ws, w.projectId))!.snapshot!;
+  const r = await appendExamples(w.ws, w.projectId, [{externalId: '0', type: 'video', title: '', features: {}}], 'sources', 2, {missing: 1, minorCreator: 1, notRecommendable: 0});
+  assert.deepEqual([r.added, r.duplicates], [0, 1]);
+  const after = (await loadProjectState(w.ws, w.projectId))!.snapshot!;
+  assert.deepEqual(after.counts.checks, {missing: 1, minorCreator: 1, notRecommendable: 0});
+  assert.deepEqual([after.counts.invalid, after.counts.valid], [before.counts.invalid + 2, before.counts.valid]);
+});
+
+test('frozen snapshots (#32): a new dataset whose items are all left out by the checks says which checks', async () => {
+  const w = await world('fz3', {gold: null});
+  Object.assign(w.inst, {examples: {lookup: async () => [], check: async (ids: string[]) => ids.map(externalId => ({externalId, type: null, problem: externalId === 'k0' ? 'missing' : 'minor_creator'}))}});
+  const {createProject} = await import('./projects.ts');
+  const {takeExamples, getSamplingTask} = await import('./dataset.ts');
+  const sourceId = await sourceOf(w, 'Kids', ['k0', 'k1', 'k2']);
+  const p = await createProject(w.ws, 'Left out');
+  await takeExamples(w.ws, p.id, [{sourceId, count: 3}]);
+  await w.jobs.idle();
+  assert.match((await getSamplingTask(w.ws, p.id))?.error ?? '', /None of these items can be used: 1 not found, 2 from a creator under 18/);
+});

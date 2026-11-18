@@ -6,6 +6,7 @@ import {datasetSources, retireCuts} from './sources.ts';
 import {latestGold} from './evaluation.ts';
 import {runView} from './views.ts';
 import {initSettings} from './settings.ts';
+import {indexOnly} from './features.ts';
 import {balanceHalves} from './governance.ts';
 
 export type {ProjectState};
@@ -78,7 +79,8 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
     catalog.find('label_comments', {projectId}, 'createdAt'),
   ]);
   // Removed examples stay in the store with their trail (spec 1.0.0, 4.4) and leave every count.
-  const examples = allExamples.filter(e => !e.removed);
+  // Project state carries the index only: features kept on records saved before #32 are left out.
+  const examples = allExamples.filter(e => !e.removed).map(indexOnly);
   const removals = rawRemovals.filter(r => !r.restoredAt).map(r => (r.gold == null ? r : {...r, gold: asAnswerOrNull(r.gold)}));
   const comments: Record<string, LabelComment[]> = {};
   for (const c of rawComments) (comments[c.exampleId] ??= []).push(c);

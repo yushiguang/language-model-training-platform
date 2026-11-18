@@ -3,6 +3,7 @@ import {createInstance, systemContext, type Connected, type Scope, type Workflow
 import * as agents from './services/agents.ts';
 import * as dataset from './services/dataset.ts';
 import * as evaluation from './services/evaluation.ts';
+import * as features from './services/features.ts';
 import * as mismatch from './services/mismatches.ts';
 import * as governance from './services/governance.ts';
 import * as projects from './services/projects.ts';
@@ -107,6 +108,11 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     addSourceFile: (ctx, r) => sources.addSourceFile(at(ctx), r),
 
     exampleMedia: (ctx, projectId, exampleId) => dataset.exampleMedia(at(ctx), projectId, exampleId),
+    async getExampleFeatures(ctx, projectId, exampleIds) {
+      const w = at(ctx);
+      if (!(await projects.getProject(w, projectId))) throw new Error('This project does not exist.');
+      return features.exampleFeatures(w, projectId, exampleIds);
+    },
     takeExamples: (ctx, r) => dataset.takeExamples(at(ctx), r.projectId, r.picks),
     stopSampleDataset: (ctx, projectId) => dataset.stopSampleDataset(at(ctx), projectId),
     async removeExamples(ctx, {projectId, exampleIds, reason}) {

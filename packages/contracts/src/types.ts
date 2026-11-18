@@ -201,8 +201,6 @@ export interface Example {
   externalId: string;
   type: ExampleType;
   title: string;
-  /** Placeholder key -> value. Image features hold URLs in `items`. */
-  features: Record<string, FeatureValue>;
   split: Split | null;
   /** Eval examples only: true = the optimiser may learn from it; false = held out for scoring. */
   optimiserHalf: boolean;
@@ -211,6 +209,40 @@ export interface Example {
   /** The data source and the file of it the example was taken from (#29); missing on older datasets. */
   sourceId?: string;
   sourceFileId?: string;
+}
+
+/** An example's features: placeholder key -> value. Image features hold URLs in `items`. */
+export type Features = Record<string, FeatureValue>;
+
+/** An example with its frozen features (#32), as labeling and the helpers read it. */
+export type ExampleWithFeatures = Example & {features: Features};
+
+/**
+ * The frozen features of one example (#32): one document per example in the document store, apart
+ * from the product records, read only by id (`featureDocId(snapshotId, externalId)`). Fetched once
+ * when the example is taken, so scoring is reproducible and the feature service is not read again.
+ * Kept as long as its dataset.
+ */
+export interface ExampleFeatures {
+  id: string;
+  snapshotId: string;
+  externalId: string;
+  type: ExampleType;
+  features: Features;
+  fetchedAt: string;
+}
+
+/** Why an item was left out when it was taken (#32): the platform's item checks. */
+export type ItemProblem = 'missing' | 'minor_creator' | 'not_recommendable';
+
+/** Items left out by the checks, per category (#32). */
+export interface ItemCheckCounts {
+  /** Not found, or no longer there. */
+  missing: number;
+  /** Its creator is under 18. */
+  minorCreator: number;
+  /** Not publicly recommendable. */
+  notRecommendable: number;
 }
 
 /** Why an example left the eval dataset (spec 1.0.0, 4.4). */
@@ -263,10 +295,23 @@ export interface DatasetSnapshot {
   createdAt: string;
   /**
    * `notSaved`: valid examples whose save failed twice and were skipped (resilience spec, 3.2),
-   * counted apart from `invalid` rows; `valid` counts only the saved ones.
+   * counted apart from `invalid` rows; `valid` counts only the saved ones. `checks`: items left out
+   * by the item checks when they were taken, per category (#32); they count in `invalid` too.
    */
-  counts: {rows: number; valid: number; invalid: number; video: number; photoText: number; notSaved?: number};
+  counts: {rows: number; valid: number; invalid: number; video: number; photoText: number; notSaved?: number; checks?: ItemCheckCounts};
   split: {eval: number; test: number; train: number} | null;
+  /**
+   * The average size of each feature per kind of example, over the examples of that kind (#32):
+   * characters of text, or the number of images of an image feature. Only for estimates, which
+   * can no longer read every example's features.
+   */
+  featureSizes?: Partial<Record<ExampleType, Record<string, FeatureSize>>>;
+}
+
+/** The average size of one feature over a dataset's examples (#32). */
+export interface FeatureSize {
+  chars: number;
+  items: number;
 }
 
 /**

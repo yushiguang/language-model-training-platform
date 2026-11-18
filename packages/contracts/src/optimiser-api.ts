@@ -1,5 +1,5 @@
 import type {LabelingTask} from './labeling-api.ts';
-import type {ChatEvent, ChatLink, EndpointId, EvalReport, MixUp, Msg, OptimisationRun, ProjectState, PromptVersion, StructuredPrompt} from './types.ts';
+import type {ChatEvent, ChatLink, EndpointId, EvalReport, Features, MixUp, Msg, OptimisationRun, ProjectState, PromptVersion, StructuredPrompt} from './types.ts';
 
 /**
  * Contract: the Optimiser service (`@yushiguang/sprint-optimiser`, spec 1.0.0 section 7.2). It owns the
@@ -60,6 +60,8 @@ export interface HalfScore {
  */
 export interface OptimiserHost {
   loadState(projectId: string): Promise<ProjectState | null>;
+  /** Examples' frozen features by example id (#32): the state carries examples without them. */
+  exampleFeatures(projectId: string, exampleIds: string[]): Promise<Record<string, Features>>;
   /**
    * Labels examples with a version (saved answers are reused) and resolves when the task ends;
    * null when another runner holds it. `exampleIds` left out: the whole eval set. `pass` 2: a

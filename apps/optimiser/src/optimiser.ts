@@ -1,6 +1,6 @@
-import type {AgentRuntimeContract, Answer, CatalogContract, EndpointId, Example, ExampleBrief, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@yushiguang/sprint-contracts';
+import type {AgentRuntimeContract, Answer, CatalogContract, EndpointId, Example, ExampleBrief, ExampleWithFeatures, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@yushiguang/sprint-contracts';
 import {NO_TELEMETRY} from '@yushiguang/sprint-contracts';
-import {checkStructured, msg, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withComments, wrongExamples, type PoolEntry} from '@yushiguang/sprint-domain';
+import {checkStructured, msg, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withComments, pickWrong, wrongExamples, type PoolEntry} from '@yushiguang/sprint-domain';
 
 /**
  * The Optimiser (GEPA, ported to TypeScript; docs/design/optimiser.md). Runs from
@@ -83,30 +83,33 @@ const isAbort = (e: unknown) => (e as Error)?.name === 'AbortError';
  * gets the parent's wrong examples, worst first; a merge gets the examples each version gets right
  * that the other misses, up to 4 each.
  */
-function briefs(state: ProjectState, schema: Schema, half: string[], parent: PromptVersion, other: PromptVersion | null, answers: Map<string, Map<string, Prediction>>, entries: PoolEntry[]): ExampleBrief[] {
+async function briefs(host: OptimiserHost, state: ProjectState, schema: Schema, half: string[], parent: PromptVersion, other: PromptVersion | null, answers: Map<string, Map<string, Prediction>>, entries: PoolEntry[]): Promise<ExampleBrief[]> {
   const halfSet = new Set(half);
   const exs = state.examples.filter(e => halfSet.has(e.id));
   const gold = new Map(exs.filter(e => !!state.gold[e.id]).map(e => [e.id, state.gold[e.id].answer]));
   const mine = answers.get(parent.id) ?? new Map<string, Prediction>();
+  // Frozen features (#32): read for the briefed examples only (a missing one reads as none).
+  const withFeatures = async (list: Example[]): Promise<ExampleWithFeatures[]> => {
+    const f = list.length ? await host.exampleFeatures(state.project.id, list.map(e => e.id)) : {};
+    return list.filter(e => f[e.id]).map(e => ({...e, features: f[e.id]}));
+  };
   if (!other) {
     const {predicted, notes} = answersForHelpers(mine.values());
-    return wrongExamples(exs, promptKeys(parent), gold, predicted, undefined, notes);
+    return wrongExamples(await withFeatures(pickWrong(exs, gold, predicted)), promptKeys(parent), gold, predicted, undefined, notes);
   }
   const a = entries.find(x => x.id === parent.id)?.scores;
   const b = entries.find(x => x.id === other.id)?.scores;
   if (!a || !b) return [];
   const theirs = answers.get(other.id) ?? new Map<string, Prediction>();
   const keys = new Set([...promptKeys(parent), ...promptKeys(other)]);
-  const wins = (x: Map<string, number>, y: Map<string, number>, by: 'template' | 'other', preds: Map<string, Prediction>) =>
-    exs
-      .filter(e => (x.get(e.id) ?? 0) > (y.get(e.id) ?? 0) && gold.has(e.id) && !preds.get(e.id)?.filtered)
-      .slice(0, systemConfig().optimiser.briefMergeWins)
+  const wins = async (x: Map<string, number>, y: Map<string, number>, by: 'template' | 'other', preds: Map<string, Prediction>) =>
+    (await withFeatures(exs.filter(e => (x.get(e.id) ?? 0) > (y.get(e.id) ?? 0) && gold.has(e.id) && !preds.get(e.id)?.filtered).slice(0, systemConfig().optimiser.briefMergeWins)))
       .map(e => {
         const p = preds.get(e.id);
         return exampleBrief(e, keys, gold.get(e.id)!, p?.answer ?? null, by, p ? answersForHelpers([p]).notes.get(e.id) : undefined);
       });
   // `predicted` is the answer of the version that misses the example.
-  return [...wins(a, b, 'template', theirs), ...wins(b, a, 'other', mine)];
+  return [...(await wins(a, b, 'template', theirs)), ...(await wins(b, a, 'other', mine))];
 }
 
 /** The version with the highest current score on the model, if any is scored. */
@@ -352,7 +355,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
 
           const m = await host.halfScore({projectId, promptVersionId: parent.id, endpoint});
           // R4-4: the labelers' Why notes go with optimiser-half examples (never the held-out half).
-          const examples = withComments(briefs(state, schema, half, parent, other, answers, entries), state.examples, toMap(await host.labelComments(projectId)));
+          const examples = withComments(await briefs(host, state, schema, half, parent, other, answers, entries), state.examples, toMap(await host.labelComments(projectId)));
           const out = await step(other ? 'merge' : 'reflect', parent, () =>
             cancellable(
               signal,

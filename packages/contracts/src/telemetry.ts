@@ -124,7 +124,7 @@ export const LABEL_VALUES: Record<string, readonly string[]> = {
   decision: ['started'],
   node: ['prompt_design', 'dataset', 'gold', 'prompt'],
   action: ['approve', 'refused', 'skip'],
-  collection: ['projects', 'setup_versions', 'dataset_snapshots', 'examples', 'gold_labels', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'audit_log', 'dataset_removals', 'label_comments', 'data_sources', 'source_files', 'source_chunks', 'source_cuts'],
+  collection: ['projects', 'setup_versions', 'dataset_snapshots', 'examples', 'example_features', 'gold_labels', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'audit_log', 'dataset_removals', 'label_comments', 'data_sources', 'source_files', 'source_chunks', 'source_cuts'],
   // Filled at startup (see above): the gateway registers its endpoints, models and slots.
   endpoint: [],
   slot: [],

@@ -2,21 +2,30 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {LabelCallRequest, LabelCallResult, LlmGatewayContract, Schema} from '@yushiguang/sprint-contracts';
 import {createCatalog} from '@yushiguang/sprint-catalog';
-import {toFeatures} from '@yushiguang/sprint-domain';
+import {featureDocId, toFeatures} from '@yushiguang/sprint-domain';
 import {localDocRuntime} from '@yushiguang/sprint-platform';
 import {createLabeling} from './labeling.ts';
 import {memoryLocks} from './locks.ts';
 
 const schema: Schema = {name: 'format', kind: 'single', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]};
 
-async function setup(n: number, prefix: string) {
+async function setup(n: number, prefix: string, without: string[] = []) {
   const db = localDocRuntime(prefix);
   const catalog = createCatalog(db);
   await catalog.insert('setup_versions', {id: 'sv_1', projectId: 'pr_1', number: 1, schemaVersion: 1, task: '', schema, thresholds: null, models: [], steps: {schema: true, evaluation: true, models: true}, createdAt: '', createdBy: ''});
   const v = await catalog.createPromptVersion({projectId: 'pr_1', structured: {taskSummary: '', features: {video: [], photo_text: [], metadata: []}, label: {name: '', kind: 'single', values: []}, ruleGroups: [], images: []}, template: 'Label {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
   const ids = Array.from({length: n}, (_, i) => `ex_${i}`);
-  await catalog.insertMany('examples', ids.map((id, i) => ({id, snapshotId: 'ds_1', externalId: String(i), type: 'video' as const, title: '', features: toFeatures({Description: `post ${i}`}), split: 'train' as const, optimiserHalf: false})));
+  await catalog.insertMany('examples', ids.map((id, i) => ({id, snapshotId: 'ds_1', externalId: String(i), type: 'video' as const, title: '', split: 'train' as const, optimiserHalf: false})));
+  // Frozen features (#32): one document per example, apart from the example records.
+  await catalog.insertMany('example_features', ids.flatMap((_, i) => (without.includes(String(i)) ? [] : [{id: featureDocId('ds_1', String(i)), snapshotId: 'ds_1', externalId: String(i), type: 'video' as const, features: toFeatures({Description: `post ${i}`}), fetchedAt: ''}])));
   return {db, catalog, v, ids};
+}
+
+/** Examples with their features, as a caller of tryTemplate passes them. */
+async function withFeatures(catalog: ReturnType<typeof createCatalog>, ids: string[]) {
+  const examples = await catalog.findByIds('examples', ids);
+  const features = await catalog.exampleFeatures(examples);
+  return examples.map(e => ({...e, features: features[e.id] ?? {}}));
 }
 
 function fakeGateway(answer: (req: LabelCallRequest) => Promise<string>, stats = {inFlight: 0, maxInFlight: 0, calls: 0}): LlmGatewayContract {
@@ -140,7 +149,7 @@ test('one runner per task: a second run returns null; Stop stops it; a closed ru
 test('tryTemplate labels a few examples with an unsaved template and saves nothing', async () => {
   const {db, catalog, v, ids} = await setup(3, 'try-');
   const labeling = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": ["Vlog"]}'), locks: memoryLocks()});
-  const examples = await catalog.findByIds('examples', ids);
+  const examples = await withFeatures(catalog, ids);
   const rows = await labeling.tryTemplate({template: 'Draft {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], schema, settings: {endpoint: 'A', maxOutputTokens: 100, temperature: 0}, examples});
   assert.deepEqual(rows.map(r => r.exampleId), ids);
   assert.ok(rows.every(r => r.answer?.join() === 'Vlog' && r.costUsd === 0.01));
@@ -158,7 +167,7 @@ test('a try is stopped by its request id: the calls carry the id, and cancel rea
     cancel: async id => void cancelled.push(id),
   };
   const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks()});
-  const examples = await catalog.findByIds('examples', ids);
+  const examples = await withFeatures(catalog, ids);
   await labeling.tryTemplate({template: 'Draft {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], schema, settings: {endpoint: 'A', maxOutputTokens: 100, temperature: 0}, examples, requestId: 'rq_try'});
   assert.deepEqual(withId, ['rq_try', 'rq_try']);
   await labeling.cancel('rq_try');
@@ -179,7 +188,7 @@ test('image URLs may be resolved asynchronously (a signed URL per call), and eve
   });
   const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks(), resolveUrl});
   const images = [{url: 'logo.png', name: 'logo.png', size: 1}];
-  const examples = await catalog.findByIds('examples', ids);
+  const examples = await withFeatures(catalog, ids);
   const rows = await labeling.tryTemplate({template: 'Draft {{Description}} [Image 1]', features: {video: ['Description'], photo_text: [], metadata: []}, images, schema, settings: {endpoint: 'A', maxOutputTokens: 100, temperature: 0}, examples});
   assert.ok(rows.every(r => r.error === null && r.answer?.join() === 'Vlog'));
   assert.equal(seen.length, 2);
@@ -347,4 +356,49 @@ test("every labeling prompt ends with the site's reason line, and the model's re
   assert.equal(preds['ex_0']?.reason, 'It shows a day out.');
   assert.deepEqual(preds['ex_0']?.answer, ['Vlog']);
   assert.equal(preds['ex_1']?.reason, undefined);
+});
+
+test('frozen features (#32): a run reads each example\'s features from its document, a batch at a time; missing features fail only that example; older records keep their own', async () => {
+  // Example 3's features document is missing.
+  const {db, catalog, v, ids} = await setup(120, 'lab-frozen', ['3']);
+  // An example saved before #32 holds its features on its own record.
+  await catalog.insert('examples', {id: 'ex_old', snapshotId: 'ds_1', externalId: 'old', type: 'video', title: '', split: 'train', optimiserHalf: false, features: toFeatures({Description: 'an older post'})} as never);
+  const prompts = new Map<string, string>();
+  const reads: number[] = [];
+  const exampleFeatures = catalog.exampleFeatures.bind(catalog);
+  const counted = Object.assign(Object.create(catalog), {
+    exampleFeatures: async (wanted: Parameters<typeof exampleFeatures>[0]) => {
+      reads.push(wanted.length);
+      return exampleFeatures(wanted);
+    },
+  });
+  const gateway = fakeGateway(async req => {
+    prompts.set(req.traceId ?? '', JSON.stringify(req.messages));
+    return '{"format": "Vlog"}';
+  });
+  const lab = createLabeling({db, catalog: counted, gateway, locks: memoryLocks()});
+  const t = await lab.createTask(input([...ids, 'ex_old'], v, {parallel: 4}));
+  const r = await lab.runTask(t.id);
+  assert.deepEqual([r?.done, r?.failed], [120, 1]);
+  assert.deepEqual(r?.failedExampleIds, ['ex_3']);
+  assert.match(r?.error ?? '', /features could not be found/);
+  assert.match(prompts.get('7') ?? '', /post 7/);
+  assert.match(prompts.get('old') ?? '', /an older post/);
+  assert.ok(reads.length >= 3 && reads.every(n => n <= 50), 'features are read a batch at a time');
+});
+
+test('frozen features (#32): a batch read that fails once is tried again; no worker fails on it', async () => {
+  const {db, catalog, v, ids} = await setup(20, 'lab-frozen-retry');
+  let failures = 1;
+  const flaky = Object.assign(Object.create(catalog), {
+    exampleFeatures: async (wanted: Parameters<typeof catalog.exampleFeatures>[0]) => {
+      if (failures-- > 0) throw new Error('storage blip');
+      return catalog.exampleFeatures(wanted);
+    },
+  });
+  const gateway = fakeGateway(async () => '{"format": "Vlog"}');
+  const lab = createLabeling({db, catalog: flaky, gateway, locks: memoryLocks()});
+  const t = await lab.createTask(input(ids, v, {parallel: 4}));
+  const r = await lab.runTask(t.id);
+  assert.deepEqual([r?.done, r?.failed, r?.state], [20, 0, 'done']);
 });

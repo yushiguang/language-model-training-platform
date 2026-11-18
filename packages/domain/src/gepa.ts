@@ -1,5 +1,5 @@
 import {systemConfig} from './config.ts';
-import type {Answer, DryRunResult, Example, ExampleBrief, Msg, OptimisationRun, OptimiserRound, Prediction, PromptVersion} from '@yushiguang/sprint-contracts';
+import type {Answer, DryRunResult, Example, ExampleBrief, ExampleWithFeatures, Msg, OptimisationRun, OptimiserRound, Prediction, PromptVersion} from '@yushiguang/sprint-contracts';
 import {msg, msgText} from './i18n.ts';
 import {featureItems, featureText, placeholderKeys} from './template.ts';
 import {isImageKey} from './catalogue.ts';
@@ -36,7 +36,7 @@ export const promptKeys = (v: Pick<PromptVersion, 'template' | 'features'>) => n
  * An example as a helper reads it: the text features in `keys`, cut short (URLs left out), and
  * up to 2 of its images (any image feature, whether or not the prompt uses it).
  */
-export function exampleBrief(e: Example, keys: Iterable<string>, gold: Answer, predicted: Answer | null, rightIn?: 'template' | 'other', said?: HelperNote): ExampleBrief {
+export function exampleBrief(e: ExampleWithFeatures, keys: Iterable<string>, gold: Answer, predicted: Answer | null, rightIn?: 'template' | 'other', said?: HelperNote): ExampleBrief {
   const features: Record<string, string> = {};
   for (const k of keys) {
     const raw = e.features[k];
@@ -68,15 +68,23 @@ export const HIDDEN_NOTE = 'The held-out half of the eval set is hidden from hel
  * The examples a version gets wrong (invalid answers first), at most `max`. Pass only
  * optimiser-half examples: the held-out half must never reach a helper.
  */
-export function wrongExamples(examples: Example[], keys: Iterable<string>, gold: Map<string, Answer>, predicted: Map<string, Answer | null>, max = systemConfig().optimiser.briefWrongExamples, notes?: Map<string, HelperNote>): ExampleBrief[] {
+export function wrongExamples(examples: ExampleWithFeatures[], keys: Iterable<string>, gold: Map<string, Answer>, predicted: Map<string, Answer | null>, max = systemConfig().optimiser.briefWrongExamples, notes?: Map<string, HelperNote>): ExampleBrief[] {
   const ks = [...keys];
+  return pickWrong(examples, gold, predicted, max).map(e => exampleBrief(e, ks, gold.get(e.id)!, predicted.get(e.id)!, undefined, notes?.get(e.id)));
+}
+
+/**
+ * The examples `wrongExamples` would brief, worst (invalid) first: features are read for these
+ * only (#32), then `wrongExamples` runs on them.
+ */
+export function pickWrong<E extends Pick<Example, 'id'>>(examples: E[], gold: Map<string, Answer>, predicted: Map<string, Answer | null>, max = systemConfig().optimiser.briefWrongExamples): E[] {
   return examples
     .filter(e => gold.has(e.id) && predicted.has(e.id))
     .map(e => ({e, s: exampleScore(gold.get(e.id)!, predicted.get(e.id)!), invalid: predicted.get(e.id) == null}))
     .filter(x => x.s < 1)
     .sort((a, b) => Number(b.invalid) - Number(a.invalid))
     .slice(0, max)
-    .map(({e}) => exampleBrief(e, ks, gold.get(e.id)!, predicted.get(e.id)!, undefined, notes?.get(e.id)));
+    .map(({e}) => e);
 }
 
 /** What a helper reads next to a model answer: the model's own reason, and why a reply was invalid. */

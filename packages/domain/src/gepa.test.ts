@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {Example, Schema} from '@yushiguang/sprint-contracts';
+import type {ExampleWithFeatures, Schema} from '@yushiguang/sprint-contracts';
 import {compareDryRun, dryRunSize, exampleBrief, exampleScore, mergePair, paretoFront, pickDryRun, pickParent, promptKeys, wrongExamples} from './gepa.ts';
 import {toFeatures} from './template.ts';
 
@@ -26,7 +26,7 @@ test('dry run: half of the optimiser half, at most 20', () => {
 });
 
 test('helpers read the wrong examples, invalid answers first, at most 8, with text features cut short and no images', () => {
-  const ex = (i: number): Example => ({id: `e${i}`, snapshotId: 's', externalId: `ex-${i}`, type: 'photo_text', title: '', features: toFeatures({Title: `title ${i}`, Body: 'x'.repeat(500), Cover: 'https://img/1.jpg', Pics: ['https://img/2.jpg'], Unused: 'not in the prompt'}), split: 'eval', optimiserHalf: true});
+  const ex = (i: number): ExampleWithFeatures => ({id: `e${i}`, snapshotId: 's', externalId: `ex-${i}`, type: 'photo_text', title: '', features: toFeatures({Title: `title ${i}`, Body: 'x'.repeat(500), Cover: 'https://img/1.jpg', Pics: ['https://img/2.jpg'], Unused: 'not in the prompt'}), split: 'eval', optimiserHalf: true});
   const exs = Array.from({length: 12}, (_, i) => ex(i));
   const gold = new Map(exs.map(e => [e.id, ['x']]));
   // e0..e3 right, e4..e7 wrong, e8..e11 invalid.
@@ -96,7 +96,7 @@ test("helpers read the model's reason and the invalid reason; filtered answers a
   assert.deepEqual(parseOutput('{"reason": " The clip shows steps. ", "a": "x"}', named), {answer: ['x'], reason: null, note: 'The clip shows steps.'});
   assert.deepEqual(parseOutput('{"reason": "It is new.", "a": "nope"}', named), {answer: null, reason: '"nope" isn\'t a value of a', note: 'It is new.'});
   assert.equal(parseOutput('{"a": "x"}', named).note, undefined);
-  const ex = (i: number): Example => ({id: `e${i}`, snapshotId: 's', externalId: `ex-${i}`, type: 'video', title: '', features: toFeatures({Title: `t${i}`}), split: 'eval', optimiserHalf: true});
+  const ex = (i: number): ExampleWithFeatures => ({id: `e${i}`, snapshotId: 's', externalId: `ex-${i}`, type: 'video', title: '', features: toFeatures({Title: `t${i}`}), split: 'eval', optimiserHalf: true});
   const exs = [0, 1, 2].map(ex);
   const gold = new Map(exs.map(e => [e.id, ['x']]));
   const said = answersForHelpers([

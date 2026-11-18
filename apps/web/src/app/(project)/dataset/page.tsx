@@ -3,8 +3,8 @@
 import {useGo} from '@/components/nav';
 import Link from 'next/link';
 import {useState, type ReactNode} from 'react';
-import type {PageContext, Schema} from '@yushiguang/sprint-contracts';
-import {gate, labelBalance, systemConfig} from '@yushiguang/sprint-domain';
+import type {ItemCheckCounts, PageContext, Schema} from '@yushiguang/sprint-contracts';
+import {checksTotal, gate, labelBalance, systemConfig} from '@yushiguang/sprint-domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {approveNode, createDataSourceFile, pruneDataset, restoreExamples, stopSampleDataset, takeExamples, type DataSourceSummary, type ProjectState, type RemovalReason} from '@/backend-api';
@@ -242,6 +242,7 @@ function Ready({state, failed}: {state: ProjectState; failed: ReactNode}) {
   const evalEx = state.examples.filter(e => e.split === 'eval');
   const labeled = evalEx.filter(e => !!state.gold[e.id]).length;
   const pending = evalEx.length - labeled;
+  const leftOut = checksTotal(snap.counts.checks);
   const few = evalEx.length < minEvalRecommended;
   const schema = state.setup?.schema ?? null;
   return (
@@ -274,7 +275,7 @@ function Ready({state, failed}: {state: ProjectState; failed: ReactNode}) {
               }))}
             />
           )}
-          {(snap.source !== 'sources' || !!snap.counts.notSaved || (labeled > 0 && pending > 0)) && (
+          {(snap.source !== 'sources' || !!snap.counts.notSaved || leftOut > 0 || (labeled > 0 && pending > 0)) && (
             <div className="row" style={{gap: 12, paddingTop: 8}}>
               {snap.source !== 'sources' && (
                 <>
@@ -283,6 +284,11 @@ function Ready({state, failed}: {state: ProjectState; failed: ReactNode}) {
                     {t('{date} · {videos} videos · {photos} photo and text', {date: dateTime(snap.createdAt), videos: num(evalEx.filter(e => e.type === 'video').length), photos: num(evalEx.filter(e => e.type !== 'video').length)})}
                   </span>
                 </>
+              )}
+              {leftOut > 0 && (
+                <span className="t-3" style={{fontSize: 13}}>
+                  <Hov text={leftOut === 1 ? t('1 item left out') : t('{n} items left out', {n: num(leftOut)})} tip={leftOutWhy(snap.counts.checks!)} />
+                </span>
               )}
               {!!snap.counts.notSaved && (
                 <span className="t-3" style={{fontSize: 13}}>
@@ -302,6 +308,16 @@ function Ready({state, failed}: {state: ProjectState; failed: ReactNode}) {
 }
 
 /** Add examples (#29; design: V-Dataset-Add-Examples): more from one or more data sources; items already here are skipped. */
+/** Why items were left out when they were taken (#32), per check, as the hover says it. */
+function leftOutWhy(c: ItemCheckCounts): string {
+  const parts = [
+    c.missing && t('{n} not found', {n: num(c.missing)}),
+    c.minorCreator && t('{n} from a creator under 18', {n: num(c.minorCreator)}),
+    c.notRecommendable && t('{n} not publicly recommendable', {n: num(c.notRecommendable)}),
+  ].filter(Boolean);
+  return t('{list}. Items are checked when they are taken.', {list: parts.join(t(', '))});
+}
+
 function AddExamples({state}: {state: ProjectState}) {
   const [list] = useDataSources();
   if (!list?.length) return null;

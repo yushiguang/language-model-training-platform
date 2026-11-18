@@ -30,6 +30,14 @@ export interface SystemConfig {
     rareValuePerHalfMin: number;
     dominantValueShareWarn: number;
     dominantWarnMinLabeled: number;
+    /** Items per batch when items are checked and their features fetched (#32). */
+    featureBatch: number;
+    /**
+     * A feature field larger than this (bytes of JSON) goes to object storage, the document keeping
+     * its URI (#32). Applied by a server document store adapter; set from the size report
+     * (`scripts/feature-size-report.mjs`).
+     */
+    overflowFieldBytes: number;
   };
   optimiser: {
     defaultMaxRounds: number;

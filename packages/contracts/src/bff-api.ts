@@ -13,6 +13,7 @@ import type {
   DatasetSnapshot,
   EndpointId,
   EndpointInfo,
+  Features,
   GoldLabel,
   LabelComment,
   ModelSettings,
@@ -309,6 +310,11 @@ export interface BffContract {
   // Dataset & Gold labels
   /** The media of one example, or null (no media source, or none for this example). */
   exampleMedia(projectId: string, exampleId: string): Promise<ExampleMedia | null>;
+  /**
+   * Examples' frozen features by example id (#32): Gold Labels reads the one shown. Project state
+   * carries examples without their features. An example whose features document is missing is left out.
+   */
+  getExampleFeatures(projectId: string, exampleIds: string[]): Promise<Record<string, Features>>;
   /**
    * Takes examples from data sources: a new eval dataset, or more examples for the one there.
    * Returns once queued (a `dataset.sample` job): progress is read back as

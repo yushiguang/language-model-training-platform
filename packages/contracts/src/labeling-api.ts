@@ -1,4 +1,4 @@
-import type {Answer, EndpointId, Example, FeatureSelection, ModelSettings, Prediction, PromptImage, Schema} from './types.ts';
+import type {Answer, EndpointId, ExampleWithFeatures, FeatureSelection, ModelSettings, Prediction, PromptImage, Schema} from './types.ts';
 
 /**
  * Contract: labeling (`apps/labeling`).
@@ -128,7 +128,8 @@ export interface TryTemplateInput {
   images: PromptImage[];
   schema: Schema;
   settings: ModelSettings;
-  examples: Example[];
+  /** With their features: a try is on a few examples the caller has read already. */
+  examples: ExampleWithFeatures[];
   /** Lets the caller stop the try with `cancel(requestId)`. */
   requestId?: string;
 }
