@@ -7,7 +7,7 @@ import {
   type CreateTaskInput,
   type DocRuntime,
   type EndpointId,
-  type Example,
+  type ExampleWithFeatures,
   type LabelingContract,
   type LabelingTask,
   type LlmGatewayContract,
@@ -43,6 +43,36 @@ const PREDICTIONS = 'predictions';
 const now = () => new Date().toISOString();
 const lockName = (taskId: string) => `labeling:${taskId}`;
 const FINISHED: TaskState[] = ['done'];
+
+/**
+ * The task's examples with their frozen features (#32), read by id a batch at a time as the
+ * workers reach them, so a run over many examples never holds all their features at once. A
+ * batch two behind the one being read is let go; an example asked for again (a busy lock puts it
+ * back in line) reads its batch again. Null: the example or its features are gone.
+ */
+function exampleReader(catalog: CatalogContract, ids: string[]): (id: string) => Promise<ExampleWithFeatures | null> {
+  const size = Math.max(1, systemConfig().dataset.featureBatch);
+  const batchOf = new Map(ids.map((id, i) => [id, Math.floor(i / size)]));
+  const batches = new Map<number, Promise<Map<string, ExampleWithFeatures>>>();
+  const load = async (b: number) => {
+    const examples = await catalog.findByIds('examples', ids.slice(b * size, (b + 1) * size));
+    const features = await catalog.exampleFeatures(examples);
+    return new Map(examples.filter(e => features.has(e.id)).map(e => [e.id, {...e, features: features.get(e.id)!}] as [string, ExampleWithFeatures]));
+  };
+  return async id => {
+    const b = batchOf.get(id);
+    if (b == null) return null;
+    let batch = batches.get(b);
+    if (!batch) {
+      batch = load(b);
+      // A failed read is tried again by the next example of the batch.
+      batch.catch(() => batches.delete(b));
+      batches.set(b, batch);
+      for (const k of batches.keys()) if (k < b - 2) batches.delete(k);
+    }
+    return (await batch).get(id) ?? null;
+  };
+}
 
 /** A run's options, plus Retry failed (clears the failed examples once the lock is held). */
 type ExecOptions = RunOptions & {retry?: boolean};
@@ -178,7 +208,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     await repo.patch<LabelingTask>(TASKS, taskId, {...counts, failedExampleIds: [...failedSet], ...(task.relabelInvalid ? {relabelExampleIds: relabelIds} : {}), state: 'running', stopReason: null, error: null, startedAt: task.startedAt ?? now(), finishedAt: null});
     emit(task.projectId);
 
-    const examples = new Map((await deps.catalog.findByIds('examples', pending)).map(e => [e.id, e] as [string, Example]));
+    const examples = exampleReader(deps.catalog, pending);
     const ctrl = new AbortController();
     active.set(taskId, ctrl);
     if (deleting.has(task.projectId)) ctrl.abort();
@@ -213,12 +243,12 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
      * model and settings in this browser never pay for the same example: the second one waits
      * and then reuses the saved answer. Returns false when the lock is busy (try again later).
      */
-    const labelOne = async (exampleId: string, ex: Example | undefined): Promise<boolean> => {
+    const labelOne = async (exampleId: string, ex: ExampleWithFeatures | null): Promise<boolean> => {
       const id = predictionId(task.promptVersionId, task.endpoint, task.settingsHash, exampleId, again(exampleId) ? 2 : 1);
       const r = await locks.run(`labeling:prediction:${id}`, async () => {
         const saved = await repo.get<Prediction>(PREDICTIONS, id);
         if (saved) return {pred: saved, paid: false};
-        if (!ex) throw new Error('The example no longer exists.');
+        if (!ex) throw new Error('The example or its features could not be found.');
         const parts = withReason(renderPrompt(version.template, ex, version.features, version.images));
         const res = await deps.gateway
           .label({
@@ -283,7 +313,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         const exampleId = pending[next++];
         const exStarted = Date.now();
         try {
-          if (!(await labelOne(exampleId, examples.get(exampleId)))) {
+          if (!(await labelOne(exampleId, await examples(exampleId)))) {
             // Another task in this browser is labeling the same example: come back to it.
             pending.push(exampleId);
             await new Promise(r => setTimeout(r, 200));

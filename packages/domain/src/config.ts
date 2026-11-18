@@ -3,7 +3,7 @@ import type {DeepPartial, SystemConfig} from '@yushiguang/sprint-contracts';
 /** The defaults of every tunable number (spec 1.0.0, section 7.4). */
 export const DEFAULT_SYSTEM_CONFIG: SystemConfig = {
   evaluation: {defaultMacroF1: 0.8, customStartValueF1: 0.6, customStartPrecision: 0.7, customStartRecall: 0.7, invalidRateCap: 0.01},
-  dataset: {minEvalHard: 4, minEvalRecommended: 20, rareValueMinCount: 4, rareValuePerHalfMin: 2, dominantValueShareWarn: 0.7, dominantWarnMinLabeled: 30},
+  dataset: {minEvalHard: 4, minEvalRecommended: 20, rareValueMinCount: 4, rareValuePerHalfMin: 2, dominantValueShareWarn: 0.7, dominantWarnMinLabeled: 30, featureBatch: 50, overflowFieldBytes: 100_000},
   optimiser: {
     defaultMaxRounds: 10,
     maxRoundsCap: 50,

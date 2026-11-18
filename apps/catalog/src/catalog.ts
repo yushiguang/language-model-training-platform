@@ -1,5 +1,5 @@
-import {NO_TELEMETRY, type CatalogContract, type CatalogKind, type CatalogRecords, type DocRuntime, type NewPromptVersion, type NewSetupVersion, type PromptVersion, type SetupVersion, type TelemetryPort} from '@yushiguang/sprint-contracts';
-import {nextVersion} from '@yushiguang/sprint-domain';
+import {NO_TELEMETRY, type CatalogContract, type Example, type Features, type CatalogKind, type CatalogRecords, type DocRuntime, type NewPromptVersion, type NewSetupVersion, type PromptVersion, type SetupVersion, type TelemetryPort} from '@yushiguang/sprint-contracts';
+import {featureDocId, nextVersion} from '@yushiguang/sprint-domain';
 import {DocRepo, newId} from '@yushiguang/sprint-platform';
 
 const now = () => new Date().toISOString();
@@ -9,6 +9,7 @@ const ID_PREFIX: Record<CatalogKind, string> = {
   setup_versions: 'sv',
   dataset_snapshots: 'ds',
   examples: 'ex',
+  example_features: 'ef',
   gold_labels: 'gl',
   prompt_versions: 'pv',
   eval_reports: 'er',
@@ -26,7 +27,7 @@ const ID_PREFIX: Record<CatalogKind, string> = {
   source_cuts: 'cut',
 };
 
-/** Every kind whose records carry their project's id (all but projects and examples). */
+/** Every kind whose records carry their project's id (all but projects, examples and their features). */
 const OWNED: CatalogKind[] = ['dataset_snapshots', 'setup_versions', 'gold_labels', 'dataset_removals', 'label_comments', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'audit_log'];
 
 /** New record id for a kind, for callers that build the record before inserting it. */
@@ -101,7 +102,11 @@ export function createCatalog(db: DocRuntime, opts: {telemetry?: TelemetryPort} 
     async deleteProject(projectId) {
       // In bulk: batch requests, never one awaited request per record (deployment readiness spec, 3).
       const snapshots = await repo.find<{id: string}>('dataset_snapshots', {projectId});
-      for (const snap of snapshots) await repo.deleteWhere('examples', {snapshotId: snap.id});
+      for (const snap of snapshots) {
+        // Frozen features first (#32): a delete cut short still finds them through the snapshot.
+        await repo.deleteWhere('example_features', {snapshotId: snap.id});
+        await repo.deleteWhere('examples', {snapshotId: snap.id});
+      }
       for (const kind of OWNED) await repo.deleteWhere(kind, {projectId});
       await repo.deleteWhere('projects', {id: projectId});
       await repo.insert('audit_log', {id: catalogId('audit_log'), projectId: null, actor: 'system', action: 'project.delete', data: {projectId}, createdAt: now()});
@@ -110,11 +115,31 @@ export function createCatalog(db: DocRuntime, opts: {telemetry?: TelemetryPort} 
     async deleteStagedChunks(fileId) {
       await repo.deleteWhere('source_chunks', {fileId, staged: true});
     },
+
+    async exampleFeatures(examples) {
+      const out = new Map<string, Features>();
+      const want = examples.map(e => ({exampleId: e.id, docId: featureDocId(e.snapshotId, e.externalId)}));
+      const docs = new Map((await contract.findByIds('example_features', want.map(w => w.docId))).map(d => [d.id, d.features]));
+      const missing: string[] = [];
+      for (const w of want) {
+        const f = docs.get(w.docId);
+        if (f) out.set(w.exampleId, f);
+        else missing.push(w.exampleId);
+      }
+      // Saved before #32: the features are on the example record itself.
+      if (missing.length) {
+        for (const e of await contract.findByIds('examples', missing)) {
+          const legacy = (e as Example & {features?: Features}).features;
+          if (legacy) out.set(e.id, legacy);
+        }
+      }
+      return out;
+    },
   };
   return instrument(contract, opts.telemetry ?? NO_TELEMETRY);
 }
 
-const KIND_OF: Partial<Record<keyof CatalogContract, CatalogKind>> = {createPromptVersion: 'prompt_versions', createSetupVersion: 'setup_versions', audit: 'audit_log', deleteProject: 'projects', deleteStagedChunks: 'source_chunks'};
+const KIND_OF: Partial<Record<keyof CatalogContract, CatalogKind>> = {createPromptVersion: 'prompt_versions', createSetupVersion: 'setup_versions', audit: 'audit_log', deleteProject: 'projects', deleteStagedChunks: 'source_chunks', exampleFeatures: 'example_features'};
 
 /** Counts and times every catalog operation (`sprint_catalog_*`), without changing what it does. */
 function instrument(c: CatalogContract, tm: TelemetryPort): CatalogContract {

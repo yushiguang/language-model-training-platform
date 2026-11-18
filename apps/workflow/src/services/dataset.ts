@@ -1,8 +1,8 @@
-import type {Answer, DatasetSnapshot, Example, ExampleMedia, GoldLabel, GoldUploadRefusal, GoldUploadResult, Job, JobControl, JobOutcome, RawExample, SamplingTask, Schema, SourcePick} from '@yushiguang/sprint-contracts';
-import {hashString, newId, readGoldAnswerWhy, readLabelFile, sameAnswer, type LabelFileRow} from '@yushiguang/sprint-domain';
+import type {Answer, DatasetSnapshot, Example, ExampleMedia, ItemCheckCounts, GoldLabel, GoldUploadRefusal, GoldUploadResult, Job, JobControl, JobOutcome, RawExample, SamplingTask, Schema, SourcePick} from '@yushiguang/sprint-contracts';
+import {checksTotal, countProblem, hashString, newId, noChecks, readGoldAnswerWhy, systemConfig, readLabelFile, sameAnswer, type LabelFileRow} from '@yushiguang/sprint-domain';
 import {latestGold} from './evaluation.ts';
 import {now, type Scope} from './app.ts';
-import {appendExamples, insertExamplesSettled} from './governance.ts';
+import {appendExamples, frozenFacts, insertExamplesSettled, type NewExample} from './governance.ts';
 import {allocate, checkPicks, retireCuts} from './sources.ts';
 
 /**
@@ -47,9 +47,9 @@ export async function stopSampleDataset(w: Scope, projectId: string): Promise<vo
   w.emitChange(projectId);
 }
 
-type Taken = RawExample & {sourceId?: string; sourceFileId?: string};
+type Taken = RawExample & {sourceId?: string; sourceFileId?: string; fetchedAt?: string};
 
-async function saveSnapshot(w: Scope, projectId: string, all: Taken[], source: DatasetSnapshot['source'], sourceName: string, invalid = 0): Promise<DatasetSnapshot> {
+async function saveSnapshot(w: Scope, projectId: string, all: Taken[], source: DatasetSnapshot['source'], sourceName: string, invalid = 0, checks?: ItemCheckCounts): Promise<DatasetSnapshot> {
   const {catalog, user} = w;
   const prev = await catalog.find('dataset_snapshots', {projectId});
   const snapshotId = newId('ds');
@@ -57,7 +57,7 @@ async function saveSnapshot(w: Scope, projectId: string, all: Taken[], source: D
   // way. One half is for the Optimiser and the helpers to learn from; scores use the other.
   const halves = (rs: {externalId: string}[]) => new Map([...rs].sort((a, b) => hashString(a.externalId).localeCompare(hashString(b.externalId))).map((r, i) => [r.externalId, i % 2 === 0]));
   const first = halves(all);
-  const examples = all.map((r): Example => ({id: newId('ex'), snapshotId, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: 'eval', optimiserHalf: first.get(r.externalId)!, ...(r.sourceId ? {sourceId: r.sourceId, sourceFileId: r.sourceFileId} : {})}));
+  const examples = all.map((r): NewExample => ({id: newId('ex'), snapshotId, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: 'eval', optimiserHalf: first.get(r.externalId)!, ...(r.fetchedAt ? {fetchedAt: r.fetchedAt} : {}), ...(r.sourceId ? {sourceId: r.sourceId, sourceFileId: r.sourceFileId} : {})}));
   // Each example is saved on its own; one that fails twice is skipped (resilience spec, 3.2).
   const saved = await insertExamplesSettled(w, examples);
   if (!saved.length) throw new Error('None of the examples could be saved. Try again.');
@@ -84,9 +84,11 @@ async function saveSnapshot(w: Scope, projectId: string, all: Taken[], source: D
       video: raws.filter(r => r.type === 'video').length,
       photoText: raws.filter(r => r.type === 'photo_text').length,
       ...(notSaved ? {notSaved} : {}),
+      ...(checks ? {checks} : {}),
     },
     // Every valid example of a Prompt Tuning project is in the eval dataset (spec 1.0.0, 2.1).
     split: {eval: raws.length, test: 0, train: 0},
+    ...frozenFacts(null, raws),
   };
   snap.counts.rows = all.length + invalid;
   // The snapshot is saved after its examples, so a half-saved upload is never picked up.
@@ -155,6 +157,7 @@ async function take(w: Scope, job: Job, ctl: JobControl, progress: JobControl['p
   const wanted: {externalId: string; sourceId: string; fileId: string}[] = [];
   const names: string[] = [];
   const raws: Taken[] = [];
+  const checks = noChecks();
   // Set once the examples are in: a failure after it keeps the segments, since their items are.
   let saved = false;
   try {
@@ -164,13 +167,29 @@ async function take(w: Scope, job: Job, ctl: JobControl, progress: JobControl['p
       names.push((await catalog.get('data_sources', p.sourceId))?.name ?? p.sourceId);
       wanted.push(...items.map(i => ({...i, sourceId: p.sourceId})));
     }
-    for (let i = 0; i < wanted.length; i += 10) {
+    // Materialise (#32): each batch is checked (gone, a creator under 18, not recommendable), then
+    // the usable items' features are fetched once and frozen with the dataset.
+    const batch = Math.max(1, systemConfig().dataset.featureBatch);
+    for (let i = 0; i < wanted.length; i += batch) {
       if (ctl.signal.aborted) break;
-      const part = wanted.slice(i, i + 10);
-      const found = new Map((await w.examples.lookup(part.map(x => x.externalId))).map(r => [r.externalId, r]));
-      for (const x of part) {
+      const part = wanted.slice(i, i + batch);
+      const checked = w.examples.check ? new Map((await retried(() => w.examples.check!(part.map(x => x.externalId)), ctl.signal)).map(c => [c.externalId, c])) : null;
+      const usable = part.filter(x => {
+        if (!checked) return true;
+        const c = checked.get(x.externalId);
+        if (c && !c.problem) return true;
+        countProblem(checks, c?.problem ?? 'missing');
+        return false;
+      });
+      const fetchedAt = now();
+      const found = usable.length ? new Map((await retried(() => w.examples.lookup(usable.map(x => x.externalId)), ctl.signal)).map(r => [r.externalId, r])) : new Map<string, RawExample>();
+      for (const x of usable) {
         const r = found.get(x.externalId);
-        if (r) raws.push({...r, sourceId: x.sourceId, sourceFileId: x.fileId});
+        const c = checked?.get(x.externalId);
+        if (r) raws.push({...r, ...(c?.type ? {type: c.type} : {}), sourceId: x.sourceId, sourceFileId: x.fileId, fetchedAt});
+        // Checked as fine but no features came back: kept, with none (the item is there).
+        else if (c?.type) raws.push({externalId: x.externalId, type: c.type, title: x.externalId, features: {}, sourceId: x.sourceId, sourceFileId: x.fileId, fetchedAt});
+        else countProblem(checks, 'missing');
       }
       fetched = Math.min(n, i + part.length);
       await progress({done: fetched, total: n});
@@ -189,12 +208,12 @@ async function take(w: Scope, job: Job, ctl: JobControl, progress: JobControl['p
       }
       throw new Error('No items could be taken from these data sources yet. Try again when their files are imported.');
     }
-    // Items the example service does not know (gone, or not a video or photo post) are counted.
-    const notFound = wanted.length - raws.length;
+    // Items left out by the checks, or that the example service does not know, are counted.
+    const notFound = checksTotal(checks);
     if (!raws.length) throw new Error('None of these items could be found. Check the data source file.');
     await progress({done: n, total: n, saving: true});
-    if (append) await appendExamples(w, projectId, raws, 'sources', notFound);
-    else await saveSnapshot(w, projectId, raws, 'sources', names.join(', '), notFound);
+    if (append) await appendExamples(w, projectId, raws, 'sources', notFound, checks);
+    else await saveSnapshot(w, projectId, raws, 'sources', names.join(', '), notFound, checks);
     saved = true;
     ended('done');
     // Each segment records how many of its items went in: the examples actually saved. A record
@@ -213,6 +232,18 @@ async function take(w: Scope, job: Job, ctl: JobControl, progress: JobControl['p
     ended(stopped ? 'stopped' : 'failed');
     if (stopped) return {state: 'cancelled', error: 'Stopped.'};
     throw e;
+  }
+}
+
+/** A call to the example service, tried twice more when it throws; the take fails after that. */
+async function retried<T>(call: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await call();
+    } catch (e) {
+      if (attempt >= 2 || signal.aborted) throw e;
+      await new Promise(res => setTimeout(res, 200 * (attempt + 1)));
+    }
   }
 }
 

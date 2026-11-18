@@ -1,5 +1,5 @@
 import type {TelemetrySink} from './telemetry.ts';
-import type {ClientDiagnostics, EndpointId, EndpointInfo, FeatureValue, Locale, NodeId, PageId} from './types.ts';
+import type {ClientDiagnostics, EndpointId, EndpointInfo, ExampleType, FeatureValue, ItemProblem, Locale, NodeId, PageId} from './types.ts';
 import type {EndpointConfig} from './gateway-api.ts';
 import type {DeepPartial, SystemConfig} from './config.ts';
 import type {JobStorePort} from './jobs-api.ts';
@@ -416,9 +416,28 @@ export interface RawExample {
   features: Record<string, FeatureValue>;
 }
 
+/** One item's checks (#32): its kind, or why it cannot be used. */
+export interface ItemCheck {
+  externalId: string;
+  /** Photo-and-text or video; null when the item is not found. */
+  type: ExampleType | null;
+  /** Why it is left out; null when it passes every check. */
+  problem: ItemProblem | null;
+}
+
 export interface ExampleSource {
-  /** Looks up examples by id (taking examples from a data source, chat attachments). Unknown ids are left out. */
+  /**
+   * The feature port: examples by id with their features (taking examples, chat attachments).
+   * Unknown ids are left out; a feature that could not be fetched is left out of that item's
+   * features. Called in batches of `dataset.featureBatch` ids.
+   */
   lookup(ids: string[]): Promise<RawExample[]>;
+  /**
+   * The platform's item checks (#32), run on every item before its features are fetched: the item
+   * exists, its creator is an adult, it is publicly recommendable, and its kind. Without it, an item
+   * `lookup` does not know counts as missing. Called in batches of `dataset.featureBatch` ids.
+   */
+  check?(ids: string[]): Promise<ItemCheck[]>;
   /**
    * The item ids of the sample data that ships with the platform, if any: every tenant gets them
    * as a built-in data source (#29).

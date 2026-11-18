@@ -60,6 +60,7 @@ export const {
   createDataSource,
   addSourceFile,
   exampleMedia,
+  getExampleFeatures,
   takeExamples,
   stopSampleDataset,
   removeExamples,

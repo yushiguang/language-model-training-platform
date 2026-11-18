@@ -99,6 +99,7 @@ export function createBffApi(deps: BffDeps): BffContract {
     createDataSource: pass('createDataSource'),
     addSourceFile: pass('addSourceFile'),
     exampleMedia: pass('exampleMedia'),
+    getExampleFeatures: pass('getExampleFeatures'),
     takeExamples: pass('takeExamples'),
     stopSampleDataset: pass('stopSampleDataset'),
     removeExamples: pass('removeExamples'),

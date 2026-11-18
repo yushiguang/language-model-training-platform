@@ -140,6 +140,19 @@ Since 1.0.0 each feature on a `RawExample` is a `FeatureValue` (`packages/contra
 `ExampleSource` adapter that still returns plain strings can wrap them with `toFeatures` from
 `@yushiguang/sprint-domain`; prompts read features only through `featureText` and `featureItems`.
 
+Since #32 the features are fetched once when items are taken and frozen in the document store,
+one `example_features` document per example (id `snapshotId:externalId`), read only by id in
+batches. A server store wants:
+
+- the documents in their own collection, sharded by the id hash; no query scans it;
+- `ExampleSource.check(ids)` (optional) giving each item's kind or why it cannot be used
+  (`missing`, `minor_creator`, `not_recommendable`); without it, an id `lookup` does not return
+  counts as not found;
+- fields above `dataset.overflowFieldBytes` moved to object storage by the document adapter, the
+  document keeping the object's URI, with signed URLs made at the moment of use and never stored.
+  Run `node scripts/feature-size-report.mjs sample.jsonl` over a real sample to set the threshold
+  (it prints the median, p90, p99 and the share above it).
+
 Since 2026-11-16 a project has one label, single or multi select (`Schema {name, kind, min?, max?,
 values}`, a value may be `exclusive`), and an answer is a list of its values in label order
 (`Answer = string[]`, one value long for single select). Bundled labels and gold upload files may

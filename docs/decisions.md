@@ -3,6 +3,16 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-18 (Frozen dataset snapshots, #32)
+
+- **An example's features are fetched once, when it is taken, and frozen** in their own document (`example_features`, id `snapshotId:externalId`), apart from the product records. The `examples` records are the dataset's index (id, kind, title, half, source) and never hold features; project state carries the index only. Scoring is reproducible and the feature service is not read again for every run.
+- **Every read is by id, a batch at a time** (`dataset.featureBatch`, 50): a labeling run reads its own examples' features in batches as it goes; Gold Labels reads the one example shown (`getExampleFeatures`); the helpers and the Optimiser read the few examples they brief, the optimiser half only. No query scans a snapshot.
+- **Items are checked when they are taken** (`ExampleSource.check`, optional): not found, a creator under 18, not publicly recommendable. What is left out is counted per check on the dataset and shown on Eval Dataset ("6 items left out", why on hover), never dropped silently. The check gives the item's kind. An item that passes its checks but whose features do not come back is kept, with none. A feature service call that throws is tried twice more, then the take fails.
+- **No expiry** (Evelyn): frozen features are kept as long as their dataset. The retention and TTL parts of #32 are dropped.
+- **Estimates use average feature sizes** kept on the dataset (`featureSizes`), since they can no longer read every example.
+- **Large fields overflow to object storage in a server adapter** (`dataset.overflowFieldBytes`, set from `scripts/feature-size-report.mjs` over a real sample). The stand-in keeps every field in the document.
+- **Breaking contract change:** `Example` has no `features` (`ExampleWithFeatures` where they are needed); new `CatalogContract.exampleFeatures`, `BffContract.getExampleFeatures`, `OptimiserHost.exampleFeatures`, `ExampleSource.check`; `DatasetSnapshot.counts.checks` and `featureSizes`. Examples saved before #32 keep their features on their own record and are still read.
+
 ## 2026-11-18 (Data Source, #29 and #30)
 
 - **Data Source is a page of the tenant**, next to Projects in the top island (title case in the UI). A data source belongs to a tenant, never to a project, and another tenant cannot see it.

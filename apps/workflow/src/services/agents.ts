@@ -13,8 +13,9 @@ import type {
   StartRequest,
   StructuredPrompt,
 } from '@yushiguang/sprint-contracts';
-import {agentName, answersForHelpers, isRight, newId, promptKeys, readStructured, rewordOnly, settingsHash, structuredEquals, tidyStructured, versionLabel, visibleToAgents, wrongExamples, toMap, msg, msgText} from '@yushiguang/sprint-domain';
+import {agentName, answersForHelpers, isRight, newId, promptKeys, readStructured, rewordOnly, settingsHash, structuredEquals, tidyStructured, versionLabel, visibleToAgents, pickWrong, wrongExamples, toMap, msg, msgText} from '@yushiguang/sprint-domain';
 import {loadProjectState} from './projects.ts';
+import {withFeatures} from './features.ts';
 import {now, type Instance, type Scope} from './app.ts';
 import {joinedMsg, postEvent} from './chat-events.ts';
 import {beginTurn, endTurn, turnOf} from './turns.ts';
@@ -358,7 +359,7 @@ export async function improveWithAi(w: Scope, projectId: string, versionId: stri
   const mistakes = half.filter(e => !!state.gold[e.id] && !isRight(state.gold[e.id]!.answer, answers.get(e.id)?.answer ?? null)).length;
   const gold = new Map(half.filter(e => !!state.gold[e.id]).map(e => [e.id, state.gold[e.id]!.answer]));
   const said = answersForHelpers(half.filter(e => answers.has(e.id)).map(e => answers.get(e.id)!));
-  const examples = withComments(wrongExamples(half, promptKeys(v), gold, said.predicted, undefined, said.notes), half, await labelComments(w, projectId, state));
+  const examples = withComments(wrongExamples(await withFeatures(w, pickWrong(half, gold, said.predicted)), promptKeys(v), gold, said.predicted, undefined, said.notes), half, await labelComments(w, projectId, state));
   await setLive(w, projectId, {agent: 'prompt_agent', working: `Reading the ${versionLabel(v)} mistakes…`, msg: msg('Reading the {version} mistakes…', {version: versionLabel(v)}), reply: null});
   await postEvent(w, projectId, 'start', 'user', msg('asked the Prompt helper to improve {version}', {version: versionLabel(v)}), {path: '/prompt'});
   let outcome = 'error';

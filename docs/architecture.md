@@ -400,6 +400,11 @@ used for counters, failed lists and approvals. Writes are partial (`patch`) so a
 and a page action never overwrite each other's fields. `DocRepo` (`packages/platform`) maps the
 application `id` to the store's document id.
 
+Frozen features (#32) live apart from the product records: one `example_features` document per
+example, read by id only (`CatalogContract.exampleFeatures`, a batch at a time). Project state
+carries the examples' index and no features; the labeling run, Gold Labels, the helpers and the
+Optimiser each read the features of the examples they use.
+
 ## Where the rules live
 
 | Rule | File |

@@ -1,4 +1,4 @@
-import type {AgentToolCall, AgentToolHost, EndpointId, Example, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@yushiguang/sprint-contracts';
+import type {AgentToolCall, AgentToolHost, EndpointId, Example, ExampleWithFeatures, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@yushiguang/sprint-contracts';
 import {agentStart, isStartTool} from './starts.ts';
 import {reportProblem} from './problems.ts';
 import {aiSuggestion, featureItems, featureText, labelBalance, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, normalizeStructured, matchRuleGroup, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap, sameAnswer, newId, mayCallTool, agentName} from '@yushiguang/sprint-domain';
@@ -7,6 +7,7 @@ import {turnOf} from './turns.ts';
 import {lockHoldout} from './governance.ts';
 import {mismatches} from './mismatches.ts';
 import {getProject, loadProjectState} from './projects.ts';
+import {withFeatures} from './features.ts';
 
 /**
  * Page views: each page as the agent sees it, built from the same saved data the page shows.
@@ -150,7 +151,7 @@ function reportView(state: ProjectState, v: PromptVersion | undefined, model: En
   };
 }
 
-function exampleView(e: Example) {
+function exampleView(e: ExampleWithFeatures) {
   const features: Record<string, string | number> = {};
   for (const [k, v] of Object.entries(e.features)) {
     if (isImageKey(k)) features[k] = `${featureItems(v).length} image(s)`;
@@ -392,7 +393,7 @@ export function agentToolHost(inst: Instance): AgentToolHost {
           const ids = Array.isArray(args.ids) ? new Set(args.ids.map(String)) : null;
           const all = state.examples.filter(e => !ids || ids.has(e.externalId) || ids.has(e.id));
           const list = all.filter(visibleToAgents);
-          return {total: list.length, examples: list.slice(0, limitOf(args.limit, 10, 5)).map(exampleView), ...(list.length < all.length ? {note: HIDDEN_NOTE} : {})};
+          return {total: list.length, examples: (await withFeatures(w, list.slice(0, limitOf(args.limit, 10, 5)), true)).map(exampleView), ...(list.length < all.length ? {note: HIDDEN_NOTE} : {})};
         }
         case 'get_gold_labels': {
           const list = state.examples.filter(e => !!state.gold[e.id] && visibleToAgents(e));
@@ -435,8 +436,10 @@ export function agentToolHost(inst: Instance): AgentToolHost {
         case 'search_examples': {
           const words = (typeof args.text === 'string' ? args.text : '').toLowerCase().split(/\s+/).filter(Boolean);
           if (!words.length) throw new Error('Give words to look for.');
-          const hay = (e: Example) => [e.title, ...Object.entries(e.features).filter(([k]) => !isImageKey(k)).map(([, v]) => featureText(v))].join(' ').toLowerCase();
-          const list = state.examples.filter(e => visibleToAgents(e) && (!args.unlabeledOnly || !state.gold[e.id]) && words.every(w => hay(e).includes(w)));
+          const hay = (e: ExampleWithFeatures) => [e.title, ...Object.entries(e.features).filter(([k]) => !isImageKey(k)).map(([, v]) => featureText(v))].join(' ').toLowerCase();
+          // Frozen features (#32) are read by id, a batch at a time, for the examples searched.
+          const searched = await withFeatures(w, state.examples.filter(e => visibleToAgents(e) && (!args.unlabeledOnly || !state.gold[e.id])), true);
+          const list = searched.filter(e => words.every(x => hay(e).includes(x)));
           return {matching: list.length, note: HIDDEN_NOTE, examples: list.slice(0, limitOf(args.limit, 10, 5)).map(e => ({...exampleView(e), gold: state.gold[e.id]?.answer ?? null}))};
         }
         case 'compare_versions':

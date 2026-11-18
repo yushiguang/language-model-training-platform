@@ -1,9 +1,11 @@
 import type {OptimiserHost, ProjectState, PromptVersion} from '@yushiguang/sprint-contracts';
+import {visibleToAgents} from '@yushiguang/sprint-domain';
 import type {Scope} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {buildReport, confirmScore, labelEvalSet, labelExamples, scoreOnOptimiserHalf} from './evaluation.ts';
 import {labelComments} from './mismatches.ts';
 
+import {exampleFeatures} from './features.ts';
 import {loadProjectState} from './projects.ts';
 import {createVersion} from './prompts.ts';
 
@@ -55,6 +57,12 @@ export function optimiserHost(w: Scope): OptimiserHost {
     async labelComments(projectId) {
       const {state} = await loaded(projectId);
       return Object.fromEntries(await labelComments(w, projectId, state));
+    },
+    async exampleFeatures(projectId, exampleIds) {
+      // The Optimiser learns from the optimiser half only: held-out examples are never read here.
+      const {state} = await loaded(projectId);
+      const ok = new Set(state.examples.filter(visibleToAgents).map(e => e.id));
+      return exampleFeatures(w, projectId, exampleIds.filter(id => ok.has(id)));
     },
     postEvent: ({projectId, event, actor, what, link}) => postEvent(w, projectId, event, actor, what, link),
   };

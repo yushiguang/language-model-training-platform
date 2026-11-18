@@ -1,5 +1,5 @@
 import {ALL_KEYS, FEATURES, ITEM_ROWS, featureDef, isImageKey, labelOf} from './catalogue.ts';
-import type {Example, ExampleType, FeatureSelection, FeatureValue, PromptImage, Schema} from '@yushiguang/sprint-contracts';
+import type {ExampleType, Features, FeatureSelection, FeatureValue, PromptImage, Schema} from '@yushiguang/sprint-contracts';
 
 /**
  * Prompt templates (tech doc §3, "Prompt templates and feature loading").
@@ -227,7 +227,7 @@ export type Part =
  * type is left out. Empty text features become "none". Image features and fixed prompt images
  * become image parts in template order.
  */
-export function renderPrompt(template: string, example: Pick<Example, 'type' | 'features'>, sel: FeatureSelection, images: PromptImage[] = []): Part[] {
+export function renderPrompt(template: string, example: {type: ExampleType; features: Features}, sel: FeatureSelection, images: PromptImage[] = []): Part[] {
   const loaded = new Set([...sel[example.type], ...sel.metadata]);
   const lines = template.split('\n').filter(line => {
     const keys = [...line.matchAll(PLACEHOLDER)].map(m => m[1]);

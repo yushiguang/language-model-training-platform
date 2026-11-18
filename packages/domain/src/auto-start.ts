@@ -2,6 +2,7 @@ import {systemConfig} from './config.ts';
 import type {EndpointId, ProjectState, PromptVersion} from '@yushiguang/sprint-contracts';
 import {estimateTokens} from './labels.ts';
 import {renderPrompt} from './template.ts';
+import {averageExample} from './frozen-features.ts';
 import {costForTokens} from './workflow.ts';
 import {canScore} from './gates.ts';
 
@@ -18,9 +19,13 @@ export type AutoStartWhat = 'score' | 'resume' | 'optimiser' | 'try_prompt';
 /** Cost of labeling `n` eval examples (all of them by default) with a version on one model. */
 export function evalEstimate(state: ProjectState, version: Pick<PromptVersion, 'template' | 'features' | 'images'>, endpoint: EndpointId, n?: number): number {
   const evalEx = state.examples.filter(e => e.split === 'eval');
-  const sample = evalEx.slice(0, 10);
-  if (!sample.length) return 0;
-  const avg = sample.map(ex => estimateTokens(renderPrompt(version.template, ex, version.features, version.images))).reduce((a, b) => a + b, 0) / sample.length;
+  if (!evalEx.length) return 0;
+  // The page's state has no features (#32): the prompt is rendered for an example of the
+  // dataset's average feature sizes, of each kind in the share the dataset has.
+  const sizes = state.snapshot?.featureSizes;
+  const video = evalEx.filter(e => e.type === 'video').length / evalEx.length;
+  const tokens = (type: 'video' | 'photo_text') => estimateTokens(renderPrompt(version.template, averageExample(type, sizes), version.features, version.images));
+  const avg = (video ? video * tokens('video') : 0) + (video < 1 ? (1 - video) * tokens('photo_text') : 0);
   return costForTokens(state.endpoints, endpoint, avg, systemConfig().gateway.evalOutputTokensEstimate) * (n ?? evalEx.length);
 }
 
