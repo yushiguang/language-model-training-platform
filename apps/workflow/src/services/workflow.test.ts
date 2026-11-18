@@ -160,6 +160,22 @@ test('an automatic resume of a task the user started counts as automatic spend',
   assert.ok(Math.abs((run.autoCostUsd ?? 0) - 0.18) < 1e-9, `the 6 resumed examples count (${run.autoCostUsd})`);
 });
 
+test('two paused tasks of one version and model both resume in one check, each as itself (#25)', async () => {
+  const w = await world('b5b');
+  const v = await w.newVersion();
+  const s0 = await w.state();
+  const make = (ids: string[]) => w.labeling.createTask({projectId: w.projectId, purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: ids, createdBy: 'Tester'});
+  const all = await make(s0.examples.map(e => e.id));
+  const subset = await make(s0.examples.map(e => e.id).slice(0, 3));
+  const repo = new DocRepo(w.db);
+  for (const t of [all, subset]) await repo.patch('labeling_tasks', t.id, {state: 'paused', stopReason: 'closed'});
+  await tick(w.ws, await w.state());
+  const queued = (await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask']})).map(j => j.args.taskId).sort();
+  assert.deepEqual(queued, [all.id, subset.id].sort());
+  await until(async () => (await w.state()).runs.every(r => r.state === 'done'), 'both resumes');
+  assert.equal((await w.state()).runs.length, 2, 'no new task was made');
+});
+
 test('agent start tools start at once, with no card, and leave an action line', async () => {
   const w = await world('b6', {delayMs: 20});
   await w.catalog.audit(w.projectId, 'system', 'auto_spend', {what: 'try_prompt', costUsd: 50});
