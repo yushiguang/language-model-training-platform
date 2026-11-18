@@ -59,6 +59,9 @@ interface Running {
   lost: boolean;
 }
 
+/** How many times a runner tries to save how a job ended before it gives up on the store. */
+const FINISH_TRIES = 3;
+
 export function createJobs(deps: JobsDeps): Jobs {
   const {store} = deps;
   const owner = deps.owner ?? newId('runner');
@@ -139,6 +142,28 @@ export function createJobs(deps: JobsDeps): Jobs {
     return r.writing;
   }
 
+  /**
+   * Saves how the job ended, trying again when the store fails. Returns the ended job, null when
+   * this runner no longer holds it (another runner took it over), or 'error' when the store
+   * kept failing.
+   */
+  async function finish(job: Job, outcome: JobOutcome): Promise<Job | null | 'error'> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await store.finish(job.id, owner, outcome, nowIso());
+      } catch {
+        if (attempt >= FINISH_TRIES) return 'error';
+        await new Promise(r => setTimeout(r, retryDelayMs * attempt));
+      }
+    }
+  }
+
+  /**
+   * The job chained after `job`. Its idempotency key names the parent, so the chain queued
+   * by a runner and again by a later run of the same parent is one job while it is active.
+   */
+  const chained = (job: Job): JobRequest => ({...job.then!, idempotencyKey: job.then!.idempotencyKey ?? `then:${job.id}`});
+
   function start(job: Job) {
     const executor = executors.get(job.kind)!;
     const r: Running = {job, ctrl: new AbortController(), progress: job.progress, writing: Promise.resolve(), cancelled: false, lost: false};
@@ -178,11 +203,16 @@ export function createJobs(deps: JobsDeps): Jobs {
       if (r.cancelled && outcome.state === 'done') outcome = {state: 'cancelled', error: 'Cancelled.'};
       clearInterval(timer);
       await r.writing;
-      const ended = await store.finish(job.id, owner, outcome, nowIso()).catch(() => null);
+      const ended = await finish(job, outcome);
       tm.histogram('sprint_job_duration_seconds', (clock() - startedAt) / 1000, {job_kind: job.kind});
-      tm.counter('sprint_jobs_ended_total', {job_kind: job.kind, outcome: ended ? ended.state : 'lost'});
+      tm.counter('sprint_jobs_ended_total', {job_kind: job.kind, outcome: ended === 'error' ? 'store_error' : ended ? ended.state : 'lost'});
       done();
-      if (ended?.state === 'done' && ended.then) await enqueue(ended.ctx, ended.then).catch(() => undefined);
+      // The chained job follows work that ended done. A lost lease queues nothing: the runner
+      // that took the job over chains it. When the store kept failing, the job stays running
+      // until its lease ends; the sweep then runs it again, and that run chains. On the job's
+      // last attempt the sweep fails it instead, so the chain is queued here, once (#26).
+      const chainNow = ended === 'error' ? outcome.state === 'done' && job.then && job.attempts >= maxAttempts : ended?.state === 'done' && ended.then;
+      if (chainNow) await enqueue(job.ctx, chained(job)).catch(() => undefined);
     })();
     function done() {
       clearInterval(timer);

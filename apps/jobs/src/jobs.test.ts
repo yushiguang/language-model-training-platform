@@ -171,6 +171,52 @@ test('a chain: the next step is enqueued with the same context only when the job
   assert.deepEqual(ran.sort(), ['label:lt_bad', 'label:lt_ok', 'report:pv_1:Ann']);
 });
 
+test('finishing fails: the runner tries again, and the chain is queued exactly once (#26)', async () => {
+  // The store fails to save the end twice, then recovers.
+  const base = memoryJobStore();
+  let failures = 2;
+  const store = {...base, finish: (...a: Parameters<typeof base.finish>) => (failures-- > 0 ? Promise.reject(new Error('store down')) : base.finish(...a))};
+  const jobs = createJobs({store, retryDelayMs: 1});
+  const ran: string[] = [];
+  jobs.register({kind: 'labeling.runTask', run: async () => (ran.push('label'), {state: 'done'})});
+  jobs.register({kind: 'report.build', run: async () => (ran.push('report'), {state: 'done'})});
+  const parent = await jobs.api.enqueue(ctx(), {kind: 'labeling.runTask', projectId: 'pr_1', args: {}, then: {kind: 'report.build', projectId: 'pr_1', args: {}}});
+  await jobs.idle();
+  assert.equal((await jobs.api.get(ctx(), parent.id))?.state, 'done');
+  assert.deepEqual(ran, ['label', 'report']);
+});
+
+test('finishing keeps failing: the sweep runs the job again and that run chains; on the last attempt the runner chains (#26)', async () => {
+  const base = memoryJobStore();
+  let down = true;
+  const store = {...base, finish: (...a: Parameters<typeof base.finish>) => (down ? Promise.reject(new Error('store down')) : base.finish(...a))};
+  let now = Date.parse('2026-11-18T00:00:00Z');
+  const jobs = createJobs({store, retryDelayMs: 1, leaseMs: 1000, maxAttempts: 2, clock: () => now});
+  const ran: string[] = [];
+  jobs.register({kind: 'labeling.runTask', run: async () => (ran.push('label'), {state: 'done'})});
+  jobs.register({kind: 'report.build', run: async () => (ran.push('report'), {state: 'done'})});
+  const parent = await jobs.api.enqueue(ctx(), {kind: 'labeling.runTask', projectId: 'pr_1', args: {}, then: {kind: 'report.build', projectId: 'pr_1', args: {}}});
+  await until(() => ran.length === 1, 'the first run');
+  await tick(30);
+  // First attempt: the end was not saved and nothing is chained yet; the job keeps its lease.
+  assert.deepEqual(ran, ['label']);
+  assert.equal((await jobs.api.get(ctx(), parent.id))?.state, 'running');
+  // The lease ends; the sweep runs it again. That is its last attempt, so the runner chains.
+  now += 2000;
+  await jobs.sweep();
+  await until(() => ran.length === 3, 'the second run and the chain');
+  assert.deepEqual(ran, ['label', 'label', 'report']);
+  // The sweep later fails the job (its end never saved); the chain is not queued again. (The
+  // chained job's own end was not saved either, so the sweep runs that one again: one job.)
+  down = false;
+  now += 2000;
+  await jobs.sweep();
+  await jobs.idle();
+  assert.equal((await jobs.api.get(ctx(), parent.id))?.state, 'failed');
+  assert.equal(ran.filter(r => r === 'label').length, 2);
+  assert.equal((await jobs.api.list(ctx(), {kinds: ['report.build']})).length, 1);
+});
+
 test('fair across tenants: a free runner takes the tenant with the fewest running jobs first', async () => {
   const store = memoryJobStore();
   // A worker that polls: the queue fills before it looks.
