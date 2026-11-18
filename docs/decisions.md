@@ -3,6 +3,12 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-18 (Upload labels, #31)
+
+- **Upload labels is its own action on Gold Labels**, apart from Upload dataset: datasets decide which examples exist, labels decide their gold answers. A label file never adds examples; a row for an item not in the dataset is counted and skipped.
+- **Rows are checked one by one.** A value outside the label (or the wrong number of values) refuses that row, named by its row number; the other rows still save. The last row for an item wins. A row that changes an item's label replaces the earlier one (the newest label counts, as when labeling by hand), the same label again saves nothing, and each upload is audited (`gold_labels.uploaded`).
+- **Files:** CSV with an `item_id` and an `answer` column (several values separated by `|` or `;`), or JSONL lines. The file is read on the server (`uploadGoldText`), so a server bff reads it the same way.
+
 ## 2026-11-18 (fixes from the maintainers' issues)
 
 - **Next stays on a version with no known advisory, and its security check stays on** (#28). Next stops a build with a security notice only when it sees a coding agent run it (an unpatched version, an agent's terminal); CI and people's terminals never stop on it. So the fix is upgrading, not turning the check off or retrying the build: 16.4.4 had two moderate advisories (cached data across root params, which a static export does not use) and 16.4.6 has none. A build that stops on the notice again means a new advisory: upgrade Next in a pull request.

@@ -1,5 +1,6 @@
-import type {Answer, DatasetSnapshot, DatasetUploadResult, Example, ExampleMedia, GoldLabel, Job, JobControl, JobOutcome, RawExample, SamplingTask, Schema} from '@yushiguang/sprint-contracts';
-import {hashString, newId, readGoldAnswer, toFeatures} from '@yushiguang/sprint-domain';
+import type {Answer, DatasetSnapshot, DatasetUploadResult, Example, ExampleMedia, GoldLabel, GoldUploadRefusal, GoldUploadResult, Job, JobControl, JobOutcome, RawExample, SamplingTask, Schema} from '@yushiguang/sprint-contracts';
+import {hashString, newId, readGoldAnswerWhy, readLabelFile, sameAnswer, toFeatures, type LabelFileRow} from '@yushiguang/sprint-domain';
+import {latestGold} from './evaluation.ts';
 import {now, type Scope} from './app.ts';
 import {appendExamples, insertExamplesSettled} from './governance.ts';
 
@@ -307,8 +308,14 @@ export async function saveGold(w: Scope, projectId: string, exampleId: string, s
 }
 
 /**
- * Upload labels: JSONL lines of {externalId, answer}, or the labels bundled with the sample file.
- * `answer` is the value; older files with `{label: ["Value"]}` still import (2026-11-16).
+ * Upload labels: rows of {externalId, answer}, from a file (`uploadGoldText`), JSON lines, or the
+ * labels bundled with the sample file. `answer` is the value; older files with `{label: ["Value"]}`
+ * still import (2026-11-16).
+ *
+ * Labels never add examples (#31): each row is matched to an example already in the dataset, and
+ * a row for any other item is counted and skipped. An answer that is not an answer to the label is
+ * refused with its row named. A row that gives the item a different label replaces the earlier one
+ * (the newest label counts); the same label again saves nothing. Each upload is audited.
  */
 export async function uploadGold(w: Scope,
   projectId: string,
@@ -316,27 +323,69 @@ export async function uploadGold(w: Scope,
   schemaVersion: number,
   examples: Example[],
   lines: {externalId: string; answer: unknown}[],
-): Promise<{saved: number; skipped: number}> {
+  source: {file?: string; kind?: 'file' | 'bundled'} = {},
+): Promise<GoldUploadResult> {
+  return saveUploadedLabels(w, projectId, schema, schemaVersion, examples, lines.map((l, i) => ({row: i + 1, externalId: String(l.externalId ?? ''), answer: l.answer})), [], source);
+}
+
+/** Upload labels from a file: CSV or JSONL (`readLabelFile`). */
+export async function uploadGoldText(w: Scope, projectId: string, schema: Schema, schemaVersion: number, examples: Example[], name: string, text: string): Promise<GoldUploadResult> {
+  const read = readLabelFile(name, text, schema.name);
+  if ('error' in read) return {saved: 0, skipped: 0, error: read.error};
+  const unreadable = read.bad.map(b => ({row: b.row, externalId: '', reason: b.reason}));
+  return saveUploadedLabels(w, projectId, schema, schemaVersion, examples, read.rows, unreadable, {file: name, kind: 'file'});
+}
+
+async function saveUploadedLabels(w: Scope,
+  projectId: string,
+  schema: Schema,
+  schemaVersion: number,
+  examples: Example[],
+  rows: LabelFileRow[],
+  unreadable: GoldUploadRefusal[],
+  source: {file?: string; kind?: 'file' | 'bundled'},
+): Promise<GoldUploadResult> {
   const byExt = new Map(examples.map(e => [e.externalId, e]));
+  const {current} = await latestGold(w, projectId, schemaVersion);
+  const refused: GoldUploadRefusal[] = [...unreadable];
   let saved = 0;
-  let skipped = 0;
-  for (const l of lines) {
-    const ex = byExt.get(l.externalId);
-    const answer = readGoldAnswer(l.answer, schema);
-    if (!ex || answer == null) {
-      skipped++;
+  let replaced = 0;
+  let unchanged = 0;
+  let notInDataset = 0;
+  // The last row for an item wins, as if the rows were saved one after another.
+  const last = new Map<string, LabelFileRow>();
+  for (const r of rows) last.set(r.externalId, r);
+  for (const r of rows) {
+    if (last.get(r.externalId) !== r) continue;
+    const ex = byExt.get(r.externalId);
+    if (!ex) {
+      notInDataset++;
       continue;
     }
-    await saveGold(w, projectId, ex.id, schemaVersion, answer, false, 'uploaded');
+    const got = readGoldAnswerWhy(r.answer, schema);
+    if ('problem' in got) {
+      refused.push({row: r.row, externalId: r.externalId, reason: got.problem});
+      continue;
+    }
+    const had = current[ex.id];
+    if (had && sameAnswer(had.answer, got.answer)) {
+      unchanged++;
+      continue;
+    }
+    await saveGold(w, projectId, ex.id, schemaVersion, got.answer, false, 'uploaded');
     saved++;
+    if (had) replaced++;
   }
-  w.tm.event('gold_labels_uploaded', {source: 'file', saved, skipped});
-  return {saved, skipped};
+  refused.sort((a, b) => a.row - b.row);
+  const skipped = notInDataset + refused.length;
+  await w.catalog.audit(projectId, (await w.user()).name, 'gold_labels.uploaded', {file: source.file ?? null, saved, replaced, unchanged, notInDataset, refused: refused.length});
+  w.tm.event('gold_labels_uploaded', {source: source.kind ?? 'file', saved, skipped});
+  return {saved, skipped, replaced, unchanged, notInDataset, refused};
 }
 
 export async function importBundledGold(w: Scope, projectId: string, schema: Schema, schemaVersion: number, examples: Example[]): Promise<{saved: number; skipped: number}> {
   const bundled = w.examples.bundledLabels;
   if (!bundled) return {saved: 0, skipped: 0};
   const lines = await bundled();
-  return uploadGold(w, projectId, schema, schemaVersion, examples, lines);
+  return uploadGold(w, projectId, schema, schemaVersion, examples, lines, {kind: 'bundled'});
 }

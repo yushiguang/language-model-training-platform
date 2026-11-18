@@ -182,3 +182,26 @@ test('change marks: word-level diff with removed text before added text', () => 
   assert.equal(diffWords('same', 'same').length, 1);
   assert.deepEqual(diffWords('a b c d', 'a x y d').map(s => s.kind), ['same', 'del', 'add', 'same']);
 });
+
+test('label files: CSV with an id and an answer column, or JSONL; rows numbered as in the file (#31)', async () => {
+  const {readLabelFile, csvCells} = await import('./label-file.ts');
+  assert.deepEqual(csvCells('a,"b, c","say ""hi"""'), ['a', 'b, c', 'say "hi"']);
+  const csv = readLabelFile('l.csv', 'item_id,answer\n1,Food\n\n2,"Food|Travel"\n,Food\n', 'topic');
+  assert.ok(!('error' in csv));
+  if ('error' in csv) return;
+  assert.deepEqual(csv.rows, [
+    {row: 2, externalId: '1', answer: 'Food'},
+    {row: 4, externalId: '2', answer: ['Food', 'Travel']},
+  ]);
+  assert.deepEqual(csv.bad, [{row: 5, reason: 'The row has no item id'}]);
+  // The label's own name may head the answer column.
+  const named = readLabelFile('l.csv', 'video_id,topic\n7,Travel', 'topic');
+  assert.ok(!('error' in named) && named.rows[0].answer === 'Travel');
+  assert.ok('error' in readLabelFile('l.csv', 'id,value\n1,Food', 'topic'));
+  const jl = readLabelFile('l.jsonl', '{"item_id":"1","answer":"Food"}\nnot json\n{"externalId":"2","topic":["Travel"]}\n', 'topic');
+  assert.ok(!('error' in jl));
+  if ('error' in jl) return;
+  assert.deepEqual(jl.rows.map(r => [r.row, r.externalId]), [[1, '1'], [3, '2']]);
+  assert.deepEqual(jl.bad, [{row: 2, reason: 'The row is not valid JSON'}]);
+  assert.ok('error' in readLabelFile('l.txt', '1 Food', 'topic'));
+});

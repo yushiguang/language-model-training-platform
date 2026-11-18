@@ -269,6 +269,20 @@ let current = null;
   await page.locator('.cmts').getByText('Shot at home, so it counts as a vlog').waitFor({timeout: 5000});
   if ((await page.locator('.media small').innerText()).trim() !== firstId) throw new Error('saving in Labeled moved to another example');
   await shot(page, '3a-gold-comment');
+  // Upload labels (#31): rows are matched to the dataset; an unknown item is skipped, a value
+  // outside the label is refused by row, and the same label again saves nothing.
+  const labelsFile = (name, text) => page.locator('input[aria-label="Upload labels"]').setInputFiles({name, mimeType: 'text/csv', buffer: Buffer.from(text)});
+  const firstAnswer = LABELS.get(firstId);
+  await labelsFile('labels.csv', `item_id,answer\nnot_in_this_dataset,${firstAnswer}\n${firstId},Not a value\n`);
+  await page.getByText(/1 item is not in the dataset and was skipped/).waitFor({timeout: 10000});
+  await page.getByText(new RegExp(`Row 3 \\(item ${firstId}\\) was refused`)).waitFor({timeout: 5000});
+  await shot(page, '3d-gold-upload-refused');
+  await labelsFile('labels.csv', `item_id,answer\n${firstId},${firstAnswer}\n`);
+  await page.getByText(/Saved 0 labels\. 1 row already had this label\./).waitFor({timeout: 10000});
+  await shot(page, '3e-gold-upload-saved');
+  await button(page, 'Dismiss').click();
+  if (await page.getByText(/already had this label/).count()) throw new Error('Dismiss left the upload result');
+  if ((await page.locator('.media small').innerText()).trim() !== firstId) throw new Error('uploading labels moved to another example');
   // Remove example: out of scope; it leaves the eval set and shows under Removed on Eval Dataset.
   await button(page, 'Next').click();
   await button(page, 'Remove example').click();

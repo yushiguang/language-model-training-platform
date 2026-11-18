@@ -119,6 +119,11 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
       const {state, schema, schemaVersion} = await withSchema(w, projectId);
       return dataset.uploadGold(w, projectId, schema, schemaVersion, state.examples, lines);
     },
+    async uploadGoldText(ctx, projectId, name, text) {
+      const w = at(ctx);
+      const {state, schema, schemaVersion} = await withSchema(w, projectId);
+      return dataset.uploadGoldText(w, projectId, schema, schemaVersion, state.examples, name, text);
+    },
     async importBundledGold(ctx, projectId) {
       const w = at(ctx);
       const {state, schema, schemaVersion} = await withSchema(w, projectId);

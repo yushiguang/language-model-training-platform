@@ -119,9 +119,33 @@ export interface UploadGoldRequest {
   lines: GoldLine[];
 }
 
+/**
+ * What an upload of labels did. Labels never add examples: a row for an item not in the dataset
+ * is counted and skipped. A row whose answer is not an answer to the label is refused and named.
+ */
 export interface GoldUploadResult {
+  /** Labels saved: new ones and changed ones. */
   saved: number;
+  /** Rows not saved: not in the dataset, refused, or unreadable. */
   skipped: number;
+  /** Of `saved`, how many replaced a different earlier label. */
+  replaced?: number;
+  /** Rows whose answer was already the item's label (nothing saved). */
+  unchanged?: number;
+  /** Rows for items that are not in the project's dataset. */
+  notInDataset?: number;
+  /** Rows refused, with why (in English), in file order. */
+  refused?: GoldUploadRefusal[];
+  /** The file could not be read at all (nothing saved). */
+  error?: string;
+}
+
+export interface GoldUploadRefusal {
+  /** The row in the file, counted from 1 (a CSV header is row 1). */
+  row: number;
+  /** The item id on the row ('' when it had none). */
+  externalId: string;
+  reason: string;
 }
 
 export interface DatasetUploadResult {
@@ -260,6 +284,12 @@ export interface BffContract {
   uploadDatasetText(projectId: string, name: string, text: string): Promise<DatasetUploadResult>;
   saveGold(projectId: string, exampleId: string, schemaVersion: number, answer: Answer, revealed: boolean, source?: GoldLabel['source']): Promise<GoldLabel>;
   uploadGold(req: UploadGoldRequest): Promise<GoldUploadResult>;
+  /**
+   * Upload labels from a file (#31): CSV with an item id and an answer column, or JSONL lines
+   * (see `readLabelFile`). Rows are matched to the examples already in the dataset and checked
+   * against the label; re-uploading replaces earlier labels and is audited.
+   */
+  uploadGoldText(projectId: string, name: string, text: string): Promise<GoldUploadResult>;
   importBundledGold(projectId: string): Promise<GoldUploadResult>;
   /** Examples where versions disagree with the gold label, for one version (left out: the best). */
   mismatches(projectId: string, promptVersionId?: string | null): Promise<MismatchList>;

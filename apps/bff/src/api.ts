@@ -104,6 +104,7 @@ export function createBffApi(deps: BffDeps): BffContract {
     addComment: pass('addComment'),
     saveGold: pass('saveGold'),
     uploadGold: pass('uploadGold'),
+    uploadGoldText: pass('uploadGoldText'),
     importBundledGold: pass('importBundledGold'),
     mismatches: pass('mismatches'),
     reviewGold: pass('reviewGold'),

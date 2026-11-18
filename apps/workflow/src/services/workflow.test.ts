@@ -1010,3 +1010,34 @@ test('revision (G9): every change gives a new one, a burst of writes writes it o
   assert.equal(await projectStatus(w.ws, 'pr_none'), null);
   await w.jobs.idle();
 });
+
+test('Upload labels: rows match examples already in the dataset, bad values are refused by row, a re-upload replaces and is audited (#31)', async () => {
+  const w = await world('gl31', {gold: null});
+  const {uploadGoldText} = await import('./dataset.ts');
+  const up = async (name: string, text: string) => uploadGoldText(w.ws, w.projectId, schema, 1, (await w.state()).examples, name, text);
+  const before = (await w.state()).examples.length;
+
+  const first = await up('labels.csv', 'item_id,answer\n0,Vlog\n1,Tutorial\n99,Vlog\n2,Cooking\n3,"Vlog|Tutorial"\n');
+  assert.deepEqual(
+    {saved: first.saved, skipped: first.skipped, notInDataset: first.notInDataset, replaced: first.replaced},
+    {saved: 2, skipped: 3, notInDataset: 1, replaced: 0},
+  );
+  assert.deepEqual(first.refused, [
+    {row: 5, externalId: '2', reason: '"Cooking" isn\'t a value of format'},
+    {row: 6, externalId: '3', reason: 'format needs exactly one value'},
+  ]);
+  // Uploading labels never adds examples.
+  assert.equal((await w.state()).examples.length, before);
+  assert.deepEqual((await w.state()).gold['ex_gl31_1']?.answer, ['Tutorial']);
+
+  // Again: a changed label replaces the earlier one, the same label saves nothing.
+  const again = await up('labels.jsonl', '{"item_id":"0","answer":"Vlog"}\n{"item_id":"1","answer":"Vlog"}\n');
+  assert.deepEqual({saved: again.saved, replaced: again.replaced, unchanged: again.unchanged}, {saved: 1, replaced: 1, unchanged: 1});
+  assert.deepEqual((await w.state()).gold['ex_gl31_1']?.answer, ['Vlog']);
+  const audits = await w.catalog.find('audit_log', {projectId: w.projectId, action: 'gold_labels.uploaded'});
+  assert.equal(audits.length, 2);
+
+  // A file that is not CSV or JSONL, or a CSV without the columns, saves nothing.
+  assert.match((await up('labels.txt', '0 Vlog')).error ?? '', /CSV or JSONL/);
+  assert.match((await up('labels.csv', 'id,value\n0,Vlog')).error ?? '', /item_id column/);
+});

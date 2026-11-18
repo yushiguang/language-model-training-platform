@@ -33,7 +33,7 @@ export interface BffClient extends BffContract {
   uploadDatasetFile(projectId: string, file: File): Promise<DatasetUploadResult>;
   /** Adds the file's examples to the eval dataset there (spec 1.0.0, 4.3). */
   appendDatasetFile(projectId: string, file: File): Promise<DatasetUploadResult>;
-  /** JSONL lines of {externalId, answer}; lines that are not JSON are skipped. */
+  /** Upload labels: a CSV or JSONL file of item ids and answers (`uploadGoldText`). */
   uploadGoldFile(projectId: string, file: File): Promise<GoldUploadResult>;
 
   /** Pages report route changes and product events through these. */

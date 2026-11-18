@@ -780,10 +780,10 @@ export function Suggestion({title, text, actions, kicker = true}: {title: string
   );
 }
 
-export function Banner({text, action, tone = 'warn', oneLine, style}: {text: string; action?: ReactNode; tone?: 'warn' | 'err'; oneLine?: boolean; style?: CSSProperties}) {
+export function Banner({text, action, tone = 'warn', oneLine, style}: {text: string; action?: ReactNode; tone?: 'warn' | 'err' | 'info'; oneLine?: boolean; style?: CSSProperties}) {
   return (
     <div className={`banner ${tone}`} role={tone === 'err' ? 'alert' : 'status'} style={style}>
-      <Icon name="alert" />
+      <Icon name={tone === 'info' ? 'check' : 'alert'} />
       <span className={oneLine ? 'grow one' : 'grow'} title={oneLine ? text : undefined}>
         {text}
       </span>

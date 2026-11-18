@@ -3,12 +3,12 @@
 import {useGo} from '@/components/nav';
 import {useSearchParams} from 'next/navigation';
 import {Fragment, Suspense, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
-import type {Answer, Example, ExampleMedia, LabelComment, MismatchList, MismatchReview, RemovalReason} from '@yushiguang/sprint-contracts';
+import type {Answer, Example, ExampleMedia, GoldUploadResult, LabelComment, MismatchList, MismatchReview, RemovalReason} from '@yushiguang/sprint-contracts';
 import {FEATURES, featureText, gate, inLabelOrder, labelBounds, sameAnswer, versionLabel} from '@yushiguang/sprint-domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {useSettings} from '@/components/ProjectSettings';
-import {addComment, approveNode, exampleMedia, mismatches, predictionsFor, removeExamples, reviewGold, saveGold, type ProjectState} from '@/backend-api';
+import {addComment, approveNode, exampleMedia, mismatches, predictionsFor, removeExamples, reviewGold, saveGold, uploadGoldFile, type ProjectState} from '@/backend-api';
 import {Badge, Banner, Button, Card, dateTime, Dialog, Empty, Hov, Icon, num, Opt, PageHead, Seg, Select, Tabs} from '@/ui';
 import {t, tm} from '@/i18n';
 
@@ -87,6 +87,47 @@ function savePick(projectId: string, id: string) {
 }
 
 
+/** Refused rows named in the upload result line; more are counted. */
+const REFUSED_SHOWN = 3;
+
+/**
+ * The result of Upload labels (#31) in one line: what was saved, what was skipped and why, and
+ * the first refused rows by number.
+ */
+function uploadSummary(r: GoldUploadResult): {text: string; err: boolean} {
+  if (r.error) return {text: t(r.error), err: true};
+  const parts = [r.replaced ? t('Saved {n} labels; {r} replaced earlier ones.', {n: num(r.saved), r: num(r.replaced)}) : r.saved === 1 ? t('Saved 1 label.') : t('Saved {n} labels.', {n: num(r.saved)})];
+  if (r.unchanged) parts.push(r.unchanged === 1 ? t('1 row already had this label.') : t('{n} rows already had this label.', {n: num(r.unchanged)}));
+  if (r.notInDataset) parts.push(r.notInDataset === 1 ? t('1 item is not in the dataset and was skipped; uploading labels never adds examples.') : t('{n} items are not in the dataset and were skipped; uploading labels never adds examples.', {n: num(r.notInDataset)}));
+  const refused = r.refused ?? [];
+  for (const f of refused.slice(0, REFUSED_SHOWN)) parts.push(f.externalId ? t('Row {row} (item {id}) was refused: {reason}.', {row: num(f.row), id: f.externalId, reason: f.reason}) : t('Row {row} was refused: {reason}.', {row: num(f.row), reason: f.reason}));
+  if (refused.length > REFUSED_SHOWN) parts.push(t('{n} more rows were refused.', {n: num(refused.length - REFUSED_SHOWN)}));
+  return {text: parts.join(' '), err: refused.length > 0 || !!r.notInDataset};
+}
+
+/** Upload labels: a file of item ids and answers for examples already in the dataset (#31). */
+function UploadLabels({projectId, onResult}: {projectId: string; onResult: (r: GoldUploadResult) => void}) {
+  const file = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  const upload = async (f: File) => {
+    setBusy(true);
+    try {
+      onResult(await uploadGoldFile(projectId, f));
+    } catch (e) {
+      onResult({saved: 0, skipped: 0, error: (e as Error).message});
+    } finally {
+      setBusy(false);
+      if (file.current) file.current.value = '';
+    }
+  };
+  return (
+    <>
+      <Button label={t('Upload labels')} kind="ghost" icon="upload" disabled={busy} title={t('A CSV or JSONL file of item IDs and answers, for examples already in the dataset.')} onClick={() => file.current?.click()} />
+      <input ref={file} type="file" className="sr-only" accept=".csv,.jsonl,.json" aria-label={t('Upload labels')} onChange={e => e.target.files?.[0] && void upload(e.target.files[0])} />
+    </>
+  );
+}
+
 function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null}) {
   const go = useGo();
   const {href} = useProject();
@@ -96,6 +137,8 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
     savePick(state.project.id, id);
   };
   const {list: mm, edited} = useMismatches(state, cmp);
+  // The last Upload labels result, shown until dismissed.
+  const [uploaded, setUploaded] = useState<GoldUploadResult | null>(null);
   // R5-2: the first list picks the best version; from then on the pick holds, and only the
   // "(best)" mark moves when scores change.
   useEffect(() => {
@@ -187,6 +230,8 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
         <>
           {!onMismatch && (
             <>
+              <UploadLabels projectId={state.project.id} onResult={setUploaded} />
+              <span style={{width: 8}} />
               <Seg
                 label={t('Eval set')}
                 value={evalSub}
@@ -251,6 +296,13 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   const expectMm = state.reports.some(r => r.schemaVersion === state.setup!.schemaVersion);
   return (
     <Frame head={head}>
+      {uploaded && (
+        <Banner
+          text={uploadSummary(uploaded).text}
+          tone={uploadSummary(uploaded).err ? 'warn' : 'info'}
+          action={<Button label={t('Dismiss')} kind="ghost" size="sm" onClick={() => setUploaded(null)} />}
+        />
+      )}
       {Object.keys(state.staleGold).length > 0 && <Banner text={t('The label or its values changed. {n} labels were made before the change and need a quick re-check.', {n: num(Object.keys(state.staleGold).length)})} />}
       <Tabs
         label={t('Sets')}
