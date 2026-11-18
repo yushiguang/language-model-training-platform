@@ -63,7 +63,7 @@ Your module exports `createPlatform()` returning the `Platform` object from
 | `agent: AgentModel` | Agent chat (`chat`, `complete` with usage and thinking, `chatStream`), and `models()`: the model registry (opaque ids, capabilities, prices, active flag; spec 5) | `scriptedAgent`, `STAND_IN_MODELS` |
 | `identity: Identity` | The signed-in user (id, name, email, organization); `currentUser()` rejects when nobody is signed in, and the site then shows a sign-in error with Retry. Optional `signOut()` ends the single sign-on session: when it is there, the avatar menu shows Sign out and the page reloads after it (2026-11-16) | `localIdentity` (no sign-out) |
 | `files: FileStore` | Uploads for prompt images and chat attachments; returns a URL the model can fetch. When stored URLs must be signed per call, the composition root passes labeling a `resolveUrl` that returns a Promise (next section) | `browserFiles` (data URLs) |
-| `examples: ExampleSource` | The prepared examples file (50 to 100 examples with features) and id lookup | `sampleExamples` |
+| `examples: ExampleSource` | An item's features by its id (`lookup`), and optionally the item ids of the sample data that every tenant gets as a built-in data source (`builtIn`) | `sampleExamples` |
 | `media?: MediaSource` | The player page and still images of one example by item id, for people to look at on Gold Labels (see "Media") | `sampleMedia` (made-up pictures, no player) |
 | `endpoints?: EndpointConfig[]` | Registered endpoints with real limits (next section) | not set: assumed limits |
 | `telemetry?: TelemetrySink` | Takes product events (`pushEvents`, batches of `TelemetryEvent`) and metrics as Prometheus text (`pushMetrics`) and forwards them to your telemetry system. Must not throw; slow is fine (the app buffers) | `localTelemetrySink` (`localStorage`); not set: kept in memory only |
@@ -127,9 +127,13 @@ replies carry `Retry-After`, and that uploaded image URLs are reachable by the l
 
 ## Examples
 
-The MVP dataset is a prepared file in the format of `apps/web/public/sample-data/examples.json`.
-Upload it to the file store and build with `NEXT_PUBLIC_EXAMPLES_URL` set to its URL. Real
-examples never go in this repo.
+Which items a project uses comes from the tenant's data sources (#29): files of item ids that
+people upload on the Data Source page. The example service only looks an item's features up by
+its id (`ExampleSource.lookup`); an id it does not know is counted, not added. The stand-in looks
+items up in a prepared file in the format of `apps/web/public/sample-data/examples.json`, whose
+items are also every tenant's built-in "Sample data" source (`builtIn`). Upload such a file to the
+file store and build with `NEXT_PUBLIC_EXAMPLES_URL` set to its URL. Real examples never go in
+this repo.
 
 Since 1.0.0 each feature on a `RawExample` is a `FeatureValue` (`packages/contracts/src/types.ts`):
 `{text}` for text features and `{items}` for lists such as image URLs, never a plain string. An

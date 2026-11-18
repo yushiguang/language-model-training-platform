@@ -2,6 +2,7 @@ import {DocFieldValue, type GateApproval, type Job, type JobOutcome, type LabelC
 import {asAnswerOrNull, compareVersions, contextIdFor, gate, judge, newId, scoresUpdating, systemConfig} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {getSamplingTask} from './dataset.ts';
+import {datasetSources, retireCuts} from './sources.ts';
 import {latestGold} from './evaluation.ts';
 import {runView} from './views.ts';
 import {initSettings} from './settings.ts';
@@ -120,6 +121,7 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
     contextId,
     endpoints: gateway.labelingEndpoints(),
     samplingTask: await getSamplingTask(w, projectId),
+    datasetSources: await datasetSources(w, projectId),
     removals,
     comments,
     otherAutoSpendUsd: autoSpend.reduce((n, a) => n + Number((a.data as {costUsd?: number}).costUsd ?? 0), 0),
@@ -222,6 +224,8 @@ export async function runDelete(w: Scope, job: Job, waitMs = STOP_WAIT_MS): Prom
   }
   await w.optimiser?.deleteProject(projectId);
   await w.labeling.deleteProject(projectId);
+  // Its segments of data sources stay taken, retired (#30): never handed out again.
+  await retireCuts(w, projectId);
   await w.catalog.deleteProject(projectId);
   w.emitChange(projectId);
   return {state: 'done'};

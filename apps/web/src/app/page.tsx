@@ -6,7 +6,7 @@ import {useEffect, useState} from 'react';
 import type {Project} from '@yushiguang/sprint-contracts';
 import {hrefFor} from '@/components/ProjectContext';
 import {NODES} from '@yushiguang/sprint-domain';
-import {UserEnd} from '@/components/Shell';
+import {TenantIsland} from '@/components/Shell';
 import {SignedIn} from '@/components/session';
 import {createProject, deleteProject, listProjects} from '@/backend-api';
 import {Banner, Button, Card, dateTime, Dialog, Field, Icon, One, PageHead, Table} from '@/ui';
@@ -68,18 +68,7 @@ function Projects() {
     <div className="k app b">
       <div className="b-body">
         <main className="b-main">
-          <header className="topnav">
-            <div className="island">
-              <span className="proj">
-                <span className="proj-ic" aria-hidden="true">
-                  S
-                </span>
-                <b>Sprint</b>
-              </span>
-              <span />
-              <UserEnd />
-            </div>
-          </header>
+          <TenantIsland current="projects" />
           <div className="b-head">
             <div className="container">
               <PageHead title={t('Projects')} />

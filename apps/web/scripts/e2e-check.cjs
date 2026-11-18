@@ -219,12 +219,17 @@ let current = null;
   await button(page, 'Next: Eval Dataset').click();
   log('prompt design done');
 
-  // Eval Dataset: auto sampling; every example is used for evaluation, there is no split to set
+  // Eval Dataset (#29): examples come from the team's data sources. The built-in sample data is
+  // ticked with its count in the box; a count over what is left is refused before anything starts.
   await page.waitForURL(/dataset/);
-  // The default is prefilled: every example available
-  await page.waitForFunction(() => +document.querySelector('[aria-label="Example count"]')?.value > 0, null, {timeout: 10000});
-  await page.getByLabel('Example count').fill(String(N));
-  await button(page, 'Auto sampling').click();
+  await page.waitForFunction(() => +document.querySelector('[aria-label="Examples from Sample data"]')?.value > 0, null, {timeout: 10000});
+  await page.getByLabel('Examples from Sample data').fill('999999');
+  await page.getByText(/^Only [\d,]+ left in Sample data\.$/).waitFor();
+  if (!(await button(page, 'Create dataset').isDisabled())) throw new Error('Create dataset is on for more items than are left');
+  await page.getByLabel('Examples from Sample data').fill(String(N));
+  await page.getByText(`${N} examples · repeats across sources count once`).waitFor();
+  await shot(page, '2a-dataset-pick');
+  await button(page, 'Create dataset').click();
   const next = button(page, 'Next: Gold Labels');
   await next.waitFor({timeout: 60000});
   await page.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent === 'Next: Gold Labels' && !b.disabled), null, {timeout: 10000});
@@ -560,12 +565,16 @@ let current = null;
   await page.getByRole('heading', {name: 'Label balance'}).waitFor();
   if (await page.locator('section.card', {hasText: 'Label balance'}).locator('.code').count()) throw new Error('Label balance still shows a field name');
   await shot(page, '2b-dataset-balance');
-  await page.waitForFunction(() => +document.querySelector('[aria-label="Examples to add"]')?.value > 0, null, {timeout: 10000});
-  await page.getByLabel('Examples to add').fill('5');
-  await button(page, 'Add sampled').click();
-  await page.getByRole('heading', {name: 'Examples'}).waitFor({timeout: 30000});
+  // Add examples (#29): more from a data source; the Examples card says where they came from.
+  await page.waitForFunction(() => +document.querySelector('[aria-label="Examples from Sample data"]')?.value > 0, null, {timeout: 10000});
+  await page.getByLabel('Examples from Sample data').fill('5');
+  await button(page, 'Add examples').click();
+  await page.getByRole('heading', {name: 'Examples', exact: true}).waitFor({timeout: 30000});
   await page.waitForFunction(() => /Waiting for gold labels\s*5(?!\d)/.test(document.querySelector('main .metrics')?.textContent ?? ''), null, {timeout: 30000});
   log('dataset after adding:', (await page.locator('main .metrics').innerText()).replace(/\s+/g, ' '));
+  const fromSample = (await page.locator('main tr', {hasText: 'Sample data'}).first().locator('td').allInnerTexts()).map(x => x.trim());
+  if (fromSample[1] !== String(N + 5)) throw new Error(`the Examples card says ${fromSample.join(' | ')} from Sample data`);
+  await shot(page, '2d-dataset-add-examples');
   await page.goto(url('/prompt/'));
   await page.locator('nav.vlist').waitFor();
   await page.getByText(/5 new examples wait for gold labels/).first().waitFor({timeout: 10000});
@@ -737,6 +746,37 @@ let current = null;
     return {events: ev.length, names, leaks, undeclared, metricNames: series.length, sample: series.filter(s => /sprint_(llm_requests|labeling_examples|agent_turns|bff_calls|web_page_views|auto_starts)/.test(s))};
   });
   log('telemetry:', JSON.stringify(tel));
+  // Data Source (#29), after the telemetry read (a page load clears the in-memory metrics): a tenant page next to Projects. A source is a name and its files, with no
+  // versions; bad rows and repeats are counted, and a second file adds only new items.
+  await page.goto(BASE + '/sources/');
+  await page.getByRole('navigation', {name: 'Sprint'}).getByRole('link', {name: 'Data Source'}).waitFor({timeout: 10000});
+  const sampleRow = page.locator('tr', {hasText: 'Sample data'});
+  await sampleRow.getByText('Built in', {exact: true}).waitFor({timeout: 10000});
+  const pickFile = (name, text) => page.locator('main input[type=file]').setInputFiles({name, mimeType: 'text/csv', buffer: Buffer.from(text)});
+  const fileCells = async name => (await page.locator('tr', {hasText: name}).locator('td').allInnerTexts()).map(x => x.trim());
+  const imported = name => page.waitForFunction(n => [...document.querySelectorAll('main tr')].some(r => r.textContent.includes(n) && !r.querySelector('.progress')), name, {timeout: 20000});
+  await page.getByPlaceholder('Weekly feed sample').fill('Creator safety review');
+  await pickFile('safety.csv', 'item_id,creator\nc1,a\nc2,b\nc1,c\nbad id,d\nc3,e\n');
+  await page.locator('.drop-file', {hasText: 'safety.csv'}).waitFor();
+  await shot(page, '6a-data-source-new');
+  await button(page, 'Create data source').click();
+  await page.waitForURL(/\/source\//, {timeout: 10000});
+  await page.getByRole('heading', {name: 'Creator safety review'}).waitFor({timeout: 10000});
+  await imported('safety.csv');
+  if ((await fileCells('safety.csv')).slice(1, 4).join('|') !== '3|1|1') throw new Error(`the first file says ${(await fileCells('safety.csv')).join(' | ')}`);
+  await pickFile('more.txt', 'c3\nc4\n');
+  await button(page, 'Add file').click();
+  await page.locator('tr', {hasText: 'more.txt'}).waitFor({timeout: 10000});
+  await imported('more.txt');
+  if ((await fileCells('more.txt')).slice(1, 4).join('|') !== '1|0|1') throw new Error(`the second file says ${(await fileCells('more.txt')).join(' | ')}`);
+  await shot(page, '6b-data-source-files');
+  await page.goto(BASE + '/sources/');
+  await page.locator('tr', {hasText: 'Creator safety review'}).waitFor({timeout: 10000});
+  if ((await fileCells('Creator safety review')).slice(1, 4).join('|') !== '2|4|4') throw new Error(`the list says ${(await fileCells('Creator safety review')).join(' | ')}`);
+  if ((await fileCells('Sample data'))[3] === (await fileCells('Sample data'))[2]) throw new Error('the sample data shows no items taken');
+  await shot(page, '6c-data-sources');
+  log('data sources:', (await page.locator('main tbody').innerText()).replace(/\s+/g, ' '));
+
   log('console errors:', errors.length ? errors : 'none');
   await ctx.close();
   const need = ['project_deleted', 'settings_saved', 'full_prompt_opened', 'prompt_copied', 'prompt_proposal_shown', 'signature_changed', 'version_scored', 'project_renamed', 'locale_changed', 'problem_report_drafted', 'problem_reported'];

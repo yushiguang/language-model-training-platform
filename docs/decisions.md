@@ -3,6 +3,19 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-18 (Data Source, #29 and #30)
+
+- **Data Source is a page of the tenant**, next to Projects in the top island (title case in the UI). A data source belongs to a tenant, never to a project, and another tenant cannot see it.
+- **A data source has no versions.** It is a name plus the files uploaded to it, and they all count together. Add a file appends to the source; an item already in it is counted as a repeat and left out. Each file shows its items, bad rows (no usable item id) and repeats. Files are CSV, JSONL or TXT with one item id per row, up to 100,000 rows. A file is imported as a `source.ingest` job with progress.
+- **No delete or rename of data sources yet.**
+- **Datasets and data sources are many to many.** A dataset takes examples from one or more sources, when it is created and later with Add examples (which brings back adding to an existing dataset, deferred on 2026-11-06). Each example records its source and file. An item in two sources counts once.
+- **Cuts are continuous over an order shuffled once at import.** Each file's new items are shuffled with a recorded seed and appended to the source's one order; a dataset takes the next unused segment. Uploaded files are often sorted (by time or creator), so a plain continuous cut would take a biased slice; shuffling once keeps the cut fair, two datasets never share an item, and the same cut gives the same items. An item already in the dataset is skipped and still uses its position.
+- **A deleted project's segments are retired**, never handed out again. Asking for more than is left is refused, with the counts.
+- **With no data source yet, the empty Eval Dataset page takes a file**, and it becomes a data source of the team.
+- **The sample data is a built-in data source** of every tenant (`ExampleSource.builtIn`); files cannot be added to it. The global sample pool (`ExampleSource.available` and `sample`, `getSamplePoolSize`) is gone, and so are Upload dataset, Auto sampling, Add from file and Add sampled: every dataset now comes from data sources.
+- **Breaking contract change:** `takeExamples({projectId, picks: [{sourceId, count}]})` replaces `startSampleDataset`, `appendSample`, `uploadDatasetText` and `appendUpload`; `listDataSources`, `getDataSource`, `createDataSource` and `addSourceFile` are new.
+- **Large files still go through the bff** in this version: the file store has no read side yet, so a file is read in the request and staged as chunks. Uploading straight to file storage waits for that.
+
 ## 2026-11-18 (Upload labels, #31)
 
 - **Upload labels is its own action on Gold Labels**, apart from Upload dataset: datasets decide which examples exist, labels decide their gold answers. A label file never adds examples; a row for an item not in the dataset is counted and skipped.

@@ -38,7 +38,7 @@ gets boards for them from the build, as for phase 2; they need a design review.
 
 | Screen | What was built | To decide |
 | --- | --- | --- |
-| Eval Dataset | Examples card with Examples, Gold-labeled, Waiting for gold labels and Removed; Add from file and Add sampled (count prefilled) in its header; Remove unlabeled (keep N) in a dialog | Where the add actions sit |
+| Eval Dataset | Examples card with Examples, Gold-labeled, Waiting for gold labels and Removed and a line per data source; Add examples as its own card beside it (#29); Remove unlabeled (keep N) in a dialog | Where the add actions sit |
 | Eval Dataset, Label balance | Gold labels per value, sorted; rare values yellow, none red; the halves on hover over the count; Downsample on a value over 70% of 30 or more labels | — |
 | Eval Dataset, Removed (N) | Item ID, why, gold label, when (who on hover), Restore per row and Restore all | — |
 | Eval Dataset, banner | "Fewer than 20 examples: scores will be rough until you add more examples." | — |

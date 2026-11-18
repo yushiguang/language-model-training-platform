@@ -8,6 +8,8 @@ import type {
   ChatMessage,
   ClientDiagnostics,
   Locale,
+  DataSourceDetail,
+  DataSourceSummary,
   DatasetSnapshot,
   EndpointId,
   EndpointInfo,
@@ -24,6 +26,7 @@ import type {
   PromptVersion,
   RemovalReason,
   Schema,
+  SourceFile,
   ProjectSettings,
   SamplingTask,
   StructuredPrompt,
@@ -148,13 +151,41 @@ export interface GoldUploadRefusal {
   reason: string;
 }
 
-export interface DatasetUploadResult {
-  snapshot?: DatasetSnapshot;
+/** A file uploaded to a data source (#29): the source and the file, or why the file was refused. */
+export interface SourceUploadResult {
+  source?: DataSourceSummary;
+  file?: SourceFile;
   error?: string;
-  /** Adding to a dataset: how many were added, already there, or could not be saved. */
-  added?: number;
-  duplicates?: number;
-  notSaved?: number;
+}
+
+/** Create a data source of the caller's tenant from its first file (#29). */
+export interface CreateDataSourceRequest {
+  name: string;
+  fileName: string;
+  text: string;
+}
+
+/** Add a file to a data source; its items join the ones there (#29). */
+export interface AddSourceFileRequest {
+  sourceId: string;
+  fileName: string;
+  text: string;
+}
+
+/** How many examples to take from one data source (#29, #30). */
+export interface SourcePick {
+  sourceId: string;
+  count: number;
+}
+
+/**
+ * Takes examples from one or more data sources into the eval dataset (#29): creates the dataset
+ * when the project has none, or adds to it (Add examples). Each pick takes the next unused
+ * segment of its source (#30); an item already in the dataset is skipped and the next one taken.
+ */
+export interface TakeExamplesRequest {
+  projectId: string;
+  picks: SourcePick[];
 }
 
 /** Remove examples from the eval dataset (soft delete with a trail, spec 1.0.0, 4.4). */
@@ -179,12 +210,6 @@ export interface PruneDatasetRequest {
   mode: 'unlabeled' | 'downsample';
   value?: string;
   keep: number;
-}
-
-/** Adds examples to the eval dataset without touching the ones there (spec 1.0.0, 4.3). */
-export interface AppendSampleRequest {
-  projectId: string;
-  count: number;
 }
 
 export interface AddCommentRequest {
@@ -271,17 +296,26 @@ export interface BffContract {
   // Project Settings (the pass rule and the labeling model). Saving also confirms them.
   saveSettings(req: SaveSettingsRequest): Promise<void>;
 
+  // Data Source (#29): tenant scope, shared by the tenant's projects. No delete or rename yet.
+  /** The caller's tenant's data sources, the built-in sample data included, newest first. */
+  listDataSources(): Promise<DataSourceSummary[]>;
+  /** One data source and its files; null when it is not the caller's tenant's. */
+  getDataSource(sourceId: string): Promise<DataSourceDetail | null>;
+  /** Creates a data source from its first file; the import runs as a `source.ingest` job. */
+  createDataSource(req: CreateDataSourceRequest): Promise<SourceUploadResult>;
+  /** Adds a file to a data source; items already in it are counted as repeats and left out. */
+  addSourceFile(req: AddSourceFileRequest): Promise<SourceUploadResult>;
+
   // Dataset & Gold labels
-  getSamplePoolSize(): Promise<number>;
   /** The media of one example, or null (no media source, or none for this example). */
   exampleMedia(projectId: string, exampleId: string): Promise<ExampleMedia | null>;
   /**
-   * Samples a new eval dataset. Returns once queued (a `dataset.sample` job): progress is read
-   * back as `ProjectState.samplingTask`, and the dataset appears when it is saved.
+   * Takes examples from data sources: a new eval dataset, or more examples for the one there.
+   * Returns once queued (a `dataset.sample` job): progress is read back as
+   * `ProjectState.samplingTask`, and the examples appear when they are saved.
    */
-  startSampleDataset(projectId: string, count: number): Promise<SamplingTask>;
+  takeExamples(req: TakeExamplesRequest): Promise<SamplingTask>;
   stopSampleDataset(projectId: string): Promise<void>;
-  uploadDatasetText(projectId: string, name: string, text: string): Promise<DatasetUploadResult>;
   saveGold(projectId: string, exampleId: string, schemaVersion: number, answer: Answer, revealed: boolean, source?: GoldLabel['source']): Promise<GoldLabel>;
   uploadGold(req: UploadGoldRequest): Promise<GoldUploadResult>;
   /**
@@ -294,13 +328,6 @@ export interface BffContract {
   /** Examples where versions disagree with the gold label, for one version (left out: the best). */
   mismatches(projectId: string, promptVersionId?: string | null): Promise<MismatchList>;
   reviewGold(req: ReviewGoldRequest): Promise<void>;
-  /**
-   * Adds new, unseen examples to the eval dataset at random; existing examples and gold labels
-   * stay. Returns once queued, like `startSampleDataset`.
-   */
-  appendSample(req: AppendSampleRequest): Promise<SamplingTask>;
-  /** Adds the examples of an uploaded file to the eval dataset; ids already in it are skipped. */
-  appendUpload(projectId: string, name: string, text: string): Promise<DatasetUploadResult & {added?: number; duplicates?: number}>;
   /** Removes examples (soft delete, each with a `DatasetRemoval`). */
   removeExamples(req: RemoveExamplesRequest): Promise<void>;
   /** Puts removed examples back, in their old half. */

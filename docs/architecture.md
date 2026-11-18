@@ -102,8 +102,7 @@ Since 1.0.0 phase 1 every service contract is written so it maps one to one to a
   together) or labeling (`tryTemplate`). Signals stay inside the process that owns the work.
   Platform ports (`ChatRequest`, `AgentChatOptions`) keep their `signal`: they are called
   in-process by the gateway and never cross our RPC, and without it a stopped call would keep its
-  request to the model open. `ExampleSource.sample` keeps its progress callback and signal too:
-  only the `dataset.sample` job's executor calls it, in the process that runs the job.
+  request to the model open.
 - Example features are `FeatureValue {text?, items?}` (text, or a list such as image URLs), read
   with `featureText` and `featureItems` (`packages/domain/src/template.ts`). Files and older
   records with plain strings and arrays are read through `toFeatures`.
@@ -137,7 +136,8 @@ recovery of a dead runner's jobs, retries and cancel. A job holds ids only; the 
 
 - **Commands return once queued.** `scoreVersion` returns the tasks it queued (each labeling job
   is followed by `report.build`), `startOptimiser` and `retryOptimiser` the run's id,
-  `startSampleDataset` and `appendSample` the sampling as the Dataset page shows it, and
+  `takeExamples` the work as the Dataset page shows it, `createDataSource` and `addSourceFile`
+  the file (imported by a `source.ingest` job), and
   `deleteProject` returns once the project is marked `deleting`. Pages read progress back through
   `loadProjectState`, as they did while work ran.
 - **Keys.** While a job with the same idempotency key is queued or running, queueing it again
@@ -341,8 +341,8 @@ side is right.
   Optimiser first reads examples (`lockHoldout`: the read tools that return examples, `try_prompt`,
   Improve with AI, Auto Optimise). From then on `Project.holdoutLocked` is set and no example ever
   changes half; an added example is placed in the half that keeps the two even.
-- *Adding.* Add from file and Add sampled append to the dataset: ids already in it (removed ones
-  too) are skipped, and nothing there changes. The evaluation context counts gold-labeled examples
+- *Adding.* Add examples takes more from one or more data sources (#29): ids already in the
+  dataset (removed ones too) are skipped, and nothing there changes. The evaluation context counts gold-labeled examples
   only, so an unlabeled example is *pending*: it is left out of scores, does not make them stale,
   and is counted on Eval Dataset and next to the score. Its gold label does make scores stale
   (Rebuild scores).

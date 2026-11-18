@@ -232,11 +232,11 @@ export const client: BffClient = {
     const text = await file.text();
     return {name: file.name, size: file.size, content: text.slice(0, systemConfig().agent.maxAttachmentChars)};
   },
-  async uploadDatasetFile(projectId, file) {
-    return timedApi.uploadDatasetText(projectId, file.name, await file.text());
+  async createDataSourceFile(name, file) {
+    return timedApi.createDataSource({name, fileName: file.name, text: await file.text()});
   },
-  async appendDatasetFile(projectId, file) {
-    return timedApi.appendUpload(projectId, file.name, await file.text());
+  async addSourceFileFile(sourceId, file) {
+    return timedApi.addSourceFile({sourceId, fileName: file.name, text: await file.text()});
   },
   async uploadGoldFile(projectId, file) {
     return timedApi.uploadGoldText(projectId, file.name, await file.text());

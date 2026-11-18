@@ -14,7 +14,7 @@ import type {RequestContext} from './platform-api.ts';
  */
 
 /** The kinds of work. `batch_labeling.run` and `export.run` are reserved: no executor yet. */
-export type JobKind = 'labeling.runTask' | 'report.build' | 'dataset.sample' | 'optimiser.run' | 'project.delete' | 'batch_labeling.run' | 'export.run';
+export type JobKind = 'labeling.runTask' | 'report.build' | 'dataset.sample' | 'source.ingest' | 'optimiser.run' | 'project.delete' | 'batch_labeling.run' | 'export.run';
 
 /**
  * - `queued`: waiting for a runner.

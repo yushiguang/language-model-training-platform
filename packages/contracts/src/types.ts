@@ -208,6 +208,9 @@ export interface Example {
   optimiserHalf: boolean;
   /** Removed from the eval dataset (soft delete, spec 1.0.0, 4.4): its `DatasetRemoval` says why; restorable. */
   removed?: boolean;
+  /** The data source and the file of it the example was taken from (#29); missing on older datasets. */
+  sourceId?: string;
+  sourceFileId?: string;
 }
 
 /** Why an example left the eval dataset (spec 1.0.0, 4.4). */
@@ -254,7 +257,8 @@ export interface DatasetSnapshot {
   id: string;
   projectId: string;
   number: number;
-  source: 'sample' | 'upload';
+  /** 'sources': taken from the tenant's data sources (#29). 'sample' and 'upload' are older datasets. */
+  source: 'sources' | 'sample' | 'upload';
   sourceName: string;
   createdAt: string;
   /**
@@ -702,13 +706,13 @@ export interface PageView {
   data: Record<string, unknown>;
 }
 
+/**
+ * Taking examples from data sources into the eval dataset (#29): a `dataset.sample` job, as the
+ * Dataset page shows it.
+ */
 export interface SamplingTask {
   id: string;
   projectId: string;
-  /** 'upload': loading the features of an uploaded file's item IDs (Dataset, "Loading features"). Missing = 'sample'. */
-  kind?: 'sample' | 'upload';
-  /** Upload only: the file's name. */
-  fileName?: string;
   total: number;
   fetched: number;
   startedAt: string;
@@ -718,6 +722,117 @@ export interface SamplingTask {
   saving?: boolean;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Data sources (#29, #30): a tenant's item-id files, shared by its projects.
+
+/**
+ * A data source of a tenant: a name and the files uploaded to it, which all count together (no
+ * versions). Its items have one fixed order (each file's items are shuffled once at import and
+ * appended); datasets take continuous segments of that order, so two cuts never share an item.
+ */
+export interface DataSource {
+  id: string;
+  tenantId: string;
+  name: string;
+  /** The sample data that ships with the platform (`ExampleSource.builtIn`). */
+  builtIn?: boolean;
+  /** Items in the order, over every imported file. */
+  items: number;
+  files: number;
+  /** Positions handed out to datasets: the next cut starts here (#30). Never goes back. */
+  next: number;
+  createdAt: string;
+  createdBy: string;
+  createdById?: string;
+  updatedAt: string;
+}
+
+/** One file of a data source. Items already in the source are repeats and left out. */
+export interface SourceFile {
+  id: string;
+  sourceId: string;
+  tenantId: string;
+  name: string;
+  /** Rows read; `bad`: rows with no usable item id; `repeats`: ids already in the file or source. */
+  rows: number;
+  bad: number;
+  repeats: number;
+  /** Items this file added to the source's order. */
+  items: number;
+  /** The seed its items were shuffled with (#30). */
+  seed: string;
+  /** Its first position in the source's order, set when its import reserves the positions. */
+  start?: number;
+  state: 'importing' | 'done' | 'failed';
+  /** Importing: items written so far, of `items`. */
+  done: number;
+  error?: string | null;
+  uploadedAt: string;
+  uploadedBy: string;
+}
+
+/**
+ * A piece of a source's order: positions `start` to `start + ids.length - 1`, all from one file.
+ * Staged pieces (`staged`) hold a file's ids until its import writes them into the order.
+ */
+export interface SourceChunk {
+  id: string;
+  sourceId: string;
+  fileId: string;
+  start: number;
+  ids: string[];
+  staged?: boolean;
+}
+
+/**
+ * A segment of a source's order given to a project's dataset (#30): positions `start` up to
+ * `end` (not included). `taken`: the items that went into the dataset (one already there is
+ * skipped). A deleted project's segments are retired, never handed out again.
+ */
+export interface SourceCut {
+  id: string;
+  sourceId: string;
+  projectId: string;
+  start: number;
+  end: number;
+  taken: number;
+  createdAt: string;
+  createdBy: string;
+  retired?: boolean;
+}
+
+/** A data source as the Data Source page lists it. */
+export interface DataSourceSummary {
+  id: string;
+  name: string;
+  builtIn: boolean;
+  files: number;
+  items: number;
+  /** Items no dataset has taken yet. */
+  notUsed: number;
+  createdBy: string;
+  updatedAt: string;
+  /** A file is being imported: items written so far, of its items. */
+  importing: {done: number; total: number} | null;
+}
+
+/** One data source with its files (the source's page). */
+export interface DataSourceDetail {
+  source: DataSourceSummary;
+  /** Newest first. */
+  files: SourceFile[];
+  /** Items taken by datasets, and by how many projects. */
+  taken: number;
+  projects: number;
+}
+
+/** Where a project's eval dataset came from: per data source, how many examples and when last added. */
+export interface DatasetSourceLine {
+  sourceId: string;
+  name: string;
+  examples: number;
+  addedAt: string;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Views shared by the bff and the web app.
@@ -761,6 +876,8 @@ export interface ProjectState {
   endpoints: EndpointInfo[];
   /** Active or recently finished sampling task, if any. */
   samplingTask: SamplingTask | null;
+  /** The data sources the eval dataset was taken from (#29). */
+  datasetSources: DatasetSourceLine[];
   /** Removals that still stand (not restored), newest first; the removed examples are not in `examples`. */
   removals: DatasetRemoval[];
   /** People's comments by example id, oldest first. */

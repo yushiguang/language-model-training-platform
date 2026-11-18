@@ -6,17 +6,17 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Now
 
-- Upload labels as its own action on Gold Labels (#31).
+- Data Source: tenant data sources from item-id files, and datasets cut from them without overlaps
+  (#29, #30, one pull request since a cut needs the source's order).
 - Fixes from the review of the deployment readiness work (#9), as review comments arrive.
 
 ## Next
 
 1. **First package release.** Tag `v1.2.0` (the packages are in main since #23); check they install from
    GitHub Packages with a read-only token.
-2. **Datasets from the teams' own data**, in this order, one pull request each: tenant data
-   sources imported from item-id files (#29); cutting datasets from a source version without
-   overlaps (#30); frozen dataset snapshots in the document store (#32); warehouse tables as a source
-   (#33). New screens are drawn in the UI design before they are built.
+2. **Datasets from the teams' own data**, after Data Source (#29, #30): frozen dataset snapshots
+   in the document store (#32); warehouse tables as a source (#33). New screens are drawn in the
+   UI design before they are built.
 3. **BFF golden fixtures.** The same plain-JSON cases as the agent fixtures, for `BffContract`
    on the merged contract (request, stand-in data, expected result), so a server-side bff can be
    held to them.
@@ -33,6 +33,7 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Done
 
+- 2026-11-18: Upload labels as its own action on Gold Labels (#31, #34).
 - 2026-11-18: contribution guide and npm packages on GitHub Packages, with fixes for #24 to #28
   (#23).
 - 2026-11-17: deployment readiness (#9): workflow module and thin bff, job module, contracts

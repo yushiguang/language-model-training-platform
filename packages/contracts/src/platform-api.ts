@@ -406,7 +406,8 @@ export interface FileStore {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Examples: the MVP mocks automatic sampling from a prepared file of examples with features.
+// Examples: an item's features, looked up by its id. Which items a project uses comes from the
+// tenant's data sources (#29); the sample data that ships with the platform is one built-in source.
 
 export interface RawExample {
   externalId: string;
@@ -416,13 +417,14 @@ export interface RawExample {
 }
 
 export interface ExampleSource {
-  /** How many examples sampling can return. */
-  available(): Promise<number>;
-  /** Picks n examples at random. Calls onProgress while it works. */
-  sample(n: number, onProgress?: (fetched: number) => void, signal?: AbortSignal): Promise<RawExample[]>;
-  /** Looks up examples by id, for chat attachments. Unknown ids are left out. */
+  /** Looks up examples by id (taking examples from a data source, chat attachments). Unknown ids are left out. */
   lookup(ids: string[]): Promise<RawExample[]>;
-  /** Gold labels shipped with the prepared file, if any (for "Upload labels"). */
+  /**
+   * The item ids of the sample data that ships with the platform, if any: every tenant gets them
+   * as a built-in data source (#29).
+   */
+  builtIn?(): Promise<{name: string; ids: string[]}>;
+  /** Gold labels shipped with the sample data, if any (for "Upload labels"). */
   bundledLabels?(): Promise<{externalId: string; answer: string | string[] | Record<string, string | string[]>}[]>;
 }
 
