@@ -1,5 +1,5 @@
 import {systemConfig} from './config.ts';
-import type {Answer, Example, GoldLabel, ModelSettings, Schema} from '@sprint/contracts';
+import type {Answer, Example, GoldLabel, ModelSettings, Schema} from '@yushiguang/sprint-contracts';
 import {hashString} from './template.ts';
 import {labelBounds} from './structured.ts';
 

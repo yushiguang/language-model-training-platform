@@ -1,4 +1,4 @@
-# domain (`@sprint/domain`)
+# domain (`@yushiguang/sprint-domain`)
 
 Pure rules shared by every app: no I/O, no side effects, deterministic.
 

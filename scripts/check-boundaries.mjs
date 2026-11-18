@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Boundary check: each package and app may import only the workspace packages listed here.
- * Apps never import each other's code; they talk through the contracts in @sprint/contracts.
+ * Apps never import each other's code; they talk through the contracts in @yushiguang/sprint-contracts.
  * The web composition root (apps/web/src/backend-api) is the one place that wires apps together.
  *
  * What it reads: every source file under apps/* and packages/* (ts, tsx, mts, cts, js, jsx, mjs,
@@ -27,21 +27,21 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
  */
 const RULES = [
   {dir: 'packages/contracts/src', allow: []},
-  {dir: 'packages/domain/src', allow: ['@sprint/contracts']},
-  {dir: 'packages/platform/src', allow: ['@sprint/contracts', '@sprint/domain']},
-  {dir: 'apps/llm-gateway/src', allow: ['@sprint/contracts', '@sprint/domain'], tests: ['@sprint/platform']},
-  {dir: 'apps/catalog/src', allow: ['@sprint/contracts', '@sprint/domain', '@sprint/platform']},
-  {dir: 'apps/labeling/src', allow: ['@sprint/contracts', '@sprint/domain', '@sprint/platform'], tests: ['@sprint/catalog']},
-  {dir: 'apps/agents/src', allow: ['@sprint/contracts', '@sprint/domain'], tests: ['@sprint/platform']},
+  {dir: 'packages/domain/src', allow: ['@yushiguang/sprint-contracts']},
+  {dir: 'packages/platform/src', allow: ['@yushiguang/sprint-contracts', '@yushiguang/sprint-domain']},
+  {dir: 'apps/llm-gateway/src', allow: ['@yushiguang/sprint-contracts', '@yushiguang/sprint-domain'], tests: ['@yushiguang/sprint-platform']},
+  {dir: 'apps/catalog/src', allow: ['@yushiguang/sprint-contracts', '@yushiguang/sprint-domain', '@yushiguang/sprint-platform']},
+  {dir: 'apps/labeling/src', allow: ['@yushiguang/sprint-contracts', '@yushiguang/sprint-domain', '@yushiguang/sprint-platform'], tests: ['@yushiguang/sprint-catalog']},
+  {dir: 'apps/agents/src', allow: ['@yushiguang/sprint-contracts', '@yushiguang/sprint-domain'], tests: ['@yushiguang/sprint-platform']},
   // The golden fixtures' recorder takes its model replies from the stand-in model, as the tests do.
-  {dir: 'apps/agents/scripts', allow: ['@sprint/contracts', '@sprint/platform']},
-  {dir: 'apps/optimiser/src', allow: ['@sprint/contracts', '@sprint/domain']},
-  {dir: 'apps/jobs/src', allow: ['@sprint/contracts', '@sprint/domain'], tests: ['@sprint/platform']},
-  {dir: 'apps/workflow/src', allow: ['@sprint/contracts', '@sprint/domain'], tests: ['@sprint/platform', '@sprint/catalog', '@sprint/labeling', '@sprint/optimiser', '@sprint/jobs']},
-  {dir: 'apps/bff/src', allow: ['@sprint/contracts', '@sprint/domain'], tests: ['@sprint/platform', '@sprint/workflow', '@sprint/catalog', '@sprint/labeling', '@sprint/jobs']},
-  {dir: 'apps/telemetry/src', allow: ['@sprint/contracts']},
+  {dir: 'apps/agents/scripts', allow: ['@yushiguang/sprint-contracts', '@yushiguang/sprint-platform']},
+  {dir: 'apps/optimiser/src', allow: ['@yushiguang/sprint-contracts', '@yushiguang/sprint-domain']},
+  {dir: 'apps/jobs/src', allow: ['@yushiguang/sprint-contracts', '@yushiguang/sprint-domain'], tests: ['@yushiguang/sprint-platform']},
+  {dir: 'apps/workflow/src', allow: ['@yushiguang/sprint-contracts', '@yushiguang/sprint-domain'], tests: ['@yushiguang/sprint-platform', '@yushiguang/sprint-catalog', '@yushiguang/sprint-labeling', '@yushiguang/sprint-optimiser', '@yushiguang/sprint-jobs']},
+  {dir: 'apps/bff/src', allow: ['@yushiguang/sprint-contracts', '@yushiguang/sprint-domain'], tests: ['@yushiguang/sprint-platform', '@yushiguang/sprint-workflow', '@yushiguang/sprint-catalog', '@yushiguang/sprint-labeling', '@yushiguang/sprint-jobs']},
+  {dir: 'apps/telemetry/src', allow: ['@yushiguang/sprint-contracts']},
   {dir: 'apps/web/src/backend-api', allow: '*'},
-  {dir: 'apps/web/src', allow: ['@sprint/contracts', '@sprint/domain', '@/backend-api', '@/components', '@/ui', '@/i18n']},
+  {dir: 'apps/web/src', allow: ['@yushiguang/sprint-contracts', '@yushiguang/sprint-domain', '@/backend-api', '@/components', '@/ui', '@/i18n']},
 ];
 
 /** npm packages only one folder may import (Astryx is wrapped in our own components). */
@@ -49,20 +49,20 @@ const ONLY_IN = [{prefix: '@astryxdesign/', dir: 'apps/web/src/ui'}];
 
 /** Where each alias must point (relative to the repo root). Any other alias is refused. */
 const ALIASES = {
-  '@sprint/contracts': 'packages/contracts/src/index.ts',
-  '@sprint/domain': 'packages/domain/src/index.ts',
-  '@sprint/platform': 'packages/platform/src/index.ts',
-  '@sprint/platform-impl': 'packages/platform/src/config.ts',
-  '@sprint/llm-gateway': 'apps/llm-gateway/src/index.ts',
-  '@sprint/catalog': 'apps/catalog/src/index.ts',
-  '@sprint/labeling': 'apps/labeling/src/index.ts',
-  '@sprint/agents': 'apps/agents/src/index.ts',
-  '@sprint/optimiser': 'apps/optimiser/src/index.ts',
-  '@sprint/workflow': 'apps/workflow/src/index.ts',
-  '@sprint/jobs': 'apps/jobs/src/index.ts',
-  '@sprint/bff': 'apps/bff/src/index.ts',
-  '@sprint/telemetry': 'apps/telemetry/src/index.ts',
-  '@sprint/client-impl': 'apps/web/src/backend-api/in-process.ts',
+  '@yushiguang/sprint-contracts': 'packages/contracts/src/index.ts',
+  '@yushiguang/sprint-domain': 'packages/domain/src/index.ts',
+  '@yushiguang/sprint-platform': 'packages/platform/src/index.ts',
+  '@yushiguang/sprint-platform-impl': 'packages/platform/src/config.ts',
+  '@yushiguang/sprint-llm-gateway': 'apps/llm-gateway/src/index.ts',
+  '@yushiguang/sprint-catalog': 'apps/catalog/src/index.ts',
+  '@yushiguang/sprint-labeling': 'apps/labeling/src/index.ts',
+  '@yushiguang/sprint-agents': 'apps/agents/src/index.ts',
+  '@yushiguang/sprint-optimiser': 'apps/optimiser/src/index.ts',
+  '@yushiguang/sprint-workflow': 'apps/workflow/src/index.ts',
+  '@yushiguang/sprint-jobs': 'apps/jobs/src/index.ts',
+  '@yushiguang/sprint-bff': 'apps/bff/src/index.ts',
+  '@yushiguang/sprint-telemetry': 'apps/telemetry/src/index.ts',
+  '@yushiguang/sprint-client-impl': 'apps/web/src/backend-api/in-process.ts',
   '@/*': 'apps/web/src/*',
 };
 
@@ -119,7 +119,7 @@ for (const top of ['apps', 'packages']) {
           if (!target.startsWith(home + '/')) problems.push(`${rel}: relative import "${spec}" leaves ${home}`);
           continue;
         }
-        if (!spec.startsWith('@sprint/') && !spec.startsWith('@/')) continue; // npm packages and node: builtins
+        if (!spec.startsWith('@yushiguang/sprint-') && !spec.startsWith('@/')) continue; // npm packages and node: builtins
         const base = spec.startsWith('@/') ? '@/' + spec.slice(2).split('/')[0] : spec.split('/').slice(0, 2).join('/');
         const allowed = rule.allow.includes(base) || (isTest && (rule.tests ?? []).includes(base));
         if (!allowed) problems.push(`${rel}: may not import "${spec}" (allowed: ${rule.allow.join(', ') || 'nothing'})`);
@@ -151,10 +151,10 @@ for (const cfg of ['tsconfig.base.json', 'tsconfig.json', 'apps/web/tsconfig.jso
 }
 /**
  * The build-time switches (deployment readiness spec, 4.4): the only aliases the web build may
- * point elsewhere. `@sprint/platform-impl` = the platform adapters; `@sprint/client-impl` = the
+ * point elsewhere. `@yushiguang/sprint-platform-impl` = the platform adapters; `@yushiguang/sprint-client-impl` = the
  * `BffClient` the pages call.
  */
-const SWITCHES = ['@sprint/platform-impl', '@sprint/client-impl'];
+const SWITCHES = ['@yushiguang/sprint-platform-impl', '@yushiguang/sprint-client-impl'];
 const nextConfig = readFileSync(path.join(root, 'apps/web/next.config.mjs'), 'utf8');
 const aliasBlock = /resolveAlias\s*:\s*\{([\s\S]*?)\}/.exec(nextConfig)?.[1] ?? '';
 for (const m of aliasBlock.matchAll(/['"]([^'"]+)['"]\s*:/g)) {
@@ -162,7 +162,7 @@ for (const m of aliasBlock.matchAll(/['"]([^'"]+)['"]\s*:/g)) {
 }
 if (/\balias\s*:/.test(nextConfig.replace(/resolveAlias/g, ''))) problems.push(`apps/web/next.config.mjs: webpack aliases are not allowed; use turbopack.resolveAlias for ${SWITCHES.join(', ')} only`);
 
-// The pages reach the backend through `@sprint/client-impl` only: no file imports the in-process
+// The pages reach the backend through `@yushiguang/sprint-client-impl` only: no file imports the in-process
 // client itself, or a server build would still bundle every backend app into the site.
 const IN_PROCESS = 'apps/web/src/backend-api/in-process';
 const CLIENT_ENTRY = 'apps/web/src/backend-api/index.ts';
@@ -172,11 +172,11 @@ for (const file of walk(path.join(root, 'apps/web'))) {
   const specs = new Set(PATTERNS.flatMap(re => [...src.matchAll(re)].map(m => m[1])));
   for (const spec of specs) {
     const target = spec.startsWith('.') ? relOf(path.resolve(path.dirname(file), spec)) : spec.startsWith('@/') ? 'apps/web/src/' + spec.slice(2) : null;
-    if (target && target.replace(/\.tsx?$/, '') === IN_PROCESS) problems.push(`${rel}: imports the in-process client directly; import it through @sprint/client-impl`);
-    if (spec === '@sprint/client-impl' && rel !== CLIENT_ENTRY) problems.push(`${rel}: only ${CLIENT_ENTRY} imports @sprint/client-impl; pages import @/backend-api`);
+    if (target && target.replace(/\.tsx?$/, '') === IN_PROCESS) problems.push(`${rel}: imports the in-process client directly; import it through @yushiguang/sprint-client-impl`);
+    if (spec === '@yushiguang/sprint-client-impl' && rel !== CLIENT_ENTRY) problems.push(`${rel}: only ${CLIENT_ENTRY} imports @yushiguang/sprint-client-impl; pages import @/backend-api`);
   }
 }
-if (!/from\s*['"]@sprint\/client-impl['"]/.test(stripComments(readFileSync(path.join(root, CLIENT_ENTRY), 'utf8')))) problems.push(`${CLIENT_ENTRY}: must take the client from @sprint/client-impl`);
+if (!/from\s*['"]@yushiguang\/sprint-client-impl['"]/.test(stripComments(readFileSync(path.join(root, CLIENT_ENTRY), 'utf8')))) problems.push(`${CLIENT_ENTRY}: must take the client from @yushiguang/sprint-client-impl`);
 
 if (problems.length) {
   console.error(`Boundary check failed (${problems.length}):\n  ${problems.join('\n  ')}`);

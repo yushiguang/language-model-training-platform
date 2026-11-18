@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, EndpointInfo, ExampleSource, FileStore, Identity, LabelCallResult, LlmGatewayContract, RequestContext, WorkflowContract} from '@sprint/contracts';
-import {createCatalog} from '@sprint/catalog';
-import {createLabeling, labelingExecutor, memoryLocks} from '@sprint/labeling';
-import {createJobs} from '@sprint/jobs';
-import {localDocRuntime, loopback, memoryJobStore, memorySharedState} from '@sprint/platform';
-import {createWorkflow} from '@sprint/workflow';
+import type {AgentRuntimeContract, EndpointInfo, ExampleSource, FileStore, Identity, LabelCallResult, LlmGatewayContract, RequestContext, WorkflowContract} from '@yushiguang/sprint-contracts';
+import {createCatalog} from '@yushiguang/sprint-catalog';
+import {createLabeling, labelingExecutor, memoryLocks} from '@yushiguang/sprint-labeling';
+import {createJobs} from '@yushiguang/sprint-jobs';
+import {localDocRuntime, loopback, memoryJobStore, memorySharedState} from '@yushiguang/sprint-platform';
+import {createWorkflow} from '@yushiguang/sprint-workflow';
 import {createBffApi} from './api.ts';
 
 const endpoint: EndpointInfo = {id: 'A', name: 'Model A', description: '', badge: '', cost: 'Lower', speed: 'Faster', supportsTemperature: true, priceIn: 0, priceOut: 200};

@@ -3,8 +3,8 @@
 import {useGo} from '@/components/nav';
 import {useSearchParams} from 'next/navigation';
 import {Suspense, useEffect, useMemo, useState} from 'react';
-import type {PageContext, PromptVersion, StructuredPrompt} from '@sprint/contracts';
-import {ALL_KEYS, canScore, checkStructured, MADE_BY, nextVersion, sameSignature, signatureOf, structuredChangeSummary, structuredEquals, versionLabel} from '@sprint/domain';
+import type {PageContext, PromptVersion, StructuredPrompt} from '@yushiguang/sprint-contracts';
+import {ALL_KEYS, canScore, checkStructured, MADE_BY, nextVersion, sameSignature, signatureOf, structuredChangeSummary, structuredEquals, versionLabel} from '@yushiguang/sprint-domain';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {FullPromptButton, StructuredEditor} from '@/components/prompt/StructuredEditor';

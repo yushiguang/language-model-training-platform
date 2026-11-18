@@ -1,4 +1,4 @@
-# catalog (`@sprint/catalog`)
+# catalog (`@yushiguang/sprint-catalog`)
 
 The product records: projects, setup versions, dataset snapshots, examples, gold labels, prompt
 versions (each holding its structured prompt), eval reports, optimiser runs, approvals, chat, proposals, audit log.

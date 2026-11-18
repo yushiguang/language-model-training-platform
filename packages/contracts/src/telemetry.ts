@@ -8,7 +8,7 @@
  * - product events: one structured record per thing a person or the system did, with ids.
  *
  * The port never throws and never blocks. Where the data goes is the platform's `TelemetrySink`
- * (stand-in: a local collection; later: the company's monitoring, plugged in by the internal agent).
+ * (stand-in: a local collection; in a deployment, its monitoring system).
  */
 
 export const BUCKETS = {

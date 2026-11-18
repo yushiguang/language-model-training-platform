@@ -3,6 +3,14 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-18 (fixes from the maintainers' issues)
+
+- **Next stays on a version with no known advisory, and its security check stays on** (#28). Next stops a build with a security notice only when it sees a coding agent run it (an unpatched version, an agent's terminal); CI and people's terminals never stop on it. So the fix is upgrading, not turning the check off or retrying the build: 16.4.4 had two moderate advisories (cached data across root params, which a static export does not use) and 16.4.6 has none. A build that stops on the notice again means a new advisory: upgrade Next in a pull request.
+- **Deleting a project waits for its running work to end** (#24) before deleting, and tries again later if it does not end in time; saved answers carry their project, so a late one is still found.
+- **An automatic resume goes on with the task that paused** (#25), never with a new scoring of the version.
+- **A job whose end could not be saved still gets its chained job, once** (#26): the runner tries three times, then the sweep's re-run chains it, or the runner itself on the job's last attempt.
+- **A package release is resumed by running it again** with the same version (#27); packages already published are skipped.
+
 ## 2026-11-16 (workflow resilience and single or multi select)
 
 - **The one label is single select or multi select.** A project still has one label and is never mixed with another; a multi-select label says how many values an answer holds (at least, at most). Answers are lists everywhere (`Answer = string[]`), one value long for single select. A value can be marked "Only on its own" (exclusive): a catch-all such as "None" is never chosen next to another value.
@@ -143,7 +151,7 @@ where it matters, why. The code follows these; change a line here when a decisio
   right. Every decision is recorded.
 - **Gold Labels picks the version to compare with.** Default: the best scored version.
 - **Document links.** The helpers read linked documents through a document interface; the
-  internal build connects the real document service.
+  deployment connects the real document service.
 - **Merging.** The stacked pull requests are merged in order.
 
 ## 2026-11-09

@@ -1,4 +1,4 @@
-import type {DeepPartial, SystemConfig} from '@sprint/contracts';
+import type {DeepPartial, SystemConfig} from '@yushiguang/sprint-contracts';
 
 /** The defaults of every tunable number (spec 1.0.0, section 7.4). */
 export const DEFAULT_SYSTEM_CONFIG: SystemConfig = {

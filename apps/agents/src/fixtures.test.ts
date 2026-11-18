@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {readdirSync, readFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
-import type {AgentToolCall} from '@sprint/contracts';
+import type {AgentToolCall} from '@yushiguang/sprint-contracts';
 import {createAgentRuntime} from './index.ts';
 import {callContext, replayModel, runRequest, type GoldenFixture, type PublishedEvent} from './golden.ts';
 

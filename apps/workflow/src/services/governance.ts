@@ -1,5 +1,5 @@
-import type {DatasetRemoval, DatasetSnapshot, Example, LabelComment, RawExample, RemovalReason} from '@sprint/contracts';
-import {assignEvalHalves, newId, pickToPrune, systemConfig} from '@sprint/domain';
+import type {DatasetRemoval, DatasetSnapshot, Example, LabelComment, RawExample, RemovalReason} from '@yushiguang/sprint-contracts';
+import {assignEvalHalves, newId, pickToPrune, systemConfig} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {loadProjectState} from './projects.ts';
 

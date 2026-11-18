@@ -1,4 +1,4 @@
-# labeling (`@sprint/labeling`)
+# labeling (`@yushiguang/sprint-labeling`)
 
 Runs labeling tasks: one prompt version on one model over a list of examples, one prediction per
 example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts`. Owns the

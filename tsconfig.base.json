@@ -15,19 +15,19 @@
     "allowImportingTsExtensions": true,
     "jsx": "react-jsx",
     "paths": {
-      "@sprint/contracts": ["./packages/contracts/src/index.ts"],
-      "@sprint/domain": ["./packages/domain/src/index.ts"],
-      "@sprint/platform": ["./packages/platform/src/index.ts"],
-      "@sprint/platform-impl": ["./packages/platform/src/config.ts"],
-      "@sprint/llm-gateway": ["./apps/llm-gateway/src/index.ts"],
-      "@sprint/catalog": ["./apps/catalog/src/index.ts"],
-      "@sprint/labeling": ["./apps/labeling/src/index.ts"],
-      "@sprint/agents": ["./apps/agents/src/index.ts"],
-      "@sprint/optimiser": ["./apps/optimiser/src/index.ts"],
-      "@sprint/workflow": ["./apps/workflow/src/index.ts"],
-      "@sprint/jobs": ["./apps/jobs/src/index.ts"],
-      "@sprint/bff": ["./apps/bff/src/index.ts"],
-      "@sprint/telemetry": ["./apps/telemetry/src/index.ts"]
+      "@yushiguang/sprint-contracts": ["./packages/contracts/src/index.ts"],
+      "@yushiguang/sprint-domain": ["./packages/domain/src/index.ts"],
+      "@yushiguang/sprint-platform": ["./packages/platform/src/index.ts"],
+      "@yushiguang/sprint-platform-impl": ["./packages/platform/src/config.ts"],
+      "@yushiguang/sprint-llm-gateway": ["./apps/llm-gateway/src/index.ts"],
+      "@yushiguang/sprint-catalog": ["./apps/catalog/src/index.ts"],
+      "@yushiguang/sprint-labeling": ["./apps/labeling/src/index.ts"],
+      "@yushiguang/sprint-agents": ["./apps/agents/src/index.ts"],
+      "@yushiguang/sprint-optimiser": ["./apps/optimiser/src/index.ts"],
+      "@yushiguang/sprint-workflow": ["./apps/workflow/src/index.ts"],
+      "@yushiguang/sprint-jobs": ["./apps/jobs/src/index.ts"],
+      "@yushiguang/sprint-bff": ["./apps/bff/src/index.ts"],
+      "@yushiguang/sprint-telemetry": ["./apps/telemetry/src/index.ts"]
     }
   }
 }

@@ -12,7 +12,7 @@ import type {
   DocWhereOp,
   DocWriteBatch,
   StoredDoc,
-} from '@sprint/contracts';
+} from '@yushiguang/sprint-contracts';
 
 function isFilterExpression(val: unknown): val is DocFilterExpression {
   return typeof val === 'object' && val !== null && ('type' in val) && (((val as any).type === 'field') || ((val as any).type === 'and') || ((val as any).type === 'or'));

@@ -1,5 +1,5 @@
-import type {EndpointConfig, Platform} from '@sprint/contracts';
-import {systemConfig} from '@sprint/domain';
+import type {EndpointConfig, Platform} from '@yushiguang/sprint-contracts';
+import {systemConfig} from '@yushiguang/sprint-domain';
 
 /**
  * Assumed limits per model, used until an endpoint is registered with its real QPM/TPM

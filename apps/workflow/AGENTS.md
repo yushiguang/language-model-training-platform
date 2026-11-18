@@ -1,4 +1,4 @@
-# workflow (`@sprint/workflow`)
+# workflow (`@yushiguang/sprint-workflow`)
 
 The application module (`WorkflowContract` in `packages/contracts/src/workflow-api.ts`): what any
 channel (the web pages' bff today, a CLI or tool channel later) needs. Stores nothing itself: it
@@ -17,7 +17,7 @@ reads and writes through the catalog, starts labeling tasks, and asks the agent 
   (`live:{projectId}`), the helper that keeps answering on a page (`stay:{projectId}`), the turn
   running, by its id, with its project, caller's context, page, language and browser record
   (`turn:{turnId}`, `services/turns.ts`), and problem-report drafts (`report-draft:{projectId}`).
-  The stand-in is `memorySharedState` in `@sprint/platform`.
+  The stand-in is `memorySharedState` in `@yushiguang/sprint-platform`.
 - The helpers' tool host (`toolHost`, `agentToolHost` in `services/page-views.ts`) is one host for
   every project: each `AgentToolCall` names its project, turn and context, and the host enforces
   the guards (preset tools, project exists, turn ownership, held-out half, start tools, report
@@ -48,7 +48,7 @@ reads and writes through the catalog, starts labeling tasks, and asks the agent 
 - `services/work.ts`: `drive` queues missing reports, then the paid work `dueStarts` lists, all of
   it, with no cost limit, writing an `auto_start` audit record. `tick` (the pages) calls it unless
   `tickFromPages` is false; `Workflow.sweep()` (a server's cron job) calls it for every project.
-- `services/optimiser-host.ts`: what the workflow does for `@sprint/optimiser` (`OptimiserHost`).
+- `services/optimiser-host.ts`: what the workflow does for `@yushiguang/sprint-optimiser` (`OptimiserHost`).
 - `services/settings.ts`, `services/prompts.ts`: Project Settings; saving a version from a
   structured prompt.
 - `services/starts.ts`: the agents' start tools. `services/page-views.ts`: page views and the

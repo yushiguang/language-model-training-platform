@@ -1,4 +1,4 @@
-import type {LlmModelInfo} from '@sprint/contracts';
+import type {LlmModelInfo} from '@yushiguang/sprint-contracts';
 
 /**
  * The model registry of the stand-in agent model (deployment readiness spec, 5): what a hosting

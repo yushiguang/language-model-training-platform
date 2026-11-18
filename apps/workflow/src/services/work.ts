@@ -1,5 +1,5 @@
-import type {EndpointId, Job, JobOutcome, JobRequest, ProjectState, PromptVersion, StartedRuns} from '@sprint/contracts';
-import {autoSpendUsd, dueStarts, settingsHash, versionLabel, type DueStart, systemConfig, msg} from '@sprint/domain';
+import type {EndpointId, Job, JobOutcome, JobRequest, LabelingTask, ProjectState, PromptVersion, StartedRuns} from '@yushiguang/sprint-contracts';
+import {autoSpendUsd, dueStarts, settingsHash, versionLabel, type DueStart, systemConfig, msg} from '@yushiguang/sprint-domain';
 import type {Scope} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {buildReport, findTask, settingsFor} from './evaluation.ts';
@@ -55,16 +55,7 @@ export async function scoreVersion(w: Scope, projectId: string, version: PromptV
           // 'auto' marks scoring code started without a click.
           createdBy: opts.auto ? 'auto' : (await w.user()).name,
         }));
-      const report = reportJob(projectId, version, m.endpoint, {auto: opts.auto, taskId: task.id});
-      if (task.state === 'done') await w.jobs.enqueue(w.ctx, report);
-      else
-        await w.jobs.enqueue(w.ctx, {
-          kind: 'labeling.runTask',
-          projectId,
-          args: {taskId: task.id, promptVersionId: version.id, endpoint: m.endpoint, trigger: opts.auto ? 'system' : 'user', auto: !!opts.auto, retry: task.state === 'needs_attention'},
-          idempotencyKey: `label:${task.id}`,
-          then: report,
-        });
+      await queueTask(w, projectId, version, task, opts);
       return task.id;
     });
     if (id) runIds.push(id);
@@ -92,8 +83,31 @@ export async function runReport(w: Scope, job: Job): Promise<JobOutcome> {
   return {state: 'done'};
 }
 
-/** Is this due start already queued or running? */
-const going = (jobs: Job[], d: DueStart) => jobs.some(j => (j.kind === 'labeling.runTask' || j.kind === 'report.build') && j.args.promptVersionId === d.versionId && j.args.endpoint === d.endpoint);
+/**
+ * Queues one labeling task to run, followed by its report (or just the report when the task is
+ * done). One job per task at a time (its idempotency key).
+ */
+async function queueTask(w: Scope, projectId: string, version: PromptVersion, task: LabelingTask, opts: {auto?: boolean} = {}) {
+  const report = reportJob(projectId, version, task.endpoint, {auto: opts.auto, taskId: task.id});
+  if (task.state === 'done') await w.jobs.enqueue(w.ctx, report);
+  else
+    await w.jobs.enqueue(w.ctx, {
+      kind: 'labeling.runTask',
+      projectId,
+      args: {taskId: task.id, promptVersionId: version.id, endpoint: task.endpoint, trigger: opts.auto ? 'system' : 'user', auto: !!opts.auto, retry: task.state === 'needs_attention'},
+      idempotencyKey: `label:${task.id}`,
+      then: report,
+    });
+}
+
+/**
+ * Is this due start already queued or running? A resume names its task, so two paused tasks of
+ * one version and model are two starts (#25); scoring a version is one start per version and model.
+ */
+const going = (jobs: Job[], d: DueStart) =>
+  d.taskId
+    ? jobs.some(j => j.kind === 'labeling.runTask' && j.args.taskId === d.taskId)
+    : jobs.some(j => (j.kind === 'labeling.runTask' || j.kind === 'report.build') && j.args.promptVersionId === d.versionId && j.args.endpoint === d.endpoint);
 
 /**
  * Queues one due start without a click and records it: an `auto_start` audit record and the
@@ -106,7 +120,11 @@ async function autoStart(w: Scope, state: ProjectState, d: DueStart) {
   const model = modelName(state, d.endpoint);
   const v = state.versions.find(x => x.id === d.versionId);
   if (!v) return;
-  await scoreVersion(w, projectId, v, d.endpoint, {auto: true});
+  // A resume goes on with the task that paused, not with scoring the version's current eval set.
+  const task = d.taskId ? await w.labeling.getTask(d.taskId) : null;
+  if (d.taskId && (!task || task.projectId !== projectId)) return;
+  if (task) await queueTask(w, projectId, v, task, {auto: true});
+  else await scoreVersion(w, projectId, v, d.endpoint, {auto: true});
   await postEvent(w, projectId, 'auto', 'workflow', msg('started scoring {version} on {model}', {version: versionLabel(v), model}), {path: '/prompt'});
   await catalog.audit(projectId, 'system', 'auto_start', {what: d.what, version: d.versionId, endpoint: d.endpoint, estimateUsd: d.estimateUsd, autoSpendUsd: spent});
   w.tm.counter('sprint_auto_starts_total', {what: d.what, decision: 'started'});
@@ -212,5 +230,5 @@ function optimiserService(w: Scope) {
   return optimiser;
 }
 
-/** The lock an optimiser run on one model holds for as long as it runs, in any tab (the name `@sprint/optimiser` uses). */
+/** The lock an optimiser run on one model holds for as long as it runs, in any tab (the name `@yushiguang/sprint-optimiser` uses). */
 const optimiserLock = (projectId: string, endpoint: string) => `optimiser:${projectId}:${endpoint}`;

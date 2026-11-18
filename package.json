@@ -20,11 +20,13 @@
   ],
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p apps/web/tsconfig.json --noEmit",
-    "test": "node --test --experimental-strip-types --no-warnings 'packages/*/src/**/*.test.ts' 'apps/*/src/**/*.test.ts'",
+    "test": "node --test --experimental-strip-types --no-warnings 'packages/*/src/**/*.test.ts' 'apps/*/src/**/*.test.ts' 'scripts/*.test.mjs'",
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "check": "npm run check:boundaries && npm run typecheck && npm test",
     "dev": "npm run dev -w apps/web",
-    "build": "npm run build -w apps/web"
+    "build": "npm run build -w apps/web",
+    "build:packages": "node scripts/build-packages.mjs",
+    "check:packages": "node scripts/build-packages.mjs 0.0.0-check && node scripts/check-packages.mjs"
   },
   "devDependencies": {
     "@types/node": "26.6.5",

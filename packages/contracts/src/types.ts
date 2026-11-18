@@ -75,7 +75,7 @@ export interface RuleGroup {
 }
 
 /**
- * A prompt as the user edits it (1.0.0): parts, not free text. `compilePrompt` in `@sprint/domain`
+ * A prompt as the user edits it (1.0.0): parts, not free text. `compilePrompt` in `@yushiguang/sprint-domain`
  * turns it into the text the model reads, the same way every time. Stored on every version.
  */
 export interface StructuredPrompt {
@@ -188,7 +188,7 @@ export interface Project {
 /**
  * One feature of an example (spec 1.0.0, 7.1): plain text, or a list (image URLs, hashtags).
  * An explicit struct instead of a `string | string[]` union, so it maps to an IDL. Read it with
- * `featureText` / `featureItems` from `@sprint/domain`.
+ * `featureText` / `featureItems` from `@yushiguang/sprint-domain`.
  */
 export interface FeatureValue {
   text?: string;
@@ -342,6 +342,8 @@ export interface PromptVersion {
 
 export interface Prediction {
   id: string;
+  /** The project of the task that saved it (missing on older records); deleting a project uses it. */
+  projectId?: string;
   promptVersionId: string;
   endpoint: EndpointId;
   settingsHash: string;
@@ -365,7 +367,7 @@ export interface Prediction {
 
 export type JobState = 'running' | 'paused' | 'done' | 'failed' | 'stopped';
 
-/** Page view of one eval or optimiser labeling task (see `@sprint/contracts` labeling-api). */
+/** Page view of one eval or optimiser labeling task (see `@yushiguang/sprint-contracts` labeling-api). */
 export interface LabelingRun {
   id: string;
   projectId: string;
@@ -720,7 +722,7 @@ export interface SamplingTask {
 // ---------------------------------------------------------------------------------------------
 // Views shared by the bff and the web app.
 
-/** The facts the gate checks read (see `@sprint/domain` gates). */
+/** The facts the gate checks read (see `@yushiguang/sprint-domain` gates). */
 export interface WorkflowFacts {
   setup: SetupVersion | null;
   snapshot: DatasetSnapshot | null;

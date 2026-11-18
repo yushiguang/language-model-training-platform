@@ -15,7 +15,7 @@ import type {
 } from './types.ts';
 
 /**
- * Contract 2: BFF <-> Agent Runtime Service (`@sprint/contracts/agent-api`).
+ * Contract 2: BFF <-> Agent Runtime Service (`@yushiguang/sprint-contracts/agent-api`).
  *
  * The BFF service (`apps/bff`) owns persistence, state orchestration, and database records.
  * The Agent service (`apps/agents`) is a stateless, DB-free runtime that receives a serialisable
@@ -98,7 +98,7 @@ export interface AgentToolCall extends AgentToolRequest {
 }
 
 /**
- * Runs the helpers' tools: one host for every project, in `@sprint/workflow`. It enforces every
+ * Runs the helpers' tools: one host for every project, in `@yushiguang/sprint-workflow`. It enforces every
  * rule that protects data, whatever the runtime does (review P4; see docs/architecture.md, "Agent
  * guards"). In-process now; a call over RPC when the runtime runs elsewhere.
  */

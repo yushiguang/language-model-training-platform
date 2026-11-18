@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {LabelCallRequest, LabelCallResult, LlmGatewayContract, Schema} from '@sprint/contracts';
-import {createCatalog} from '@sprint/catalog';
-import {toFeatures} from '@sprint/domain';
-import {localDocRuntime} from '@sprint/platform';
+import type {LabelCallRequest, LabelCallResult, LlmGatewayContract, Schema} from '@yushiguang/sprint-contracts';
+import {createCatalog} from '@yushiguang/sprint-catalog';
+import {toFeatures} from '@yushiguang/sprint-domain';
+import {localDocRuntime} from '@yushiguang/sprint-platform';
 import {createLabeling} from './labeling.ts';
 import {memoryLocks} from './locks.ts';
 
@@ -130,7 +130,7 @@ test('one runner per task: a second run returns null; Stop stops it; a closed ru
   // A task left "running" by a closed page (no lock held) is reported as paused.
   await createCatalog(db); // no-op, keeps the same store
   const t2 = await lab.createTask(input(ids, v));
-  const {DocRepo} = await import('@sprint/platform');
+  const {DocRepo} = await import('@yushiguang/sprint-platform');
   await new DocRepo(db).patch('labeling_tasks', t2.id, {state: 'running'});
   const listed = (await lab.listTasks('pr_1')).find(x => x.id === t2.id);
   assert.equal(listed?.state, 'paused');
@@ -248,7 +248,7 @@ test('two tasks for the same version, model and settings never pay twice for an 
   const [ra, rb] = await Promise.all([lab.runTask(a.id), lab.runTask(b.id)]);
   assert.equal(stats.calls, 12, 'each example labeled once');
   assert.deepEqual([ra?.done, rb?.done], [12, 12]);
-  const {DocRepo} = await import('@sprint/platform');
+  const {DocRepo} = await import('@yushiguang/sprint-platform');
   const docs = await new DocRepo(db).find('predictions', {promptVersionId: v.id});
   assert.equal(docs.length, 12, 'one saved prediction per example');
 });
@@ -272,7 +272,7 @@ test('a Stop from another tab is seen during a long model call, and an old Stop 
   const t = await tab1.createTask(input(ids, v));
   // A Stop pressed before this run started is not for it.
   await tab2.stopTask(t.id);
-  const {DocRepo} = await import('@sprint/platform');
+  const {DocRepo} = await import('@yushiguang/sprint-platform');
   await new DocRepo(db).patch('labeling_tasks', t.id, {stopRequestedAt: '2000-01-01T00:00:00.000Z'});
   const run = tab1.runTask(t.id);
   await new Promise(r => setTimeout(r, 2300));
@@ -331,7 +331,7 @@ test('relabelInvalid does not try again an invalid answer the same task saved be
 });
 
 test("every labeling prompt ends with the site's reason line, and the model's reason is kept with the answer", async () => {
-  const {REASON_LINE} = await import('@sprint/domain');
+  const {REASON_LINE} = await import('@yushiguang/sprint-domain');
   const {db, catalog, v, ids} = await setup(2, 'lab-reason');
   const asked: string[] = [];
   const gateway = fakeGateway(async req => {

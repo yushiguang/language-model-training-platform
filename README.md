@@ -16,4 +16,6 @@ npm run build      # static site in apps/web/out/
 - [docs/README.md](docs/README.md): the design portfolio and where each kind of document goes.
 - [docs/product/overview.md](docs/product/overview.md): what the product is for and where it is going.
 - [docs/architecture.md](docs/architecture.md): the apps, how labeling runs, where each rule lives.
-- [docs/handover/integration.md](docs/handover/integration.md): what the internal build replaces, and how.
+- [ROADMAP.md](ROADMAP.md): what is being worked on now and next.
+- [CONTRIBUTING.md](CONTRIBUTING.md): how to ask for a change, report a bug, and how pull requests are reviewed and merged.
+- [docs/integration.md](docs/integration.md): running Sprint on your own platform: the npm packages, the adapters a deployment provides, and how.

@@ -1,4 +1,4 @@
-import type {SharedStatePort} from '@sprint/contracts';
+import type {SharedStatePort} from '@yushiguang/sprint-contracts';
 
 /**
  * The shared-state stand-in: a map in this process, with TTL expiry. Right for the browser (one

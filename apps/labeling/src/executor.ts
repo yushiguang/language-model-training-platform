@@ -1,4 +1,4 @@
-import type {JobExecutor, LabelingContract} from '@sprint/contracts';
+import type {JobExecutor, LabelingContract} from '@yushiguang/sprint-contracts';
 
 /**
  * The `labeling.runTask` job (deployment readiness spec, 3): runs one labeling task until it is

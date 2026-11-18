@@ -1,5 +1,5 @@
 import {systemConfig} from './config.ts';
-import type {EndpointId, ProjectState, PromptVersion} from '@sprint/contracts';
+import type {EndpointId, ProjectState, PromptVersion} from '@yushiguang/sprint-contracts';
 import {estimateTokens} from './labels.ts';
 import {renderPrompt} from './template.ts';
 import {costForTokens} from './workflow.ts';
@@ -44,6 +44,8 @@ export interface DueStart {
   what: 'score' | 'resume';
   versionId: string | null;
   endpoint: EndpointId;
+  /** A resume: the labeling task that paused (that task goes on, not a new one). */
+  taskId?: string;
   estimateUsd: number;
   /** Stable key: one start per key at a time. */
   key: string;
@@ -74,7 +76,7 @@ export function dueStarts(state: ProjectState): DueStart[] {
     const v = state.versions.find(x => x.id === r.promptVersionId);
     if (!v) continue;
     const left = Math.max(0, r.total - r.done);
-    out.push({what: 'resume', versionId: v.id, endpoint: r.endpoint, estimateUsd: evalEstimate(state, v, r.endpoint, left), key: `resume:${r.id}`});
+    out.push({what: 'resume', versionId: v.id, endpoint: r.endpoint, taskId: r.id, estimateUsd: evalEstimate(state, v, r.endpoint, left), key: `resume:${r.id}`});
   }
 
   const latest = state.versions[0];

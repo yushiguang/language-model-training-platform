@@ -1,4 +1,4 @@
-import type {MixUp, Schema, StructuredPrompt} from '@sprint/contracts';
+import type {MixUp, Schema, StructuredPrompt} from '@yushiguang/sprint-contracts';
 
 /**
  * A fix aimed at one mix-up, for the stand-in helpers (a real model writes its own). It goes into

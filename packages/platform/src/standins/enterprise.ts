@@ -1,4 +1,4 @@
-import type {AuthorizationPort, TenantConfigPort} from '@sprint/contracts';
+import type {AuthorizationPort, TenantConfigPort} from '@yushiguang/sprint-contracts';
 
 /**
  * Single-tenant stand-ins for the enterprise ports: one tenant with no overrides, and every action

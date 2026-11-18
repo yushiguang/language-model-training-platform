@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {LlmCallError, NO_TELEMETRY, type ChatRequest, type ChatResult, type EndpointInfo, type Platform} from '@sprint/contracts';
-import {memoryLimiterStore, STAND_IN_MODELS} from '@sprint/platform';
+import {LlmCallError, NO_TELEMETRY, type ChatRequest, type ChatResult, type EndpointInfo, type Platform} from '@yushiguang/sprint-contracts';
+import {memoryLimiterStore, STAND_IN_MODELS} from '@yushiguang/sprint-platform';
 import {createGateway} from './gateway.ts';
 import {EndpointLimiter} from './limiter.ts';
 import {buildRegistry} from './registry.ts';

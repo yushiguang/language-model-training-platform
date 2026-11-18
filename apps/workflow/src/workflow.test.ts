@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, CallerUser, DocumentSource, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, PageContext, RequestContext, TicketSubmission, WorkflowContract} from '@sprint/contracts';
-import {createCatalog} from '@sprint/catalog';
-import {createLabeling, memoryLocks} from '@sprint/labeling';
-import {createJobs} from '@sprint/jobs';
-import {localDocRuntime, loopback, memoryJobStore, memorySharedState} from '@sprint/platform';
+import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, CallerUser, DocumentSource, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, PageContext, RequestContext, TicketSubmission, WorkflowContract} from '@yushiguang/sprint-contracts';
+import {createCatalog} from '@yushiguang/sprint-catalog';
+import {createLabeling, memoryLocks} from '@yushiguang/sprint-labeling';
+import {createJobs} from '@yushiguang/sprint-jobs';
+import {localDocRuntime, loopback, memoryJobStore, memorySharedState} from '@yushiguang/sprint-platform';
 import {createWorkflow} from './workflow.ts';
 
 /**

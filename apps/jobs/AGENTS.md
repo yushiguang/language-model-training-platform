@@ -1,4 +1,4 @@
-# jobs (`@sprint/jobs`)
+# jobs (`@yushiguang/sprint-jobs`)
 
 The job module (deployment readiness spec, 3): one way to run background work. Contract:
 `JobsContract`, `JobExecutor` and `JobStorePort` in `packages/contracts/src/jobs-api.ts`.
@@ -18,7 +18,7 @@ The job module (deployment readiness spec, 3): one way to run background work. C
     fails them after `maxAttempts`. `poll(ms)` is a server worker's loop. `idle()` waits until
     nothing runs or can start (tests).
 - It knows no business rule and stores nothing itself: executors come from the apps that own the
-  work, and jobs live in the injected store (`memoryJobStore` in `@sprint/platform` for one
+  work, and jobs live in the injected store (`memoryJobStore` in `@yushiguang/sprint-platform` for one
   process; a shared store such as Redis on a server).
 
 Rules: imports contracts and domain only. Tests (`jobs.test.ts`) cover the lifecycle: enqueue once

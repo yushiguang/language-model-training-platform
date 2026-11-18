@@ -1,4 +1,4 @@
-import type {AgentPreset, ClientDiagnostics, Locale, PageContext, RequestContext} from '@sprint/contracts';
+import type {AgentPreset, ClientDiagnostics, Locale, PageContext, RequestContext} from '@yushiguang/sprint-contracts';
 import type {Scope} from './app.ts';
 
 /**

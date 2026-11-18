@@ -1,5 +1,5 @@
-import {canScore} from '@sprint/domain';
-import type {NodeId} from '@sprint/contracts';
+import {canScore} from '@yushiguang/sprint-domain';
+import type {NodeId} from '@yushiguang/sprint-contracts';
 import type {ProjectState} from '@/backend-api';
 
 export type StepState = 'todo' | 'running' | 'done' | 'attention';

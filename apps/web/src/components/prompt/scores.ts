@@ -1,4 +1,4 @@
-import type {EndpointId, Thresholds} from '@sprint/contracts';
+import type {EndpointId, Thresholds} from '@yushiguang/sprint-contracts';
 import type {ProjectState} from '@/backend-api';
 
 type Report = ProjectState['reports'][number];

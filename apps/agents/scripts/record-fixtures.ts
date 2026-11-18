@@ -8,8 +8,8 @@
  */
 import {mkdirSync, readdirSync, rmSync, writeFileSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
-import type {AgentModel, AgentToolCall, AgentTurnRequest, LlmStreamChunk, ModelMessage, RequestContext, StructuredPrompt} from '@sprint/contracts';
-import {scriptedAgent} from '@sprint/platform';
+import type {AgentModel, AgentToolCall, AgentTurnRequest, LlmStreamChunk, ModelMessage, RequestContext, StructuredPrompt} from '@yushiguang/sprint-contracts';
+import {scriptedAgent} from '@yushiguang/sprint-platform';
 import {createAgentRuntime} from '../src/index.ts';
 import {runRequest, type GoldenFixture, type GoldenRequest, type GoldenToolCall} from '../src/golden.ts';
 

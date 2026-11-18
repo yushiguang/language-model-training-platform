@@ -11,7 +11,7 @@ import type {
   LlmStreamChunk,
   OptimiserReflectOutput,
   OptimiserReflectRequest,
-} from '@sprint/contracts';
+} from '@yushiguang/sprint-contracts';
 
 /**
  * Golden agent fixtures (deployment readiness spec, 4.6 and 6): fixed requests with the model's

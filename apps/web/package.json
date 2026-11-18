@@ -1,5 +1,5 @@
 {
-  "name": "@sprint/web",
+  "name": "@yushiguang/sprint-web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "next": "16.4.4",
+    "next": "16.4.6",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },

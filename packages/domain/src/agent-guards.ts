@@ -1,4 +1,4 @@
-import type {AgentPreset, AgentToolName} from '@sprint/contracts';
+import type {AgentPreset, AgentToolName} from '@yushiguang/sprint-contracts';
 
 /**
  * Which helper may call which tool (deployment readiness spec, 6; review P4). The runtime tells a

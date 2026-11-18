@@ -1,9 +1,8 @@
-import type {FeatureInfo, FeatureInfoSource} from '@sprint/contracts';
+import type {FeatureInfo, FeatureInfoSource} from '@yushiguang/sprint-contracts';
 
 /**
- * Stand-in feature descriptions, made up for the public repository. The internal build provides
- * the real ones through `Platform.featureInfo` (docs/handover/integration.md, "Feature
- * descriptions"). The agents read them with the read_feature_info tool.
+ * Stand-in feature descriptions, made up for the stand-ins. A deployment provides the real
+ * ones through `Platform.featureInfo` (docs/integration.md, "Feature descriptions"). The agents read them with the read_feature_info tool.
  */
 const MADE_UP: Record<string, FeatureInfo> = {
   Title: {description: 'The title the poster wrote.', goodFor: 'What the post is about, in the poster’s words.', caveats: 'Often short or empty.'},

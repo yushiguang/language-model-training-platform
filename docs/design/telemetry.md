@@ -46,9 +46,9 @@ server instances.
 
 - **Stand-in:** nothing leaves the browser. Metrics stay in memory (`render()` gives the
   Prometheus text), and the last 1,000 events are kept in local storage.
-- **Real adapter:** implemented behind `@sprint/platform-impl` as `Platform.telemetry`. A static
+- **Real adapter:** implemented behind `@yushiguang/sprint-platform-impl` as `Platform.telemetry`. A static
   site cannot be scraped, so the adapter pushes. Server-side apps, once they exist, can also
-  serve `render()` for scraping. See [../handover/integration.md](../handover/integration.md).
+  serve `render()` for scraping. See [../integration.md](../integration.md).
 
 ## Audit log and telemetry are different things
 

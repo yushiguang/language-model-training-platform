@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import {Fragment, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent} from 'react';
-import type {AgentPreset, ChatEvent, ChatMessage, PageContext} from '@sprint/contracts';
-import {agentName, pageFromPath} from '@sprint/domain';
+import type {AgentPreset, ChatEvent, ChatMessage, PageContext} from '@yushiguang/sprint-contracts';
+import {agentName, pageFromPath} from '@yushiguang/sprint-domain';
 import {agentLive, chatHistory, isAgentBusy, sendUserMessage, subscribeAgentLive, subscribeChanges} from '@/backend-api';
 import {dateTime, Icon, LinkChip, useTip} from '@/ui';
 import {currentLocale, t, tm} from '@/i18n';

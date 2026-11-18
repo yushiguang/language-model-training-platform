@@ -6,8 +6,8 @@ import {
   type DocRuntime,
   type DocSubscriptionHandlers,
   type DocUpdatePatch,
-} from '@sprint/contracts';
-import {newId} from '@sprint/domain';
+} from '@yushiguang/sprint-contracts';
+import {newId} from '@yushiguang/sprint-domain';
 
 export {DocFieldValue, DocFilter};
 
@@ -254,4 +254,4 @@ export class DocRepo {
   }
 }
 
-export {newId} from '@sprint/domain';
+export {newId} from '@yushiguang/sprint-domain';

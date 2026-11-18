@@ -1,5 +1,5 @@
 'use client';
-import {systemConfig} from '@sprint/domain';
+import {systemConfig} from '@yushiguang/sprint-domain';
 
 import {useSearchParams} from 'next/navigation';
 import {createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode} from 'react';

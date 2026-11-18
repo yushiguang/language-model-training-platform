@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, AgentToolRequest, ClientDiagnostics, RequestContext, SharedStatePort, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission} from '@sprint/contracts';
-import {createCatalog} from '@sprint/catalog';
-import {createLabeling, labelingExecutor, memoryLocks} from '@sprint/labeling';
-import {createOptimiser, optimiserExecutor} from '@sprint/optimiser';
-import {DocRepo, localDocRuntime, memoryJobStore, memorySharedState} from '@sprint/platform';
-import {createJobs} from '@sprint/jobs';
+import type {AgentRuntimeContract, AgentToolRequest, ClientDiagnostics, RequestContext, SharedStatePort, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission} from '@yushiguang/sprint-contracts';
+import {createCatalog} from '@yushiguang/sprint-catalog';
+import {createLabeling, labelingExecutor, memoryLocks} from '@yushiguang/sprint-labeling';
+import {createOptimiser, optimiserExecutor} from '@yushiguang/sprint-optimiser';
+import {DocRepo, localDocRuntime, memoryJobStore, memorySharedState} from '@yushiguang/sprint-platform';
+import {createJobs} from '@yushiguang/sprint-jobs';
 import {createInstance, systemContext} from './app.ts';
 import {optimiserHost} from './optimiser-host.ts';
 import {workflowExecutors} from './executors.ts';
@@ -17,7 +17,7 @@ import {beginTurn, endTurn, turnOf} from './turns.ts';
 import {agentToolHost} from './page-views.ts';
 import {agentStart} from './starts.ts';
 import {scoreVersion, tick} from './work.ts';
-import {compilePrompt, DEFAULT_THRESHOLDS, versionLabel} from '@sprint/domain';
+import {compilePrompt, DEFAULT_THRESHOLDS, versionLabel} from '@yushiguang/sprint-domain';
 
 const schema: Schema = {name: 'format', kind: 'single', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]};
 /** Output price only, so every estimate is 150 tokens x $200/M = $0.03 per example. */
@@ -160,6 +160,22 @@ test('an automatic resume of a task the user started counts as automatic spend',
   assert.ok(Math.abs((run.autoCostUsd ?? 0) - 0.18) < 1e-9, `the 6 resumed examples count (${run.autoCostUsd})`);
 });
 
+test('two paused tasks of one version and model both resume in one check, each as itself (#25)', async () => {
+  const w = await world('b5b');
+  const v = await w.newVersion();
+  const s0 = await w.state();
+  const make = (ids: string[]) => w.labeling.createTask({projectId: w.projectId, purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: ids, createdBy: 'Tester'});
+  const all = await make(s0.examples.map(e => e.id));
+  const subset = await make(s0.examples.map(e => e.id).slice(0, 3));
+  const repo = new DocRepo(w.db);
+  for (const t of [all, subset]) await repo.patch('labeling_tasks', t.id, {state: 'paused', stopReason: 'closed'});
+  await tick(w.ws, await w.state());
+  const queued = (await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask']})).map(j => j.args.taskId).sort();
+  assert.deepEqual(queued, [all.id, subset.id].sort());
+  await until(async () => (await w.state()).runs.every(r => r.state === 'done'), 'both resumes');
+  assert.equal((await w.state()).runs.length, 2, 'no new task was made');
+});
+
 test('agent start tools start at once, with no card, and leave an action line', async () => {
   const w = await world('b6', {delayMs: 20});
   await w.catalog.audit(w.projectId, 'system', 'auto_spend', {what: 'try_prompt', costUsd: 50});
@@ -265,6 +281,24 @@ test('Delete project removes its records everywhere and leaves other projects al
   assert.equal(Object.keys(await w.labeling.predictions(v.id, 'A', 'x')).length, 0);
   assert.equal((await w.catalog.find('prompt_versions', {projectId: other.id})).length, 1);
   await assert.rejects(deleteProject(w.ws, w.projectId), /does not exist/);
+});
+
+test('Delete project mid-run: the running labeling ends first, so no answer or task is left behind (#24)', async () => {
+  const w = await world('b11b', {delayMs: 30});
+  const v = await w.newVersion();
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.state()).runs[0]?.done >= 1, 'scoring under way');
+  const {deleteProject, runDelete} = await import('./projects.ts');
+  await deleteProject(w.ws, w.projectId);
+  await w.jobs.idle();
+  assert.equal((await w.labeling.listTasks(w.projectId)).length, 0);
+  const repo = new DocRepo(w.db);
+  assert.equal((await repo.find('predictions' as never, {})).length, 0);
+  assert.equal(Object.keys(await w.labeling.predictions(v.id, 'A', 'x')).length, 0);
+  // Safe to run again, and an answer a late runner elsewhere saved is found by its project.
+  await repo.insert('predictions' as never, {id: 'pd_late', projectId: w.projectId, promptVersionId: v.id, endpoint: 'A', settingsHash: 'h', exampleId: 'ex_b11b_0', output: '', answer: null, invalidReason: null, costUsd: 0, createdAt: ''});
+  await runDelete(w.ws, {id: 'job_again', projectId: w.projectId} as never);
+  assert.equal((await repo.find('predictions' as never, {})).length, 0);
 });
 
 test('a helper that joined keeps answering on its page; on another page the page helper answers, with a line', async () => {

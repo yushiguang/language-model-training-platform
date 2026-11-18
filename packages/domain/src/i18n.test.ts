@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import type {AgentPreset} from '@sprint/contracts';
+import type {AgentPreset} from '@yushiguang/sprint-contracts';
 import {catalogKeys, fill, hasKey, isLocale, msg, msgText, translate} from './i18n.ts';
 import {ZH} from './locales/zh.ts';
 import {NODES} from './gates.ts';

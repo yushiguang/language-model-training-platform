@@ -1,7 +1,7 @@
 # Specification: UI Motion, Async Feedback Audit, and Design System Refinement
 
 **Date:** 2026-11-12  
-**Target:** External Agent (for Design System / Unified UI canvas review first, then `apps/web/src/ui/kit.css`, `app.css`, `@/ui`, and step pages)  
+**Target:** Contributors (for Design System / Unified UI canvas review first, then `apps/web/src/ui/kit.css`, `app.css`, `@/ui`, and step pages)  
 **Design Principle:** Restrained, purposeful motion (`140ms–220ms`, `cubic-bezier(0.2, 0, 0, 1)`). The top island remains stationary; panels, items, and async actions provide immediate, unmistakable tactile feedback without flashy or distracting animations.
 
 ---
@@ -103,7 +103,7 @@ In `Shell.tsx`, `{open && side && createPortal(<AskAi ... />, side)}` mounts and
 
 ---
 
-## 3. Summary Checklist for External Agent Review
+## 3. Summary Checklist for Review
 
 - [ ] Review whether `--ease-out`, `--dur-fast`, `--dur-med`, tactile `.btn`/`.ch` transitions, Dialog/Drawer entrance rules, and `.btn-cue` belong in `kit.css` (Unified UI canvas) vs. `app.css`.
 - [ ] Update `docs/ui-gaps.md` for any motion behavior that lives only in code (`app.css`).

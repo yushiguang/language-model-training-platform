@@ -8,46 +8,46 @@
       }
     ],
     "paths": {
-      "@sprint/contracts": [
+      "@yushiguang/sprint-contracts": [
         "../../packages/contracts/src/index.ts"
       ],
-      "@sprint/domain": [
+      "@yushiguang/sprint-domain": [
         "../../packages/domain/src/index.ts"
       ],
-      "@sprint/platform": [
+      "@yushiguang/sprint-platform": [
         "../../packages/platform/src/index.ts"
       ],
-      "@sprint/platform-impl": [
+      "@yushiguang/sprint-platform-impl": [
         "../../packages/platform/src/config.ts"
       ],
-      "@sprint/llm-gateway": [
+      "@yushiguang/sprint-llm-gateway": [
         "../../apps/llm-gateway/src/index.ts"
       ],
-      "@sprint/catalog": [
+      "@yushiguang/sprint-catalog": [
         "../../apps/catalog/src/index.ts"
       ],
-      "@sprint/labeling": [
+      "@yushiguang/sprint-labeling": [
         "../../apps/labeling/src/index.ts"
       ],
-      "@sprint/agents": [
+      "@yushiguang/sprint-agents": [
         "../../apps/agents/src/index.ts"
       ],
-      "@sprint/optimiser": [
+      "@yushiguang/sprint-optimiser": [
         "../../apps/optimiser/src/index.ts"
       ],
-      "@sprint/workflow": [
+      "@yushiguang/sprint-workflow": [
         "../../apps/workflow/src/index.ts"
       ],
-      "@sprint/jobs": [
+      "@yushiguang/sprint-jobs": [
         "../../apps/jobs/src/index.ts"
       ],
-      "@sprint/bff": [
+      "@yushiguang/sprint-bff": [
         "../../apps/bff/src/index.ts"
       ],
-      "@sprint/telemetry": [
+      "@yushiguang/sprint-telemetry": [
         "../../apps/telemetry/src/index.ts"
       ],
-      "@sprint/client-impl": [
+      "@yushiguang/sprint-client-impl": [
         "./src/backend-api/in-process.ts"
       ],
       "@/*": [

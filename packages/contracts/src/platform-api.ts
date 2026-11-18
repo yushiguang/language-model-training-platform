@@ -7,15 +7,15 @@ import type {JobStorePort} from './jobs-api.ts';
 export type {EndpointInfo};
 
 /**
- * Contract 3: Platform Runtime API (`@sprint/contracts/platform-api`).
+ * Contract 3: Platform Runtime API (`@yushiguang/sprint-contracts/platform-api`).
  *
  * Defines the complete set of capabilities exposed by the underlying hosting platform
  * (document database, online labeling models, agent LLM gateway, SSO identity, file storage,
  * and example pools).
  *
  * - `packages/platform` provides browser/local stand-ins so the public repository runs end-to-end.
- * - `internal/` provides the real platform adapters injected during internal builds.
- * - Keep this file completely free of internal company product or vendor names.
+ * - A deployment provides the real adapters (docs/integration.md).
+ * - Keep this file free of company product or vendor names.
  */
 
 // ---------------------------------------------------------------------------------------------
@@ -460,8 +460,8 @@ export interface MediaSource {
 
 /**
  * What a feature is and when it helps, for the agents (the Prompt helper and the Optimiser) and
- * for hover text on feature names. The internal team provides the real text; the repo has a
- * stand-in with made-up text. See docs/handover/integration.md, "Feature descriptions".
+ * for hover text on feature names. A deployment provides the real text; the repo has a
+ * stand-in with made-up text. See docs/integration.md, "Feature descriptions".
  */
 export interface FeatureInfo {
   description: string;
@@ -481,9 +481,9 @@ export interface LinkedDocument {
 }
 
 /**
- * Reads the documents users link in Ask AI (the internal document service), for the helpers'
- * `read_doc` tool. The internal agent implements it; the repo's stand-in reads nothing. See
- * docs/handover/integration.md, "Document links".
+ * Reads the documents users link in Ask AI (the deployment's document service), for the helpers'
+ * `read_doc` tool. A deployment implements it; the repo's stand-in reads nothing. See
+ * docs/integration.md, "Document links".
  */
 export interface DocumentSource {
   /**
@@ -496,7 +496,7 @@ export interface DocumentSource {
 
 // ---------------------------------------------------------------------------------------------
 // Enterprise extension ports (spec 1.0.0, section 7.1). All optional: the single-tenant stand-ins
-// in `@sprint/platform` allow everything and run jobs in the page.
+// in `@yushiguang/sprint-platform` allow everything and run jobs in the page.
 
 /** The person a call is made for, as the channel (the bff) authenticated them. */
 export interface CallerUser {
@@ -574,7 +574,7 @@ export interface LimiterStats {
  * The gateway's rate-limiter state for every endpoint, shared by every replica of every caller
  * (deployment readiness spec, 5), so one endpoint has one budget. Each method is one atomic step
  * on one endpoint's state (`key`): a Redis implementation runs each as a script; SQL as one
- * transaction. `@sprint/platform` has the in-memory one (`memoryLimiterStore`).
+ * transaction. `@yushiguang/sprint-platform` has the in-memory one (`memoryLimiterStore`).
  *
  * Semantics, the same as one process's limiter: a sliding window of requests and tokens (QPM,
  * TPM), a cap on calls in flight, one FIFO queue of waiters, and after a busy reply half the
@@ -627,7 +627,7 @@ export interface Platform {
   examples: ExampleSource;
   /**
    * Media for people to look at (Gold Labels). Optional: without it pages show the item id only.
-   * See docs/handover/integration.md, "Media".
+   * See docs/integration.md, "Media".
    */
   media?: MediaSource;
   /** Feature descriptions. Optional: without it the agents see feature names only. */
@@ -670,7 +670,7 @@ export interface Platform {
   sharedState?: SharedStatePort;
   /**
    * Where problem reports go (spec 1.1.0, 3.3). Optional: without it the helpers say reports
-   * cannot be sent here. See docs/handover/integration.md, "Problem reports".
+   * cannot be sent here. See docs/integration.md, "Problem reports".
    */
   tickets?: TicketPort;
   /** Shown in the header so nobody mistakes a stand-in for the real service. */

@@ -1,5 +1,5 @@
 import {ALL_KEYS, FEATURES, ITEM_ROWS, featureDef, isImageKey, labelOf} from './catalogue.ts';
-import type {Example, ExampleType, FeatureSelection, FeatureValue, PromptImage, Schema} from '@sprint/contracts';
+import type {Example, ExampleType, FeatureSelection, FeatureValue, PromptImage, Schema} from '@yushiguang/sprint-contracts';
 
 /**
  * Prompt templates (tech doc §3, "Prompt templates and feature loading").

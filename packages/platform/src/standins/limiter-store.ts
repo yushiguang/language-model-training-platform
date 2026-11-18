@@ -1,4 +1,4 @@
-import type {LimiterLimits, LimiterStats, LimiterStorePort, LimiterTry} from '@sprint/contracts';
+import type {LimiterLimits, LimiterStats, LimiterStorePort, LimiterTry} from '@yushiguang/sprint-contracts';
 
 interface Entry {
   at: number;

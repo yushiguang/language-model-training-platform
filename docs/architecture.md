@@ -22,7 +22,7 @@ apps/web ──► apps/web/src/backend-api (the BffClient the pages call; in-pr
                  │            └──► llm-gateway  (endpoint list, agent model)
                  ├── jobs (runs the queued work: executors of labeling, optimiser and workflow)
                  ├── telemetry (one port, given to every app above) ──► the platform's sink
-                 └── @sprint/platform-impl (stand-ins, or the internal adapters)
+                 └── @yushiguang/sprint-platform-impl (stand-ins, or a deployment's adapters)
                        document store · labeling models · agent model · identity · files · examples · shared state · telemetry sink
 
 All apps depend only on packages/contracts (types, contracts) and packages/domain (pure rules).
@@ -37,7 +37,7 @@ composition root is the only place that knows which implementation sits behind e
 **A thin bff, a stateless workflow (deployment readiness spec, 2).** The bff only finds out who
 the caller is, builds a `RequestContext` per call (request id, user, caller, language, time zone,
 app version) and keeps a repeated start from running twice. Everything a CLI or tool channel would
-also need is in `@sprint/workflow`, whose every method takes that context first. The workflow is a
+also need is in `@yushiguang/sprint-workflow`, whose every method takes that context first. The workflow is a
 factory with no module-level state: who acts comes from the context of each call, never from a
 process-wide user, and short-lived state every instance must see (the live turn, the helper that
 answers, the running turn's context, problem-report drafts) sits behind `SharedStatePort` with a
@@ -110,9 +110,9 @@ Since 1.0.0 phase 1 every service contract is written so it maps one to one to a
 
 `apps/web/src/backend-api` has three files: `client.ts` (the `BffClient` interface pages use:
 the contract plus live listeners, file uploads and page telemetry), `in-process.ts` (the default
-client and composition root: every service runs in the page on `@sprint/platform-impl`) and
-`index.ts` (takes the client from `@sprint/client-impl`). That alias is a build-time switch like
-`@sprint/platform-impl`: the in-process client by default, or the module `SPRINT_CLIENT_IMPL`
+client and composition root: every service runs in the page on `@yushiguang/sprint-platform-impl`) and
+`index.ts` (takes the client from `@yushiguang/sprint-client-impl`). That alias is a build-time switch like
+`@yushiguang/sprint-platform-impl`: the in-process client by default, or the module `SPRINT_CLIENT_IMPL`
 names, such as an HTTP client for a server deployment, which bundles no backend app. No page
 changes either way.
 
@@ -128,9 +128,9 @@ per-tenant configuration and permission checks (`RequestContext`, `TenantConfigP
 
 ### Background work is jobs (deployment readiness spec, 3)
 
-Every piece of work that outlives a request is a job of `@sprint/jobs`: `labeling.runTask`
-(executor in `@sprint/labeling`), `optimiser.run` (`@sprint/optimiser`), and `report.build`,
-`dataset.sample` and `project.delete` (`@sprint/workflow`). The workflow decides what should run
+Every piece of work that outlives a request is a job of `@yushiguang/sprint-jobs`: `labeling.runTask`
+(executor in `@yushiguang/sprint-labeling`), `optimiser.run` (`@yushiguang/sprint-optimiser`), and `report.build`,
+`dataset.sample` and `project.delete` (`@yushiguang/sprint-workflow`). The workflow decides what should run
 and queues it with the caller's context; the job module runs it with a lease per job, heartbeats,
 recovery of a dead runner's jobs, retries and cancel. A job holds ids only; the domain record
 (the labeling task, the Optimiser run) keeps the state, so an executor resumes from it.
@@ -258,7 +258,7 @@ createTask ──► runTask (browser lock "labeling:<task>"; a second tab gets 
 - **Other tabs.** Writes are announced to other tabs of the site, and pages re-read every 5 s
   while something runs, so a second tab follows a run and sees it pause.
 - **Later:** several runners sharing one task, and shared quota records across runners. A worker
-  outside the browser is a job runner (`@sprint/jobs` with a shared `JobStorePort`).
+  outside the browser is a job runner (`@yushiguang/sprint-jobs` with a shared `JobStorePort`).
 
 ## The Optimiser and the helpers
 
@@ -384,7 +384,7 @@ fails on any the Chinese catalog lacks.
 draft, and sends only after the user writes again, which code enforces. The ticket goes to
 `Platform.tickets` with the page, the browser's rolling record (`ClientDiagnostics`, sent with
 each Ask AI message and never stored), the last action lines and, only with consent, the prompt.
-Adapter steps: [handover/integration.md](handover/integration.md#problem-reports).
+Adapter steps: [integration.md](integration.md#problem-reports).
 
 ## Prompts with images
 
@@ -433,8 +433,8 @@ application `id` to the store's document id.
 
 - Services inside the workflow still pass records to each other (only the contracts are plain
   JSON).
-- The progress handlers of running Ask AI turns stay in the memory of the workflow instance that
-  started the turn, until the agent service (spec 6) takes them over.
+- An Ask AI turn runs to its end in the instance that accepted it (it is not a job): if that
+  instance stops, the turn is lost, and its live line clears when its time to live ends.
 - In the browser build, jobs run in the open page and its job store is that tab's memory: closing
   the page drops what was queued there, and the next page tick queues due work again. The
   Optimiser loop holds a browser lock per project and model, so a second tab cannot run it twice.

@@ -1,4 +1,4 @@
-import {EVENT_PROP_KEYS, LABEL_VALUES, METRICS, type EventName, type EventProps, type Labels, type MetricName, type TelemetryContext, type TelemetryEvent, type TelemetryPort, type TelemetrySink} from '@sprint/contracts';
+import {EVENT_PROP_KEYS, LABEL_VALUES, METRICS, type EventName, type EventProps, type Labels, type MetricName, type TelemetryContext, type TelemetryEvent, type TelemetryPort, type TelemetrySink} from '@yushiguang/sprint-contracts';
 
 export interface TelemetryOptions {
   sink: TelemetrySink;

@@ -1,12 +1,12 @@
 'use client';
 
 import {createContext, Fragment, useCallback, useContext, useEffect, useState, type ReactNode} from 'react';
-import type {Locale, Msg} from '@sprint/contracts';
-import {hasKey, isLocale, translate} from '@sprint/domain';
+import type {Locale, Msg} from '@yushiguang/sprint-contracts';
+import {hasKey, isLocale, translate} from '@yushiguang/sprint-domain';
 
 /**
  * The site's language (spec 1.1.0, 2). English is the source: every text is its own key and
- * `t()` looks it up in the chosen language's catalog (`@sprint/domain`, `locales/`). The static
+ * `t()` looks it up in the chosen language's catalog (`@yushiguang/sprint-domain`, `locales/`). The static
  * export is built in English; the saved choice is applied right after the first paint, and a
  * switch re-renders the whole tree in place.
  */

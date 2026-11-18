@@ -17,9 +17,9 @@ import {
   type TaskState,
   type TelemetryPort,
   type TryTemplateRow,
-} from '@sprint/contracts';
-import {asAnswerOrNull, hashString, parseOutput, REASON_LINE, renderPrompt, settingsHash, type Part, systemConfig} from '@sprint/domain';
-import {DocRepo, newId} from '@sprint/platform';
+} from '@yushiguang/sprint-contracts';
+import {asAnswerOrNull, hashString, parseOutput, REASON_LINE, renderPrompt, settingsHash, type Part, systemConfig} from '@yushiguang/sprint-domain';
+import {DocRepo, newId} from '@yushiguang/sprint-platform';
 import {browserLocks, type TaskLocks} from './locks.ts';
 
 export interface LabelingDeps {
@@ -70,6 +70,10 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
   const locks = deps.locks ?? browserLocks();
   const emit = (projectId?: string) => deps.onChange?.(projectId);
   const active = new Map<string, AbortController>();
+  /** The runs going on in this process, by task: deleting a project waits for them to end. */
+  const runs = new Map<string, Set<Promise<unknown>>>();
+  /** Projects being deleted in this process: a run of theirs that is just starting stops at once. */
+  const deleting = new Set<string>();
   const tm = deps.telemetry ?? NO_TELEMETRY;
   const running = new Map<string, number>();
   const stopPressed = new Map<string, number>();
@@ -81,7 +85,14 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
 
   /** Runs a task under its lock; a second tab asking for the same task gets null. */
   async function run(taskId: string, trigger?: 'system' | 'user', opts: ExecOptions = {}) {
-    const r = await locks.run(lockName(taskId), () => execute(taskId, trigger, opts));
+    const going = locks.run(lockName(taskId), () => execute(taskId, trigger, opts));
+    const tracked = going.catch(() => undefined);
+    const mine = runs.get(taskId) ?? new Set();
+    runs.set(taskId, mine.add(tracked));
+    const r = await going.finally(() => {
+      mine.delete(tracked);
+      if (!mine.size && runs.get(taskId) === mine) runs.delete(taskId);
+    });
     if (r === null) {
       const t = await getTask(taskId);
       if (t) tm.counter('sprint_labeling_lock_conflicts_total', {task_purpose: t.purpose});
@@ -170,6 +181,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     const examples = new Map((await deps.catalog.findByIds('examples', pending)).map(e => [e.id, e] as [string, Example]));
     const ctrl = new AbortController();
     active.set(taskId, ctrl);
+    if (deleting.has(task.projectId)) ctrl.abort();
     // The run's model calls share one request id; a Stop cancels them at the gateway by id.
     const runId = newId('lr');
     ctrl.signal.addEventListener('abort', () => void Promise.resolve().then(() => deps.gateway.cancel(runId)).catch(() => undefined), {once: true});
@@ -223,13 +235,14 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
             throw e;
           });
         if (!res) {
-          const pred: Prediction = {id, promptVersionId: task.promptVersionId, endpoint: task.endpoint, settingsHash: task.settingsHash, exampleId, output: '', answer: null, invalidReason: 'Stopped by the safety filter', filtered: true, costUsd: 0, tokens: 0, createdAt: now()};
+          const pred: Prediction = {id, projectId: task.projectId, promptVersionId: task.promptVersionId, endpoint: task.endpoint, settingsHash: task.settingsHash, exampleId, output: '', answer: null, invalidReason: 'Stopped by the safety filter', filtered: true, costUsd: 0, tokens: 0, createdAt: now()};
           await repo.insert(PREDICTIONS, pred);
           return {pred, paid: true};
         }
         const parsed = parseOutput(res.text, schema);
         const pred: Prediction = {
           id,
+          projectId: task.projectId,
           promptVersionId: task.promptVersionId,
           endpoint: task.endpoint,
           settingsHash: task.settingsHash,
@@ -429,20 +442,38 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
 
     cancel: requestId => deps.gateway.cancel(requestId),
 
-    /** Deleting a project: its running tasks stop, then its tasks and their saved answers go. */
+    /**
+     * Deleting a project: its running tasks stop, and their runs in this process end before
+     * anything is deleted, so no answer is saved after the delete. Then its tasks and their saved
+     * answers go. Answers carry their project, so a run elsewhere that saved one late is removed
+     * by deleting again.
+     */
     async deleteProject(projectId: string) {
-      const tasks = await repo.find<LabelingTask>(TASKS, {projectId});
-      for (const t of tasks) active.get(t.id)?.abort();
-      // In bulk: one batched delete per version, model and settings (deployment readiness spec, 3).
-      const seen = new Set<string>();
-      for (const t of tasks) {
-        const key = `${t.promptVersionId}|${t.endpoint}|${t.settingsHash}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        await repo.deleteWhere(PREDICTIONS, {promptVersionId: t.promptVersionId, endpoint: t.endpoint, settingsHash: t.settingsHash});
+      deleting.add(projectId);
+      try {
+        await removeProject(projectId);
+      } finally {
+        deleting.delete(projectId);
       }
-      await repo.deleteWhere(TASKS, {projectId});
       emit(projectId);
     },
   };
+
+  /** Stops the project's runs in this process, waits for them to end, then deletes its records. */
+  async function removeProject(projectId: string) {
+    const tasks = await repo.find<LabelingTask>(TASKS, {projectId});
+    for (const t of tasks) active.get(t.id)?.abort();
+    await Promise.all(tasks.flatMap(t => [...(runs.get(t.id) ?? [])]));
+    await repo.deleteWhere(PREDICTIONS, {projectId});
+    // Answers saved before they carried their project: one batched delete per version, model
+    // and settings (deployment readiness spec, 3).
+    const seen = new Set<string>();
+    for (const t of tasks) {
+      const key = `${t.promptVersionId}|${t.endpoint}|${t.settingsHash}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      await repo.deleteWhere(PREDICTIONS, {promptVersionId: t.promptVersionId, endpoint: t.endpoint, settingsHash: t.settingsHash});
+    }
+    await repo.deleteWhere(TASKS, {projectId});
+  }
 }

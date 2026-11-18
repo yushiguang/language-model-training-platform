@@ -1,5 +1,5 @@
-import type {ExampleMedia, ExampleSource, MediaSource, RawExample} from '@sprint/contracts';
-import {featureItems, toFeatures} from '@sprint/domain';
+import type {ExampleMedia, ExampleSource, MediaSource, RawExample} from '@yushiguang/sprint-contracts';
+import {featureItems, toFeatures} from '@yushiguang/sprint-domain';
 
 interface SampleFile {
   examples: RawExample[];
@@ -28,7 +28,7 @@ const sleep = (ms: number, signal?: AbortSignal) =>
 /**
  * Stand-in for automatic sampling: picks from the prepared file of examples with features.
  * For the MVP the real data is also a prepared file (50 to 100 examples) in the same format;
- * see docs/handover/integration.md, "Examples".
+ * see docs/integration.md, "Examples".
  */
 export function sampleExamples(base = ''): ExampleSource {
   return {
@@ -60,7 +60,7 @@ export function sampleExamples(base = ''): ExampleSource {
 
 /**
  * Stand-in media: the made-up pictures the sample file names in its Cover, Frame and Images
- * features. There is no video. The real media service replaces this (docs/handover/integration.md).
+ * features. There is no video. The real media service replaces this (docs/integration.md).
  */
 export function sampleMedia(base = ''): MediaSource {
   const url = (u: string) => (/^(https?:|data:|\/)/.test(u) ? u : `${base}/${u}`);

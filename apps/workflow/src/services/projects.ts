@@ -1,5 +1,5 @@
-import {DocFieldValue, type GateApproval, type Job, type JobOutcome, type LabelComment, type NodeId, type Project, type ProjectState, type ProjectStatus, type WorkflowFacts} from '@sprint/contracts';
-import {asAnswerOrNull, compareVersions, contextIdFor, gate, judge, newId, scoresUpdating, systemConfig} from '@sprint/domain';
+import {DocFieldValue, type GateApproval, type Job, type JobOutcome, type LabelComment, type NodeId, type Project, type ProjectState, type ProjectStatus, type WorkflowFacts} from '@yushiguang/sprint-contracts';
+import {asAnswerOrNull, compareVersions, contextIdFor, gate, judge, newId, scoresUpdating, systemConfig} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {getSamplingTask} from './dataset.ts';
 import {latestGold} from './evaluation.ts';
@@ -194,14 +194,32 @@ export async function deleteProject(w: Scope, projectId: string): Promise<void> 
   w.emitChange(projectId);
 }
 
+/** How long deleting waits for the project's cancelled jobs to end (two default job leases). */
+const STOP_WAIT_MS = 60_000;
+
 /**
  * The `project.delete` executor: cancels the project's other jobs, stops its Optimiser runs and
  * labeling, then labeling drops its tasks and answers and the catalog every record, in batches.
  * Safe to run again: what was deleted stays deleted.
  */
-export async function runDelete(w: Scope, job: Job): Promise<JobOutcome> {
+export async function runDelete(w: Scope, job: Job, waitMs = STOP_WAIT_MS): Promise<JobOutcome> {
   const projectId = job.projectId!;
-  for (const other of await w.jobs.list(w.ctx, {projectId, states: ['queued', 'running']})) if (other.id !== job.id) await w.jobs.cancel(w.ctx, other.id);
+  const others = (await w.jobs.list(w.ctx, {projectId, states: ['queued', 'running']})).filter(j => j.id !== job.id);
+  for (const other of others) await w.jobs.cancel(w.ctx, other.id);
+  // A cancelled job on another instance sees the cancel at its next heartbeat and may still save
+  // an answer before it ends: delete only once every one of them has ended. Still running after
+  // the wait: this try fails and the job runs again later.
+  const until = Date.now() + waitMs;
+  for (;;) {
+    const left = [];
+    for (const o of others) {
+      const j = await w.jobs.get(w.ctx, o.id);
+      if (j && (j.state === 'queued' || j.state === 'running')) left.push(j.id);
+    }
+    if (!left.length) break;
+    if (Date.now() >= until) throw new Error(`${left.length} job${left.length === 1 ? '' : 's'} of the project did not stop in time.`);
+    await new Promise(r => setTimeout(r, 50));
+  }
   await w.optimiser?.deleteProject(projectId);
   await w.labeling.deleteProject(projectId);
   await w.catalog.deleteProject(projectId);

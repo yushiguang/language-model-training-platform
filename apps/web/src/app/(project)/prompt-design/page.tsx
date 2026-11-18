@@ -1,8 +1,8 @@
 'use client';
 
 import {useEffect, useState} from 'react';
-import type {AgentProposal, PageContext, StructuredPrompt} from '@sprint/contracts';
-import {ALL_KEYS, checkStructured, emptyStructuredPrompt, structuredEquals, versionLabel} from '@sprint/domain';
+import type {AgentProposal, PageContext, StructuredPrompt} from '@yushiguang/sprint-contracts';
+import {ALL_KEYS, checkStructured, emptyStructuredPrompt, structuredEquals, versionLabel} from '@yushiguang/sprint-domain';
 import {useGo} from '@/components/nav';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
