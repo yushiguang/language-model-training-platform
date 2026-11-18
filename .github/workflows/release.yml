@@ -30,18 +30,19 @@ jobs:
           scope: '@yushiguang'
       - name: Version
         id: version
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
-          v="${{ github.event.inputs.version }}"
+          v="$INPUT_VERSION"
           if [ -z "$v" ]; then v="${GITHUB_REF_NAME#v}"; fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - run: npm ci
       - run: npm run check
       - run: node scripts/build-packages.mjs "${{ steps.version.outputs.version }}"
       - run: node scripts/check-packages.mjs
+      # In dependency order, skipping packages already published at this version: a release that
+      # failed halfway is resumed by running it again with the same version.
       - name: Publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          for dir in build/packages/*/; do
-            (cd "$dir" && npm publish)
-          done
+        run: node scripts/publish-packages.mjs

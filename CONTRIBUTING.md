@@ -35,7 +35,8 @@ docs (`docs/architecture.md`, `docs/design/`, `docs/decisions.md`) in the pull r
 - A pull request is ready to merge when its checks are green, it has no conflict, and you approve.
 - Only maintainers merge. A contributor never merges its own pull request.
 - Releases: push a tag `v<version>` (or run the `Release packages` workflow with a version) to
-  publish the npm packages (see `docs/integration.md`).
+  publish the npm packages (see `docs/integration.md`). A release that failed halfway is resumed
+  by running the workflow again with the same version: packages already published are skipped.
 
 ## For contributors: doing the work
 

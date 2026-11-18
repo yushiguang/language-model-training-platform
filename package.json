@@ -20,7 +20,7 @@
   ],
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p apps/web/tsconfig.json --noEmit",
-    "test": "node --test --experimental-strip-types --no-warnings 'packages/*/src/**/*.test.ts' 'apps/*/src/**/*.test.ts'",
+    "test": "node --test --experimental-strip-types --no-warnings 'packages/*/src/**/*.test.ts' 'apps/*/src/**/*.test.ts' 'scripts/*.test.mjs'",
     "check:boundaries": "node scripts/check-boundaries.mjs",
     "check": "npm run check:boundaries && npm run typecheck && npm test",
     "dev": "npm run dev -w apps/web",

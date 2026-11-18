@@ -14,26 +14,12 @@ import {execFileSync} from 'node:child_process';
 import {cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {PUBLISHED} from './published.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCOPE = '@yushiguang/';
 const REGISTRY = 'https://npm.pkg.github.com';
 const REPO = 'https://github.com/yushiguang/language-model-training-platform';
-
-/** The published workspaces, in dependency order. */
-export const PUBLISHED = [
-  'packages/contracts',
-  'packages/domain',
-  'packages/platform',
-  'apps/llm-gateway',
-  'apps/catalog',
-  'apps/labeling',
-  'apps/optimiser',
-  'apps/jobs',
-  'apps/workflow',
-  'apps/bff',
-  'apps/telemetry',
-];
 
 const version = process.argv[2];
 if (!version || !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) {
