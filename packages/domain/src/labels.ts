@@ -74,16 +74,24 @@ export function parseOutput(text: string, schema: Schema): {answer: Answer | nul
  * null when the values do not make an answer to the label (see `answerProblem`).
  */
 export function readGoldAnswer(raw: unknown, schema: Schema): Answer | null {
-  const read = (v: unknown): Answer | null => {
+  const r = readGoldAnswerWhy(raw, schema);
+  return 'answer' in r ? r.answer : null;
+}
+
+/** `readGoldAnswer` with the reason a value is not an answer to the label (in English). */
+export function readGoldAnswerWhy(raw: unknown, schema: Schema): {answer: Answer} | {problem: string} {
+  const read = (v: unknown): {answer: Answer} | {problem: string} => {
     const list = typeof v === 'string' ? [v] : Array.isArray(v) && v.every(x => typeof x === 'string') ? [...new Set(v as string[])] : null;
-    return list && !answerProblem(list, schema) ? inLabelOrder(list, schema) : null;
+    if (!list) return {problem: 'The answer is not a value or a list of values'};
+    const problem = answerProblem(list, schema);
+    return problem ? {problem} : {answer: inLabelOrder(list, schema)};
   };
   if (typeof raw === 'string' || Array.isArray(raw)) return read(raw);
-  if (!raw || typeof raw !== 'object') return null;
+  if (!raw || typeof raw !== 'object') return {problem: 'The row has no answer'};
   const o = raw as Record<string, unknown>;
   if (schema.name in o) return read(o[schema.name]);
   const keys = Object.keys(o);
-  return keys.length === 1 ? read(o[keys[0]]) : null;
+  return keys.length === 1 ? read(o[keys[0]]) : {problem: `The answer names more than one label, not ${schema.name}`};
 }
 
 /**

@@ -239,18 +239,7 @@ export const client: BffClient = {
     return timedApi.appendUpload(projectId, file.name, await file.text());
   },
   async uploadGoldFile(projectId, file) {
-    const lines = (await file.text())
-      .split(/\r?\n/)
-      .filter(l => l.trim())
-      .map(l => {
-        try {
-          return JSON.parse(l) as GoldLine;
-        } catch {
-          return null;
-        }
-      })
-      .filter((x): x is GoldLine => x !== null);
-    return timedApi.uploadGold({projectId, lines});
+    return timedApi.uploadGoldText(projectId, file.name, await file.text());
   },
   pageViewed(pathname, search) {
     pageOpened(pathname + search);
