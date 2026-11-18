@@ -573,7 +573,8 @@ let current = null;
   await page.waitForFunction(() => /Waiting for gold labels\s*5(?!\d)/.test(document.querySelector('main .metrics')?.textContent ?? ''), null, {timeout: 30000});
   log('dataset after adding:', (await page.locator('main .metrics').innerText()).replace(/\s+/g, ' '));
   const fromSample = (await page.locator('main tr', {hasText: 'Sample data'}).first().locator('td').allInnerTexts()).map(x => x.trim());
-  if (fromSample[1] !== String(N + 5)) throw new Error(`the Examples card says ${fromSample.join(' | ')} from Sample data`);
+  // Live examples only: the one removed above leaves the count.
+  if (fromSample[1] !== String(N + 5 - 1)) throw new Error(`the Examples card says ${fromSample.join(' | ')} from Sample data`);
   await shot(page, '2d-dataset-add-examples');
   await page.goto(url('/prompt/'));
   await page.locator('nav.vlist').waitFor();
