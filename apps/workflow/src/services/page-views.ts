@@ -17,6 +17,8 @@ import {getProject, loadProjectState} from './projects.ts';
 
 const TITLES: Record<PageId, string> = {
   projects: 'Projects',
+  sources: 'Data Source',
+  source: 'Data Source · one data source',
   prompt_design: 'Prompt Design',
   dataset: 'Eval Dataset',
   gold: 'Gold Labels',
@@ -187,7 +189,9 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
         snapshot: snap ? {number: snap.number, source: snap.source, name: snap.sourceName, counts: snap.counts} : null,
         // Spec 1.0.0, 4.4: what scores rest on now (get_dataset_stats has the label balance).
         now: snap ? datasetCounts(state) : null,
-        sampling: state.samplingTask ? {state: state.samplingTask.state, done: state.samplingTask.fetched, total: state.samplingTask.total} : null,
+        sampling: state.samplingTask ? {state: state.samplingTask.state, done: state.samplingTask.fetched, total: state.samplingTask.total, ...(state.samplingTask.error ? {error: state.samplingTask.error} : {})} : null,
+        // Where the examples came from (#29): live examples per data source.
+        sources: state.datasetSources.map(l => ({name: l.name, examples: l.examples})),
       });
     }
     case 'gold': {

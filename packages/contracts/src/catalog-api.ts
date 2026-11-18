@@ -2,6 +2,7 @@ import type {DocUpdatePatch} from './platform-api.ts';
 import type {
   AgentProposal,
   ChatMessage,
+  DataSource,
   DatasetRemoval,
   DatasetSnapshot,
   EvalReport,
@@ -13,6 +14,9 @@ import type {
   Project,
   PromptVersion,
   SetupVersion,
+  SourceChunk,
+  SourceCut,
+  SourceFile,
   StartRequest,
 } from './types.ts';
 
@@ -49,6 +53,12 @@ export interface CatalogRecords {
   agent_proposals: AgentProposal;
   start_requests: StartRequest;
   audit_log: AuditEntry;
+  /** Tenant records (#29): data sources belong to a tenant, never to a project. */
+  data_sources: DataSource;
+  source_files: SourceFile;
+  source_chunks: SourceChunk;
+  /** A project's segments of a source (#30); kept, retired, when the project is deleted. */
+  source_cuts: SourceCut;
 }
 
 export type CatalogKind = keyof CatalogRecords;
@@ -82,4 +92,6 @@ export interface CatalogContract {
   audit(projectId: string | null, actor: string, action: string, data?: object): Promise<void>;
   /** Removes a project and every catalog record it owns (examples by its dataset snapshots). */
   deleteProject(projectId: string): Promise<void>;
+  /** Removes a data source file's staged chunks once its import has written them into the order (#29). */
+  deleteStagedChunks(fileId: string): Promise<void>;
 }

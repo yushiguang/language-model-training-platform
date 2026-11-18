@@ -19,34 +19,15 @@ export const loadSampleFile = (base: string) =>
     return (r.json() as Promise<SampleFile>).then(f => ({...f, examples: f.examples.map(e => ({...e, features: toFeatures(e.features as unknown as Record<string, unknown>)}))}));
   }));
 
-const sleep = (ms: number, signal?: AbortSignal) =>
-  new Promise<void>((res, rej) => {
-    const t = setTimeout(res, ms);
-    signal?.addEventListener('abort', () => (clearTimeout(t), rej(new DOMException('Stopped', 'AbortError'))));
-  });
-
 /**
- * Stand-in for automatic sampling: picks from the prepared file of examples with features.
- * For the MVP the real data is also a prepared file (50 to 100 examples) in the same format;
- * see docs/integration.md, "Examples".
+ * Stand-in example service: the prepared file of examples with features. Its items are every
+ * tenant's built-in "Sample data" source (#29), and features are looked up from it; see
+ * docs/integration.md, "Examples".
  */
 export function sampleExamples(base = ''): ExampleSource {
   return {
-    async available() {
-      return (await loadSampleFile(base)).examples.length;
-    },
-    async sample(n, onProgress, signal) {
-      const all = [...(await loadSampleFile(base)).examples];
-      for (let i = all.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [all[i], all[j]] = [all[j], all[i]];
-      }
-      const picked = all.slice(0, n);
-      for (let i = 0; i < picked.length; i += 8) {
-        await sleep(400, signal);
-        onProgress?.(Math.min(picked.length, i + 8));
-      }
-      return picked;
+    async builtIn() {
+      return {name: 'Sample data', ids: (await loadSampleFile(base)).examples.map(e => e.externalId)};
     },
     async lookup(ids) {
       const all = (await loadSampleFile(base)).examples;

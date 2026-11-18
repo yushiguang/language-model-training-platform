@@ -8,6 +8,7 @@ import * as governance from './services/governance.ts';
 import * as projects from './services/projects.ts';
 import * as prompts from './services/prompts.ts';
 import * as settings from './services/settings.ts';
+import * as sources from './services/sources.ts';
 import * as work from './services/work.ts';
 import {agentToolHost} from './services/page-views.ts';
 import {optimiserHost} from './services/optimiser-host.ts';
@@ -47,7 +48,7 @@ export interface Workflow {
   connect(c: Connected): void;
   /**
    * The work the workflow owns, for the job module of the process that runs jobs:
-   * `report.build`, `dataset.sample` and `project.delete`. Each runs as the job's caller.
+   * `report.build`, `dataset.sample`, `source.ingest` and `project.delete`. Each runs as the job's caller.
    */
   executors: JobExecutor[];
   /**
@@ -100,13 +101,14 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
 
     saveSettings: (ctx, {projectId, ...s}) => settings.saveSettings(at(ctx), projectId, s),
 
-    getSamplePoolSize: ctx => dataset.getSamplePoolSize(at(ctx)),
+    listDataSources: ctx => sources.listDataSources(at(ctx)),
+    getDataSource: (ctx, sourceId) => sources.getDataSource(at(ctx), sourceId),
+    createDataSource: (ctx, r) => sources.createDataSource(at(ctx), r),
+    addSourceFile: (ctx, r) => sources.addSourceFile(at(ctx), r),
+
     exampleMedia: (ctx, projectId, exampleId) => dataset.exampleMedia(at(ctx), projectId, exampleId),
-    startSampleDataset: (ctx, projectId, n) => dataset.startSampleDataset(at(ctx), projectId, n),
+    takeExamples: (ctx, r) => dataset.takeExamples(at(ctx), r.projectId, r.picks),
     stopSampleDataset: (ctx, projectId) => dataset.stopSampleDataset(at(ctx), projectId),
-    uploadDatasetText: (ctx, projectId, name, text) => dataset.uploadDatasetText(at(ctx), projectId, name, text),
-    appendSample: (ctx, r) => dataset.appendSample(at(ctx), r.projectId, r.count),
-    appendUpload: (ctx, projectId, name, text) => dataset.uploadDatasetText(at(ctx), projectId, name, text, true),
     async removeExamples(ctx, {projectId, exampleIds, reason}) {
       await governance.removeExamples(at(ctx), projectId, exampleIds, reason);
     },

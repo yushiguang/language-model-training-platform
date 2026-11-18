@@ -38,7 +38,7 @@ async function world(prefix: string, identity: Identity = {currentUser: async ()
   await catalog.insertMany('examples', Array.from({length: 4}, (_, i) => ({id: `ex_${prefix}_${i}`, snapshotId: `ds_${prefix}`, externalId: String(i), type: 'video' as const, title: '', features: {}, split: 'eval' as const, optimiserHalf: i % 2 === 0})));
   for (let i = 0; i < 4; i++) await catalog.insert('gold_labels', {id: `gl_${prefix}_${i}`, projectId, exampleId: `ex_${prefix}_${i}`, schemaVersion: 1, answer: ['Vlog'], source: 'labeled', revealed: false, createdAt: '', createdBy: 'Tester'});
   await catalog.insert('projects', {id: projectId, name: 'p', createdAt: '', createdBy: '', kind: 'prompt_tuning', settingsConfirmed: true, setupVersionId: `sv_${prefix}`, snapshotId: `ds_${prefix}`, approvedNodes: []});
-  return {api: createBffApi({workflow, identity, appVersion: '9.9.9'}), catalog, projectId, contexts};
+  return {api: createBffApi({workflow, identity, appVersion: '9.9.9'}), catalog, projectId, contexts, workflow, jobs};
 }
 
 async function until(cond: () => Promise<boolean>, what: string) {
@@ -151,4 +151,23 @@ test('contract: a failed sign-in check is asked again on the next call; a good o
   assert.deepEqual((await api.getRuntimeInfo()).user, {id: 'u_2', name: 'Later'});
   await api.listProjects();
   assert.equal(asked, 2);
+});
+
+test('contract: the signed-in organization is the tenant; one organization never sees another one\'s data sources (#29)', async () => {
+  const acme: Identity = {currentUser: async () => ({id: 'u_a', name: 'Ann', organization: 'org_acme'})};
+  const globex: Identity = {currentUser: async () => ({id: 'u_g', name: 'Gus', organization: 'org_globex'})};
+  const w = await world('tenants', acme);
+  const other = createBffApi({workflow: w.workflow, identity: globex, appVersion: '9.9.9'});
+  const made = await w.api.createDataSource({name: 'Feed', fileName: 'feed.txt', text: 'v1\nv2'});
+  assert.ok(made.source, made.error ?? 'no source');
+  await w.jobs.idle();
+  assert.equal(w.contexts.at(-1)?.tenantId, 'org_acme');
+  assert.deepEqual((await w.api.listDataSources()).map(s => [s.name, s.items]), [['Feed', 2]]);
+  assert.deepEqual(await other.listDataSources(), []);
+  assert.equal(w.contexts.at(-1)?.tenantId, 'org_globex');
+  assert.equal(await other.getDataSource(made.source!.id), null);
+  await assert.rejects(other.addSourceFile({sourceId: made.source!.id, fileName: 'x.txt', text: 'v3'}), /does not exist/);
+  // The same name is free in another organization.
+  assert.ok((await other.createDataSource({name: 'Feed', fileName: 'feed.txt', text: 'v9'})).source);
+  assert.equal((await w.api.listDataSources()).length, 1);
 });

@@ -550,6 +550,71 @@ export function Field({label, children, width, off}: {label: ReactNode; children
 }
 
 /**
+ * A file picker (Data Source, #29): a dashed drop zone ("Drop a file here, or browse") with the
+ * accepted formats, and the chosen file under it with a remove button. Click, Enter or Space opens
+ * the browser's file dialog; a file dropped on it is taken the same way.
+ */
+export function FileInput({label, hint, accept, file, onFile}: {label: string; hint: string; accept: string; file: File | null; onFile: (f: File | null) => void}) {
+  const input = useRef<HTMLInputElement>(null);
+  const [over, setOver] = useState(false);
+  const browse = () => input.current?.click();
+  return (
+    <div className="field">
+      <span className="field-l">{label}</span>
+      <div
+        className={`drop${over ? ' over' : ''}`}
+        role="button"
+        tabIndex={0}
+        aria-label={label}
+        onClick={browse}
+        onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), browse())}
+        onDragOver={e => (e.preventDefault(), setOver(true))}
+        onDragLeave={() => setOver(false)}
+        onDrop={e => {
+          e.preventDefault();
+          setOver(false);
+          const f = e.dataTransfer.files?.[0];
+          if (f) onFile(f);
+        }}
+      >
+        <span className="empty-ic">
+          <Icon name="upload" />
+        </span>
+        <b>
+          {t('Drop a file here, or')} <span className="drop-link">{t('browse')}</span>
+        </b>
+        <span className="t-3 drop-hint">{hint}</span>
+      </div>
+      <input
+        ref={input}
+        type="file"
+        className="sr-only"
+        accept={accept}
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={e => {
+          const f = e.target.files?.[0];
+          if (f) onFile(f);
+          e.target.value = '';
+        }}
+      />
+      {file && (
+        <div className="drop-file">
+          <Icon name="doc" />
+          <One text={file.name} className="grow" />
+          <span className="t-3">{fileSize(file.size)}</span>
+          <button type="button" className="icon-btn" aria-label={t('Remove {name}', {name: file.name})} title={t('Remove')} onClick={() => onFile(null)}>
+            <Icon name="x" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const fileSize = (b: number) => (b >= 1e6 ? `${(b / 1e6).toFixed(1)} MB` : b >= 1e3 ? `${Math.round(b / 1e3)} KB` : `${b} B`);
+
+/**
  * A dropdown drawn like the rest of the site (2026-11-16 refinements, 3.5): a button that opens a
  * rounded list under it, never the browser's own menu. Keyboard: Enter, Space or the arrows open
  * it; the arrows, Home and End move; Enter or Space picks; Escape or Tab closes.

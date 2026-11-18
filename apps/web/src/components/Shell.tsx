@@ -197,6 +197,40 @@ export function Frame({head, children, chat}: {head: ReactNode; children: ReactN
   );
 }
 
+/**
+ * The top island of the tenant pages (#29): Sprint, then Projects and Data Source, then the user.
+ * Projects and Data Source are the two places above any one project.
+ */
+export function TenantIsland({current}: {current: 'projects' | 'sources'}) {
+  const links = [
+    {id: 'projects', label: t('Projects'), href: '/'},
+    {id: 'sources', label: t('Data Source'), href: '/sources/'},
+  ] as const;
+  return (
+    <header className="topnav">
+      <div className="island">
+        <span className="proj">
+          <span className="proj-ic" aria-hidden="true">
+            S
+          </span>
+          <b>Sprint</b>
+        </span>
+        <nav className="stepper" aria-label="Sprint">
+          {links.map((l, i) => (
+            <span key={l.id} style={{display: 'contents'}}>
+              {i > 0 && <span className="step-sep" aria-hidden="true" />}
+              <Link className="step plain" aria-current={l.id === current ? 'page' : undefined} href={l.href}>
+                {l.label}
+              </Link>
+            </span>
+          ))}
+        </nav>
+        <UserEnd />
+      </div>
+    </header>
+  );
+}
+
 function TopNav({state, current}: {state: ProjectState; current: NodeId}) {
   const {href} = useProject();
   const st = stepStates(state);

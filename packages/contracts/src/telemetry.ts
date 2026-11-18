@@ -105,7 +105,7 @@ export type MetricName = keyof typeof METRICS;
 export const LABEL_VALUES: Record<string, readonly string[]> = {
   purpose: ['labeling', 'chat'],
   outcome: ['ok', 'error', 'rate_limited', 'server', 'timeout', 'rejected', 'filtered', 'aborted', 'gave_up', 'shown', 'accepted', 'cancelled', 'approved', 'discarded', 'joined', 'passes', 'no_new_ideas', 'budget', 'max_rounds', 'stopped', 'failed', 'done', 'paused', 'lost', 'retried', 'requeued'],
-  job_kind: ['labeling.runTask', 'report.build', 'dataset.sample', 'optimiser.run', 'project.delete', 'batch_labeling.run', 'export.run'],
+  job_kind: ['labeling.runTask', 'report.build', 'dataset.sample', 'source.ingest', 'optimiser.run', 'project.delete', 'batch_labeling.run', 'export.run'],
   reason: ['rate_limited', 'server', 'timeout', 'user', 'failures', 'closed', 'none'],
   kind: ['input', 'output', 'reasoning', 'qpm', 'tpm', 'concurrency', 'script', 'asset', 'backend', 'image', 'schema', 'prompt', 'other'],
   assumed: ['true', 'false'],
@@ -119,12 +119,12 @@ export const LABEL_VALUES: Record<string, readonly string[]> = {
   to: ['prompt_agent', 'evaluation_agent'],
   intent: ['answer', 'follow_up', 'draft_prompt', 'import_prompt', 'revise_prompt', 'explain_version', 'explain_report', 'reflect', 'merge', 'improve'],
   tool: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'get_gold_labels', 'get_predictions', 'check_prompt', 'read_feature_info', 'read_doc', 'get_project_summary', 'get_dataset_stats', 'search_examples', 'compare_versions', 'get_mismatch_summary', 'try_prompt', 'score_version', 'start_optimiser', 'report_problem'],
-  page: ['projects', 'prompt_design', 'dataset', 'gold', 'prompt', 'prompt_edit', 'other'],
+  page: ['projects', 'sources', 'source', 'prompt_design', 'dataset', 'gold', 'prompt', 'prompt_edit', 'other'],
   what: ['score', 'resume', 'optimiser', 'try_prompt', 'score_version', 'start_optimiser'],
   decision: ['started'],
   node: ['prompt_design', 'dataset', 'gold', 'prompt'],
   action: ['approve', 'refused', 'skip'],
-  collection: ['projects', 'setup_versions', 'dataset_snapshots', 'examples', 'gold_labels', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'audit_log', 'dataset_removals', 'label_comments'],
+  collection: ['projects', 'setup_versions', 'dataset_snapshots', 'examples', 'gold_labels', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'audit_log', 'dataset_removals', 'label_comments', 'data_sources', 'source_files', 'source_chunks', 'source_cuts'],
   // Filled at startup (see above): the gateway registers its endpoints, models and slots.
   endpoint: [],
   slot: [],
@@ -163,9 +163,9 @@ export interface EventProps {
   // Dataset
   sample_started: {requested: Num};
   sample_finished: {fetched: Num; seconds: Num; outcome: 'done' | 'stopped' | 'failed'};
-  dataset_uploaded: {rows: Num; valid: Num; invalid: Num; video: Num; photo_text: Num};
-  dataset_upload_failed: {reason: 'format' | 'empty' | 'too_large' | 'other'};
-  dataset_appended: {source: 'sample' | 'upload'; added: Num; duplicates: Num};
+  /** A file added to a data source (#29): its rows, bad rows and repeats. */
+  source_file_uploaded: {rows: Num; bad: Num; repeats: Num};
+  dataset_appended: {source: 'sources' | 'sample' | 'upload'; added: Num; duplicates: Num};
   /** Examples whose save failed twice and were skipped (resilience spec, 3.2). */
   examples_not_saved: {count: Num};
   dataset_examples_removed: {reason: 'broken' | 'out_of_scope' | 'downsample' | 'excess_unlabeled'; count: Num; with_gold: Num};
@@ -235,8 +235,7 @@ export const EVENT_PROP_KEYS: {[E in EventName]: readonly (keyof EventProps[E] &
   // Dataset
   sample_started: ['requested'],
   sample_finished: ['fetched', 'seconds', 'outcome'],
-  dataset_uploaded: ['rows', 'valid', 'invalid', 'video', 'photo_text'],
-  dataset_upload_failed: ['reason'],
+  source_file_uploaded: ['rows', 'bad', 'repeats'],
   dataset_appended: ['source', 'added', 'duplicates'],
   examples_not_saved: ['count'],
   dataset_examples_removed: ['reason', 'count', 'with_gold'],

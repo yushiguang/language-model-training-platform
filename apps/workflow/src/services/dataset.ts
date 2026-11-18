@@ -1,56 +1,55 @@
-import type {Answer, DatasetSnapshot, DatasetUploadResult, Example, ExampleMedia, GoldLabel, GoldUploadRefusal, GoldUploadResult, Job, JobControl, JobOutcome, RawExample, SamplingTask, Schema} from '@yushiguang/sprint-contracts';
-import {hashString, newId, readGoldAnswerWhy, readLabelFile, sameAnswer, toFeatures, type LabelFileRow} from '@yushiguang/sprint-domain';
+import type {Answer, DatasetSnapshot, Example, ExampleMedia, GoldLabel, GoldUploadRefusal, GoldUploadResult, Job, JobControl, JobOutcome, RawExample, SamplingTask, Schema, SourcePick} from '@yushiguang/sprint-contracts';
+import {hashString, newId, readGoldAnswerWhy, readLabelFile, sameAnswer, type LabelFileRow} from '@yushiguang/sprint-domain';
 import {latestGold} from './evaluation.ts';
 import {now, type Scope} from './app.ts';
 import {appendExamples, insertExamplesSettled} from './governance.ts';
+import {allocate, checkPicks, retireCuts} from './sources.ts';
 
 /**
- * Sampling runs as a `dataset.sample` job (deployment readiness spec, 3): the Dataset page's
- * progress is the job's stored progress, never a map in one process, so it shows whichever
- * process runs the job. Loading the features of an uploaded file stays inside its request (the
- * page waits for the result); its progress and Stop sit in shared state (`loading:{projectId}`).
+ * Taking examples from data sources (#29) runs as a `dataset.sample` job (deployment readiness
+ * spec, 3): the Dataset page's progress is the job's stored progress, never a map in one process,
+ * so it shows whichever process runs the job.
  */
-const LOADING_TTL_MS = 10 * 60_000;
-const loadingKey = (projectId: string) => `loading:${projectId}`;
-interface Loading {
-  task: SamplingTask;
-  stop: boolean;
-}
-
 const activeSamples = (w: Scope, projectId: string) => w.jobs.list(w.ctx, {projectId, kinds: ['dataset.sample'], states: ['queued', 'running']});
 
-/** A sampling job as the Dataset page shows it. */
+const picksOf = (job: Job): SourcePick[] => JSON.parse(String(job.args.picks ?? '[]')) as SourcePick[];
+
+/** A job as the Dataset page shows it. */
 function samplingView(job: Job): SamplingTask {
-  const total = Number(job.args.n);
+  const total = picksOf(job).reduce((n, p) => n + p.count, 0);
   return {
     id: job.id,
     projectId: job.projectId!,
-    kind: 'sample',
     total,
     fetched: Math.min(total, job.progress?.done ?? 0),
     startedAt: job.createdAt,
-    state: 'running',
-    error: null,
+    state: job.state === 'failed' ? 'failed' : 'running',
+    error: job.state === 'failed' ? job.error : null,
     ...(job.progress?.saving ? {saving: true} : {}),
   };
 }
 
+/**
+ * The take running in the project, or the last one when it failed (its error shows on the Dataset
+ * page until the next take). A take that ended done or stopped shows nothing.
+ */
 export async function getSamplingTask(w: Scope, projectId: string): Promise<SamplingTask | null> {
-  const loading = await w.shared.get<Loading>(loadingKey(projectId));
-  if (loading) return loading.task;
-  const [job] = await activeSamples(w, projectId);
-  return job ? samplingView(job) : null;
+  const [active] = await activeSamples(w, projectId);
+  if (active) return samplingView(active);
+  const ended = await w.jobs.list(w.ctx, {projectId, kinds: ['dataset.sample'], states: ['done', 'failed', 'cancelled']});
+  const last = ended.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id))[0];
+  return last?.state === 'failed' ? samplingView(last) : null;
 }
 
-/** Stop on the Dataset page: cancels the sampling job, or stops loading an upload's features. */
+/** Stop on the Dataset page: cancels the job. */
 export async function stopSampleDataset(w: Scope, projectId: string): Promise<void> {
   for (const job of await activeSamples(w, projectId)) await w.jobs.cancel(w.ctx, job.id);
-  const loading = await w.shared.get<Loading>(loadingKey(projectId));
-  if (loading) await w.shared.set(loadingKey(projectId), {...loading, stop: true}, LOADING_TTL_MS);
   w.emitChange(projectId);
 }
 
-async function saveSnapshot(w: Scope, projectId: string, all: RawExample[], source: DatasetSnapshot['source'], sourceName: string, invalid = 0): Promise<DatasetSnapshot> {
+type Taken = RawExample & {sourceId?: string; sourceFileId?: string};
+
+async function saveSnapshot(w: Scope, projectId: string, all: Taken[], source: DatasetSnapshot['source'], sourceName: string, invalid = 0): Promise<DatasetSnapshot> {
   const {catalog, user} = w;
   const prev = await catalog.find('dataset_snapshots', {projectId});
   const snapshotId = newId('ds');
@@ -58,7 +57,7 @@ async function saveSnapshot(w: Scope, projectId: string, all: RawExample[], sour
   // way. One half is for the Optimiser and the helpers to learn from; scores use the other.
   const halves = (rs: {externalId: string}[]) => new Map([...rs].sort((a, b) => hashString(a.externalId).localeCompare(hashString(b.externalId))).map((r, i) => [r.externalId, i % 2 === 0]));
   const first = halves(all);
-  const examples = all.map((r): Example => ({id: newId('ex'), snapshotId, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: 'eval', optimiserHalf: first.get(r.externalId)!}));
+  const examples = all.map((r): Example => ({id: newId('ex'), snapshotId, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: 'eval', optimiserHalf: first.get(r.externalId)!, ...(r.sourceId ? {sourceId: r.sourceId, sourceFileId: r.sourceFileId} : {})}));
   // Each example is saved on its own; one that fails twice is skipped (resilience spec, 3.2).
   const saved = await insertExamplesSettled(w, examples);
   if (!saved.length) throw new Error('None of the examples could be saved. Try again.');
@@ -98,33 +97,31 @@ async function saveSnapshot(w: Scope, projectId: string, all: RawExample[], sour
   return snap;
 }
 
-/** Queues a `dataset.sample` job; a sampling already running in the project stops first. */
-async function queueSample(w: Scope, projectId: string, n: number, append: boolean): Promise<SamplingTask> {
-  if (!(await w.catalog.get('projects', projectId))) throw new Error('This project does not exist.');
+/**
+ * Takes examples from data sources (#29): a new eval dataset, or more for the one there. Checks
+ * the picks (each source has that many unused items), then queues a `dataset.sample` job; a job
+ * already running in the project stops first.
+ */
+export async function takeExamples(w: Scope, projectId: string, picks: SourcePick[]): Promise<SamplingTask> {
+  const project = await w.catalog.get('projects', projectId);
+  if (!project) throw new Error('This project does not exist.');
+  await checkPicks(w, picks);
   await stopSampleDataset(w, projectId);
-  const job = await w.jobs.enqueue(w.ctx, {kind: 'dataset.sample', projectId, args: {n, append}});
+  // A stopped take ends at its runner's next look: the new one waits, so two never run at once.
+  for (let i = 0; (await activeSamples(w, projectId)).length; i++) {
+    if (i >= 100) throw new Error('The last take is still stopping. Try again in a moment.');
+    await new Promise(res => setTimeout(res, 100));
+  }
+  const job = await w.jobs.enqueue(w.ctx, {kind: 'dataset.sample', projectId, args: {picks: JSON.stringify(picks.map(p => ({sourceId: p.sourceId, count: p.count})))}, idempotencyKey: `sample:${projectId}`});
   w.emitChange(projectId);
   return samplingView(job);
 }
 
-/** Samples a new eval dataset of `n` examples: returns once queued. */
-export function startSampleDataset(w: Scope, projectId: string, n: number): Promise<SamplingTask> {
-  return queueSample(w, projectId, n, false);
-}
-
 /**
- * Adds `n` sampled examples to the eval dataset (spec 1.0.0, 4.3), none of them already in it
- * (removed ones count as in it): returns once queued.
- */
-export function appendSample(w: Scope, projectId: string, n: number): Promise<SamplingTask> {
-  return queueSample(w, projectId, n, true);
-}
-
-/**
- * The `dataset.sample` executor: asks the example source for `n` examples (more when adding, so
- * repeats can be dropped), with progress and Stop, then saves them as a new dataset or adds them.
- * The job stays running until the examples are saved (resilience spec, 3.1), so the page never
- * shows the empty start in between. Stopped while the last page came in: nothing is saved.
+ * The `dataset.sample` executor: takes each pick's segment of its source (#30), loads the items'
+ * features with progress and Stop, then saves them as a new dataset or adds them. The job stays
+ * running until the examples are saved (resilience spec, 3.1), so the page never shows the empty
+ * start in between. Stopped or failed before the save: its segments are retired, nothing is saved.
  */
 export async function runSample(w: Scope, job: Job, ctl: JobControl): Promise<JobOutcome> {
   // The progress lives on the job: every move is a change the Dataset page reads again.
@@ -133,44 +130,90 @@ export async function runSample(w: Scope, job: Job, ctl: JobControl): Promise<Jo
     w.emitChange(job.projectId);
   };
   try {
-    return await sample(w, job, ctl, progress);
+    return await take(w, job, ctl, progress);
   } finally {
     w.emitChange(job.projectId);
   }
 }
 
-async function sample(w: Scope, job: Job, ctl: JobControl, progress: JobControl['progress']): Promise<JobOutcome> {
+async function take(w: Scope, job: Job, ctl: JobControl, progress: JobControl['progress']): Promise<JobOutcome> {
   const projectId = job.projectId!;
-  const n = Number(job.args.n);
-  const append = job.args.append === true;
+  const picks = picksOf(job);
+  const n = picks.reduce((m, p) => m + p.count, 0);
   const {catalog} = w;
   const project = await catalog.get('projects', projectId);
   if (!project || project.deleting) return {state: 'cancelled', error: 'The project was deleted.'};
-  const known = append && project.snapshotId ? new Set((await catalog.find('examples', {snapshotId: project.snapshotId})).map(e => e.externalId)) : new Set<string>();
+  const append = !!project.snapshotId;
+  // Removed examples count as in the dataset: they are not taken again.
+  const known = append ? new Set((await catalog.find('examples', {snapshotId: project.snapshotId!})).map(e => e.externalId)) : new Set<string>();
   await progress({done: 0, total: n});
   w.tm.event('sample_started', {requested: n});
-  const sampleStarted = Date.now();
+  const started = Date.now();
   let fetched = 0;
-  const ended = (outcome: 'done' | 'stopped' | 'failed') => w.tm.event('sample_finished', {fetched, seconds: Math.round((Date.now() - sampleStarted) / 1000), outcome});
-  let raws: RawExample[];
+  const ended = (outcome: 'done' | 'stopped' | 'failed') => w.tm.event('sample_finished', {fetched, seconds: Math.round((Date.now() - started) / 1000), outcome});
+  const cuts: {id: string; sourceId: string; items: Set<string>}[] = [];
+  const wanted: {externalId: string; sourceId: string; fileId: string}[] = [];
+  const names: string[] = [];
+  const raws: Taken[] = [];
+  // Set once the examples are in: a failure after it keeps the segments, since their items are.
+  let saved = false;
   try {
-    raws = await w.examples.sample(n + known.size, got => ((fetched = Math.min(n, got)), void progress({done: fetched, total: n})), ctl.signal);
+    for (const p of picks) {
+      const {cut, items} = await allocate(w, projectId, p, known);
+      cuts.push({id: cut.id, sourceId: p.sourceId, items: new Set(items.map(i => i.externalId))});
+      names.push((await catalog.get('data_sources', p.sourceId))?.name ?? p.sourceId);
+      wanted.push(...items.map(i => ({...i, sourceId: p.sourceId})));
+    }
+    for (let i = 0; i < wanted.length; i += 10) {
+      if (ctl.signal.aborted) break;
+      const part = wanted.slice(i, i + 10);
+      const found = new Map((await w.examples.lookup(part.map(x => x.externalId))).map(r => [r.externalId, r]));
+      for (const x of part) {
+        const r = found.get(x.externalId);
+        if (r) raws.push({...r, sourceId: x.sourceId, sourceFileId: x.fileId});
+      }
+      fetched = Math.min(n, i + part.length);
+      await progress({done: fetched, total: n});
+    }
+    if (ctl.signal.aborted) {
+      ended('stopped');
+      await retireCuts(w, projectId, cuts.map(c => c.id));
+      return {state: 'cancelled', error: 'Stopped.'};
+    }
+    if (!wanted.length) {
+      // Every position was already in the dataset: nothing to add, and that is not a failure.
+      if (append) {
+        saved = true;
+        ended('done');
+        return {state: 'done'};
+      }
+      throw new Error('No items could be taken from these data sources yet. Try again when their files are imported.');
+    }
+    // Items the example service does not know (gone, or not a video or photo post) are counted.
+    const notFound = wanted.length - raws.length;
+    if (!raws.length) throw new Error('None of these items could be found. Check the data source file.');
+    await progress({done: n, total: n, saving: true});
+    if (append) await appendExamples(w, projectId, raws, 'sources', notFound);
+    else await saveSnapshot(w, projectId, raws, 'sources', names.join(', '), notFound);
+    saved = true;
+    ended('done');
+    // Each segment records how many of its items went in: the examples actually saved. A record
+    // only (the Dataset page counts the examples themselves), so a failure here fails nothing.
+    try {
+      const snapshotId = (await catalog.get('projects', projectId))?.snapshotId;
+      const examples = snapshotId ? await catalog.find('examples', {snapshotId}) : [];
+      await catalog.patchMany('source_cuts', cuts.map(c => ({id: c.id, patch: {taken: examples.filter(e => e.sourceId === c.sourceId && c.items.has(e.externalId)).length}})));
+    } catch {
+      // The cuts keep the counts they were made with.
+    }
+    return {state: 'done'};
   } catch (e) {
-    const stopped = (e as Error).name === 'AbortError' || ctl.signal.aborted;
+    if (!saved) await retireCuts(w, projectId, cuts.map(c => c.id));
+    const stopped = !saved && ((e as Error).name === 'AbortError' || ctl.signal.aborted);
     ended(stopped ? 'stopped' : 'failed');
     if (stopped) return {state: 'cancelled', error: 'Stopped.'};
     throw e;
   }
-  ended('done');
-  if (ctl.signal.aborted) return {state: 'cancelled', error: 'Stopped.'};
-  await progress({done: n, total: n, saving: true});
-  if (append) await appendExamples(w, projectId, raws.filter(r => !known.has(r.externalId)).slice(0, n), 'sample');
-  else await saveSnapshot(w, projectId, raws, 'sample', 'Sampled from the platform');
-  return {state: 'done'};
-}
-
-export async function getSamplePoolSize(w: Scope): Promise<number> {
-  return w.examples.available();
 }
 
 /** The media of one example (Gold Labels), or null without a media source. */
@@ -184,115 +227,6 @@ export async function exampleMedia(w: Scope, projectId: string, exampleId: strin
 
 export function hasBundledGold(w: Scope): boolean {
   return typeof w.examples.bundledLabels === 'function';
-}
-
-/**
- * Upload dataset: a text or CSV file of item IDs separated by commas or new lines (an optional
- * header such as item_id is skipped), or JSONL of ids or full examples. The system then loads each
- * item's features, which the Dataset page shows as "Loading features for N items".
- */
-export async function uploadDatasetText(w: Scope, projectId: string, name: string, text: string, append = false): Promise<DatasetUploadResult> {
-  if (!/\.(csv|txt|jsonl|json)$/i.test(name)) {
-    return {error: "This file can't be used. Upload a text or CSV file of item IDs."};
-  }
-  const raws: RawExample[] = [];
-  const ids: string[] = [];
-  let invalid = 0;
-  const first = (text.split(/\r?\n/)[0] ?? '').split(',').map(h => h.trim().toLowerCase());
-  // A CSV table with several columns, one of them the id; anything else is a plain list of IDs.
-  const isTable = /\.csv$/i.test(name) && first.length > 1 && first.some(h => h === 'video_id' || h === 'id' || h === 'external_id');
-  if (!isTable && /\.(txt|csv)$/i.test(name)) {
-    // A list of item IDs, separated by commas or new lines; a header word is skipped.
-    for (const tok of text.split(/[\s,;]+/).map(t => t.trim()).filter(Boolean)) {
-      if (/^(item_id|video_id|id|external_id)$/i.test(tok)) continue;
-      if (/^[A-Za-z0-9_-]+$/.test(tok)) ids.push(tok);
-      else invalid++;
-    }
-  } else if (/\.csv$/i.test(name)) {
-    const [head, ...rows] = text.trim().split(/\r?\n/);
-    const col = head
-      .split(',')
-      .map(s => s.trim().toLowerCase())
-      .findIndex(h => h === 'video_id' || h === 'id' || h === 'external_id');
-    if (col === -1) return {error: 'The file needs a video_id column.'};
-    for (const row of rows) {
-      const id = row.split(',')[col]?.trim();
-      if (id) ids.push(id);
-      else invalid++;
-    }
-  } else {
-    for (const line of text.split(/\r?\n/).filter(l => l.trim())) {
-      try {
-        const o = JSON.parse(line);
-        if (o.features && o.type) raws.push({externalId: String(o.externalId ?? o.id ?? o.video_id), type: o.type, title: o.title ?? '', features: toFeatures(o.features)});
-        else if (o.video_id ?? o.id) ids.push(String(o.video_id ?? o.id));
-        else invalid++;
-      } catch {
-        invalid++;
-      }
-    }
-  }
-  let task: SamplingTask | null = null;
-  if (ids.length) {
-    const found = await loadFeatures(w, projectId, name, ids);
-    if (!found) return {};
-    task = found.task;
-    invalid += ids.length - found.raws.length;
-    raws.push(...found.raws);
-  }
-  try {
-    if (!raws.length) {
-      w.tm.event('dataset_upload_failed', {reason: 'empty'});
-      return {error: 'No usable rows in this file.'};
-    }
-    w.tm.event('dataset_uploaded', {rows: raws.length + invalid, valid: raws.length, invalid, video: raws.filter(r => r.type === 'video').length, photo_text: raws.filter(r => r.type !== 'video').length});
-    if (task) await setLoading(w, projectId, {...task, fetched: task.total, saving: true});
-    // Adding to an eval dataset there (spec 1.0.0, 4.3) keeps every example, half and gold label.
-    if (append) return await appendExamples(w, projectId, raws, 'upload', invalid);
-    return {snapshot: await saveSnapshot(w, projectId, raws, 'upload', name, invalid)};
-  } finally {
-    if (task) await endLoading(w, projectId);
-  }
-}
-
-async function setLoading(w: Scope, projectId: string, task: SamplingTask): Promise<boolean> {
-  const was = await w.shared.get<Loading>(loadingKey(projectId));
-  if (was?.stop) return false;
-  await w.shared.set(loadingKey(projectId), {task, stop: false}, LOADING_TTL_MS);
-  w.emitChange(projectId);
-  return true;
-}
-
-async function endLoading(w: Scope, projectId: string): Promise<void> {
-  await w.shared.delete(loadingKey(projectId));
-  w.emitChange(projectId);
-}
-
-/**
- * Looks the IDs up in chunks, as a task the Dataset page shows with its progress and Stop (in
- * shared state, so Stop works from whichever process the page reaches). On success the task stays
- * on until the caller has saved the examples and calls `endLoading`.
- */
-async function loadFeatures(w: Scope, projectId: string, fileName: string, ids: string[]): Promise<{raws: RawExample[]; task: SamplingTask} | null> {
-  await stopSampleDataset(w, projectId);
-  await w.shared.delete(loadingKey(projectId));
-  const task: SamplingTask = {id: newId('sm'), projectId, kind: 'upload', fileName, total: ids.length, fetched: 0, startedAt: now(), state: 'running', error: null};
-  await setLoading(w, projectId, task);
-  const out: RawExample[] = [];
-  try {
-    for (let i = 0; i < ids.length; i += 10) {
-      out.push(...(await w.examples.lookup(ids.slice(i, i + 10))));
-      // Stop pressed: the next chunk is not asked for, and nothing is saved.
-      if (!(await setLoading(w, projectId, {...task, fetched: Math.min(ids.length, i + 10)}))) {
-        await endLoading(w, projectId);
-        return null;
-      }
-    }
-    return {raws: out, task};
-  } catch (e) {
-    await endLoading(w, projectId);
-    throw e;
-  }
 }
 
 export async function saveGold(w: Scope, projectId: string, exampleId: string, schemaVersion: number, answer: Answer, revealed: boolean, source: GoldLabel['source'] = 'labeled'): Promise<GoldLabel> {

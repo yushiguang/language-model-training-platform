@@ -20,6 +20,10 @@ const ID_PREFIX: Record<CatalogKind, string> = {
   audit_log: 'au',
   dataset_removals: 'rm',
   label_comments: 'lc',
+  data_sources: 'src',
+  source_files: 'sf',
+  source_chunks: 'sc',
+  source_cuts: 'cut',
 };
 
 /** Every kind whose records carry their project's id (all but projects and examples). */
@@ -102,11 +106,15 @@ export function createCatalog(db: DocRuntime, opts: {telemetry?: TelemetryPort} 
       await repo.deleteWhere('projects', {id: projectId});
       await repo.insert('audit_log', {id: catalogId('audit_log'), projectId: null, actor: 'system', action: 'project.delete', data: {projectId}, createdAt: now()});
     },
+
+    async deleteStagedChunks(fileId) {
+      await repo.deleteWhere('source_chunks', {fileId, staged: true});
+    },
   };
   return instrument(contract, opts.telemetry ?? NO_TELEMETRY);
 }
 
-const KIND_OF: Partial<Record<keyof CatalogContract, CatalogKind>> = {createPromptVersion: 'prompt_versions', createSetupVersion: 'setup_versions', audit: 'audit_log', deleteProject: 'projects'};
+const KIND_OF: Partial<Record<keyof CatalogContract, CatalogKind>> = {createPromptVersion: 'prompt_versions', createSetupVersion: 'setup_versions', audit: 'audit_log', deleteProject: 'projects', deleteStagedChunks: 'source_chunks'};
 
 /** Counts and times every catalog operation (`sprint_catalog_*`), without changing what it does. */
 function instrument(c: CatalogContract, tm: TelemetryPort): CatalogContract {

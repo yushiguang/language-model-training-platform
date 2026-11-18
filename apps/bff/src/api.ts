@@ -25,11 +25,12 @@ const KEPT_KEYS = 500;
 export function createBffApi(deps: BffDeps): BffContract {
   const {workflow, identity} = deps;
 
-  // The signed-in user, asked once; a failed sign-in check is asked again on the next call.
-  let user: Promise<CallerUser> | null = null;
-  const currentUser = (): Promise<CallerUser> => {
+  // The signed-in user, asked once; a failed sign-in check is asked again on the next call. Their
+  // organization is the tenant: what a tenant owns (data sources, #29) is kept per organization.
+  let user: Promise<{user: CallerUser; tenantId?: string}> | null = null;
+  const currentUser = (): Promise<{user: CallerUser; tenantId?: string}> => {
     if (!user) {
-      user = identity.currentUser().then(u => ({id: u.id, name: u.name, ...(u.email ? {email: u.email} : {})}));
+      user = identity.currentUser().then(u => ({user: {id: u.id, name: u.name, ...(u.email ? {email: u.email} : {})}, ...(u.organization ? {tenantId: u.organization} : {})}));
       user.catch(() => (user = null));
     }
     return user;
@@ -38,9 +39,11 @@ export function createBffApi(deps: BffDeps): BffContract {
   /** The context of one call: a new request id, the caller, and what the channel knows. */
   const context = async (locale?: Locale): Promise<RequestContext> => {
     const timeZone = deps.timeZone?.();
+    const who = await currentUser();
     return {
       requestId: newId('rq'),
-      user: await currentUser(),
+      user: who.user,
+      ...(who.tenantId ? {tenantId: who.tenantId} : {}),
       caller: 'bff',
       ...(locale ? {locale} : {}),
       ...(timeZone ? {timeZone} : {}),
@@ -91,13 +94,13 @@ export function createBffApi(deps: BffDeps): BffContract {
     renameProject: pass('renameProject'),
     tick: pass('tick'),
     saveSettings: pass('saveSettings'),
-    getSamplePoolSize: pass('getSamplePoolSize'),
+    listDataSources: pass('listDataSources'),
+    getDataSource: pass('getDataSource'),
+    createDataSource: pass('createDataSource'),
+    addSourceFile: pass('addSourceFile'),
     exampleMedia: pass('exampleMedia'),
-    startSampleDataset: pass('startSampleDataset'),
+    takeExamples: pass('takeExamples'),
     stopSampleDataset: pass('stopSampleDataset'),
-    uploadDatasetText: pass('uploadDatasetText'),
-    appendSample: pass('appendSample'),
-    appendUpload: pass('appendUpload'),
     removeExamples: pass('removeExamples'),
     restoreExamples: pass('restoreExamples'),
     pruneDataset: pass('pruneDataset'),

@@ -46,6 +46,8 @@ interface WorldOpts {
   /** Where problem reports go (none: reports cannot be sent). */
   tickets?: TicketPort;
   sharedState?: SharedStatePort;
+  /** The job module's wait before a retry (default its own). */
+  retryDelayMs?: number;
 }
 
 /** The helpers' tools on the world's project, with no turn: calls run as the world's caller. */
@@ -76,7 +78,7 @@ async function world(prefix: string, opts: WorldOpts = {}) {
   const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks(), onChange: id => inst.emitChange(id ?? null)});
   const agents = opts.agents ?? ({} as AgentRuntimeContract);
   // Background work runs through the job module, in this process, as in the browser build.
-  const jobs = createJobs({store: memoryJobStore()});
+  const jobs = createJobs({store: memoryJobStore(), ...(opts.retryDelayMs ? {retryDelayMs: opts.retryDelayMs} : {})});
   const inst = createInstance({
     jobs: jobs.api,
     catalog,
@@ -902,58 +904,302 @@ test('problem report (1.1.0): without a ticket port the helper is told to send t
   assert.match(res.error, /cannot be sent/);
 });
 
-test('sampling: a job whose progress stays on until the dataset is saved; a save that fails twice is skipped and counted apart, and the halves stay even', async () => {
-  const w = await world('b-sample', {gold: null});
-  const {startSampleDataset, getSamplingTask, appendSample} = await import('./dataset.ts');
-  // The job runs in a scope of its own: the fakes go on the instance every scope reads.
+/** Every item id is a video the example service knows, except ids starting with "gone". */
+const knownItems = {lookup: async (ids: string[]) => ids.filter(id => !id.startsWith('gone')).map(externalId => ({externalId, type: 'video' as const, title: '', features: {}}))};
+
+/** A data source of the world's tenant made from `ids`, imported. */
+async function sourceOf(w: Awaited<ReturnType<typeof world>>, name: string, ids: string[]) {
+  const {createDataSource} = await import('./sources.ts');
+  const res = await createDataSource(w.ws, {name, fileName: `${name}.txt`, text: ids.join('\n')});
+  assert.ok(res.source, res.error ?? 'no source');
+  await w.jobs.idle();
+  return res.source!.id;
+}
+
+test('data sources (#29): a file of ids becomes a tenant source; bad rows and repeats are counted; more files add to it; another tenant cannot see it', async () => {
+  const w = await world('src1', {gold: null});
+  const {addSourceFile, createDataSource, getDataSource, listDataSources} = await import('./sources.ts');
+  assert.match((await createDataSource(w.ws, {name: ' ', fileName: 'a.csv', text: 'item_id\n1'})).error ?? '', /name/);
+  assert.match((await createDataSource(w.ws, {name: 'x', fileName: 'a.xlsx', text: '1'})).error ?? '', /CSV, JSONL or TXT/);
+  const res = await createDataSource(w.ws, {name: 'Weekly feed', fileName: 'feed.csv', text: 'item_id,creator\nv1,a\nv2,b\n,c\nv1,d\nbad id!,e\nv3,f\n'});
+  assert.ok(res.file);
+  assert.deepEqual([res.file!.rows, res.file!.bad, res.file!.repeats, res.file!.state], [6, 2, 1, 'importing']);
+  assert.match((await createDataSource(w.ws, {name: 'weekly FEED', fileName: 'b.txt', text: 'v9'})).error ?? '', /already exists/);
+  await w.jobs.idle();
+  let d = (await getDataSource(w.ws, res.source!.id))!;
+  assert.deepEqual([d.source.items, d.source.notUsed, d.source.files, d.source.importing, d.files[0].state], [3, 3, 1, null, 'done']);
+  // A second file: ids already in the source are repeats; the rest join it.
+  const more = await addSourceFile(w.ws, {sourceId: res.source!.id, fileName: 'more.txt', text: 'v3\nv4\nv5'});
+  assert.equal(more.file!.repeats, 0, 'repeats against the source are known once the import ran');
+  await w.jobs.idle();
+  d = (await getDataSource(w.ws, res.source!.id))!;
+  assert.deepEqual([d.source.items, d.source.files, d.files.find(f => f.name === 'more.txt')!.repeats, d.files.find(f => f.name === 'more.txt')!.items], [5, 2, 1, 2]);
+  // Another tenant sees none of it.
+  const other = w.inst.scope({...w.ws.ctx, tenantId: 't2'});
+  assert.deepEqual(await listDataSources(other), []);
+  assert.equal(await getDataSource(other, res.source!.id), null);
+  await assert.rejects(addSourceFile(other, {sourceId: res.source!.id, fileName: 'x.txt', text: 'v8'}), /does not exist/);
+  assert.equal((await listDataSources(w.ws)).length, 1);
+});
+
+test('data sources (#29): the sample data is a built-in source of every tenant, made once; files cannot be added to it', async () => {
+  const w = await world('src2', {gold: null});
+  const {addSourceFile, listDataSources} = await import('./sources.ts');
+  Object.assign(w.inst, {examples: {...knownItems, builtIn: async () => ({name: 'Sample data', ids: ['s1', 's2', 's3', 's2']})}});
+  const [a] = await Promise.all([listDataSources(w.ws), listDataSources(w.ws)]);
+  const all = await listDataSources(w.ws);
+  assert.equal(all.length, 1, 'two first reads make it once');
+  assert.deepEqual([a[0].name, a[0].builtIn, all[0].items, all[0].createdBy], ['Sample data', true, 3, 'Sprint']);
+  assert.equal((await listDataSources(w.inst.scope({...w.ws.ctx, tenantId: 't2'})))[0].builtIn, true);
+  assert.match((await addSourceFile(w.ws, {sourceId: all[0].id, fileName: 'x.txt', text: 'z'})).error ?? '', /built-in/);
+});
+
+test('cuts (#30): continuous segments of an order shuffled once; two datasets never share an item; too many is refused with the counts; a deleted project is never reissued; a new file does not move earlier cuts', async () => {
+  const w = await world('cut1', {gold: null});
+  Object.assign(w.inst, {examples: knownItems});
+  const {addSourceFile, allocate, getDataSource} = await import('./sources.ts');
+  const {createProject} = await import('./projects.ts');
+  const {takeExamples} = await import('./dataset.ts');
+  const ids = Array.from({length: 40}, (_, i) => `i${String(i).padStart(2, '0')}`);
+  const sourceId = await sourceOf(w, 'Feed', ids);
+  const a = await allocate(w.ws, 'pr_a', {sourceId, count: 10}, new Set());
+  const b = await allocate(w.ws, 'pr_b', {sourceId, count: 10}, new Set());
+  const taken = (x: typeof a) => x.items.map(i => i.externalId);
+  assert.deepEqual([a.cut.start, a.cut.end, b.cut.start, b.cut.end], [0, 10, 10, 20]);
+  assert.equal(new Set([...taken(a), ...taken(b)]).size, 20, 'no item in both');
+  assert.notDeepEqual(taken(a), ids.slice(0, 10), 'the file order was shuffled at import');
+  // Two cuts at once still never overlap.
+  const [c, e] = await Promise.all([allocate(w.ws, 'pr_c', {sourceId, count: 5}, new Set()), allocate(w.ws, 'pr_e', {sourceId, count: 5}, new Set())]);
+  assert.equal(new Set([...taken(a), ...taken(b), ...taken(c), ...taken(e)]).size, 30);
+  await assert.rejects(allocate(w.ws, 'pr_f', {sourceId, count: 11}, new Set()), /Only 10 unused items are left in Feed; 11 were asked for/);
+  // A deleted project's segment is retired and never handed out again.
+  const p = await createProject(w.ws, 'Doomed');
+  await takeExamples(w.ws, p.id, [{sourceId, count: 4}]);
+  await w.jobs.idle();
+  const before = (await getDataSource(w.ws, sourceId))!;
+  assert.deepEqual([before.taken, before.projects, before.source.notUsed], [34, 5, 6]);
+  await deleteProject(w.ws, p.id);
+  await w.jobs.idle();
+  const after = (await getDataSource(w.ws, sourceId))!;
+  assert.deepEqual([after.taken, after.projects, after.source.notUsed], [34, 4, 6]);
+  const cuts = await w.catalog.find('source_cuts', {projectId: p.id});
+  assert.ok(cuts.length === 1 && cuts[0].retired);
+  // Items already in the dataset are skipped, and still use their positions.
+  const left = await allocate(w.ws, 'pr_f', {sourceId, count: 2}, new Set(ids));
+  assert.deepEqual([left.items.length, left.cut.start, left.cut.end], [0, 34, 40], 'every unused item was already in the dataset');
+  // A new file joins at the end: earlier cuts keep their items.
+  await addSourceFile(w.ws, {sourceId, fileName: 'more.txt', text: 'n1\nn2\ni00'});
+  await w.jobs.idle();
+  const again = await allocate(w.ws, 'pr_g', {sourceId, count: 2}, new Set());
+  assert.deepEqual([again.cut.start, again.cut.end], [40, 42]);
+  assert.deepEqual(taken(again).sort(), ['n1', 'n2'], 'only the new items; i00 was a repeat');
+});
+
+test('take examples (#29): a new dataset from two sources, each example knows its source; Add examples skips items already there; unknown items are counted', async () => {
+  const w = await world('take1', {gold: null});
+  Object.assign(w.inst, {examples: knownItems});
+  const {takeExamples, getSamplingTask} = await import('./dataset.ts');
+  const {createProject} = await import('./projects.ts');
+  const one = await sourceOf(w, 'One', ['a1', 'a2', 'a3', 'a4', 'shared', 'gone1']);
+  const two = await sourceOf(w, 'Two', ['b1', 'b2', 'b3', 'shared']);
+  const p = await createProject(w.ws, 'Fresh');
+  await assert.rejects(takeExamples(w.ws, p.id, []), /at least one/);
+  await assert.rejects(takeExamples(w.ws, p.id, [{sourceId: one, count: 7}]), /Only 6 unused items are left in One; 7 were asked for/);
+  const task = await takeExamples(w.ws, p.id, [{sourceId: one, count: 6}, {sourceId: two, count: 2}]);
+  assert.deepEqual([task.state, task.total], ['running', 8], 'the command returns once the job is queued');
+  await w.jobs.idle();
+  assert.equal(await getSamplingTask(w.ws, p.id), null);
+  let s = (await loadProjectState(w.ws, p.id))!;
+  assert.equal(s.snapshot?.source, 'sources');
+  assert.equal(s.snapshot?.counts.invalid, 1, 'an item the example service does not know is counted');
+  const ext = s.examples.map(e => e.externalId);
+  assert.equal(new Set(ext).size, ext.length, 'no item twice, even one in both sources');
+  assert.ok(s.examples.every(e => (e.sourceId === one || e.sourceId === two) && e.sourceFileId));
+  assert.deepEqual(s.datasetSources.map(l => [l.name, l.examples]), [['One', 5], ['Two', 2]]);
+  // Add examples: the rest of Two; "shared" (if still unused there) is skipped, not added twice.
+  const left = (await (await import('./sources.ts')).getDataSource(w.ws, two))!.source.notUsed;
+  await takeExamples(w.ws, p.id, [{sourceId: two, count: left}]);
+  await w.jobs.idle();
+  s = (await loadProjectState(w.ws, p.id))!;
+  assert.equal(new Set(s.examples.map(e => e.externalId)).size, s.examples.length);
+  assert.ok(['b1', 'b2', 'b3', 'shared'].every(id => s.examples.some(e => e.externalId === id)));
+  assert.equal(s.datasetSources.find(l => l.name === 'Two')!.examples + s.datasetSources.find(l => l.name === 'One')!.examples, s.examples.length);
+});
+
+test('take examples: progress stays on until the dataset is saved; a save that fails twice is skipped and counted apart, the halves stay even; nothing saved fails the job and retires its segment', async () => {
+  const w = await world('take2', {gold: null});
+  const {takeExamples, getSamplingTask} = await import('./dataset.ts');
+  const {getDataSource} = await import('./sources.ts');
+  const {createProject} = await import('./projects.ts');
   const app = w.inst;
-  const raws = Array.from({length: 10}, (_, i) => ({externalId: `s${i}`, type: 'video' as const, title: '', features: {}}));
+  Object.assign(app, {examples: knownItems});
+  const sourceId = await sourceOf(w, 'Feed', Array.from({length: 20}, (_, i) => `s${i}`));
+  const p = await createProject(w.ws, 'Fresh');
   const tries = new Map<string, number>();
   const during: (boolean | undefined)[] = [];
   let failAll = false;
+  let failOne = '';
   const insert = app.catalog.insert.bind(app.catalog);
   Object.assign(app, {
-    examples: {available: async () => 20, lookup: async () => [], sample: async (n: number) => raws.slice(0, n)},
     catalog: Object.assign(Object.create(app.catalog), {
       insert: async (kind: string, rec: {externalId: string}) => {
         if (kind === 'examples') {
-          during.push((await getSamplingTask(w.ws, w.projectId))?.saving);
+          during.push((await getSamplingTask(w.ws, p.id))?.saving);
           const n = (tries.get(rec.externalId) ?? 0) + 1;
           tries.set(rec.externalId, n);
-          if (failAll || rec.externalId === 's3' || (rec.externalId === 's5' && n === 1)) throw new Error('write failed');
+          failOne ||= rec.externalId;
+          if (failAll || rec.externalId === failOne) throw new Error('write failed');
         }
         return insert(kind as never, rec as never);
       },
     }),
   });
-  const task = await startSampleDataset(w.ws, w.projectId, 10);
-  assert.deepEqual([task.state, task.total, task.kind], ['running', 10, 'sample'], 'the command returns once the job is queued');
+  await takeExamples(w.ws, p.id, [{sourceId, count: 10}]);
   await w.jobs.idle();
-  assert.ok(during.length === 12 && during.every(Boolean), 'the page shows saving, never the empty start, while examples are saved');
-  assert.equal(await getSamplingTask(w.ws, w.projectId), null);
-  const snap = (await app.catalog.get('dataset_snapshots', (await app.catalog.get('projects', w.projectId))!.snapshotId!))!;
-  assert.deepEqual([snap.counts.rows, snap.counts.valid, snap.counts.invalid, snap.counts.notSaved], [10, 9, 0, 1]);
-  assert.equal(tries.get('s5'), 2, 'a failed write is tried once more');
+  assert.ok(during.length === 11 && during.every(Boolean), 'the page shows saving, never the empty start, while examples are saved');
+  const snap = (await app.catalog.get('dataset_snapshots', (await app.catalog.get('projects', p.id))!.snapshotId!))!;
+  assert.deepEqual([snap.counts.valid, snap.counts.notSaved], [9, 1]);
+  assert.equal(tries.get(failOne), 2, 'a failed write is tried once more');
   const saved = await app.catalog.find('examples', {snapshotId: snap.id});
-  assert.equal(saved.length, 9);
-  const opt = saved.filter(e => e.optimiserHalf).length;
-  assert.ok(Math.abs(2 * opt - saved.length) <= 1, 'the halves are even over the saved examples');
-  // Nothing saved fails the job, with the reason, and no dataset is made.
+  assert.ok(Math.abs(2 * saved.filter(e => e.optimiserHalf).length - saved.length) <= 1, 'the halves are even over the saved examples');
+  // Nothing saved: the job fails with the reason, and its segment is retired.
   failAll = true;
-  const failing = await startSampleDataset(w.ws, w.projectId, 3);
+  const failing = await takeExamples(w.ws, p.id, [{sourceId, count: 3}]);
   await w.jobs.idle();
   const job = await w.jobs.api.get(w.ws.ctx, failing.id);
   assert.equal(job?.state, 'failed');
   assert.match(job?.error ?? '', /None of the examples could be saved/);
-  assert.equal(await getSamplingTask(w.ws, w.projectId), null);
-  assert.equal((await app.catalog.get('projects', w.projectId))!.snapshotId, snap.id);
-  // Adding: the same rules.
+  const cuts = await app.catalog.find('source_cuts', {projectId: p.id});
+  assert.deepEqual(cuts.map(c => !!c.retired), [false, true]);
+  assert.equal((await getDataSource(w.ws, sourceId))!.source.notUsed, 7, 'a retired segment is not handed out again');
+  // The Dataset page shows why the take failed, until the next take.
+  const shown = (await loadProjectState(w.ws, p.id))!.samplingTask;
+  assert.deepEqual([shown?.state, shown?.id], ['failed', failing.id]);
+  assert.match(shown?.error ?? '', /None of the examples could be saved/);
+  // The per-source count is the examples actually saved (one was not).
+  let s = (await loadProjectState(w.ws, p.id))!;
+  assert.deepEqual(s.datasetSources.map(l => l.examples), [9]);
+  assert.equal(cuts[0].taken, 9, 'the segment records the examples saved, not the items found');
+  // Removed examples leave the count; restored ones come back.
+  const {removeExamples, restoreExamples} = await import('./governance.ts');
+  await removeExamples(w.ws, p.id, s.examples.slice(0, 2).map(e => e.id), 'broken');
+  s = (await loadProjectState(w.ws, p.id))!;
+  assert.deepEqual(s.datasetSources.map(l => l.examples), [7]);
+  await restoreExamples(w.ws, p.id, s.removals.map(r => r.id));
+  s = (await loadProjectState(w.ws, p.id))!;
+  assert.deepEqual(s.datasetSources.map(l => l.examples), [9]);
+  // A new take clears the failure.
   failAll = false;
-  raws.push(...Array.from({length: 4}, (_, i) => ({externalId: `a${i}`, type: 'video' as const, title: '', features: {}})));
-  raws.splice(3, 1);
-  await appendSample(w.ws, w.projectId, 4);
+  await takeExamples(w.ws, p.id, [{sourceId, count: 2}]);
   await w.jobs.idle();
-  assert.equal((await app.catalog.find('examples', {snapshotId: snap.id})).length, 13);
+  assert.equal(await getSamplingTask(w.ws, p.id), null);
+});
+
+test('take examples (review): Add examples whose items are all in the dataset already succeeds and adds nothing', async () => {
+  const w = await world('take3', {gold: null});
+  Object.assign(w.inst, {examples: knownItems});
+  const {takeExamples, getSamplingTask} = await import('./dataset.ts');
+  const {getDataSource} = await import('./sources.ts');
+  const {createProject} = await import('./projects.ts');
+  const one = await sourceOf(w, 'One', ['x1', 'x2', 'x3']);
+  const p = await createProject(w.ws, 'Fresh');
+  await takeExamples(w.ws, p.id, [{sourceId: one, count: 3}]);
+  await w.jobs.idle();
+  // Every item of Two is in the dataset already.
+  const two = await sourceOf(w, 'Two', ['x3', 'x1']);
+  const job = await takeExamples(w.ws, p.id, [{sourceId: two, count: 2}]);
+  await w.jobs.idle();
+  assert.equal((await w.jobs.api.get(w.ws.ctx, job.id))?.state, 'done');
+  assert.equal(await getSamplingTask(w.ws, p.id), null, 'no failure to show');
+  const s = (await loadProjectState(w.ws, p.id))!;
+  assert.equal(s.examples.length, 3);
+  assert.deepEqual(s.datasetSources.map(l => [l.name, l.examples]), [['One', 3]]);
+  assert.equal((await getDataSource(w.ws, two))!.source.notUsed, 0, 'the positions are used: the next take moves on');
+});
+
+/** The world's catalog with `insert` and `patch` going through `hook` first (it may throw). */
+function hookCatalog(w: Awaited<ReturnType<typeof world>>, hook: {insert?: (kind: string, rec: Record<string, unknown>) => void; patch?: (kind: string, id: string, patch: Record<string, unknown>) => void}) {
+  const app = w.inst;
+  const insert = app.catalog.insert.bind(app.catalog);
+  const patch = app.catalog.patch.bind(app.catalog);
+  Object.assign(app, {
+    catalog: Object.assign(Object.create(app.catalog), {
+      insert: async (kind: string, rec: Record<string, unknown>) => (hook.insert?.(kind, rec), insert(kind as never, rec as never)),
+      patch: async (kind: string, id: string, p: Record<string, unknown>) => (hook.patch?.(kind, id, p), patch(kind as never, id, p as never)),
+    }),
+  });
+}
+
+test('data sources (review): an import that keeps failing is tried again, then marked failed; what it wrote can be taken, the rest is skipped, and uploading it again adds the rest', async () => {
+  const w = await world('ing1', {gold: null, retryDelayMs: 1});
+  const {addSourceFile, allocate, getDataSource} = await import('./sources.ts');
+  const sourceId = await sourceOf(w, 'Feed', Array.from({length: 30}, (_, i) => `a${i}`));
+  const big = Array.from({length: 2500}, (_, i) => `b${i}`);
+  let tries = 0;
+  let failing = true;
+  // Positions 30-1029 are written; the piece at 1030 never is.
+  hookCatalog(w, {
+    insert: (kind, rec) => {
+      if (failing && kind === 'source_chunks' && !rec.staged && rec.start === 1030) {
+        tries++;
+        throw new Error('write failed');
+      }
+    },
+  });
+  const res = await addSourceFile(w.ws, {sourceId, fileName: 'big.txt', text: big.join('\n')});
+  await until(async () => (await w.catalog.get('source_files', res.file!.id))?.state === 'failed', 'the import to fail');
+  const file = (await w.catalog.get('source_files', res.file!.id))!;
+  assert.equal(tries, 3, 'tried twice more before it failed');
+  assert.deepEqual([file.start, file.items, file.done], [30, 2500, 1000]);
+  assert.match(file.error ?? '', /write failed/);
+  assert.equal((await w.catalog.find('source_chunks', {fileId: file.id})).filter(c => c.staged).length, 0, 'its staged ids are gone');
+  let d = (await getDataSource(w.ws, sourceId))!;
+  assert.deepEqual([d.source.items, d.source.notUsed, d.source.importing], [1030, 1030, null], 'only written items count');
+  // A later file goes after the failed one's positions; a cut skips the unwritten ones.
+  failing = false;
+  await addSourceFile(w.ws, {sourceId, fileName: 'last.txt', text: 'c1\nc2\nc3'});
+  await w.jobs.idle();
+  d = (await getDataSource(w.ws, sourceId))!;
+  assert.deepEqual([d.source.items, d.source.notUsed], [1033, 1033]);
+  const cut = await allocate(w.ws, 'pr_x', {sourceId, count: 1033}, new Set());
+  assert.equal(new Set(cut.items.map(i => i.externalId)).size, 1033);
+  assert.ok(['c1', 'c2', 'c3'].every(id => cut.items.some(i => i.externalId === id)), 'the walk went past the hole');
+  assert.deepEqual([cut.cut.start, cut.cut.end], [0, 2533]);
+  await assert.rejects(allocate(w.ws, 'pr_x', {sourceId, count: 1}, new Set()), /Only 0 unused items/);
+  // Uploading the file again adds what the failed import did not write.
+  const again = await addSourceFile(w.ws, {sourceId, fileName: 'big.txt', text: big.join('\n')});
+  await w.jobs.idle();
+  const second = (await w.catalog.get('source_files', again.file!.id))!;
+  assert.deepEqual([second.state, second.items, second.repeats], ['done', 1500, 1000]);
+  d = (await getDataSource(w.ws, sourceId))!;
+  assert.deepEqual([d.source.items, d.source.notUsed, d.taken], [2533, 1500, 1033]);
+});
+
+test('data sources (review): an import cut short between reserving on the source and on the file goes on with the same positions; a file imported meanwhile goes after them', async () => {
+  const w = await world('ing2', {gold: null, retryDelayMs: 150});
+  const {addSourceFile, allocate, getDataSource} = await import('./sources.ts');
+  const sourceId = await sourceOf(w, 'Feed', ['a1', 'a2', 'a3']);
+  let crashed = false;
+  hookCatalog(w, {
+    patch: (kind, _id, p) => {
+      if (kind === 'source_files' && 'start' in p && !crashed) {
+        crashed = true;
+        throw new Error('process stopped');
+      }
+    },
+  });
+  const one = await addSourceFile(w.ws, {sourceId, fileName: 'one.txt', text: 'b1\nb2\nb3\nb4'});
+  await until(async () => crashed, 'the first import to stop');
+  // Before the first one's retry, a second file is imported.
+  const two = await addSourceFile(w.ws, {sourceId, fileName: 'two.txt', text: 'c1\nc2'});
+  await until(async () => (await w.catalog.get('source_files', one.file!.id))?.state === 'done', 'the first import to go on');
+  await w.jobs.idle();
+  const [f1, f2] = await Promise.all([w.catalog.get('source_files', one.file!.id), w.catalog.get('source_files', two.file!.id)]);
+  assert.deepEqual([f1!.start, f1!.items, f2!.start, f2!.items, f2!.state], [3, 4, 7, 2, 'done']);
+  const d = (await getDataSource(w.ws, sourceId))!;
+  assert.deepEqual([d.source.items, d.source.notUsed], [9, 9], 'no position reserved twice or lost');
+  const all = await allocate(w.ws, 'pr_x', {sourceId, count: 9}, new Set());
+  assert.deepEqual(all.items.map(i => i.externalId).sort(), ['a1', 'a2', 'a3', 'b1', 'b2', 'b3', 'b4', 'c1', 'c2']);
 });
 
 test('revision (G9): every change gives a new one, a burst of writes writes it once, and the light read carries the running work', async () => {

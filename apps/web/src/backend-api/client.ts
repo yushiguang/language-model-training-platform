@@ -1,4 +1,4 @@
-import type {AgentLive, BffContract, ChatAttachment, DatasetUploadResult, EventName, EventProps, GoldUploadResult} from '@yushiguang/sprint-contracts';
+import type {AgentLive, BffContract, ChatAttachment, EventName, EventProps, GoldUploadResult, SourceUploadResult} from '@yushiguang/sprint-contracts';
 
 /**
  * What the pages call (spec 1.0.0, section 7.3): the bff's contract, plus the few things that only
@@ -30,9 +30,10 @@ export interface BffClient extends BffContract {
   uploadAsset(file: File): Promise<{url: string}>;
   /** An image is uploaded; a text file's start is read into the attachment. */
   prepareChatAttachment(file: File): Promise<ChatAttachment>;
-  uploadDatasetFile(projectId: string, file: File): Promise<DatasetUploadResult>;
-  /** Adds the file's examples to the eval dataset there (spec 1.0.0, 4.3). */
-  appendDatasetFile(projectId: string, file: File): Promise<DatasetUploadResult>;
+  /** Creates a data source of the caller's tenant from a file of item ids (#29). */
+  createDataSourceFile(name: string, file: File): Promise<SourceUploadResult>;
+  /** Adds a file of item ids to a data source. */
+  addSourceFileFile(sourceId: string, file: File): Promise<SourceUploadResult>;
   /** Upload labels: a CSV or JSONL file of item ids and answers (`uploadGoldText`). */
   uploadGoldFile(projectId: string, file: File): Promise<GoldUploadResult>;
 
