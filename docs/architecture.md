@@ -155,6 +155,12 @@ recovery of a dead runner's jobs, retries and cancel. A job holds ids only; the 
 - In the browser the job store is this tab's memory (`memoryJobStore`) and the tab runs its own
   jobs as soon as they are queued, so every flow behaves as before; labeling and the Optimiser keep
   their browser locks, so two tabs never run the same task or run.
+- On a server the locks are shared too (#46): the composition passes one `leaseLocks` over
+  `Platform.lockStore` to labeling, the workflow and the Optimiser in every unit, so two units
+  never run the same task or Optimiser run, and a BFF unit's read never calls a worker's live task
+  abandoned. Labeling also asks the job queue before reaping (`liveElsewhere`: a queued or running
+  `labeling.runTask` job, or the project's `optimiser.run` job), so live job work is not falsified
+  even by a unit whose locks cannot see the runner.
 
 ## The structured prompt (1.0.0)
 
@@ -236,7 +242,7 @@ record with its cost. Automatic spend is recorded for the audit log and telemetr
 limits nothing.
 
 ```
-createTask ──► runTask (browser lock "labeling:<task>"; a second tab gets null)
+createTask ──► runTask (lock "labeling:<task>"; a second runner anywhere gets null)
                  │ rebuild counters from saved predictions; pending = not labeled, not failed
                  │ 4 workers take the next pending example:
                  │    render prompt ─► gateway.label ─► parse answer ─► save prediction ─► increment counters
@@ -250,15 +256,19 @@ createTask ──► runTask (browser lock "labeling:<task>"; a second tab gets 
 
 - **Predictions are shared.** The prediction id is a hash of version + model + settings + example,
   so a task for the same combination reuses what is saved; only missing examples are labeled.
+  Saving re-reads first, so an answer another runner saved while this call was in flight is the
+  one document kept (that call is already paid; not paying at all is the prediction lock's job).
 - **Resume.** A task runs as a `labeling.runTask` job; in the browser the open page is the
-  runner. Closing the page stops the runner; the task stays `running` with no lock held, and the
-  next read reports it as `paused` with reason `closed`. Scoring and optimiser tasks resume by
+  runner. Closing the page stops the runner; the task stays `running` with no lock held anywhere
+  and no live job behind it, and the next read reports it as `paused` with reason `closed` (on a
+  server, a dead worker's task reaps once its lock lease ends). Scoring and optimiser tasks resume by
   themselves on the next page tick (which queues a new job). Retry failed clears the failed list
   and runs again.
-- **Other tabs.** Writes are announced to other tabs of the site, and pages re-read every 5 s
-  while something runs, so a second tab follows a run and sees it pause.
-- **Later:** several runners sharing one task, and shared quota records across runners. A worker
-  outside the browser is a job runner (`@yushiguang/sprint-jobs` with a shared `JobStorePort`).
+- **Other tabs and units.** Writes are announced to other tabs of the site, and pages re-read every 5 s
+  while something runs, so a second tab follows a run and sees it pause. Across server units the
+  shared lock store does the same job (#46): one runner per task, and reads in any unit see it.
+- **Workers.** A worker outside the browser is a job runner (`@yushiguang/sprint-jobs` with a shared
+  `JobStorePort`), and several of them coordinate through the shared lock store above.
 
 ## The Optimiser and the helpers
 
@@ -451,5 +461,9 @@ Optimiser each read the features of the examples they use.
 - In the browser build, jobs run in the open page and its job store is that tab's memory: closing
   the page drops what was queued there, and the next page tick queues due work again. The
   Optimiser loop holds a browser lock per project and model, so a second tab cannot run it twice.
-- A job whose runner lost its lease (several runners only) is not stopped mid-step: labeling's lock
-  per task and the Optimiser's lock keep the runner that took it over off it until it ends.
+- A job whose runner lost its lease (several runners only) is not stopped mid-step: with shared
+  locks (`leaseLocks` over `Platform.lockStore`, #46), labeling's lock per task and the Optimiser's
+  lock keep the runner that took it over off it until it ends; on per-process locks that holds only
+  within one process. A runner frozen longer than its lock lease can still duplicate an in-flight
+  model call (the fencing limit every lease here accepts); the saved-prediction re-check then keeps
+  the store to one document, and the next run recounts from saved answers.

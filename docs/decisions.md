@@ -3,6 +3,12 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-19 (Labeling across processes, #46)
+
+- **Named locks are a platform port, shared by every process.** `LockStorePort` (additive contract change, its own pull request first) gives acquire/renew/release/isHeld as atomic per-name lease operations, like the job and limiter stores; `@yushiguang/sprint-platform` brings the memory stand-in and `leaseLocks`, and every composition passes one such locks object to labeling, the workflow and the Optimiser. Before this, locks were per browser or per process, so a BFF replica read a worker's running task as abandoned and persisted it `paused`/`closed`, and after a job-lease takeover or in a second Optimiser worker two runners could both pay for one example.
+- **`listTasks` never falsifies live work.** It reaps a `running` task only when no runner holds it through the shared locks and the composition's `liveElsewhere` reports no queued or running job for it (`labeling.runTask` by task, `optimiser.run` by project), so closed-page and dead-worker tasks still become `paused`/`closed` — a dead worker's only after its lock lease ends — while live runs keep their state in every unit.
+- **The lease fencing residual is accepted.** A runner frozen longer than its lock lease can lose the lock mid-call and duplicate that one call, the same limit the job and limiter leases already accept. Saving a prediction re-reads first, so such a duplicate (or one from per-process locks) still leaves one document and one counted answer; a hard no-duplicate guarantee would need an atomic create-if-absent on the document contract, deferred as its own contract change.
+
 ## 2026-11-19 (Collaboration rules, #41)
 
 - **No code before a go.** Work was being built before it was investigated or agreed, and more branches and pull requests were opened than a maintainer could follow. Every issue now gets a first comment by its kind (Analysis, Design review, Findings and plan, or an answer) and waits for a maintainer's go on the issue.

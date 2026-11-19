@@ -6,10 +6,10 @@ import {createGateway} from '@yushiguang/sprint-llm-gateway';
 import {browserLocks, createLabeling, labelingExecutor} from '@yushiguang/sprint-labeling';
 import {createAgentRuntime} from '@yushiguang/sprint-agents';
 import {createPlatform} from '@yushiguang/sprint-platform-impl';
-import {loopback, memoryJobStore, memoryLimiterStore, memorySharedState} from '@yushiguang/sprint-platform';
+import {leaseLocks, loopback, memoryJobStore, memoryLimiterStore, memorySharedState} from '@yushiguang/sprint-platform';
 import {createJobs} from '@yushiguang/sprint-jobs';
 import {createOptimiser, optimiserExecutor} from '@yushiguang/sprint-optimiser';
-import {createWorkflow} from '@yushiguang/sprint-workflow';
+import {createWorkflow, systemContext} from '@yushiguang/sprint-workflow';
 import {createBffApi} from '@yushiguang/sprint-bff';
 import type {BffClient} from './client';
 import {webTelemetry} from './web-telemetry';
@@ -33,19 +33,45 @@ const telemetry = createTelemetry({
 // One process: the limits are counted here unless the platform shares a store (spec 5).
 const gateway = createGateway(platform, {telemetry, limiterStore: platform.limiterStore ?? memoryLimiterStore()});
 const catalog = createCatalog(platform.db, {telemetry});
-const labeling = createLabeling({db: platform.db, catalog, gateway, locks: browserLocks(), resolveUrl: absoluteUrl, onChange: projectId => workflow.changed(projectId), telemetry});
 /**
  * Background work (scoring, reports, sampling, Optimiser runs, deleting a project) runs as jobs.
  * In the browser this page is the runner: jobs start as soon as they are queued, kept in the
  * platform's job store (by default this tab's memory, so a closed page drops its queue and the
- * pages' tick picks the work up again, as before).
+ * pages' tick picks the work up again, as before). Built before labeling, whose orphan check
+ * below reads the queue.
  */
 const jobs = createJobs({store: platform.jobStore ?? memoryJobStore(), telemetry});
+/**
+ * One locks object for labeling, the workflow and the Optimiser in this process (issue #46):
+ * over the platform's shared lock store when it supplies one (a server composition), so a lock
+ * taken in one unit is seen in every other; in the browser, Web Locks as before. The same object
+ * goes to all three, so their `isHeld` checks agree with each other's runs.
+ */
+const locks = platform.lockStore ? leaseLocks(platform.lockStore) : browserLocks();
+const labeling = createLabeling({
+  db: platform.db,
+  catalog,
+  gateway,
+  locks,
+  resolveUrl: absoluteUrl,
+  onChange: projectId => workflow.changed(projectId),
+  telemetry,
+  /**
+   * A running task whose lock this process cannot see may still be live as queued or running
+   * job work (in another unit, whose runner holds the job's lease): such a task is never read
+   * as abandoned. An Optimiser-purpose task is covered by its project's Optimiser job, behind
+   * which it labels in-process.
+   */
+  liveElsewhere: async task => {
+    const live = await jobs.api.list(systemContext('labeling'), {projectId: task.projectId, kinds: ['labeling.runTask', 'optimiser.run'], states: ['queued', 'running']});
+    return live.some(j => (j.kind === 'labeling.runTask' && j.args.taskId === task.id) || (task.purpose === 'optimiser' && j.kind === 'optimiser.run'));
+  },
+});
 /** The application module, with no state of its own; short-lived shared state goes to the platform's store. */
-const workflow = createWorkflow({jobs: jobs.api, catalog, labeling, gateway, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, tickets: platform.tickets, appVersion: APP_VERSION, standIns: platform.standIns, telemetry, locks: browserLocks(), sharedState: platform.sharedState ?? memorySharedState()});
+const workflow = createWorkflow({jobs: jobs.api, catalog, labeling, gateway, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, tickets: platform.tickets, appVersion: APP_VERSION, standIns: platform.standIns, telemetry, locks, sharedState: platform.sharedState ?? memorySharedState()});
 /** The helpers, built once with their model, the project tools and where live progress goes. */
 const agentRuntime = createAgentRuntime({llm: gateway.agentModel(), tools: workflow.toolHost, progress: workflow.agentProgress});
-const optimiser = createOptimiser({catalog, labeling, agents: agentRuntime, host: workflow.optimiserHost, locks: browserLocks(), telemetry, onChange: projectId => workflow.changed(projectId)});
+const optimiser = createOptimiser({catalog, labeling, agents: agentRuntime, host: workflow.optimiserHost, locks, telemetry, onChange: projectId => workflow.changed(projectId)});
 workflow.connect({agents: agentRuntime, optimiser});
 // Executors tell open pages when their records change, as before; a job's own life does not, so a
 // job that changes nothing never makes the pages read again (and tick again).

@@ -107,20 +107,25 @@ imports it and wraps it without reaching into `src/` paths: `createGateway` (`@y
 return a Promise, so a server can sign a URL per call; every image of a prompt is resolved at once
 before the call.
 
-Locks in a server composition root — a deployment's own wiring, as in this section; this
-repository's in-process root (`apps/web/src/backend-api/in-process.ts`) is a browser composition
-and still passes `browserLocks()` everywhere, so nothing in the browser build changes yet: build
-one locks object per process and pass that same object as `locks` to `createLabeling`,
+Locks in a server composition root — a deployment's own wiring, as in this section: build one
+locks object per process and pass that same object as `locks` to `createLabeling`,
 `createWorkflow` and `createOptimiser`, in the BFF units and the worker unit alike —
 `leaseLocks(platform.lockStore)` from `@yushiguang/sprint-platform` when the platform supplies a
 `lockStore`, else `browserLocks()` in the browser or `memoryLocks()` in a single server process.
-Every process must lock over the **same** store: the BFF units only read and enqueue, but
-labeling's `listTasks` asks `isHeld` whether a task lock is held before it calls a running task
-abandoned, so a lock store a BFF unit cannot see makes a live worker run look abandoned. Sharing
-one object inside a unit matters too: labeling calls `isHeld` for its task locks and the workflow
-calls `isHeld` for the Optimiser lock (which the Optimiser itself only ever takes through
-`locks.run`), so those checks only agree with the runs behind them when labeling, the workflow
-and the Optimiser were all built over the same locks.
+This repository's in-process root (`apps/web/src/backend-api/in-process.ts`) wires it exactly
+this way — one object, `leaseLocks(platform.lockStore)` when a `lockStore` is supplied and
+`browserLocks()` otherwise, so the browser build is unchanged — and a server composition copies
+that shape. Every process must lock over the **same** store: the BFF units only read and enqueue,
+but labeling's `listTasks` asks `isHeld` whether a task lock is held before it calls a running
+task abandoned, so a lock store a BFF unit cannot see makes a live worker run look abandoned.
+Sharing one object inside a unit matters too: labeling calls `isHeld` for its task locks and the
+workflow calls `isHeld` for the Optimiser lock (which the Optimiser itself only ever takes
+through `locks.run`), so those checks only agree with the runs behind them when labeling, the
+workflow and the Optimiser were all built over the same locks. Build the job module before
+labeling and also pass labeling `liveElsewhere`, answered from `jobs.api.list` as the in-process
+root does (a queued or running `labeling.runTask` job by task id, or an `optimiser.run` job by
+project for an optimiser-purpose task): a task that is live as job work is then never read as
+abandoned either, even by a unit whose locks cannot see the runner.
 
 ## Endpoints and limits
 

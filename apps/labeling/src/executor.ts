@@ -8,7 +8,12 @@ import type {JobExecutor, LabelingContract} from '@yushiguang/sprint-contracts';
  * `retry` (Retry failed: label the failed examples again).
  *
  * A cancel is the user's Stop (`stopTask`). A lost lease leaves the task alone: the task's own
- * lock keeps a second runner off it until this one ends.
+ * lock keeps a second runner off it until this one ends. That premise holds across processes
+ * only when the composition root wires labeling with shared locks (`leaseLocks` over
+ * `Platform.lockStore`, docs/integration.md; issue #46); with per-process locks it holds only
+ * inside this process, and a second runner that does slip through has already paid by the time
+ * the saved-prediction re-check runs (it follows the model call) — the re-check then keeps the
+ * store to one document, it does not prevent the duplicate call.
  */
 export function labelingExecutor(labeling: LabelingContract): JobExecutor {
   return {
