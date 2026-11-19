@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, AgentToolRequest, ClientDiagnostics, RequestContext, SharedStatePort, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission} from '@yushiguang/sprint-contracts';
+import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, ClientDiagnostics, RequestContext, SharedStatePort, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission} from '@yushiguang/sprint-contracts';
 import {createCatalog} from '@yushiguang/sprint-catalog';
 import {createLabeling, labelingExecutor, memoryLocks} from '@yushiguang/sprint-labeling';
 import {createOptimiser, optimiserExecutor} from '@yushiguang/sprint-optimiser';
@@ -315,13 +315,12 @@ test('a helper that joined keeps answering on its page; on another page the page
         await progress({message: {role: 'event', agent: null, event: 'join', text: 'Prompt helper joined to answer'}});
         await progress({agent: 'prompt_agent', reply: 'Sure'});
         await progress({message: {role: 'agent', agent: 'prompt_agent', text: 'Sure.'}});
-        return {invocations: [{from: 'user', to: 'front_desk', intent: 'answer', note: ''}, {from: 'front_desk', to: 'prompt_agent', intent: 'revise_prompt', note: ''}], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
+        return {invocations: [{from: 'user', to: 'front_desk', intent: 'answer', note: ''}, {from: 'front_desk', to: 'prompt_agent', intent: 'revise_prompt', note: ''}], messages: [], proposal: null, toolCalls: [], modelCalls: [], skills: [], parseFailures: []};
       }
       await progress({message: {role: 'agent', agent: input.page.agent, text: 'Again.'}});
-      return {invocations: [{from: 'user', to: input.page.agent, intent: input.page.intent, note: ''}], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
+      return {invocations: [{from: 'user', to: input.page.agent, intent: input.page.intent, note: ''}], messages: [], proposal: null, toolCalls: [], modelCalls: [], skills: [], parseFailures: []};
     },
     reflectPrompt: async () => ({prompt: sp(), change: ''}),
-    draftImprovement: async () => ({prompt: sp(), changes: [], reply: ''}),
     cancel: async () => {},
   } satisfies AgentRuntimeContract;
   const w = await world('b12', {agents});
@@ -355,7 +354,7 @@ const ruled = (id: string, _n: number, prompt: string) => {
 let optimiserRandom = () => 0;
 
 const ruleAgent = (fail: {left: number} = {left: 0}): AgentRuntimeContract => ({
-  runTurn: async () => ({invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []}),
+  runTurn: async () => ({invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], skills: [], parseFailures: []}),
   cancel: async () => {},
   async reflectPrompt(input) {
     if (fail.left > 0) {
@@ -365,7 +364,6 @@ const ruleAgent = (fail: {left: number} = {left: 0}): AgentRuntimeContract => ({
     const k = (rulesOf(input.prompt).match(/RULE/g) ?? []).length + 1;
     return {prompt: withRules(input.prompt, `${rulesOf(input.prompt)}\nRULE ${k}`.trim()), change: `rule ${k}`};
   },
-  draftImprovement: async input => ({prompt: input.prompt, changes: [], reply: ''}),
 });
 
 test('Auto Optimise: dry run, full labeling, stops when a version passes; versions are minors of the run major', async () => {
@@ -625,8 +623,6 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
 
 test('Finding 3: no helper tool or helper input carries an example of the held-out half', async () => {
   const agents = ruleAgent();
-  const improve: Parameters<AgentRuntimeContract['draftImprovement']>[0][] = [];
-  agents.draftImprovement = async input => (improve.push(input), {prompt: input.prompt, changes: [], reply: ''});
   const w = await world('b31', {agents, answer: ruled, macroF1: 0.99, gold: goldOf});
   await w.newVersion();
   await tick(w.ws, await w.state());
@@ -656,18 +652,15 @@ test('Finding 3: no helper tool or helper input carries an example of the held-o
   assert.equal(tried.rows.length, 5);
   assert.deepEqual(leaks(tried), []);
 
-  const {improveWithAi} = await import('./agents.ts');
-  await improveWithAi(w.ws, w.projectId, s.versions[0].id);
-  const input = improve[0];
-  assert.ok(input.examples && input.examples.length > 0);
-  assert.deepEqual(leaks(input), [], 'examples and mix-ups come from the optimiser half');
-  assert.ok(input.mixUps.every(m => m.exampleIds.every(id => !heldOut.has(id))));
+  // Improve with AI's brief (#39): the skill reads it with get_mistakes.
+  const brief = (await call('get_mistakes', {version: 'v1'})) as {examples: object[]; mixUps: object[]};
+  assert.ok(brief.examples.length > 0);
+  assert.deepEqual(leaks(brief), [], 'examples and mix-ups come from the optimiser half');
+  assert.ok(brief.mixUps.every(m => !('exampleIds' in m)), 'mix-ups as counts only');
 });
 
 test('R4-4: the labeler\'s Why reaches the helpers for optimiser-half examples only', async () => {
   const agents = ruleAgent();
-  const improve: Parameters<AgentRuntimeContract['draftImprovement']>[0][] = [];
-  agents.draftImprovement = async input => (improve.push(input), {prompt: input.prompt, changes: [], reply: ''});
   const w = await world('b33', {agents, answer: ruled, macroF1: 0.99, gold: goldOf});
   await w.newVersion();
   await tick(w.ws, await w.state());
@@ -684,11 +677,9 @@ test('R4-4: the labeler\'s Why reaches the helpers for optimiser-half examples o
   await reviewGold(w.ws, w.projectId, held.id, v, 'kept', undefined, 'A held-out note');
   const notes = await labelComments(w.ws, w.projectId, (await w.state())!);
   assert.deepEqual([...notes], [[mine.id, ['Shown at work, so it is a Tutorial']]]);
-  const {improveWithAi} = await import('./agents.ts');
-  await improveWithAi(w.ws, w.projectId, v);
-  const briefs = improve[0].examples ?? [];
-  assert.deepEqual(briefs.find(b => b.externalId === mine.externalId)?.comments, ['Shown at work, so it is a Tutorial']);
-  assert.ok(!JSON.stringify(improve[0]).includes('A held-out note'));
+  const brief = (await toolsOf(w).call({agent: 'prompt_agent', name: 'get_mistakes', args: {version: 'v1'}})) as {examples: {externalId: string; comments?: string[]}[]};
+  assert.deepEqual(brief.examples.find(b => b.externalId === mine.externalId)?.comments, ['Shown at work, so it is a Tutorial']);
+  assert.ok(!JSON.stringify(brief).includes('A held-out note'));
 });
 
 test("Auto Optimise: the pool holds the user's other scored versions too, and the helper reads the model's reasons", async () => {
@@ -1458,4 +1449,69 @@ test('agent abilities (#39): read_guide finds a topic by name or by a word peopl
   const none = await call('quantum');
   assert.match(none.error ?? '', /No guide topic/);
   assert.ok(none.topics);
+});
+
+test('agent abilities (#39): get_flips and get_confusions read two scored versions, from the optimiser half only', async () => {
+  // v1 answers Vlog everywhere; v2 (one RULE) is right on 0-4. Gold: Tutorial on 0-7, Vlog on 8-9.
+  const w = await world('ab7', {answer: ruled, macroF1: 0.99, gold: goldOf});
+  await w.newVersion();
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
+  await w.newVersion('RULE 1');
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.state()).reports.length === 2, 'v2 scored');
+  const s = await w.state();
+  const heldOut = new Set(s.examples.filter(e => e.split === 'eval' && !e.optimiserHalf).flatMap(e => [e.externalId, e.id]));
+  const leaks = (x: unknown) => [...heldOut].filter(id => new RegExp(`"(id|externalId|exampleId)":"${id}"`).test(JSON.stringify(x)));
+  const tools = toolsOf(w);
+  const f = (await tools.call({agent: 'evaluation_agent', name: 'get_flips', args: {a: 'v1', b: 'v2'}})) as {a: {version: string}; b: {version: string}; fixed: {id: string; a: string[]; b: string[]; gold: string[]}[]; broken: object[]; promptB: StructuredPrompt};
+  assert.deepEqual([f.a.version, f.b.version], ['v1', 'v2']);
+  assert.ok(f.fixed.length > 0);
+  assert.ok(f.fixed.every(x => x.a[0] === 'Vlog' && x.b[0] === 'Tutorial' && x.gold[0] === 'Tutorial'));
+  assert.equal(f.broken.length, 0);
+  assert.match(f.promptB.ruleGroups[0].content, /RULE 1/);
+  assert.deepEqual(leaks(f), [], 'flipped examples come from the optimiser half');
+  // b defaults to the newest scored and a to the one before it.
+  const d = (await tools.call({agent: 'evaluation_agent', name: 'get_flips', args: {}})) as {a: {version: string}; b: {version: string}};
+  assert.deepEqual([d.a.version, d.b.version], ['v1', 'v2']);
+  await assert.rejects(tools.call({agent: 'evaluation_agent', name: 'get_flips', args: {a: 'v2', b: 'v2'}}), /two different versions/);
+  await assert.rejects(tools.call({agent: 'front_desk', name: 'get_flips', args: {}}), /cannot use get_flips/);
+
+  const c = (await tools.call({agent: 'prompt_agent', name: 'get_confusions', args: {}})) as {scoredVersions: number; mixUps: {gold: string; predicted: string; count: number; inVersions: string[]}[]; balance: {value: string}[]};
+  assert.equal(c.scoredVersions, 2);
+  const top = c.mixUps[0];
+  assert.deepEqual([top.gold, top.predicted], ['Tutorial', 'Vlog']);
+  assert.deepEqual(top.inVersions.sort(), ['v1', 'v2'], 'summed over the versions it comes back in');
+  assert.ok(c.mixUps.every(m => !('exampleIds' in m)), 'counts only, never examples');
+  assert.deepEqual(c.balance.map(b => b.value).sort(), [...schema.values.map(v => v.name)].sort());
+});
+
+test('agent abilities (#39): Improve with AI is a Prompt helper turn, and its draft goes on the version it improves', async () => {
+  const seen: AgentTurnRequest[] = [];
+  const agents = ruleAgent();
+  const w = await world('ab8', {agents, answer: ruled, macroF1: 0.99, gold: goldOf});
+  agents.runTurn = async input => {
+    seen.push(input);
+    // The skill reads its brief through the tool host, as the runtime does.
+    const brief = (await toolsOf(w).call({agent: 'prompt_agent', name: 'get_mistakes', args: {version: (input.page.context as {version: string}).version}})) as {prompt: StructuredPrompt; versionId: string};
+    const structured = {...brief.prompt, taskSummary: 'Label this, sharper.'};
+    return {invocations: [{from: 'user', to: 'prompt_agent', intent: 'improve', note: ''}], messages: [], proposal: {kind: 'prompt', agent: 'prompt_agent', brief: 'Improve v1', payload: {structured, change: 'sharper', changes: [{text: 'sharper', reason: '5 Tutorials were read as Vlog'}], baseVersionId: brief.versionId, unmapped: []}}, skills: [{agent: 'prompt_agent', name: 'improve_from_mistakes'}], toolCalls: [], modelCalls: [], parseFailures: []};
+  };
+  const v1 = await w.newVersion();
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
+  await w.newVersion('RULE 1'); // the newest version is v2; the user improves v1
+  const {improveWithAi, chatHistory, openProposals} = await import('./agents.ts');
+  await assert.rejects(improveWithAi(w.ws, w.projectId, 'pv_none'), /not found/);
+  const {turnId} = await improveWithAi(w.ws, w.projectId, v1.id, 'zh');
+  assert.ok(turnId);
+  await until(async () => (await openProposals(w.ws, w.projectId)).length === 1, 'the draft');
+  assert.deepEqual([seen[0].page.agent, seen[0].page.intent, seen[0].page.context, seen[0].locale], ['prompt_agent', 'improve', {version: 'v1'}, 'zh']);
+  assert.deepEqual(seen[0].page.where, {page: 'prompt_edit', params: {v: v1.id}});
+  const [p] = await openProposals(w.ws, w.projectId);
+  assert.equal(p.payload.baseVersionId, v1.id);
+  assert.equal(p.payload.changes?.[0].reason, '5 Tutorials were read as Vlog');
+  const chat = await chatHistory(w.ws, w.projectId);
+  assert.equal(chat.filter(m => m.role === 'user').length, 0, 'a button, not a message');
+  assert.deepEqual(chat.filter(m => m.role === 'event').map(m => m.msg?.key).slice(-2), ['{who} asked the Prompt helper to improve {version}', '{who} put a draft on {page}']);
 });

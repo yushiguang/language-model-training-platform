@@ -3,7 +3,7 @@ import test from 'node:test';
 import type {AgentToolCall, StructuredPrompt} from '@yushiguang/sprint-contracts';
 import {scriptedAgent} from '@yushiguang/sprint-platform';
 import {translate} from '@yushiguang/sprint-domain';
-import {draftImprovement, importIntent, partialReply, reflectPrompt, runAgentTurn} from './runtime.ts';
+import {importIntent, partialReply, reflectPrompt, runAgentTurn, type ToolCaller} from './runtime.ts';
 import {languageLine, PRESETS, systemPrompt} from './presets.ts';
 import {createAgentRuntime} from './index.ts';
 
@@ -200,14 +200,56 @@ test('a helper that renames a value or the key is overruled: the Optimiser chang
   assert.equal(out.prompt.label.values[1].definition, 'sharper');
 });
 
-test('Improve with AI returns a draft with each change and its reason', async () => {
-  const out = await draftImprovement(
-    {version: 'v2', prompt: optPrompt, mixUps: [mix], macroF1: 0.5, lowestValue: null, mistakes: 5},
-    scriptedAgent(),
-  );
-  assert.equal(out.changes.length, 1);
-  assert.equal(out.changes[0].reason, '5 Clip examples were read as Vlog');
-  assert.ok(rules(out.prompt).includes(out.changes[0].text));
+/** Improve with AI (#39): a Prompt helper turn on the editor that runs the skill improve_from_mistakes. */
+const improveTurn = (llm: Parameters<typeof runAgentTurn>[1], brief: object, locale?: 'zh') => {
+  const calls: string[] = [];
+  const host: ToolCaller = {call: async ({name, args}) => (calls.push(`${name} ${JSON.stringify(args)}`), name === 'get_mistakes' ? brief : {error: 'not here'})};
+  const run = runAgentTurn({userText: 'Improve v2', page: {label: 'Edit prompt', agent: 'prompt_agent', intent: 'improve', context: {version: 'v2'}}, workspace: {projectId: 'pr_1', task: '', prompt: null, history: [], pageView: null}, ...(locale ? {locale} : {})}, llm, host);
+  return run.then(out => ({out, calls}));
+};
+const mistakesBrief = (more: object = {}) => ({version: 'v2', versionId: 'pv_2', prompt: optPrompt, mixUps: [mix], macroF1: 0.5, lowestValue: null, mistakes: 5, ...more});
+
+test('Improve with AI runs the skill: it reads the mistakes, then drafts each change with its reason', async () => {
+  const {out, calls} = await improveTurn(scriptedAgent(), mistakesBrief());
+  assert.deepEqual(calls, ['get_mistakes {"version":"v2"}']);
+  assert.deepEqual(out.skills, [{agent: 'prompt_agent', name: 'improve_from_mistakes'}]);
+  const p = out.proposal!.payload;
+  assert.equal(p.changes?.length, 1);
+  assert.equal(p.changes![0].reason, '5 Clip examples were read as Vlog');
+  assert.ok(rules(p.structured).includes(p.changes![0].text));
+  assert.equal(p.baseVersionId, 'pv_2', 'the draft goes on the version it was written from');
+  assert.equal(out.proposal!.brief, 'Improve v2');
+  // One fixed line: the reasons sit on the marks in the editor.
+  assert.deepEqual(out.messages.map(m => m.msg?.key), ['I made 1 change to {version}. Hover each mark to see why.']);
+});
+
+test('a skill whose brief fails tells the helper why; a skill the helper does not have is refused', async () => {
+  const seen: string[] = [];
+  const replies = [JSON.stringify({skill: {name: 'improve_from_mistakes', args: {}}}), JSON.stringify({skill: {name: 'diagnose_score_change', args: {b: 'v9'}}}), JSON.stringify({reply: 'v9 has no scores yet.'})];
+  const llm = {chat: async (msgs: {content: string}[]) => (seen.push(String(msgs.at(-1)!.content)), replies.shift()!)} as unknown as Parameters<typeof runAgentTurn>[1];
+  const host: ToolCaller = {call: async ({name}) => {
+    throw new Error(name === 'get_flips' ? 'v9 has no scores yet.' : 'unexpected');
+  }};
+  const out = await runAgentTurn({userText: 'Why did v9 drop?', page: {label: 'Prompt versions', agent: 'evaluation_agent', intent: 'explain_report', context: {}}, workspace: {projectId: 'pr_1', task: '', prompt: null, history: [], pageView: null}}, llm, host);
+  assert.match(seen[1], /improve_from_mistakes is not one of your skills/);
+  assert.match(seen[2], /"skill_result".*v9 has no scores yet/);
+  assert.deepEqual(out.toolCalls.map(t => [t.name, t.ok]), [['get_flips', false]]);
+  assert.deepEqual(out.skills, []);
+  assert.deepEqual(out.messages.map(m => m.text), ['v9 has no scores yet.']);
+});
+
+test('a helper runs a skill from the chat: the skill reads its brief and gives the answer', async () => {
+  const systems: string[] = [];
+  const replies = [JSON.stringify({skill: {name: 'diagnose_score_change', args: {a: 'v1', b: 'v2'}}}), JSON.stringify({reply: 'v2 fixed 3 Clips and broke none.'})];
+  const llm = {chat: async (msgs: {content: string}[]) => (systems.push(String(msgs[0].content)), replies.shift()!)} as unknown as Parameters<typeof runAgentTurn>[1];
+  const host: ToolCaller = {call: async ({name}) => (name === 'get_flips' ? {a: {version: 'v1'}, b: {version: 'v2'}, fixed: [], broken: []} : {error: 'no'})};
+  const out = await runAgentTurn({userText: 'Why is v2 better than v1?', page: {label: 'Prompt versions', agent: 'evaluation_agent', intent: 'explain_report', context: {}}, workspace: {projectId: 'pr_1', task: '', prompt: null, history: [], pageView: null}}, llm, host);
+  assert.match(systems[0], /diagnose_score_change/, 'the helper is told its skills');
+  assert.match(systems[1], /running the skill "diagnose_score_change"/);
+  assert.deepEqual(out.toolCalls.map(t => [t.name, t.args]), [['get_flips', {a: 'v1', b: 'v2'}]]);
+  assert.deepEqual(out.skills, [{agent: 'evaluation_agent', name: 'diagnose_score_change'}]);
+  assert.deepEqual(out.messages.map(m => m.text), ['v2 fixed 3 Clips and broke none.']);
+  assert.equal(out.proposal, null, 'only a drafting skill drafts');
 });
 
 test('a question on a page gets an answer and never a draft (R3-10)', async () => {
@@ -277,7 +319,7 @@ test('the Optimiser and Improve with AI get the wrong examples', async () => {
   const llm = {chat: async (msgs: {content: string}[]) => (seen.push(msgs.at(-1)!.content), JSON.stringify({prompt: optPrompt, change: 'x', changes: [], reply: ''}))} as unknown as Parameters<typeof runAgentTurn>[1];
   const examples = [{externalId: 'ex-7', features: {Title: 'cooking'}, gold: ['Clip'], predicted: ['Vlog']}];
   await reflectPrompt({prompt: optPrompt, triedChanges: [], mixUps: [], macroF1: 0.5, lowestValue: null, examples}, llm);
-  await draftImprovement({version: 'v2', prompt: optPrompt, mixUps: [], macroF1: 0.5, lowestValue: null, mistakes: 1, examples}, llm);
+  await improveTurn(llm, mistakesBrief({mixUps: [], mistakes: 1, examples}));
   assert.equal(seen.filter(c => c.includes('"ex-7"')).length, 2);
 });
 
@@ -381,8 +423,8 @@ test('a pasted or linked prompt on Prompt Design is imported, whatever intent th
 test('Improve with AI answers in Chinese when the user reads the site in Chinese; the prompt keeps its language', async () => {
   const systems: string[] = [];
   const llm = {chat: async (msgs: {role: string; content: string}[]) => (systems.push(msgs[0].content), JSON.stringify({prompt: optPrompt, changes: [], reply: ''}))} as unknown as Parameters<typeof runAgentTurn>[1];
-  await draftImprovement({version: 'v2', prompt: optPrompt, mixUps: [], macroF1: 0.5, lowestValue: null, mistakes: 1, locale: 'zh'}, llm);
-  await draftImprovement({version: 'v2', prompt: optPrompt, mixUps: [], macroF1: 0.5, lowestValue: null, mistakes: 1}, llm);
+  await improveTurn(llm, mistakesBrief({mixUps: [], mistakes: 1}), 'zh');
+  await improveTurn(llm, mistakesBrief({mixUps: [], mistakes: 1}));
   assert.match(systems[0], /Simplified Chinese/);
   assert.match(systems[0], /each change's "reason" in Simplified Chinese/);
   assert.doesNotMatch(systems[1], /Simplified Chinese/);

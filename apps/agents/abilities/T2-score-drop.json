@@ -1,0 +1,242 @@
+{
+  "row": "T2",
+  "name": "Why a version scored lower than the one before it",
+  "request": {
+    "userText": "Why did v5 score lower than v4?",
+    "page": {
+      "label": "Prompt versions",
+      "agent": "evaluation_agent",
+      "intent": "explain_report",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_ability",
+      "task": "Label the format of short videos",
+      "prompt": {
+        "taskSummary": "Label the format of short videos.",
+        "features": {
+          "video": [
+            "Description"
+          ],
+          "photo_text": [
+            "Title",
+            "Description"
+          ],
+          "metadata": []
+        },
+        "label": {
+          "name": "format",
+          "kind": "single",
+          "values": [
+            {
+              "name": "Vlog",
+              "definition": "A day in the creator's life."
+            },
+            {
+              "name": "Tutorial",
+              "definition": "Shows how to do something, step by step."
+            },
+            {
+              "name": "Other",
+              "definition": "Anything else."
+            }
+          ]
+        },
+        "ruleGroups": [],
+        "images": []
+      },
+      "history": [],
+      "pageView": {
+        "page": "prompt",
+        "title": "Prompt versions",
+        "summary": "Every prompt version with its scores.",
+        "data": {}
+      }
+    },
+    "locale": "en"
+  },
+  "tools": {
+    "get_flips": {
+      "result": {
+        "a": {
+          "version": "v4",
+          "change": "Clarify Vlog",
+          "scores": {
+            "macroF1": 0.71,
+            "values": {
+              "Vlog": 0.8,
+              "Tutorial": 0.66,
+              "Other": 0.67
+            }
+          }
+        },
+        "b": {
+          "version": "v5",
+          "change": "Add: a video that shows the creator's day is a Vlog",
+          "scores": {
+            "macroF1": 0.63,
+            "values": {
+              "Vlog": 0.78,
+              "Tutorial": 0.44,
+              "Other": 0.67
+            }
+          }
+        },
+        "promptA": {
+          "taskSummary": "Label the format of short videos.",
+          "features": {
+            "video": [
+              "Description"
+            ],
+            "photo_text": [
+              "Title",
+              "Description"
+            ],
+            "metadata": []
+          },
+          "label": {
+            "name": "format",
+            "kind": "single",
+            "values": [
+              {
+                "name": "Vlog",
+                "definition": "A day in the creator's life."
+              },
+              {
+                "name": "Tutorial",
+                "definition": "Shows how to do something, step by step."
+              },
+              {
+                "name": "Other",
+                "definition": "Anything else."
+              }
+            ]
+          },
+          "ruleGroups": [],
+          "images": []
+        },
+        "promptB": {
+          "taskSummary": "Label the format of short videos.",
+          "features": {
+            "video": [
+              "Description"
+            ],
+            "photo_text": [
+              "Title",
+              "Description"
+            ],
+            "metadata": []
+          },
+          "label": {
+            "name": "format",
+            "kind": "single",
+            "values": [
+              {
+                "name": "Vlog",
+                "definition": "A day in the creator's life."
+              },
+              {
+                "name": "Tutorial",
+                "definition": "Shows how to do something, step by step."
+              },
+              {
+                "name": "Other",
+                "definition": "Anything else."
+              }
+            ]
+          },
+          "ruleGroups": [
+            {
+              "id": "rg1",
+              "title": "Label priority",
+              "content": "A video that shows the creator's day is a Vlog."
+            }
+          ],
+          "images": []
+        },
+        "readableHalf": {
+          "examples": 60,
+          "fixedByB": 1,
+          "brokenByB": 4
+        },
+        "fixed": [
+          {
+            "id": "1201",
+            "title": "A day at the beach",
+            "gold": [
+              "Vlog"
+            ],
+            "a": [
+              "Other"
+            ],
+            "aReason": "No steps shown.",
+            "b": [
+              "Vlog"
+            ],
+            "bReason": "It shows the creator's day.",
+            "features": {}
+          }
+        ],
+        "broken": [
+          {
+            "id": "1042",
+            "title": "Morning routine: how I make cold brew",
+            "gold": [
+              "Tutorial"
+            ],
+            "a": [
+              "Tutorial"
+            ],
+            "aReason": "Shows the steps of making cold brew.",
+            "b": [
+              "Vlog"
+            ],
+            "bReason": "It shows the creator's day, so the rule says Vlog.",
+            "features": {}
+          },
+          {
+            "id": "1077",
+            "title": "Fix a flat bike tire in my garage",
+            "gold": [
+              "Tutorial"
+            ],
+            "a": [
+              "Tutorial"
+            ],
+            "aReason": "Step by step repair.",
+            "b": [
+              "Vlog"
+            ],
+            "bReason": "The creator's day in the garage.",
+            "features": {}
+          }
+        ],
+        "note": "Scores are on the held-out half; fixed and broken examples are from the optimiser half only, so their counts do not add up to the score change."
+      }
+    },
+    "get_report": {
+      "result": {
+        "version": "v5",
+        "macroF1": 0.63
+      }
+    }
+  },
+  "expect": {
+    "calls": [
+      "get_flips"
+    ],
+    "skills": [
+      "diagnose_score_change"
+    ],
+    "notCalls": [
+      "try_prompt",
+      "score_version",
+      "start_optimiser"
+    ],
+    "reply": [
+      "Says Macro-F1 fell from 0.71 to 0.63 and that Tutorial dropped the most",
+      "Ties the drop to the new rule about the creator's day, citing at least one broken example such as 1042 or 1077",
+      "Does not say any gold label is wrong and does not calculate a score of its own"
+    ]
+  }
+}

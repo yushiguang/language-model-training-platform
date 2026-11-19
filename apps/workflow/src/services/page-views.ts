@@ -8,7 +8,7 @@ import {lockHoldout} from './governance.ts';
 import {mismatches} from './mismatches.ts';
 import {getProject, loadProjectState} from './projects.ts';
 import {withFeatures} from './features.ts';
-import {drafts, gates, guide, optimiserRun, runningWork, uploadResult} from './agent-reads.ts';
+import {confusions, drafts, flips, gates, guide, mistakes, optimiserRun, runningWork, uploadResult} from './agent-reads.ts';
 
 /**
  * Page views: each page as the agent sees it, built from the same saved data the page shows.
@@ -247,7 +247,7 @@ export async function getPageView(w: Scope, projectId: string, loc: PageLocation
 const limitOf = (x: unknown, max: number, dflt: number) => Math.max(1, Math.min(max, typeof x === 'number' ? Math.floor(x) : dflt));
 
 /** Tools that read examples; the first such read locks the halves. */
-const READS_EXAMPLES = new Set<string>(['get_examples', 'get_gold_labels', 'get_predictions', 'search_examples', 'try_prompt']);
+const READS_EXAMPLES = new Set<string>(['get_examples', 'get_gold_labels', 'get_predictions', 'search_examples', 'try_prompt', 'get_mistakes', 'get_flips']);
 
 /** Removed gold-labeled examples and pending ones, as the score line shows them (spec 1.0.0, 4.4). */
 function datasetCounts(state: ProjectState) {
@@ -461,6 +461,12 @@ export function agentToolHost(inst: Instance): AgentToolHost {
           return drafts(w, state, limitOf(args.limit, 10, 5));
         case 'read_guide':
           return guide(args.topic);
+        case 'get_mistakes':
+          return mistakes(w, state, args.version);
+        case 'get_flips':
+          return flips(w, state, args.a, args.b);
+        case 'get_confusions':
+          return confusions(state);
         default:
           throw new Error(`Unknown tool ${String(name)}.`);
       }

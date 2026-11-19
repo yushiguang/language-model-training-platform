@@ -1,5 +1,6 @@
-import type {AgentPreset, AgentToolName, AgentTurnInput, AgentTurnOutput} from '@yushiguang/sprint-contracts';
-import {mayCallTool, PRESET_TOOLS, START_TOOLS} from '@yushiguang/sprint-domain';
+import type {AgentPreset, AgentSkillName, AgentToolName, AgentTurnInput, AgentTurnOutput} from '@yushiguang/sprint-contracts';
+import {mayCallTool, PRESET_SKILLS, PRESET_TOOLS, START_TOOLS} from '@yushiguang/sprint-domain';
+import {SKILLS} from './skills.ts';
 
 /**
  * Ability cases (#39): what users ask the helpers, with what a good answer does. Plain JSON in
@@ -21,6 +22,8 @@ export interface AbilityCase {
     calls: AgentToolName[];
     /** Tools a good answer never calls. Paid tools are never allowed unless listed in `calls`. */
     notCalls?: AgentToolName[];
+    /** Skills a good answer runs (each at least once); their brief tools count as calls. */
+    skills?: AgentSkillName[];
     /** The helper the turn should end with, when it should hand off; left out: no handoff. */
     handoffTo?: AgentPreset;
     /** What the reply must do, item by item; a grader model checks them. */
@@ -35,6 +38,8 @@ export interface AbilityResult {
   called: string[];
   missing: string[];
   forbidden: string[];
+  /** Skills the case expects that did not run. */
+  missingSkills: string[];
   /** A paid tool the case did not ask for (target: 0 over all cases). */
   unaskedPaid: string[];
   handoffOk: boolean;
@@ -57,6 +62,13 @@ export function caseProblems(c: AbilityCase): string[] {
     if (!helpers.some(h => mayCallTool(h, t))) out.push(`no helper of this case may call ${t}`);
     if (!(t in (c.tools ?? {}))) out.push(`tools has no answer for ${t}`);
   }
+  for (const k of c.expect?.skills ?? []) {
+    if (!SKILLS[k]) out.push(`${k} is not a skill`);
+    else {
+      if (!helpers.some(h => PRESET_SKILLS[h].includes(k))) out.push(`no helper of this case may run ${k}`);
+      if (!(SKILLS[k].brief in (c.tools ?? {}))) out.push(`tools has no answer for ${SKILLS[k].brief}, the brief of ${k}`);
+    }
+  }
   for (const t of c.expect?.notCalls ?? []) if (!Object.values(PRESET_TOOLS).some(list => list.includes(t))) out.push(`${t} is not a tool`);
   return out;
 }
@@ -66,8 +78,10 @@ export function scoreCalls(c: AbilityCase, out: AgentTurnOutput): Omit<AbilityRe
   const called = out.toolCalls.map(t => t.name as string);
   const missing = c.expect.calls.filter(t => !called.includes(t));
   const forbidden = (c.expect.notCalls ?? []).filter(t => called.includes(t));
+  const ran = (out.skills ?? []).map(k => k.name as string);
+  const missingSkills = (c.expect.skills ?? []).filter(k => !ran.includes(k));
   const unaskedPaid = called.filter(t => (START_TOOLS as string[]).includes(t) && !(c.expect.calls as string[]).includes(t));
   const last = out.messages.filter(m => m.role === 'agent').at(-1)?.agent ?? null;
   const handoffOk = c.expect.handoffTo ? last === c.expect.handoffTo : last === null || last === c.request.page.agent;
-  return {row: c.row, name: c.name, called, missing, forbidden, unaskedPaid, handoffOk};
+  return {row: c.row, name: c.name, called, missing, forbidden, missingSkills, unaskedPaid, handoffOk};
 }

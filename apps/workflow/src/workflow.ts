@@ -173,7 +173,7 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     startOptimiser: (ctx, r) => work.startOptimiser(at(ctx), r.projectId, r.maxRounds, r.startVersionId),
     stopOptimiser: (ctx, r) => work.stopOptimiser(at(ctx), r.projectId, r.runId),
     retryOptimiser: (ctx, r) => work.retryOptimiser(at(ctx), r.projectId, r.runId),
-    improveWithAi: (ctx, projectId, versionId, locale) => agents.improveWithAi(at(ctx), projectId, versionId, locale),
+    improveWithAi: (ctx, projectId, versionId, locale) => agents.improveWithAi(at(ctx), projectId, versionId, locale).then(() => undefined),
     featureInfo: (ctx, keys) => prompts.featureInfo(at(ctx), keys),
     async predictionsFor(ctx, projectId, versionId, endpoint, s) {
       const w = at(ctx);

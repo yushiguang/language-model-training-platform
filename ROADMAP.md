@@ -7,9 +7,10 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 ## Now
 
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
-  tools, skills and acceptance cases for any agent runtime. Step 1, read tools and the ability
-  cases, is in review; then skills (Improve with AI becomes the Prompt helper's skill), then
-  action tools with cards drawn on the UI design first.
+  tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are in review in one
+  pull request: read tools, the ability cases, and skills (Improve with AI is now the Prompt
+  helper's skill `improve_from_mistakes`). Then step 3, action tools, with their cards drawn on
+  the UI design first.
 
 ## Next
 

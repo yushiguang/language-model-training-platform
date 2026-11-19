@@ -36,7 +36,7 @@ test('ability cases: a run is scored on the tools called, paid tools not asked f
     return rt.runTurn({...c.request, turnId: 'turn_ability', ctx: {requestId: 'rq_ability', user: {id: 'u', name: 'U'}, caller: 'test'}});
   };
   const good = scoreCalls(c, await run(['{"tool": {"name": "get_running_work", "args": {}}}', '{"reply": "v3 is being scored: 40 of 120. Stop is on its row."}']));
-  assert.deepEqual([good.missing, good.forbidden, good.unaskedPaid, good.handoffOk], [[], [], [], true]);
+  assert.deepEqual([good.missing, good.missingSkills, good.forbidden, good.unaskedPaid, good.handoffOk], [[], [], [], [], true]);
   const lazy = scoreCalls(c, await run(['{"reply": "Nothing is running."}']));
   assert.deepEqual(lazy.missing, ['get_running_work']);
 });

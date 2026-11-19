@@ -1,7 +1,10 @@
 import type {AgentProposal, AuditEntry, GoldUploadRefusal, ProjectState, PromptVersion, SourceFile} from '@yushiguang/sprint-contracts';
-import {dryRunSize, findGuideTopic, gate, NODES, productGuide, stepLine, systemConfig, versionLabel} from '@yushiguang/sprint-domain';
+import {answersForHelpers, dryRunSize, featureText, isImageKey, findGuideTopic, gate, isRight, labelBalance, NODES, pickWrong, productGuide, promptKeys, settingsHash, stepLine, systemConfig, toMap, versionLabel, visibleToAgents, wrongExamples} from '@yushiguang/sprint-domain';
 import type {Scope} from './app.ts';
 import {getSamplingTask} from './dataset.ts';
+import {scoreOnOptimiserHalf} from './evaluation.ts';
+import {withFeatures} from './features.ts';
+import {labelComments, withComments} from './mismatches.ts';
 import {tenantOf} from './sources.ts';
 
 /**
@@ -215,4 +218,108 @@ export function guide(topic: unknown) {
   const hit = findGuideTopic(topic);
   if (!hit) return {error: `No guide topic matches "${topic}".`, topics};
   return {topic: hit.name, title: hit.topic.title, text: hit.topic.text};
+}
+
+// ---------------------------------------------------------------------------------------------
+// Step 2 (#39): the briefs the skills start from. Examples come from the optimiser half only.
+
+function findVersionRef(state: ProjectState, ref: unknown): PromptVersion | undefined {
+  if (typeof ref !== 'string' || !ref) return undefined;
+  const label = ref.trim().toLowerCase().replace(/^version\s+/, '');
+  return state.versions.find(v => v.id === ref || versionLabel(v) === label || versionLabel(v) === `v${label}`);
+}
+
+/** The scored report of a version on the project's model, or an error the helper can act on. */
+function scoredVersion(state: ProjectState, ref: unknown) {
+  const v = ref == null || ref === '' ? state.versions.find(x => state.reports.some(r => r.promptVersionId === x.id && !r.archivedNow)) : findVersionRef(state, ref);
+  if (!v) throw new Error(ref ? `There is no version "${String(ref)}". Versions: ${state.versions.map(versionLabel).join(', ')}.` : 'No version has scores yet.');
+  const report = state.reports.find(r => r.promptVersionId === v.id && !r.archivedNow);
+  if (!report) throw new Error(`${versionLabel(v)} has no scores yet.`);
+  const settings = state.setup?.models.find(m => m.endpoint === report.endpoint);
+  if (!settings || !state.setup?.schema) throw new Error(`${versionLabel(v)} has no scores on the project's model.`);
+  return {v, report, settings, setup: state.setup};
+}
+
+/**
+ * T1: what Improve with AI reads, in chat or from the button (the same brief either way): a
+ * version's prompt, its mix-ups and weakest value on the optimiser half, how many mistakes it
+ * makes there, and up to 8 wrong examples with the model's reasons and people's comments.
+ */
+export async function mistakes(w: Scope, state: ProjectState, ref: unknown) {
+  const {v, report, settings, setup} = scoredVersion(state, ref);
+  const answers = toMap(await w.labeling.predictions(v.id, report.endpoint, settingsHash(settings)));
+  // R3-9 (D3) and finding 3: everything here comes from the optimiser half.
+  const half = state.examples.filter(e => e.split === 'eval' && visibleToAgents(e));
+  const gold = new Map(half.filter(e => !!state.gold[e.id]).map(e => [e.id, state.gold[e.id]!.answer]));
+  const wrong = half.filter(e => gold.has(e.id) && !isRight(gold.get(e.id)!, answers.get(e.id)?.answer ?? null)).length;
+  const said = answersForHelpers(half.filter(e => answers.has(e.id)).map(e => answers.get(e.id)!));
+  const examples = withComments(wrongExamples(await withFeatures(w, pickWrong(half, gold, said.predicted)), promptKeys(v), gold, said.predicted, undefined, said.notes), half, await labelComments(w, state.project.id, state));
+  const m = await scoreOnOptimiserHalf(w, setup, v, report.endpoint, state.examples, state.gold);
+  return {
+    version: versionLabel(v),
+    versionId: v.id,
+    prompt: v.structured,
+    macroF1: r2(m.macroF1),
+    lowestValue: m.lowestValue ? {value: m.lowestValue.value, f1: r2(m.lowestValue.f1)} : null,
+    mixUps: m.mixUps.slice(0, 8).map(x => ({kind: x.kind ?? 'confused', gold: x.gold, predicted: x.predicted, count: x.count})),
+    mistakes: wrong,
+    examples,
+    note: 'From the optimiser half only; the scores people see come from the held-out half.',
+  };
+}
+
+/**
+ * T2: why two versions score differently: the parts of the prompt that changed, and the examples
+ * of the optimiser half one version gets right and the other wrong, with both answers and reasons.
+ */
+export async function flips(w: Scope, state: ProjectState, aRef: unknown, bRef: unknown) {
+  const b = scoredVersion(state, bRef ?? state.versions[0]?.id);
+  const a = scoredVersion(state, aRef ?? state.versions.find(x => x.id === b.v.parentId)?.id ?? state.versions[1]?.id);
+  if (a.v.id === b.v.id) throw new Error('Name two different versions.');
+  if (a.report.endpoint !== b.report.endpoint) throw new Error('The two versions were scored on different models.');
+  const [pa, pb] = await Promise.all([a, b].map(x => w.labeling.predictions(x.v.id, x.report.endpoint, settingsHash(x.settings)).then(toMap)));
+  const half = state.examples.filter(e => e.split === 'eval' && visibleToAgents(e) && !!state.gold[e.id] && pa.has(e.id) && pb.has(e.id));
+  const ok = (p: typeof pa, id: string) => isRight(state.gold[id]!.answer, p.get(id)?.answer ?? null);
+  const row = (id: string) => ({a: pa.get(id)!.answer, aReason: pa.get(id)!.reason ?? null, b: pb.get(id)!.answer, bReason: pb.get(id)!.reason ?? null});
+  const fixed = half.filter(e => !ok(pa, e.id) && ok(pb, e.id));
+  const broken = half.filter(e => ok(pa, e.id) && !ok(pb, e.id));
+  const brief = async (list: typeof half) =>
+    (await withFeatures(w, list.slice(0, 6), true)).map(e => ({id: e.externalId, title: e.title, gold: state.gold[e.id]!.answer, ...row(e.id), features: Object.fromEntries(Object.entries(e.features).filter(([k]) => promptKeys(b.v).has(k) && !isImageKey(k)).map(([k, x]) => [k, featureText(x).slice(0, 400)]))}));
+  const score = (x: typeof a) => ({macroF1: r2(x.report.metrics.macroF1), values: Object.fromEntries(x.report.metrics.values.map(y => [y.value, r2(y.f1)]))});
+  return {
+    a: {version: versionLabel(a.v), change: a.v.change || null, scores: score(a)},
+    b: {version: versionLabel(b.v), change: b.v.change || null, scores: score(b)},
+    promptA: a.v.structured,
+    promptB: b.v.structured,
+    readableHalf: {examples: half.length, fixedByB: fixed.length, brokenByB: broken.length},
+    fixed: await brief(fixed),
+    broken: await brief(broken),
+    note: 'Scores are on the held-out half; fixed and broken examples are from the optimiser half only, so their counts do not add up to the score change.',
+  };
+}
+
+/** P3: which values are read as which across every scored version (counts), and the label balance. */
+export function confusions(state: ProjectState) {
+  const schema = state.setup?.schema;
+  if (!schema) throw new Error('The project has no label yet.');
+  const pairs = new Map<string, {gold: string | null; predicted: string | null; kind: string; count: number; versions: Set<string>}>();
+  for (const r of state.reports.filter(x => !x.archivedNow)) {
+    const v = state.versions.find(x => x.id === r.promptVersionId);
+    for (const m of r.metrics.mixUps) {
+      const key = `${m.kind ?? 'confused'}|${m.gold}|${m.predicted}`;
+      const p = pairs.get(key) ?? {gold: m.gold, predicted: m.predicted, kind: m.kind ?? 'confused' as string, count: 0, versions: new Set<string>()};
+      p.count += m.count;
+      if (v) p.versions.add(versionLabel(v));
+      pairs.set(key, p);
+    }
+  }
+  const evalEx = state.examples.filter(e => e.split === 'eval');
+  const b = labelBalance(schema, evalEx, state.gold);
+  return {
+    label: {name: schema.name, kind: schema.kind, values: schema.values.map(v => ({name: v.name, definition: v.definition, ...(v.exclusive ? {exclusive: true} : {})}))},
+    scoredVersions: new Set(state.reports.filter(x => !x.archivedNow).map(x => x.promptVersionId)).size,
+    mixUps: [...pairs.values()].sort((x, y) => y.count - x.count).slice(0, 10).map(p => ({kind: p.kind, gold: p.gold, predicted: p.predicted, count: p.count, inVersions: [...p.versions]})),
+    balance: b.values.map(v => ({value: v.value, goldLabeled: v.count, rare: v.rare, dominant: v.dominant})),
+    note: 'Mix-ups are counts summed over every scored version, never examples.',
+  };
 }

@@ -20,7 +20,7 @@ const fixtures = readdirSync(DIR)
 
 test('golden fixtures: there are cases of every kind', () => {
   const kinds = new Set(fixtures.map(([, fx]) => fx.kind));
-  assert.deepEqual([...kinds].sort(), ['improve', 'reflect', 'turn']);
+  assert.deepEqual([...kinds].sort(), ['reflect', 'turn']);
   for (const [file, fx] of fixtures) {
     assert.ok(fx.name && fx.guards.length, `${file} names its case and the guards it holds`);
     assert.deepEqual(JSON.parse(JSON.stringify(fx.request)), fx.request, `${file}: the request is plain JSON`);

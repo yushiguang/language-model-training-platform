@@ -1,0 +1,190 @@
+{
+  "row": "T1",
+  "name": "Improve a version from the chat: the same skill as the Improve with AI button",
+  "request": {
+    "userText": "Can you improve v2? It keeps reading tutorials as vlogs.",
+    "page": {
+      "label": "Prompt editor",
+      "agent": "prompt_agent",
+      "intent": "follow_up",
+      "context": {
+        "version": "v2"
+      }
+    },
+    "workspace": {
+      "projectId": "pr_ability",
+      "task": "Label the format of short videos",
+      "prompt": {
+        "taskSummary": "Label the format of short videos.",
+        "features": {
+          "video": [
+            "Description"
+          ],
+          "photo_text": [
+            "Title",
+            "Description"
+          ],
+          "metadata": []
+        },
+        "label": {
+          "name": "format",
+          "kind": "single",
+          "values": [
+            {
+              "name": "Vlog",
+              "definition": "A day in the creator's life."
+            },
+            {
+              "name": "Tutorial",
+              "definition": "Shows how to do something, step by step."
+            },
+            {
+              "name": "Other",
+              "definition": "Anything else."
+            }
+          ]
+        },
+        "ruleGroups": [],
+        "images": []
+      },
+      "history": [],
+      "pageView": {
+        "page": "prompt_edit",
+        "title": "Prompt editor",
+        "summary": "Edit a version and save it as a new one.",
+        "data": {}
+      }
+    },
+    "locale": "en"
+  },
+  "tools": {
+    "get_mistakes": {
+      "result": {
+        "version": "v2",
+        "versionId": "pv_2",
+        "prompt": {
+          "taskSummary": "Label the format of short videos.",
+          "features": {
+            "video": [
+              "Description"
+            ],
+            "photo_text": [
+              "Title",
+              "Description"
+            ],
+            "metadata": []
+          },
+          "label": {
+            "name": "format",
+            "kind": "single",
+            "values": [
+              {
+                "name": "Vlog",
+                "definition": "A day in the creator's life."
+              },
+              {
+                "name": "Tutorial",
+                "definition": "Shows how to do something, step by step."
+              },
+              {
+                "name": "Other",
+                "definition": "Anything else."
+              }
+            ]
+          },
+          "ruleGroups": [],
+          "images": []
+        },
+        "macroF1": 0.62,
+        "lowestValue": {
+          "value": "Tutorial",
+          "f1": 0.45
+        },
+        "mixUps": [
+          {
+            "kind": "confused",
+            "gold": "Tutorial",
+            "predicted": "Vlog",
+            "count": 5
+          },
+          {
+            "kind": "confused",
+            "gold": "Other",
+            "predicted": "Vlog",
+            "count": 1
+          }
+        ],
+        "mistakes": 6,
+        "examples": [
+          {
+            "externalId": "1042",
+            "features": {
+              "Title": "Morning routine: how I make cold brew",
+              "Description": "morning routine: how i make cold brew."
+            },
+            "gold": [
+              "Tutorial"
+            ],
+            "predicted": [
+              "Vlog"
+            ],
+            "reason": "It shows the creator's morning."
+          },
+          {
+            "externalId": "1077",
+            "features": {
+              "Title": "Fix a flat bike tire in my garage",
+              "Description": "fix a flat bike tire in my garage."
+            },
+            "gold": [
+              "Tutorial"
+            ],
+            "predicted": [
+              "Vlog"
+            ],
+            "reason": "The creator talks about their day."
+          },
+          {
+            "externalId": "1103",
+            "features": {
+              "Title": "Unboxing my new phone",
+              "Description": "unboxing my new phone."
+            },
+            "gold": [
+              "Other"
+            ],
+            "predicted": [
+              "Vlog"
+            ],
+            "reason": "A personal video."
+          }
+        ],
+        "note": "From the optimiser half only; the scores people see come from the held-out half."
+      }
+    },
+    "read_feature_info": {
+      "result": {
+        "Description": {
+          "description": "The text under the video, written by the creator."
+        }
+      }
+    }
+  },
+  "expect": {
+    "calls": [
+      "get_mistakes"
+    ],
+    "skills": [
+      "improve_from_mistakes"
+    ],
+    "notCalls": [
+      "try_prompt",
+      "score_version",
+      "start_optimiser"
+    ],
+    "reply": [
+      "Says it drafted changes to v2 (or that it has no new change) and points to the marks in the editor for the reasons",
+      "Does not say which value any example should be"
+    ]
+  }
+}

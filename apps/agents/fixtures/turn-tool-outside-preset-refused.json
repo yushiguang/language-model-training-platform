@@ -53,6 +53,7 @@
       }
     ],
     "proposal": null,
+    "skills": [],
     "toolCalls": [],
     "modelCalls": [
       {

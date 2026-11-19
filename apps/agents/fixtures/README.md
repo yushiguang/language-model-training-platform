@@ -11,7 +11,7 @@ acceptance bar of the deployment readiness spec, sections 4.6 and 6.
 |---|---|
 | `name` | The case in one line. |
 | `guards` | The guards and behaviours the case holds an implementation to, in words. |
-| `kind` | `turn` (`runTurn`), `reflect` (`reflectPrompt`) or `improve` (`draftImprovement`). |
+| `kind` | `turn` (`runTurn`, Improve with AI included) or `reflect` (`reflectPrompt`). |
 | `request` | The request exactly as the workflow sends it, with the caller's `ctx`. |
 | `model` | The model's replies, in the order the reference runtime asked for them. |
 | `tools` | The tool calls the helpers make, in order: `agent`, `name`, `args`, and the host's answer (`result`, or `error` when the host refused or failed). |
@@ -23,7 +23,7 @@ acceptance bar of the deployment readiness spec, sections 4.6 and 6.
    as one streamed piece) and a tool host that answers from `tools`.
 2. Every tool call must be the next one in `tools` and carry the request's project, turn and caller:
    for a turn, `projectId` is `request.workspace.projectId` and `turnId` is `request.turnId`; for
-   `reflect` and `improve`, `projectId` is `request.projectId` and `turnId` is null. `ctx` is
+   `reflect`, `projectId` is `request.projectId` and `turnId` is null. `ctx` is
    always `request.ctx`.
 3. The output equals `expected`, every model reply and every tool call was used, and for a turn
    each message in `expected.messages` was published to the progress port, in order, under the

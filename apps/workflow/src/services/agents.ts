@@ -250,14 +250,18 @@ async function runTurn(w: Scope, t: Turn): Promise<void> {
     }
 
     if (turnOut.proposal) {
-      // A draft that changes nothing on the page is a plain answer, not a draft.
-      const base = workspace.prompt;
+      // A draft that changes nothing on the page (or on the version it was written from) is a
+      // plain answer, not a draft.
+      const from = turnOut.proposal.payload.baseVersionId ? await catalog.get('prompt_versions', turnOut.proposal.payload.baseVersionId) : null;
+      const base = from?.structured ?? workspace.prompt;
       const structured = tidyStructured(turnOut.proposal.payload.structured);
       if (base && structuredEquals(base, structured) && !turnOut.proposal.payload.unmapped.length) return;
       for (const prev of await openProposals(w, projectId)) await catalog.patch('agent_proposals', prev.id, {state: 'discarded'});
       const [newest] = await catalog.find('prompt_versions', {projectId}, 'createdAt desc');
       const onEdit = page.where?.page === 'prompt_edit';
-      const baseVersionId = onEdit ? (page.where?.params.v ?? newest?.id ?? null) : (newest?.id ?? null);
+      // A skill's draft names the version it was written from (Improve with AI on any version).
+      const drafted = turnOut.proposal.payload.baseVersionId;
+      const baseVersionId = drafted ?? (onEdit ? (page.where?.params.v ?? newest?.id ?? null) : (newest?.id ?? null));
       const proposal: AgentProposal = {
         id: newId('ap'),
         projectId,
@@ -337,63 +341,27 @@ export async function closeProposal(w: Scope, p: AgentProposal, state: 'approved
 }
 
 /**
- * Improve with AI: the Prompt helper drafts a few changes to a version from its mistakes, each
- * with a reason. The draft goes into the editor (an open prompt proposal) with the changes
- * marked; nothing is labeled until the user saves it.
+ * Improve with AI: a Prompt helper turn that runs the skill improve_from_mistakes (#39) on a
+ * version. The skill reads the version's mistakes on the optimiser half (`get_mistakes`) and
+ * drafts a few changes, each with a reason; the draft goes into the editor (an open prompt
+ * proposal) with the changes marked, and nothing is labeled until the user saves it. Like a chat
+ * message, this returns when the turn is accepted; the page follows it in Ask AI.
  */
-export async function improveWithAi(w: Scope, projectId: string, versionId: string, locale?: Locale): Promise<void> {
-  const {catalog, agents, gateway, labeling} = w;
-  // The helper reads examples: the halves are fixed from here on (spec 1.0.0, 4.2).
-  await lockHoldout(w, projectId);
+export async function improveWithAi(w: Scope, projectId: string, versionId: string, locale?: Locale): Promise<{turnId: string}> {
   const state = await loadProjectState(w, projectId);
   const v = state?.versions.find(x => x.id === versionId);
-  const setup = state?.setup;
-  if (!state || !v || !setup?.schema) throw new Error('The version was not found.');
-  const report = state.reports.find(r => r.promptVersionId === v.id && !r.archivedNow);
-  if (!report) throw new Error(`${versionLabel(v)} has no scores yet.`);
-  const settings = setup.models.find(m => m.endpoint === report.endpoint);
-  const answers = settings ? toMap(await labeling.predictions(v.id, report.endpoint, settingsHash(settings))) : new Map();
-  // R3-9 (D3) and finding 3: the mistakes, mix-ups and up to 8 wrong examples all come from the
-  // optimiser half; nothing of the held-out half reaches the helper.
-  const half = state.examples.filter(e => e.split === 'eval' && visibleToAgents(e));
-  const mistakes = half.filter(e => !!state.gold[e.id] && !isRight(state.gold[e.id]!.answer, answers.get(e.id)?.answer ?? null)).length;
-  const gold = new Map(half.filter(e => !!state.gold[e.id]).map(e => [e.id, state.gold[e.id]!.answer]));
-  const said = answersForHelpers(half.filter(e => answers.has(e.id)).map(e => answers.get(e.id)!));
-  const examples = withComments(wrongExamples(await withFeatures(w, pickWrong(half, gold, said.predicted)), promptKeys(v), gold, said.predicted, undefined, said.notes), half, await labelComments(w, projectId, state));
-  await setLive(w, projectId, {agent: 'prompt_agent', working: `Reading the ${versionLabel(v)} mistakes…`, msg: msg('Reading the {version} mistakes…', {version: versionLabel(v)}), reply: null});
-  await postEvent(w, projectId, 'start', 'user', msg('asked the Prompt helper to improve {version}', {version: versionLabel(v)}), {path: '/prompt'});
-  let outcome = 'error';
-  try {
-    const m = await scoreOnOptimiserHalf(w, setup, v, report.endpoint, state.examples, state.gold);
-    const out = await agents.draftImprovement({projectId, ctx: w.ctx, version: versionLabel(v), prompt: v.structured, mixUps: m.mixUps.slice(0, 8), macroF1: m.macroF1, lowestValue: m.lowestValue, mistakes, examples, ...(locale ? {locale} : {})});
-    for (const prev of await openProposals(w, projectId)) await catalog.patch('agent_proposals', prev.id, {state: 'discarded'});
-    // Improve with AI rewords; the label's key and values stay as they are.
-    const structured: StructuredPrompt = tidyStructured(rewordOnly(v.structured, out.prompt));
-    const change = out.changes.map(c => c.text).join('; ') || 'Improved with AI';
-    const proposal: AgentProposal = {
-      id: newId('ap'),
-      projectId,
-      agent: 'prompt_agent',
-      kind: 'prompt',
-      payload: {structured, change, changes: out.changes, baseVersionId: v.id, unmapped: []},
-      brief: `Improve ${versionLabel(v)}`,
-      state: 'open',
-      createdAt: now(),
-    };
-    await catalog.insert('agent_proposals', proposal);
-    // One line: the reasons sit on the marks in the editor, so the chat does not repeat them.
-    const n = out.changes.length;
-    // With its catalog key, so the line reads in the user's language (resilience spec, 8).
-    const version = versionLabel(v);
-    const line = n === 1 ? msg('I made 1 change to {version}. Hover each mark to see why.', {version}) : n ? msg('I made {n} changes to {version}. Hover each mark to see why.', {n, version}) : msg('I have no new change for {version}.', {version});
-    await post(w, projectId, {role: 'agent', agent: 'prompt_agent', text: msgText(line), msg: line, page: 'Edit prompt'});
-    await postEvent(w, projectId, 'draft', 'prompt_agent', msg('put a draft on {page}', {page: 'Edit prompt'}), {path: '/prompt/edit', params: {v: v.id}});
-    w.tm.counter('sprint_agent_proposals_total', {agent: 'prompt_agent', kind: 'prompt', outcome: 'shown'});
-    w.tm.event('prompt_proposal_shown', {agent: 'prompt_agent', unmapped: 0});
-    outcome = 'ok';
-  } finally {
-    await setLive(w, projectId, null);
-    w.tm.counter('sprint_agent_turns_total', {agent: 'prompt_agent', page: 'prompt', outcome});
-    w.emitChange(projectId);
-  }
+  if (!state || !v || !state.setup?.schema) throw new Error('The version was not found.');
+  if (!state.reports.some(r => r.promptVersionId === v.id && !r.archivedNow)) throw new Error(`${versionLabel(v)} has no scores yet.`);
+  const version = versionLabel(v);
+  const page: PageContext = {label: 'Edit prompt', agent: 'prompt_agent', intent: 'improve', context: {version}, where: {page: 'prompt_edit', params: {v: v.id}}};
+  const started = Date.now();
+  // A button, not a message: the chat shows what the user asked for as an action line.
+  await w.shared.delete(stayKey(projectId));
+  await setLive(w, projectId, {agent: 'prompt_agent', working: 'Thinking…', reply: null});
+  await postEvent(w, projectId, 'start', 'user', msg('asked the Prompt helper to improve {version}', {version}), {path: '/prompt'});
+  const turnId = newId('turn');
+  const lang = locale ?? 'en';
+  await beginTurn(w, turnId, {projectId, page, entry: 'prompt_agent', locale: lang, client: null});
+  w.turnRunning(runTurn(w, {turnId, projectId, text: `Improve ${version}`, page, turnPage: page, join: false, locale: lang, started}));
+  return {turnId};
 }

@@ -12,14 +12,14 @@ import type {
   AgentTurnProgress,
   OptimiserReflectInput,
   OptimiserReflectOutput,
-  DraftImprovementInput,
-  DraftImprovementOutput,
   AgentModel,
+  AgentSkillName,
   AgentPreset,
   StructuredPrompt,
 } from '@yushiguang/sprint-contracts';
-import {FEATURES, HANDOFF_TARGETS, msg, msgText, readStructured, rewordOnly, structuredEquals, systemConfig} from '@yushiguang/sprint-domain';
+import {FEATURES, HANDOFF_TARGETS, msg, msgText, PRESET_SKILLS, readStructured, rewordOnly, structuredEquals, systemConfig} from '@yushiguang/sprint-domain';
 import {agentName, languageLine, presetModel, PRESETS, START_TOOLS, systemPrompt, TOOL_SPECS} from './presets.ts';
+import {SKILL_INTENTS, skillBlurb, SKILLS} from './skills.ts';
 
 
 
@@ -34,7 +34,21 @@ interface RawAgentReply {
   unmapped?: unknown;
   /** One short question when the request is unclear (R3-10): the turn then proposes nothing. */
   question?: string;
+  /** A skill to run (#39): the runtime reads its brief and the skill gives the answer. */
+  skill?: {name: AgentSkillName; args?: Record<string, unknown>};
+  /** Improve with AI: each change with its reason. */
+  changes?: unknown;
 }
+
+/** What a skill that drafts adds to its answer: the prompt it drafted from, and that version. */
+interface SkillDraft {
+  base: StructuredPrompt;
+  versionId: string | null;
+  version: string | null;
+  changes: {text: string; reason: string}[];
+}
+
+type Answer = RawAgentReply & {draft?: SkillDraft};
 
 /**
  * The tools as the runtime's helpers call them: a request by name. `createAgentRuntime` binds each
@@ -86,6 +100,7 @@ function buildAgentContext(input: AgentTurnInput, targetAgent: AgentPreset): Rec
 
 interface TurnTools {
   host?: ToolCaller;
+  skills: AgentTurnOutput['skills'];
   used: AgentTurnOutput['toolCalls'];
   modelCalls: AgentTurnOutput['modelCalls'];
   parseFailures: AgentTurnOutput['parseFailures'];
@@ -138,6 +153,12 @@ function workingLine(name: AgentToolName, args: Record<string, unknown>): Msg {
       return msg('Reading earlier drafts…');
     case 'read_guide':
       return msg('Reading the guide…');
+    case 'get_mistakes':
+      return v ? msg('Reading the {version} mistakes…', {version: v}) : msg('Reading the mistakes…');
+    case 'get_flips':
+      return msg('Comparing the answers of two versions…');
+    case 'get_confusions':
+      return msg('Reviewing the values…');
     case 'try_prompt':
       return msg('Trying the prompt on a few examples…');
     case 'score_version':
@@ -199,8 +220,8 @@ async function callModel(llm: AgentModel, to: AgentPreset, messages: ModelMessag
   return raw;
 }
 
-function toolBlurb(to: AgentPreset, host?: ToolCaller): string {
-  const names = host ? PRESETS[to].tools : [];
+function toolBlurb(to: AgentPreset, host?: ToolCaller, only?: AgentToolName[]): string {
+  const names = host ? (only ?? PRESETS[to].tools) : [];
   if (!names.length) return '';
   const list = names.map(n => `- ${n} ${TOOL_SPECS[n].args}: ${TOOL_SPECS[n].returns}`).join('\n');
   const paid = names.some(n => START_TOOLS.includes(n))
@@ -211,24 +232,33 @@ function toolBlurb(to: AgentPreset, host?: ToolCaller): string {
   return `\nIf the page view doesn't have what you need, use a tool: answer {"tool": {"name": string, "args": object}} instead, and the result comes back as the next message.${paid} At most ${systemConfig().agent.maxToolCalls} calls per turn. Your tools:\n${list}`;
 }
 
-/** One agent's part of a turn: calls the model, runs the read tools it asks for, until it answers. */
-async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, input: AgentTurnInput, tools: TurnTools): Promise<RawAgentReply> {
-  const context = buildAgentContext(input, to);
-  const body = {
-    preset: to,
-    intent,
-    page: input.page.label,
-    userText: input.userText,
-    context,
-  };
+/** One agent's part of a turn: calls the model, runs the read tools and the skill it asks for, until it answers. */
+async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, input: AgentTurnInput, tools: TurnTools): Promise<Answer> {
+  // A button that runs a skill (Improve with AI) starts it directly, with the page's arguments.
+  const direct = SKILL_INTENTS[intent];
+  if (direct && PRESET_SKILLS[to].includes(direct)) {
+    const started = await runSkill(llm, to, direct, input.page.context as Record<string, unknown>, input, tools);
+    return 'error' in started ? {reply: started.error} : started;
+  }
   const shape = PRESETS[to].intents[intent] ?? '{"reply": string}';
   const messages: ModelMessage[] = [
-    {role: 'system', content: `${systemPrompt(to)}\nAnswer shape for "${intent}": ${shape}${toolBlurb(to, tools.host)}${languageLine(input.locale)}`},
+    {role: 'system', content: `${systemPrompt(to)}\nAnswer shape for "${intent}": ${shape}${toolBlurb(to, tools.host)}${tools.host ? skillBlurb(to) : ''}${languageLine(input.locale)}`},
     // Example images (the label check) go as content parts, like the Optimiser's wrong examples.
-    {role: 'user', content: withImages(body)},
+    {role: 'user', content: withImages({preset: to, intent, page: input.page.label, userText: input.userText, context: buildAgentContext(input, to)})},
   ];
+  return converse(llm, to, intent, messages, PRESETS[to].tools, tools, async skill => {
+    if (!PRESET_SKILLS[to].includes(skill.name) || !SKILLS[skill.name]) return {error: `${String(skill.name)} is not one of your skills.`};
+    return runSkill(llm, to, skill.name, skill.args && typeof skill.args === 'object' ? skill.args : {}, input, tools);
+  });
+}
+
+/**
+ * The model loop: calls the model, runs the tools it asks for (only `allowed`), and a skill when
+ * `onSkill` is given, until it answers. A refused or extra call still counts as a step, so a model
+ * that keeps asking can't loop.
+ */
+async function converse(llm: AgentModel, to: AgentPreset, intent: string, messages: ModelMessage[], allowed: AgentToolName[], tools: TurnTools, onSkill?: (skill: NonNullable<RawAgentReply['skill']>) => Promise<Answer | {error: string}>): Promise<Answer> {
   let retried = false;
-  // A refused or extra call still counts as a step, so a model that keeps asking can't loop.
   for (let step = 0; ; step++) {
     const raw = await callModel(llm, to, messages, tools.progress);
     tools.modelCalls.push({agent: to, model: presetModel(to)});
@@ -245,29 +275,66 @@ async function invokePreset(llm: AgentModel, to: AgentPreset, intent: string, in
       }
       return {reply: raw.trim() && !/[{}[\]]/.test(raw) ? raw.trim() : "Sorry, my answer came out garbled. Please ask again."};
     }
+    if (out.skill && onSkill) {
+      const done = await onSkill(out.skill);
+      if (!('error' in done)) return done;
+      // The skill could not start (no such skill, or its brief failed): the helper hears why.
+      messages.push({role: 'assistant', content: raw}, {role: 'user', content: JSON.stringify({skill_result: {name: out.skill.name, error: done.error}})});
+      if (step >= systemConfig().agent.maxToolCalls + 1) return {reply: done.error};
+      continue;
+    }
     if (!out.tool) return out;
     if (step >= systemConfig().agent.maxToolCalls + 1) return {reply: "I couldn't find what I needed. Could you say a bit more about what you're asking?"};
     const name = out.tool.name;
     const args = out.tool.args && typeof out.tool.args === 'object' ? out.tool.args : {};
-    let result: unknown;
-    if (!tools.host || !PRESETS[to].tools.includes(name)) result = {error: `${name} is not one of your tools.`};
-    else if (tools.used.length >= systemConfig().agent.maxToolCalls) result = {error: 'No more tool calls in this turn. Answer now with what you have.'};
-    else {
-      const started = Date.now();
-      const line = workingLine(name, args);
-      tools.progress?.({agent: to, working: msgText(line), msg: line});
-      try {
-        result = await tools.host.call({agent: to, name, args});
-        tools.used.push({agent: to, name, args, ok: true, ms: Date.now() - started});
-      } catch (e) {
-        result = {error: (e as Error).message ?? String(e)};
-        tools.used.push({agent: to, name, args, ok: false, ms: Date.now() - started});
-      }
-    }
+    const result = allowed.includes(name) ? await callTool(to, name, args, tools) : {error: `${name} is not one of your tools${allowed === PRESETS[to].tools ? '' : ' here'}.`};
     let text = JSON.stringify({tool_result: {name, result}});
     if (text.length > systemConfig().agent.maxToolResultChars) text = `${text.slice(0, systemConfig().agent.maxToolResultChars)}… (cut)`;
     messages.push({role: 'assistant', content: raw}, {role: 'user', content: text});
   }
+}
+
+/** One tool call through the host, with its live line; an error comes back as `{error}`. */
+async function callTool(to: AgentPreset, name: AgentToolName, args: Record<string, unknown>, tools: TurnTools, line?: Msg): Promise<unknown> {
+  if (!tools.host || !PRESETS[to].tools.includes(name)) return {error: `${name} is not one of your tools.`};
+  if (tools.used.length >= systemConfig().agent.maxToolCalls) return {error: 'No more tool calls in this turn. Answer now with what you have.'};
+  const started = Date.now();
+  const working = line ?? workingLine(name, args);
+  tools.progress?.({agent: to, working: msgText(working), msg: working});
+  try {
+    const result = await tools.host.call({agent: to, name, args});
+    tools.used.push({agent: to, name, args, ok: true, ms: Date.now() - started});
+    return result;
+  } catch (e) {
+    tools.used.push({agent: to, name, args, ok: false, ms: Date.now() - started});
+    return {error: (e as Error).message ?? String(e)};
+  }
+}
+
+/**
+ * Runs a skill (#39): reads its brief with the skill's arguments, then asks the helper for the
+ * answer under the skill's instructions and shape, with only the skill's tools. A brief that
+ * fails comes back as `{error}`, for the helper to answer from.
+ */
+async function runSkill(llm: AgentModel, to: AgentPreset, name: AgentSkillName, args: Record<string, unknown>, input: AgentTurnInput, tools: TurnTools): Promise<Answer | {error: string}> {
+  const skill = SKILLS[name];
+  const brief = await callTool(to, skill.brief, args, tools, skill.working(args));
+  if (brief && typeof brief === 'object' && 'error' in brief) return {error: String((brief as {error: unknown}).error)};
+  tools.skills.push({agent: to, name});
+  const b = brief as Record<string, unknown>;
+  // Improve with AI: the reasons come in the user's language; the prompt keeps its own (2026-11-16).
+  const lang = languageLine(input.locale) + (skill.drafts && input.locale === 'zh' ? ' Write each change\'s "reason" in Simplified Chinese too; "text" quotes the prompt\'s own words.' : '');
+  const context: Record<string, unknown> = {brief: {...b, examples: undefined}, args, ...(Array.isArray(b.examples) ? {examples: b.examples} : {}), pageView: input.workspace.pageView};
+  const messages: ModelMessage[] = [
+    {role: 'system', content: `${systemPrompt(to)}\n\nYou are running the skill "${name}".\n${skill.instructions}\nAnswer shape: ${skill.shape}${toolBlurb(to, tools.host, skill.tools)}${lang}`},
+    {role: 'user', content: withImages({preset: to, intent: name, page: input.page.label, userText: input.userText, context})},
+  ];
+  const out = await converse(llm, to, name, messages, skill.tools, tools);
+  if (!skill.drafts) return {...out, prompt: undefined};
+  const base = readStructured(b.prompt) ?? input.workspace.prompt;
+  if (!base) return {reply: out.reply};
+  const changes = Array.isArray(out.changes) ? (out.changes as {text?: unknown; reason?: unknown}[]).filter(c => c && typeof c.text === 'string').map(c => ({text: c.text as string, reason: typeof c.reason === 'string' ? c.reason : ''})) : [];
+  return {...out, prompt: reworded(base, out.prompt), draft: {base, versionId: typeof b.versionId === 'string' ? b.versionId : null, version: typeof b.version === 'string' ? b.version : null, changes}};
 }
 
 /**
@@ -296,7 +363,7 @@ export function importIntent(agent: AgentPreset, intent: string, text: string | 
 export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?: ToolCaller, progress?: AgentTurnProgress): Promise<AgentTurnOutput> {
   const invocations: AgentTurnOutput['invocations'] = [];
   const messages: AgentEmittedMessage[] = [];
-  const tools: TurnTools = {host, used: [], modelCalls: [], parseFailures: [], progress};
+  const tools: TurnTools = {host, skills: [], used: [], modelCalls: [], parseFailures: [], progress};
   // Each message is reported as soon as it is final, so the host can save it while the turn goes on.
   const emit = (m: AgentEmittedMessage) => {
     messages.push(m);
@@ -324,26 +391,36 @@ export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?
   }
 
   const question = typeof out.question === 'string' ? out.question.trim() : '';
-  const text = [out.reply?.trim(), question].filter(Boolean).join('\n\n');
-  if (text) {
-    emit({role: 'agent', agent, text});
+  const draft = out.draft;
+  if (draft) {
+    // A skill's draft (Improve with AI): one fixed line; the reasons sit on the marks in the
+    // editor, so the chat does not repeat them.
+    const n = draft.changes.length;
+    const version = draft.version ?? '';
+    const line = n === 1 ? msg('I made 1 change to {version}. Hover each mark to see why.', {version}) : n ? msg('I made {n} changes to {version}. Hover each mark to see why.', {n, version}) : msg('I have no new change for {version}.', {version});
+    emit({role: 'agent', agent, text: msgText(line), msg: line});
+  } else {
+    const text = [out.reply?.trim(), question].filter(Boolean).join('\n\n');
+    if (text) emit({role: 'agent', agent, text});
   }
 
   // A question, or an answer that leaves the prompt as it is, is a plain answer: no draft (R3-10).
   let proposal: AgentProposalDraft | null = null;
-  const base = input.workspace.prompt;
+  const base = draft?.base ?? input.workspace.prompt;
   const structured = question ? null : readStructured(out.prompt, base ?? undefined);
   const unmapped = Array.isArray(out.unmapped) ? out.unmapped.filter((x): x is string => typeof x === 'string' && !!x.trim()).map(x => x.trim()) : [];
   if (structured && (!base || !structuredEquals(base, structured) || unmapped.length)) {
     proposal = {
       kind: 'prompt',
       agent,
-      brief: input.userText,
-      payload: {structured, ...(typeof out.change === 'string' && out.change.trim() ? {change: out.change.trim()} : {}), unmapped},
+      brief: draft ? `Improve ${draft.version ?? 'the version'}` : input.userText,
+      payload: draft
+        ? {structured, change: draft.changes.map(c => c.text).join('; ') || 'Improved with AI', changes: draft.changes, baseVersionId: draft.versionId, unmapped: []}
+        : {structured, ...(typeof out.change === 'string' && out.change.trim() ? {change: out.change.trim()} : {}), unmapped},
     };
   }
 
-  return {invocations, messages, proposal, toolCalls: tools.used, modelCalls: tools.modelCalls, parseFailures: tools.parseFailures};
+  return {invocations, messages, proposal, skills: tools.skills, toolCalls: tools.used, modelCalls: tools.modelCalls, parseFailures: tools.parseFailures};
 }
 
 /**
@@ -424,19 +501,4 @@ export async function reflectPrompt(input: OptimiserReflectInput, llm: AgentMode
 /** A model's rewording laid over the prompt it started from (label key and value names kept). */
 function reworded(base: StructuredPrompt, answer: unknown): StructuredPrompt {
   return answer && typeof answer === 'object' ? rewordOnly(base, answer as Partial<StructuredPrompt>) : base;
-}
-
-/** Improve with AI: the Prompt helper's draft of a version, with every change and its reason. */
-export async function draftImprovement(input: DraftImprovementInput, llm: AgentModel, tools?: ToolCaller): Promise<DraftImprovementOutput> {
-  const {locale, ...context} = input;
-  // The reply and each change's reason come in the user's language; the prompt keeps its own (2026-11-16).
-  const lang = languageLine(locale) ? `${languageLine(locale)} Write each change's "reason" in Simplified Chinese too; "text" quotes the prompt's own words.` : '';
-  const raw = await withFeatureInfo(llm, 'prompt_agent', 'improve', {...context, examples: (input.examples ?? []).slice(0, 8)}, tools, undefined, lang);
-  const out = parseJsonObject<{prompt?: unknown; changes?: {text: string; reason?: string}[]; reply?: unknown}>(raw, {});
-  const changes = Array.isArray(out.changes) ? out.changes.filter(c => c && typeof c.text === 'string').map(c => ({text: c.text, reason: typeof c.reason === 'string' ? c.reason : ''})) : [];
-  return {
-    prompt: reworded(input.prompt, out.prompt),
-    changes,
-    reply: typeof out.reply === 'string' ? out.reply : '',
-  };
 }

@@ -1,0 +1,130 @@
+{
+  "row": "G1",
+  "name": "Which examples to label first: the rare value first",
+  "request": {
+    "userText": "Which examples should I label first?",
+    "page": {
+      "label": "Gold Labels",
+      "agent": "front_desk",
+      "intent": "answer",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_ability",
+      "task": "Label the format of short videos",
+      "prompt": {
+        "taskSummary": "Label the format of short videos.",
+        "features": {
+          "video": [
+            "Description"
+          ],
+          "photo_text": [
+            "Title",
+            "Description"
+          ],
+          "metadata": []
+        },
+        "label": {
+          "name": "format",
+          "kind": "single",
+          "values": [
+            {
+              "name": "Vlog",
+              "definition": "A day in the creator's life."
+            },
+            {
+              "name": "Tutorial",
+              "definition": "Shows how to do something, step by step."
+            },
+            {
+              "name": "Other",
+              "definition": "Anything else."
+            }
+          ]
+        },
+        "ruleGroups": [],
+        "images": []
+      },
+      "history": [],
+      "pageView": {
+        "page": "gold",
+        "title": "Gold Labels",
+        "summary": "Give each example its correct answer.",
+        "data": {}
+      }
+    },
+    "locale": "en"
+  },
+  "tools": {
+    "get_dataset_stats": {
+      "result": {
+        "values": [
+          {
+            "value": "Vlog",
+            "goldLabeled": 30,
+            "readableHalf": 15,
+            "heldOutHalf": 15,
+            "rare": false,
+            "dominant": true
+          },
+          {
+            "value": "Tutorial",
+            "goldLabeled": 3,
+            "readableHalf": 2,
+            "heldOutHalf": 1,
+            "rare": true,
+            "dominant": false
+          },
+          {
+            "value": "Other",
+            "goldLabeled": 7,
+            "readableHalf": 4,
+            "heldOutHalf": 3,
+            "rare": false,
+            "dominant": false
+          }
+        ],
+        "waitingForGold": 60,
+        "removed": 0
+      }
+    },
+    "search_examples": {
+      "result": {
+        "total": 3,
+        "examples": [
+          {
+            "id": "1310",
+            "title": "How to repot a cactus"
+          },
+          {
+            "id": "1322",
+            "title": "Step by step: folding a paper crane"
+          },
+          {
+            "id": "1340",
+            "title": "Quick guide to tying a tie"
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "calls": [
+      "get_dataset_stats",
+      "search_examples"
+    ],
+    "skills": [
+      "plan_labeling"
+    ],
+    "notCalls": [
+      "try_prompt",
+      "score_version",
+      "start_optimiser"
+    ],
+    "reply": [
+      "Says to label more Tutorial examples first because Tutorial has too few gold labels",
+      "Lists some unlabeled item ids such as 1310, 1322 or 1340 by what they mention",
+      "Never says which value any listed example is or looks like"
+    ]
+  }
+}

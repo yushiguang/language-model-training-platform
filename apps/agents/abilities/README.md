@@ -15,12 +15,13 @@ real model, so any agent runtime with any model can be measured on the same case
 | `tools` | What each tool answers, by name, whatever its arguments: `{"result": ...}` or `{"error": "..."}`. A tool not listed answers with an error. |
 | `expect.calls` | Tools a good answer calls, each at least once. |
 | `expect.notCalls` | Tools a good answer never calls. A paid tool (`try_prompt`, `score_version`, `start_optimiser`) is never allowed unless it is in `calls`. |
+| `expect.skills` | Skills a good answer runs, each at least once (`apps/agents/src/skills.ts`). The skill's brief tool needs an answer in `tools`. |
 | `expect.handoffTo` | The helper the turn should end with, when it should hand off. Left out: no handoff. |
 | `expect.reply` | What the reply must do, item by item. |
 
 ## How a case is scored
 
-- **Tools**, exactly: every tool in `calls` was called, none in `notCalls` was, no paid tool ran
+- **Tools**, exactly: every tool in `calls` was called and every skill in `skills` ran, none in `notCalls` was called, no paid tool ran
   unasked, and the turn ended with the right helper.
 - **Reply**, by a grader model: each item is met, not met, or unsure. A person grades the unsure
   ones.

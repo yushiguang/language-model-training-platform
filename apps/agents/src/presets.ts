@@ -45,6 +45,9 @@ export const TOOL_SPECS: Record<AgentToolName, {args: string; returns: string}> 
   get_optimiser_run: {args: '{"run"?: a run number, 1 for the first (default: the newest)}', returns: 'one Optimiser run round by round: the version it started from and why, the value it aimed at, the change, the dry run, the outcome and its meaning, the score, and why the run stopped'},
   get_drafts: {args: '{"limit"?: up to 10}', returns: 'your drafts, newest first, discarded ones too: their state, the version they started from, the change note, each change with its reason, and the prompt'},
   read_guide: {args: '{"topic"?: a topic or a term, like "macro_f1", "held-out half" or "Rebuild scores"}', returns: 'what the site\'s terms, pages and buttons mean, in the pages\' own words; without a topic, the list of topics'},
+  get_mistakes: {args: '{"version"?: a label like "v4" (default: the newest scored)}', returns: "a scored version's structured prompt, its Macro-F1 and weakest value, its top mix-ups and up to 8 of its wrong answers on the part of the eval set helpers can read, with features, the model's reasons and people's comments"},
+  get_flips: {args: '{"a"?: the earlier version (default: the parent of "b"), "b"?: the later version (default: the newest scored)}', returns: "both versions' scores and prompts, and the examples \"b\" fixed and broke on the part of the eval set helpers can read (up to 6 each), with both answers and the model's reasons"},
+  get_confusions: {args: '{}', returns: "the label with each value's definition, which values the scored versions read as which (counts summed over versions) and how many gold labels each value has"},
   try_prompt: {args: '{"prompt"?: a structured prompt (default: the newest version), "model"?: a model name, "n"?: up to 5}', returns: "PAID, small: the model's answers on n examples of the part of the eval set helpers can read, next to their gold labels; nothing is saved"},
   score_version: {args: '{"version": a label like "v4", "model"?: a model name}', returns: 'PAID: starts scoring a saved version on the eval set; its scores appear on Prompt versions when it finishes'},
   start_optimiser: {args: '{"rounds"?: how many changes to try, 1 to 50 (default 10)}', returns: 'PAID: starts the Optimiser (Auto Optimise) on the project\'s model; each change it tries appears on Prompt versions'},
@@ -77,6 +80,7 @@ How to answer.
 - When the user asks why they cannot go on, read get_gates and give the exact missing condition and how to meet it. When they ask what is running or want it stopped, read get_running_work and point to its Stop button. When they ask why a file or rows were skipped, read get_upload_result. When they ask what a term, a page or a button means, read read_guide and use its words.
 - When the user's message has a document link, read it with read_doc before you answer and work from what it says. If it cannot be opened, say so in one line and ask the user to paste the text.
 - Never mention money, cost, price or how long something takes. The site never shows them.
+- Never tell the user which value an example should get, whether it has a gold label yet or not: gold labels are people's call, and a hint would steer them. Explain what the definitions say and leave the choice to the user.
 - Keep "reply" short: the answer first, then at most a few lines of reasons.
 
 Problem reports. When the user says the site itself does not work (an error message, a button that does nothing, a page that stays loading or looks wrong), or asks to report a problem:
@@ -131,7 +135,6 @@ On Gold Labels, never say which label is right for the example the user is looki
       // A raw prompt the user already has, pasted or linked: parsed into the structured parts.
       import_prompt: DRAFT_SHAPE,
       revise_prompt: DRAFT_SHAPE,
-      improve: `{"reply": string, "prompt": ${PROMPT_SHAPE}, "changes": [{"text": string, "reason": string}]}`,
       explain_version: '{"reply": string}',
       follow_up: `${DRAFT_SHAPE}, plus ${PASS_ON}`,
     },
@@ -165,15 +168,7 @@ Importing a prompt the user already has ("import_prompt"). Whenever the user's m
 
 Revising ("revise_prompt", "follow_up"). Make the change the user asked for and nothing else, and return the whole prompt with that change. Put a one-line summary in "change". Wording changes (the task, definitions, rule groups, ticked features) keep the gold labels and scores valid. Adding, removing or renaming a value, renaming the label's key, or changing single or multi select or how many values an item may get, changes the labels: once gold labels exist the user has to recheck them, so say this in one line before you draft such a change, and draft it only when the user asks for it or the problem is clear.
 
-Improving from mistakes ("improve"). "prompt" is the version's structured prompt, and "examples" holds a few of its wrong answers: the gold label, the model's answer, the features, and when there is one the model's own short "reason" for its answer. When the site could not read the model's reply, "invalid" says why (for example a value that is not in the labels). Read them to find what the prompt fails to say: the reason often shows which words the model leaned on, or which rule it misread. When people commented on an example, "comments" holds their words: it is their reading of what the label means, so build it into the prompt's rules and never argue with it.
-- Change wording only here: definitions, rule groups, the task summary, and ticked features. Keep the label's key, its single or multi select and every value name exactly as they are; the site ignores any other change.
-- Look for a pattern first: several mistakes with the same cause. Fix patterns before single cases.
-- Write each fix as a general rule that would also be right for items you have not seen. When a value's own boundary is vague, too broad or missing an exclusion or exemption, refine that value's definition, keeping its list structure. When the mistakes come from the order of checks between two values that both match, or from how an input is read for every value, update or add the cross-value rule group. Never copy an example's text into the prompt, and never write a rule that only describes one example.
-- Make a few targeted changes, not a rewrite. Keep what already works.
-- You may tick or untick a feature when the mistakes point to it; read its description with read_feature_info first.
-- Gold labels are the user's to judge, never yours. When an example's gold label looks odd against the value's own definition, write no rule to match it and work on the other mistakes; do not say which label is right or wrong.
-- When the mistakes come from two values whose definitions overlap, sharpen those two definitions first, and say so in "reply".
-- Give each change a one-line reason that cites the mistakes, for example "5 Complaints were read as Question", and cite examples by "externalId" where it helps. Each change's "text" quotes the words it adds, or the words it removes when it only removes, so the editor can put the reason on the right mark.
+Improving from mistakes. When the user asks you to improve a version or fix its mistakes, run the skill improve_from_mistakes: it reads the version's mistakes for you, so do not draft the improvement yourself.
 
 Your earlier drafts. When the user asks about a draft you made, or why you changed something, read get_drafts: it keeps discarded drafts with their changes and reasons. Do not offer a change the user discarded again unless they ask for it.
 
@@ -249,6 +244,7 @@ In "merge" you get two prompts, "prompt" and "other.prompt", that each get right
 };
 
 export const systemPrompt = (p: AgentPreset | 'optimiser') => PRESETS[p].system;
+export {PROMPT_SHAPE};
 export const presetModel = (p: AgentPreset | 'optimiser'): string => PRESETS[p].model;
 
 /** Words the helpers use in Chinese, so their replies match the pages (spec 1.1.0, 2.3). */

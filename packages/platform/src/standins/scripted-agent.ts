@@ -179,6 +179,26 @@ function importPrompt(r: Req) {
   };
 }
 
+/** Skills (#39): the runtime read the brief; the answer comes from it. */
+function skill(r: Req) {
+  const brief = (r.context.brief ?? {}) as Record<string, any>;
+  if (r.intent === 'improve_from_mistakes') return improve({...r, context: brief});
+  if (r.intent === 'diagnose_score_change') {
+    const fixed = (brief.fixed ?? []).length;
+    const broke = (brief.broken ?? []).length;
+    return {reply: `${brief.b?.version ?? 'The newer version'} fixed ${fixed} example${fixed === 1 ? '' : 's'} and broke ${broke} that ${brief.a?.version ?? 'the older one'} got right, on the part of the eval set I can read. ${fixed + broke < 5 ? 'So few changed that the difference may be chance.' : 'Want me to draft a change for the broken ones?'}`};
+  }
+  if (r.intent === 'review_label_set') {
+    const pairs = (brief.mixUps ?? []).slice(0, 2).map((m: any) => `${m.gold} and ${m.predicted}`);
+    return {reply: pairs.length ? `The values that get mixed up most are ${pairs.join(', and ')}. Sharpening those definitions would help; shall I draft it?` : 'No two values are mixed up often in the scores so far.'};
+  }
+  if (r.intent === 'plan_labeling') {
+    const rare = ((brief.values ?? []) as {value: string; rare?: boolean}[]).filter(v => v.rare).map(v => v.value);
+    return {reply: rare.length ? `Label more examples of ${rare.join(', ')} first: they have too few gold labels to score fairly.` : 'No value is rare: label the waiting examples in any order.'};
+  }
+  return null;
+}
+
 function promptAgent(r: Req) {
   if (r.intent === 'improve') return improve(r);
   const start = promptAgentStart(r);
@@ -380,6 +400,7 @@ export function scriptedAgent(): AgentModel {
     await new Promise(res => setTimeout(res, 450));
     const req = readRequest(messages);
     const out =
+      skill(req) ??
       (req.preset !== 'optimiser' && req.intent !== 'improve' ? problemReport(req) : null) ??
       passOn(req) ??
       (req.preset === 'front_desk'

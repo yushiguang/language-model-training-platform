@@ -70,7 +70,7 @@ after a value (for example "Strong criteria") into that value's definition. A lo
 is treated as an import whatever the intent (`importIntent` in `apps/agents/src/runtime.ts`). The
 Prompt helper ticks a feature in both the video and the photo-and-text groups when both have it,
 and suggests a catch-all value ("Other" or "None") when the values may not cover every item.
-Improve with AI writes each change's reason in the site's language (`DraftImprovementInput.locale`).
+Improve with AI writes each change's reason in the site's language (the turn's `locale`).
 
 **Images.** Wrong examples (`ExampleBrief.images`, up to 2 per example from the image features)
 go to the helpers as image content parts after the text, for Improve with AI and the Optimiser. A relative sample URL is not resolved for the model; the stand-in data uses them,
@@ -95,8 +95,8 @@ helper:
   out and say so in a `note`; asking for one by id gives nothing;
 - `get_report` and the report page view give mix-ups as counts only, since reports are scored on
   the held-out half;
-- `try_prompt`, Improve with AI (its mistakes, mix-ups and wrong examples come
-  from `scoreOnOptimiserHalf`) and the Optimiser read the optimiser half only.
+- `try_prompt`, `get_mistakes` (Improve with AI's mistakes, mix-ups and wrong examples, from
+  `scoreOnOptimiserHalf`), `get_flips` and the Optimiser read the optimiser half only.
 Page views carry scores and counts only. Every preset's instructions (`common` and the
 Optimiser's) say the held-out half is hidden and why, so a helper doesn't ask for it.
 
@@ -147,14 +147,52 @@ the user stops them from the page.
 - `read_guide` (every helper): the product guide (`packages/domain/src/guide.ts`): the site's
   terms, pages and buttons, by topic or by a word people use.
 
+**Reads for the skills** (step 2), also in `agent-reads.ts`; `get_mistakes` and `get_flips` lock
+the halves like every read of examples:
+- `get_mistakes` (Prompt helper): a scored version's prompt, its Macro-F1, weakest value and top
+  mix-ups (counts) and up to 8 wrong answers, all on the optimiser half, with the model's reasons
+  and people's comments. It is what Improve with AI read before.
+- `get_flips` (Prompt and Scores helpers): two scored versions' scores and prompts, and the
+  examples of the optimiser half the later one fixed and broke (up to 6 each), with both answers.
+- `get_confusions` (Prompt and Scores helpers): the label's definitions, the mix-ups summed over
+  every scored version (counts only) and the gold labels per value.
+The front desk also reads `get_dataset_stats` and `search_examples` now, for labeling plans.
+
+**Skills** (step 2, `apps/agents/src/skills.ts`). A skill is a written workflow for a whole task.
+Each starts from a brief, one read tool the runtime calls with the skill's arguments, then asks the
+helper again with the skill's instructions and answer shape and only the skill's tools. A helper
+runs one by answering `{"skill": {"name": ..., "args": {...}}}`; which helper may run which is
+`PRESET_SKILLS` in `packages/domain/src/agent-guards.ts`, and the brief and tools go through the
+tool host, so its guards hold. A skill the helper does not have, or a brief that fails, goes back
+to the helper as a `skill_result` with the error. The turn's output lists the skills that ran
+(`AgentTurnOutput.skills`).
+- `improve_from_mistakes` (Prompt helper): Improve with AI. Reads `get_mistakes` and drafts a few
+  wording changes, each with its reason, on the version it read (`baseVersionId`). The button
+  starts a Prompt helper turn with intent `improve` that runs the skill directly; asking in the
+  chat runs the same skill, so both give the same draft. The chat gets one fixed line ("I made 2
+  changes to v4. Hover each mark to see why.").
+- `diagnose_score_change` (Prompt and Scores helpers): why one version scored differently from
+  another, from `get_flips`: the values that moved, the changed words and the examples behind them.
+- `review_label_set` (Prompt helper): which values overlap and whether a catch-all is missing,
+  from `get_confusions`. Never paid.
+- `plan_labeling` (front desk): which examples to label first, from `get_dataset_stats`, rare
+  values first, with unlabeled items found by `search_examples` and listed by what they mention.
+`AgentRuntimeContract.draftImprovement` is gone; the workflow's `improveWithAi` starts the turn and
+returns when it is accepted, like a chat message.
+
+**Helpers never pick a gold label** (G2): every helper's instructions say never to tell the user
+which value an example should get, whether it has a gold label yet or not; they explain what the
+definitions say and leave the choice to the user.
+
 **Ability cases** (`apps/agents/abilities/*.json`, format in its README) hold what users ask and
-what a good answer does: the tools it must and must not call, and a checklist for the reply.
+what a good answer does: the tools it must and must not call, the skills it runs, and a checklist
+for the reply.
 `npm test` checks they are well formed; `apps/agents/scripts/run-abilities.ts` runs them against
 a real model and reports the score.
 
 **The holdout lock.** The first tool call that returns examples (`get_examples`,
-`get_gold_labels`, `get_predictions`, `search_examples`, `try_prompt`), Improve with AI and Auto
-Optimise call `lockHoldout`: the halves are balanced one last time and then fixed for good, so an
+`get_gold_labels`, `get_predictions`, `search_examples`, `try_prompt`, `get_mistakes`,
+`get_flips`) and Auto Optimise call `lockHoldout`: the halves are balanced one last time and then fixed for good, so an
 example a helper has read never moves into the scored half.
 
 **Comments.** People's comments on an example (Gold Labels, both tabs) go to the Optimiser and

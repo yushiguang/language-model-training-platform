@@ -84,11 +84,12 @@ export async function runAbilities(opts: RunAbilitiesOptions): Promise<AbilityRu
     const calls = scoreCalls(c, out);
     const reply = out.messages.filter(m => m.role === 'agent').map(m => m.text).join('\n\n');
     const items = await grade(grader, c, reply);
-    const passed = !calls.missing.length && !calls.forbidden.length && !calls.unaskedPaid.length && calls.handoffOk && items.every(i => i.met === true);
+    const passed = !calls.missing.length && !calls.missingSkills.length && !calls.forbidden.length && !calls.unaskedPaid.length && calls.handoffOk && items.every(i => i.met === true);
     results.push({...calls, reply: items, passed, toolCalls: out.toolCalls.length, modelCalls: out.modelCalls.length});
     const unsure = items.filter(i => i.met === 'unsure').length;
-    log(`${passed ? 'pass' : unsure && items.every(i => i.met !== false) && !calls.missing.length && !calls.forbidden.length ? 'unsure' : 'FAIL'}  ${c.row}  ${c.name}`);
+    log(`${passed ? 'pass' : unsure && items.every(i => i.met !== false) && !calls.missing.length && !calls.missingSkills.length && !calls.forbidden.length ? 'unsure' : 'FAIL'}  ${c.row}  ${c.name}`);
     for (const m of calls.missing) log(`        did not call ${m}`);
+    for (const k of calls.missingSkills) log(`        did not run the skill ${k}`);
     for (const f of calls.forbidden) log(`        called ${f}, which the case forbids`);
     for (const p of calls.unaskedPaid) log(`        started paid work unasked: ${p}`);
     if (!calls.handoffOk) log(`        ended with the wrong helper`);
