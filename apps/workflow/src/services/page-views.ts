@@ -8,6 +8,7 @@ import {lockHoldout} from './governance.ts';
 import {mismatches} from './mismatches.ts';
 import {getProject, loadProjectState} from './projects.ts';
 import {withFeatures} from './features.ts';
+import {drafts, gates, guide, optimiserRun, runningWork, uploadResult} from './agent-reads.ts';
 
 /**
  * Page views: each page as the agent sees it, built from the same saved data the page shows.
@@ -448,6 +449,18 @@ export function agentToolHost(inst: Instance): AgentToolHost {
           return compareVersions(state, findVersion(state, args.a), findVersion(state, args.b), asModel(args.model, state));
         case 'get_mismatch_summary':
           return mismatchSummary(w, projectId, state, findVersion(state, args.version));
+        case 'get_gates':
+          return gates(state);
+        case 'get_running_work':
+          return runningWork(w, state);
+        case 'get_upload_result':
+          return uploadResult(w, state);
+        case 'get_optimiser_run':
+          return optimiserRun(state, args.run);
+        case 'get_drafts':
+          return drafts(w, state, limitOf(args.limit, 10, 5));
+        case 'read_guide':
+          return guide(args.topic);
         default:
           throw new Error(`Unknown tool ${String(name)}.`);
       }

@@ -131,6 +131,27 @@ the user stops them from the page.
 - `get_mismatch_summary`: the Mismatches tab in counts (to review, wrong in every version,
   reviewed, accuracy, top mix-ups), never which side is right.
 
+**Reads added for the agent abilities** (issue #39, step 1), in `apps/workflow/src/services/agent-reads.ts`:
+- `get_gates` (every helper): each step approved or not, what its Approve button waits for, and
+  the numbers behind it, gold labels per half included;
+- `get_running_work` (every helper): labeling, Optimiser runs, taking examples and data source
+  imports that run now, how far each is, and where its Stop button is;
+- `get_upload_result` (every helper): the last label uploads (refused rows by row number and
+  reason, never their item ids, since one could be held out), what the item checks left out, and
+  what the data source files skipped;
+- `get_optimiser_run` (Prompt and Scores helpers): one run round by round: where each change
+  started and why, the value it aimed at (`OptimiserRound.aimedAt`), the dry run, the outcome
+  and what it means, and why the run stopped;
+- `get_drafts` (Prompt helper): its drafts, discarded ones too, with their changes and reasons,
+  so it can answer for a draft the user dropped and does not offer it again;
+- `read_guide` (every helper): the product guide (`packages/domain/src/guide.ts`): the site's
+  terms, pages and buttons, by topic or by a word people use.
+
+**Ability cases** (`apps/agents/abilities/*.json`, format in its README) hold what users ask and
+what a good answer does: the tools it must and must not call, and a checklist for the reply.
+`npm test` checks they are well formed; `apps/agents/scripts/run-abilities.ts` runs them against
+a real model and reports the score.
+
 **The holdout lock.** The first tool call that returns examples (`get_examples`,
 `get_gold_labels`, `get_predictions`, `search_examples`, `try_prompt`), Improve with AI and Auto
 Optimise call `lockHoldout`: the halves are balanced one last time and then fixed for good, so an

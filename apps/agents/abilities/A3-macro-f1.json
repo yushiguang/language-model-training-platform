@@ -1,0 +1,82 @@
+{
+  "row": "A3",
+  "name": "What Macro-F1 means, in the guide's words",
+  "request": {
+    "userText": "What does Macro-F1 mean here?",
+    "page": {
+      "label": "Prompt Tuning · prompt versions",
+      "agent": "front_desk",
+      "intent": "answer",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_ability",
+      "task": "Label the format of short videos",
+      "prompt": {
+        "taskSummary": "Label the format of short videos.",
+        "features": {
+          "video": [
+            "Description"
+          ],
+          "photo_text": [
+            "Title",
+            "Description"
+          ],
+          "metadata": []
+        },
+        "label": {
+          "name": "format",
+          "kind": "single",
+          "values": [
+            {
+              "name": "Vlog",
+              "definition": "A day in the creator's life."
+            },
+            {
+              "name": "Tutorial",
+              "definition": "Shows how to do something, step by step."
+            },
+            {
+              "name": "Other",
+              "definition": "Anything else."
+            }
+          ]
+        },
+        "ruleGroups": [],
+        "images": []
+      },
+      "history": [],
+      "pageView": {
+        "page": "prompt",
+        "title": "Prompt Tuning · prompt versions",
+        "summary": "Every prompt version with its scores.",
+        "data": {}
+      }
+    },
+    "locale": "en"
+  },
+  "tools": {
+    "read_guide": {
+      "result": {
+        "topic": "macro_f1",
+        "title": "Macro-F1 and the per-value scores",
+        "text": "Macro-F1 is the main score, from 0 to 1. It averages the F1 of each value, so every value counts the same: a rare value the model gets wrong pulls the score down as much as a common one. A value's F1 combines how often the model's choice of that value is right (precision) and how many of that value it finds (recall). Accuracy is the share of examples answered exactly right."
+      }
+    }
+  },
+  "expect": {
+    "calls": [
+      "read_guide"
+    ],
+    "notCalls": [
+      "try_prompt",
+      "score_version",
+      "start_optimiser"
+    ],
+    "reply": [
+      "Explains that Macro-F1 runs from 0 to 1 and every value counts the same",
+      "Says a rare value the model gets wrong pulls the score down",
+      "Uses plain words, no formula"
+    ]
+  }
+}

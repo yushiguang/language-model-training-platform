@@ -1,0 +1,114 @@
+{
+  "row": "D5",
+  "name": "Why rows of a label upload were skipped",
+  "request": {
+    "userText": "I uploaded my labels but some were skipped. Why?",
+    "page": {
+      "label": "Gold Labels",
+      "agent": "front_desk",
+      "intent": "answer",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_ability",
+      "task": "Label the format of short videos",
+      "prompt": {
+        "taskSummary": "Label the format of short videos.",
+        "features": {
+          "video": [
+            "Description"
+          ],
+          "photo_text": [
+            "Title",
+            "Description"
+          ],
+          "metadata": []
+        },
+        "label": {
+          "name": "format",
+          "kind": "single",
+          "values": [
+            {
+              "name": "Vlog",
+              "definition": "A day in the creator's life."
+            },
+            {
+              "name": "Tutorial",
+              "definition": "Shows how to do something, step by step."
+            },
+            {
+              "name": "Other",
+              "definition": "Anything else."
+            }
+          ]
+        },
+        "ruleGroups": [],
+        "images": []
+      },
+      "history": [],
+      "pageView": {
+        "page": "gold",
+        "title": "Gold Labels",
+        "summary": "Label examples; the scores are measured against these labels.",
+        "data": {}
+      }
+    },
+    "locale": "en"
+  },
+  "tools": {
+    "get_upload_result": {
+      "result": {
+        "labelUploads": [
+          {
+            "at": "2026-11-19T08:00:00.000Z",
+            "by": "Ability user",
+            "file": "labels.csv",
+            "saved": 37,
+            "replacedEarlierLabels": 0,
+            "unchanged": 0,
+            "notInDataset": 3,
+            "refused": 2,
+            "refusedRows": [
+              {
+                "row": 12,
+                "reason": "\"Cooking\" isn't a value of format"
+              },
+              {
+                "row": 30,
+                "reason": "The row is not valid JSON"
+              }
+            ]
+          }
+        ],
+        "dataset": {
+          "itemsAsked": 60,
+          "examplesSaved": 58,
+          "leftOut": 2,
+          "leftOutByChecks": {
+            "missing": 1,
+            "minorCreator": 1,
+            "notRecommendable": 0
+          },
+          "notSaved": 0
+        },
+        "dataSourceFiles": [],
+        "note": "Label uploads: rows for items not in the dataset are skipped; refused rows give their row number and reason."
+      }
+    }
+  },
+  "expect": {
+    "calls": [
+      "get_upload_result"
+    ],
+    "notCalls": [
+      "try_prompt",
+      "score_version",
+      "start_optimiser"
+    ],
+    "reply": [
+      "Says 3 rows were for items not in the dataset",
+      "Names row 12 (\"Cooking\" is not a value of the label) and row 30 (not valid JSON)",
+      "Says how to fix them: use a value of the label, or fix the row, then upload again"
+    ]
+  }
+}

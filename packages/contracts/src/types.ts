@@ -557,6 +557,11 @@ export interface OptimiserRound {
    */
   parentWins?: number | null;
   /**
+   * What the change aimed at (#39): the parent's weakest value on the optimiser half when the change
+   * was written. Missing on rounds made before.
+   */
+  aimedAt?: {value: string; f1: number} | null;
+  /**
    * A pass is confirmed by labeling the held-out half a second time (decided 2026-11-10): the
    * second labeling's score, and whether it passes too. Only a confirmed pass ends the run.
    */

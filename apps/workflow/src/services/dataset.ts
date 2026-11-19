@@ -281,6 +281,9 @@ export async function saveGold(w: Scope, projectId: string, exampleId: string, s
   return g;
 }
 
+/** How many refused rows an upload's audit record keeps, for the helpers' get_upload_result (#39). */
+export const UPLOAD_ROWS_KEPT = 20;
+
 /**
  * Upload labels: rows of {externalId, answer}, from a file (`uploadGoldText`), JSON lines, or the
  * labels bundled with the sample file. `answer` is the value; older files with `{label: ["Value"]}`
@@ -352,7 +355,7 @@ async function saveUploadedLabels(w: Scope,
   }
   refused.sort((a, b) => a.row - b.row);
   const skipped = notInDataset + refused.length;
-  await w.catalog.audit(projectId, (await w.user()).name, 'gold_labels.uploaded', {file: source.file ?? null, saved, replaced, unchanged, notInDataset, refused: refused.length});
+  await w.catalog.audit(projectId, (await w.user()).name, 'gold_labels.uploaded', {file: source.file ?? null, saved, replaced, unchanged, notInDataset, refused: refused.length, refusedRows: refused.slice(0, UPLOAD_ROWS_KEPT)});
   w.tm.event('gold_labels_uploaded', {source: source.kind ?? 'file', saved, skipped});
   return {saved, skipped, replaced, unchanged, notInDataset, refused};
 }

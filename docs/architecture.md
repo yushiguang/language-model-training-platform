@@ -294,6 +294,7 @@ normalized. `apps/bff/src/fixtures.test.ts` replays them on the bff over the ref
 | Start tools start work at once and say so in the chat | Tool host (`services/starts.ts`) |
 | A problem report is sent only after the user answered its draft | Tool host (`services/problems.ts`) |
 | Proposals never save themselves: a draft is saved as a version only by the user | Workflow (`sendUserMessage` stores a proposal; no tool saves a version) |
+| Reads for the agent abilities (#39) give counts and labels only; refused upload rows lose their item ids | Tool host (`services/agent-reads.ts`) |
 | Handoffs go only to known specialists with a known intent (`HANDOFF_TARGETS`) | Runtime; fixtures (`apps/agents/fixtures`) |
 | Improve with AI and the Optimiser change wording only (`rewordOnly`) | Runtime and the Optimiser; fixtures |
 | Nothing is carried over silently on prompt import (unmapped parts are listed) | Runtime; fixtures |

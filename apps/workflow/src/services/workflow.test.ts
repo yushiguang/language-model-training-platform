@@ -389,6 +389,7 @@ test('Auto Optimise: dry run, full labeling, stops when a version passes; versio
   );
   assert.ok(run.history.every(h => h.dryRun && h.dryRun.passed > h.dryRun.parentPassed && h.dryRun.examples === 2));
   assert.deepEqual(s.versions.map(v => `${v.major}.${v.minor}`), ['2.2', '2.1', '1.0']);
+  assert.ok(run.history.every(h => h.aimedAt && typeof h.aimedAt.value === 'string'), 'each round records the weakest value it aimed at (#39)');
   assert.ok(s.reports.some(r => r.promptVersionId === run.history[1].versionId && r.passed));
 });
 
@@ -1370,4 +1371,91 @@ test('frozen snapshots (#32): a new dataset whose items are all left out by the 
   await takeExamples(w.ws, p.id, [{sourceId, count: 3}]);
   await w.jobs.idle();
   assert.match((await getSamplingTask(w.ws, p.id))?.error ?? '', /None of these items can be used: 1 not found, 2 from a creator under 18/);
+});
+
+test('agent abilities (#39): get_gates names what each step waits for, with the numbers behind it', async () => {
+  const w = await world('ab1', {gold: null, goldApproved: false});
+  const tools = toolsOf(w);
+  const g = (await tools.call({agent: 'front_desk', name: 'get_gates', args: {}})) as {current: string; steps: {step: string; approved: boolean; canApprove: boolean; waitsFor: string | null}[]; numbers: {goldLabeled: number; goldLabeledPerHalf: {optimiser: number; heldOut: number}}};
+  assert.equal(g.current, 'Prompt Design', 'no step approved yet');
+  const gold = g.steps.find(s => s.step === 'Gold Labels')!;
+  assert.deepEqual([gold.approved, gold.canApprove], [false, false]);
+  assert.match(gold.waitsFor ?? '', /Label at least 4 examples/);
+  assert.deepEqual([g.numbers.goldLabeled, g.numbers.goldLabeledPerHalf], [0, {optimiser: 0, heldOut: 0}]);
+  assert.match(g.steps.find(s => s.step === 'Prompt Design')!.waitsFor ?? '', /Approve the first prompt/);
+});
+
+test('agent abilities (#39): get_running_work shows scoring while it runs, then nothing', async () => {
+  const w = await world('ab2', {delayMs: 30});
+  await w.newVersion();
+  await tick(w.ws, await w.state());
+  const tools = toolsOf(w);
+  const busy = (await tools.call({agent: 'front_desk', name: 'get_running_work', args: {}})) as {labeling: {version: string; why: string; of: number; stoppable: boolean}[]; note?: string};
+  assert.equal(busy.labeling.length, 1);
+  assert.deepEqual([busy.labeling[0].version, busy.labeling[0].why, busy.labeling[0].of, busy.labeling[0].stoppable], ['v1', 'scoring', EVAL, true]);
+  assert.equal(busy.note, undefined);
+  await w.jobs.idle();
+  const idle = (await tools.call({agent: 'front_desk', name: 'get_running_work', args: {}})) as {labeling: unknown[]; note?: string};
+  assert.deepEqual(idle.labeling, []);
+  assert.match(idle.note ?? '', /Nothing is running/);
+});
+
+test('agent abilities (#39): get_upload_result gives refused rows by number and reason, never their item ids', async () => {
+  const w = await world('ab3', {gold: null});
+  const s = await w.state();
+  const {uploadGoldText} = await import('./dataset.ts');
+  await uploadGoldText(w.ws, w.projectId, schema, 1, s.examples, 'labels.jsonl', '{"externalId":"0","answer":"Vlog"}\n{"externalId":"1","answer":"Cooking"}\n{"externalId":"nope","answer":"Vlog"}\nnot json\n');
+  const tools = toolsOf(w);
+  const r = (await tools.call({agent: 'front_desk', name: 'get_upload_result', args: {}})) as {labelUploads: {file: string; saved: number; notInDataset: number; refused: number; refusedRows: {row: number; reason: string}[]}[]; dataset: {examplesSaved: number}};
+  assert.equal(r.labelUploads.length, 1);
+  const u = r.labelUploads[0];
+  assert.deepEqual([u.file, u.saved, u.notInDataset, u.refused], ['labels.jsonl', 1, 1, 2]);
+  assert.deepEqual(u.refusedRows, [{row: 2, reason: '"Cooking" isn\'t a value of format'}, {row: 4, reason: 'The row is not valid JSON'}]);
+  assert.ok(!JSON.stringify(r.labelUploads).includes('"1"'), 'no item id');
+  assert.equal(r.dataset.examplesSaved, EVAL);
+});
+
+test('agent abilities (#39): get_optimiser_run explains each round; numbering starts at the first run', async () => {
+  const w = await world('ab4');
+  const v1 = await w.newVersion();
+  const round = (n: number, outcome: string, extra: object = {}) => ({round: n, versionId: null, parentId: v1.id, parentWins: n === 1 ? null : 3, kind: 'change', change: `change ${n}`, outcome, score: null, passed: false, dryRun: {examples: 4, passed: 1, parentPassed: 2}, aimedAt: {value: 'Tutorial', f1: 0.4321}, ...extra});
+  const run = (id: string, startedAt: string, history: object[], stopReason: string) => ({id, projectId: w.projectId, endpoint: 'A', startVersionId: v1.id, major: 1, maxRounds: 5, round: history.length, state: 'done', step: null, stepStartedAt: null, stepVersionId: null, history, calls: 0, candidates: 0, costUsd: 0, stopReason, error: null, startedAt, finishedAt: startedAt});
+  await w.catalog.insert('optimisation_runs', run('or_1', '2026-11-01T00:00:00.000Z', [round(1, 'dropped')], 'user') as never);
+  await w.catalog.insert('optimisation_runs', run('or_2', '2026-11-02T00:00:00.000Z', [round(1, 'dropped'), round(2, 'repeat')], 'no_new_ideas') as never);
+  const tools = toolsOf(w);
+  const newest = (await tools.call({agent: 'evaluation_agent', name: 'get_optimiser_run', args: {}})) as {run: number; runs: number; rounds: {whyThatVersion: string; aimedAt: {value: string; f1: number}; outcomeMeans: string; dryRun: object}[]; stopReasonMeans: string};
+  assert.deepEqual([newest.run, newest.runs, newest.rounds.length], [2, 2, 2]);
+  assert.match(newest.rounds[0].whyThatVersion, /started from/);
+  assert.match(newest.rounds[1].whyThatVersion, /best version on 3 examples/);
+  assert.deepEqual(newest.rounds[0].aimedAt, {value: 'Tutorial', f1: 0.43});
+  assert.match(newest.rounds[0].outcomeMeans, /did worse/);
+  assert.match(newest.stopReasonMeans, /nothing better/);
+  const first = (await tools.call({agent: 'evaluation_agent', name: 'get_optimiser_run', args: {run: 1}})) as {run: number; rounds: unknown[]};
+  assert.deepEqual([first.run, first.rounds.length], [1, 1]);
+  await assert.rejects(tools.call({agent: 'evaluation_agent', name: 'get_optimiser_run', args: {run: 3}}), /no run 3/);
+});
+
+test('agent abilities (#39): get_drafts recalls discarded drafts with their reasons, for the Prompt helper only', async () => {
+  const w = await world('ab5');
+  const v1 = await w.newVersion();
+  await w.catalog.insert('agent_proposals', {id: 'ap_ab5', projectId: w.projectId, agent: 'prompt_agent', kind: 'prompt', payload: {structured: sp('Prefer Vlog.'), change: 'Prefer Vlog', changes: [{text: 'Prefer Vlog.', reason: '3 Vlogs were read as Tutorial'}], baseVersionId: v1.id, unmapped: []}, brief: 'Improve v1', state: 'discarded', createdAt: '2026-11-19T00:00:00.000Z'});
+  const tools = toolsOf(w);
+  const d = (await tools.call({agent: 'prompt_agent', name: 'get_drafts', args: {}})) as {total: number; drafts: {state: string; from: string; changes: {reason: string}[]}[]};
+  assert.equal(d.total, 1);
+  assert.deepEqual([d.drafts[0].state, d.drafts[0].from, d.drafts[0].changes[0].reason], ['discarded', 'v1', '3 Vlogs were read as Tutorial']);
+  await assert.rejects(tools.call({agent: 'front_desk', name: 'get_drafts', args: {}}), /cannot use get_drafts/);
+});
+
+test('agent abilities (#39): read_guide finds a topic by name or by a word people use, and lists topics otherwise', async () => {
+  const w = await world('ab6');
+  const tools = toolsOf(w);
+  const call = (topic?: string) => tools.call({agent: 'front_desk', name: 'read_guide', args: topic ? {topic} : {}}) as Promise<{topic?: string; text?: string; topics?: {topic: string}[]; error?: string}>;
+  assert.equal((await call('held-out half')).topic, 'halves');
+  assert.equal((await call('macro_f1')).topic, 'macro_f1');
+  assert.equal((await call('Rebuild scores')).topic, 'rebuild_scores');
+  const list = await call();
+  assert.ok((list.topics?.length ?? 0) >= 10);
+  const none = await call('quantum');
+  assert.match(none.error ?? '', /No guide topic/);
+  assert.ok(none.topics);
 });

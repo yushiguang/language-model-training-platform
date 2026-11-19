@@ -126,6 +126,18 @@ function workingLine(name: AgentToolName, args: Record<string, unknown>): Msg {
       return msg('Comparing versions…');
     case 'get_mismatch_summary':
       return msg('Counting mismatches…');
+    case 'get_gates':
+      return msg('Reading what each step waits for…');
+    case 'get_running_work':
+      return msg('Reading what is running…');
+    case 'get_upload_result':
+      return msg('Reading the upload results…');
+    case 'get_optimiser_run':
+      return msg('Reading the Optimiser run…');
+    case 'get_drafts':
+      return msg('Reading earlier drafts…');
+    case 'read_guide':
+      return msg('Reading the guide…');
     case 'try_prompt':
       return msg('Trying the prompt on a few examples…');
     case 'score_version':

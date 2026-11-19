@@ -1,0 +1,94 @@
+{
+  "row": "A5",
+  "name": "What is running now, and where to stop it",
+  "request": {
+    "userText": "Is anything still running? I want to stop it.",
+    "page": {
+      "label": "Prompt Tuning · prompt versions",
+      "agent": "front_desk",
+      "intent": "answer",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_ability",
+      "task": "Label the format of short videos",
+      "prompt": {
+        "taskSummary": "Label the format of short videos.",
+        "features": {
+          "video": [
+            "Description"
+          ],
+          "photo_text": [
+            "Title",
+            "Description"
+          ],
+          "metadata": []
+        },
+        "label": {
+          "name": "format",
+          "kind": "single",
+          "values": [
+            {
+              "name": "Vlog",
+              "definition": "A day in the creator's life."
+            },
+            {
+              "name": "Tutorial",
+              "definition": "Shows how to do something, step by step."
+            },
+            {
+              "name": "Other",
+              "definition": "Anything else."
+            }
+          ]
+        },
+        "ruleGroups": [],
+        "images": []
+      },
+      "history": [],
+      "pageView": {
+        "page": "prompt",
+        "title": "Prompt Tuning · prompt versions",
+        "summary": "Every prompt version with its scores.",
+        "data": {}
+      }
+    },
+    "locale": "en"
+  },
+  "tools": {
+    "get_running_work": {
+      "result": {
+        "labeling": [
+          {
+            "version": "v3",
+            "model": "Model A",
+            "why": "scoring",
+            "state": "running",
+            "done": 40,
+            "of": 120,
+            "stoppable": true
+          }
+        ],
+        "optimiser": [],
+        "takingExamples": null,
+        "dataSourceImports": [],
+        "howToStop": "Scoring stops with Stop on its row on Prompt versions; the Optimiser with Stop on its progress panel; taking examples with Stop on Eval Dataset. Stopping keeps what is already done."
+      }
+    }
+  },
+  "expect": {
+    "calls": [
+      "get_running_work"
+    ],
+    "notCalls": [
+      "try_prompt",
+      "score_version",
+      "start_optimiser"
+    ],
+    "reply": [
+      "Says v3 is being scored and how far it is (40 of 120)",
+      "Points to the Stop button on v3's row on Prompt versions",
+      "Does not mention cost or time"
+    ]
+  }
+}

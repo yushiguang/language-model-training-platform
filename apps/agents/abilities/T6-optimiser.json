@@ -1,0 +1,136 @@
+{
+  "row": "T6",
+  "name": "What the Optimiser tried and why it stopped",
+  "request": {
+    "userText": "What did the optimiser try, and why did it stop?",
+    "page": {
+      "label": "Prompt Tuning · prompt versions",
+      "agent": "evaluation_agent",
+      "intent": "explain_report",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_ability",
+      "task": "Label the format of short videos",
+      "prompt": {
+        "taskSummary": "Label the format of short videos.",
+        "features": {
+          "video": [
+            "Description"
+          ],
+          "photo_text": [
+            "Title",
+            "Description"
+          ],
+          "metadata": []
+        },
+        "label": {
+          "name": "format",
+          "kind": "single",
+          "values": [
+            {
+              "name": "Vlog",
+              "definition": "A day in the creator's life."
+            },
+            {
+              "name": "Tutorial",
+              "definition": "Shows how to do something, step by step."
+            },
+            {
+              "name": "Other",
+              "definition": "Anything else."
+            }
+          ]
+        },
+        "ruleGroups": [],
+        "images": []
+      },
+      "history": [],
+      "pageView": {
+        "page": "prompt",
+        "title": "Prompt Tuning · prompt versions",
+        "summary": "Every prompt version with its scores.",
+        "data": {}
+      }
+    },
+    "locale": "en"
+  },
+  "tools": {
+    "get_optimiser_run": {
+      "result": {
+        "run": 1,
+        "runs": 1,
+        "model": "Model A",
+        "state": "done",
+        "startedFrom": "v2",
+        "rounds": [
+          {
+            "round": 1,
+            "kind": "change",
+            "from": "v2",
+            "whyThatVersion": "the version the run started from",
+            "aimedAt": {
+              "value": "Tutorial",
+              "f1": 0.41
+            },
+            "change": "Tutorial: a recipe shown step by step counts",
+            "version": "v2.1",
+            "dryRun": {
+              "examples": 4,
+              "passed": 3,
+              "parentPassed": 2
+            },
+            "outcome": "kept",
+            "outcomeMeans": "did as well or better in the dry run, scored on the eval set and kept as a version",
+            "macroF1": 0.71,
+            "betterThanParent": true,
+            "passed": false,
+            "confirmed": null
+          },
+          {
+            "round": 2,
+            "kind": "change",
+            "from": "v2.1",
+            "whyThatVersion": "the best version on 6 examples of the optimiser half",
+            "aimedAt": {
+              "value": "Other",
+              "f1": 0.5
+            },
+            "change": "Other: travel diaries without a day routine",
+            "version": "v2.2",
+            "dryRun": {
+              "examples": 4,
+              "passed": 1,
+              "parentPassed": 3
+            },
+            "outcome": "dropped",
+            "outcomeMeans": "did worse than its parent in the dry run, so it was not scored",
+            "macroF1": null,
+            "betterThanParent": null,
+            "passed": false,
+            "confirmed": null
+          }
+        ],
+        "stopReason": "max_rounds",
+        "stopReasonMeans": "it tried the number of rounds asked for",
+        "error": null
+      }
+    }
+  },
+  "expect": {
+    "calls": [
+      "get_optimiser_run"
+    ],
+    "notCalls": [
+      "try_prompt",
+      "score_version",
+      "start_optimiser"
+    ],
+    "reply": [
+      "Says round 1 aimed at Tutorial and was kept as v2.1 with a better score",
+      "Says round 2 aimed at Other and was dropped after its dry run",
+      "Says the run stopped because it tried the number of rounds asked for",
+      "Does not start the Optimiser again"
+    ]
+  }
+}

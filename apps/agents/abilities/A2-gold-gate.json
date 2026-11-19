@@ -1,0 +1,127 @@
+{
+  "row": "A2",
+  "name": "Why the Approve button on Gold Labels is unavailable: the held-out half has too few labels",
+  "request": {
+    "userText": "Why can't I approve this step? I've labeled 6 already.",
+    "page": {
+      "label": "Gold Labels",
+      "agent": "front_desk",
+      "intent": "answer",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_ability",
+      "task": "Label the format of short videos",
+      "prompt": {
+        "taskSummary": "Label the format of short videos.",
+        "features": {
+          "video": [
+            "Description"
+          ],
+          "photo_text": [
+            "Title",
+            "Description"
+          ],
+          "metadata": []
+        },
+        "label": {
+          "name": "format",
+          "kind": "single",
+          "values": [
+            {
+              "name": "Vlog",
+              "definition": "A day in the creator's life."
+            },
+            {
+              "name": "Tutorial",
+              "definition": "Shows how to do something, step by step."
+            },
+            {
+              "name": "Other",
+              "definition": "Anything else."
+            }
+          ]
+        },
+        "ruleGroups": [],
+        "images": []
+      },
+      "history": [],
+      "pageView": {
+        "page": "gold",
+        "title": "Gold Labels",
+        "summary": "Label examples; the scores are measured against these labels.",
+        "data": {
+          "labeled": 6,
+          "toLabel": 14
+        }
+      }
+    },
+    "locale": "en"
+  },
+  "tools": {
+    "get_gates": {
+      "result": {
+        "current": "Gold Labels",
+        "steps": [
+          {
+            "step": "Prompt Design",
+            "approved": true,
+            "canApprove": true,
+            "waitsFor": null
+          },
+          {
+            "step": "Eval Dataset",
+            "approved": true,
+            "canApprove": true,
+            "waitsFor": null
+          },
+          {
+            "step": "Gold Labels",
+            "approved": false,
+            "canApprove": false,
+            "waitsFor": "Label at least 4 examples to continue (6 so far)."
+          },
+          {
+            "step": "Prompt Tuning",
+            "approved": false,
+            "canApprove": false,
+            "waitsFor": "Create the first prompt version."
+          }
+        ],
+        "numbers": {
+          "examples": 20,
+          "goldLabeled": 6,
+          "goldLabeledPerHalf": {
+            "optimiser": 5,
+            "heldOut": 1
+          },
+          "versions": 1,
+          "passingVersions": [],
+          "settingsSaved": true
+        },
+        "needed": {
+          "examples": 4,
+          "goldLabeled": 4,
+          "goldLabeledInEachHalf": 2,
+          "toFinish": "a version that passes the pass rule in Project Settings"
+        },
+        "note": "Gold Labels also needs 2 gold-labeled examples in each half of the eval set: one half teaches, the other scores. Labeling more examples fills both halves. Paid work does not start by itself until Project Settings is saved once."
+      }
+    }
+  },
+  "expect": {
+    "calls": [
+      "get_gates"
+    ],
+    "notCalls": [
+      "try_prompt",
+      "score_version",
+      "start_optimiser"
+    ],
+    "reply": [
+      "Says the step needs at least 2 gold labels in each half, and that one half has only 1",
+      "Says labeling more examples fixes it",
+      "Does not ask the user to pick which examples go in which half"
+    ]
+  }
+}

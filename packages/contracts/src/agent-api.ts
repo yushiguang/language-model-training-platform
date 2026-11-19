@@ -68,6 +68,19 @@ export type AgentToolName =
   | 'compare_versions'
   /** Mismatches between a version and the gold labels, as counts only. */
   | 'get_mismatch_summary'
+  // Agent abilities (#39), step 1: reads for the questions the helpers could not answer.
+  /** Each step: approved or not, what its Approve button waits for, and the numbers behind it. */
+  | 'get_gates'
+  /** Labeling, Optimiser runs and taking examples that are running, with how far they are. */
+  | 'get_running_work'
+  /** What the last label uploads and the dataset's imports saved, skipped and refused, and why. */
+  | 'get_upload_result'
+  /** One Optimiser run round by round: the change, where it started and why, the dry run, the outcome. */
+  | 'get_optimiser_run'
+  /** The Prompt helper's drafts, discarded ones too, with their changes and reasons. */
+  | 'get_drafts'
+  /** The product guide: what the site's terms, pages and buttons mean. */
+  | 'read_guide'
   // Start-work tools: paid. They run at once when automatic starts are allowed, else they ask
   // the user with a card in the chat and the turn ends.
   | 'try_prompt'

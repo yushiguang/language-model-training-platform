@@ -12,11 +12,14 @@ export const START_TOOLS: AgentToolName[] = ['try_prompt', 'score_version', 'sta
 /** Every helper can file a problem report (spec 1.1.0, 3). */
 const REPORT: AgentToolName[] = ['report_problem'];
 
-const READ_ALL: AgentToolName[] = ['get_page_view', 'get_project_summary', 'list_versions', 'get_version', 'compare_versions', 'get_report', 'get_dataset_stats', 'get_mismatch_summary', 'get_examples', 'search_examples', 'get_gold_labels', 'get_predictions'];
+/** Reads every helper has (#39): where the project stands, what runs, what uploads did, the guide. */
+const READ_BASICS: AgentToolName[] = ['get_gates', 'get_running_work', 'get_upload_result', 'read_guide'];
+
+const READ_ALL: AgentToolName[] = ['get_page_view', 'get_project_summary', 'list_versions', 'get_version', 'compare_versions', 'get_report', 'get_dataset_stats', 'get_mismatch_summary', 'get_examples', 'search_examples', 'get_gold_labels', 'get_predictions', 'get_optimiser_run', ...READ_BASICS];
 
 export const PRESET_TOOLS: Record<AgentPreset | 'optimiser', AgentToolName[]> = {
-  front_desk: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'read_doc', ...REPORT],
-  prompt_agent: [...READ_ALL, 'check_prompt', 'read_feature_info', 'read_doc', ...START_TOOLS, ...REPORT],
+  front_desk: ['get_page_view', 'list_versions', 'get_version', 'get_report', 'get_examples', 'read_doc', ...READ_BASICS, ...REPORT],
+  prompt_agent: [...READ_ALL, 'get_drafts', 'check_prompt', 'read_feature_info', 'read_doc', ...START_TOOLS, ...REPORT],
   evaluation_agent: [...READ_ALL, 'score_version', 'start_optimiser', ...REPORT],
   // The Optimiser's calls go out as the Prompt helper's (`read_feature_info` only).
   optimiser: ['read_feature_info'],
