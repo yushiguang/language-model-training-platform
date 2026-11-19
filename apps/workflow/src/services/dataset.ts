@@ -281,6 +281,9 @@ export async function saveGold(w: Scope, projectId: string, exampleId: string, s
   return g;
 }
 
+/** How many refused rows an upload's audit record keeps, for the helpers' get_upload_result (#39). */
+export const UPLOAD_ROWS_KEPT = 20;
+
 /**
  * Upload labels: rows of {externalId, answer}, from a file (`uploadGoldText`), JSON lines, or the
  * labels bundled with the sample file. `answer` is the value; older files with `{label: ["Value"]}`
@@ -305,7 +308,11 @@ export async function uploadGold(w: Scope,
 /** Upload labels from a file: CSV or JSONL (`readLabelFile`). */
 export async function uploadGoldText(w: Scope, projectId: string, schema: Schema, schemaVersion: number, examples: Example[], name: string, text: string): Promise<GoldUploadResult> {
   const read = readLabelFile(name, text, schema.name);
-  if ('error' in read) return {saved: 0, skipped: 0, error: read.error};
+  if ('error' in read) {
+    // Refused as a whole: audited too, so a helper can say why (#39, D5).
+    await w.catalog.audit(projectId, (await w.user()).name, 'gold_labels.rejected', {file: name, error: read.error});
+    return {saved: 0, skipped: 0, error: read.error};
+  }
   const unreadable = read.bad.map(b => ({row: b.row, externalId: '', reason: b.reason}));
   return saveUploadedLabels(w, projectId, schema, schemaVersion, examples, read.rows, unreadable, {file: name, kind: 'file'});
 }
@@ -352,7 +359,7 @@ async function saveUploadedLabels(w: Scope,
   }
   refused.sort((a, b) => a.row - b.row);
   const skipped = notInDataset + refused.length;
-  await w.catalog.audit(projectId, (await w.user()).name, 'gold_labels.uploaded', {file: source.file ?? null, saved, replaced, unchanged, notInDataset, refused: refused.length});
+  await w.catalog.audit(projectId, (await w.user()).name, 'gold_labels.uploaded', {file: source.file ?? null, saved, replaced, unchanged, notInDataset, refused: refused.length, refusedRows: refused.slice(0, UPLOAD_ROWS_KEPT)});
   w.tm.event('gold_labels_uploaded', {source: source.kind ?? 'file', saved, skipped});
   return {saved, skipped, replaced, unchanged, notInDataset, refused};
 }

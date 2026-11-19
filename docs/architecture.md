@@ -87,8 +87,8 @@ Since 1.0.0 phase 1 every service contract is written so it maps one to one to a
 - No callbacks or signals cross a service contract (phase 3, and deployment readiness spec 4.1).
   The agent runtime is built once with `createAgentRuntime({llm, tools, progress})`: the model,
   the workflow's one tool host (`Workflow.toolHost`) and an `AgentProgressPort` for Ask AI's live
-  line are injected, so `runTurn`, `reflectPrompt` and `draftImprovement` take and return plain
-  data. Each request carries the caller's `ctx`, and every tool call the runtime makes carries
+  line are injected, so `runTurn` and `reflectPrompt` take and return plain data (Improve with AI
+  is a turn that runs a skill, #39). Each request carries the caller's `ctx`, and every tool call the runtime makes carries
   `projectId`, `turnId` (null outside an Ask AI turn) and that `ctx` (`AgentToolCall`), so a tool
   host in another process gets all it needs from the call (deployment readiness spec, 6). A turn's
   record (project, caller, page, language, browser record) is in shared state under `turn:{turnId}`
@@ -294,6 +294,8 @@ normalized. `apps/bff/src/fixtures.test.ts` replays them on the bff over the ref
 | Start tools start work at once and say so in the chat | Tool host (`services/starts.ts`) |
 | A problem report is sent only after the user answered its draft | Tool host (`services/problems.ts`) |
 | Proposals never save themselves: a draft is saved as a version only by the user | Workflow (`sendUserMessage` stores a proposal; no tool saves a version) |
+| Reads for the agent abilities (#39) give counts and labels only; refused upload rows lose their item ids | Tool host (`services/agent-reads.ts`) |
+| A helper runs only the skills its preset lists (`PRESET_SKILLS`); a skill's brief and tools go through the tool host | Runtime (`src/skills.ts`); tool host |
 | Handoffs go only to known specialists with a known intent (`HANDOFF_TARGETS`) | Runtime; fixtures (`apps/agents/fixtures`) |
 | Improve with AI and the Optimiser change wording only (`rewordOnly`) | Runtime and the Optimiser; fixtures |
 | Nothing is carried over silently on prompt import (unmapped parts are listed) | Runtime; fixtures |
@@ -431,7 +433,8 @@ Optimiser each read the features of the examples they use.
 | Halves, label balance and which examples a prune removes | `packages/domain/src/dataset.ts` |
 | Adding, removing, restoring and pruning examples; the holdout lock; comments | `apps/workflow/src/services/governance.ts` |
 | Optimiser loop: rounds, retries, Failed and Retry, the end of a run after a confirmed pass | `apps/optimiser/src/optimiser.ts` |
-| Improve with AI (a draft with marked changes, nothing labeled) | `improveWithAi` in `apps/workflow/src/services/agents.ts` |
+| Improve with AI (a draft with marked changes, nothing labeled) | `improveWithAi` in `apps/workflow/src/services/agents.ts` starts the turn; the skill `improve_from_mistakes` in `apps/agents/src/skills.ts` |
+| Helper skills and which helper runs which | `apps/agents/src/skills.ts`, `PRESET_SKILLS` in `packages/domain/src/agent-guards.ts` |
 | The structured prompt: compiling to text, the label signature, wording-only changes | `packages/domain/src/structured.ts` |
 | The fixed AI Suggestion cards on Prompt Tuning (T1 to T6) | `aiSuggestion` in `packages/domain/src/workflow.ts` |
 | Project Settings (pass rule, labeling model) and their confirmation | `apps/workflow/src/services/settings.ts` |

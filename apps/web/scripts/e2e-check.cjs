@@ -430,6 +430,20 @@ let current = null;
   // below the bar and on a passing version too, so the check runs it whether or not v1 passed.
   for (let i = 0; i < 30 && !(await button(page, 'Improve with AI').count()); i++) await page.waitForTimeout(1000);
   if (await button(page, 'Improve with AI').count()) {
+    // Discard first (#39, T8): the draft closes as discarded and does not come back on reload.
+    await button(page, 'Improve with AI').first().click();
+    await page.waitForURL(/prompt\/edit/);
+    await page.getByText('Draft from Prompt helper', {exact: true}).waitFor({timeout: 20000});
+    await button(page, 'Discard').click();
+    await page.getByText('Draft from Prompt helper', {exact: true}).waitFor({state: 'detached'});
+    await page.waitForTimeout(500);
+    await page.reload();
+    await page.locator('textarea.grow-box').first().waitFor();
+    await page.waitForTimeout(1500);
+    if (await page.getByText('Draft from Prompt helper', {exact: true}).count()) throw new Error('a discarded draft came back on reload');
+    log('improve with AI: discarded draft stays discarded');
+    await page.goto(url('/prompt/'));
+    for (let i = 0; i < 30 && !(await button(page, 'Improve with AI').count()); i++) await page.waitForTimeout(1000);
     await button(page, 'Improve with AI').first().click();
     await page.waitForURL(/prompt\/edit/);
     await page.getByText('Draft from Prompt helper', {exact: true}).waitFor({timeout: 20000});

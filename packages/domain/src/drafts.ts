@@ -1,4 +1,4 @@
-import type {MixUp, Schema, StructuredPrompt} from '@yushiguang/sprint-contracts';
+import type {AgentProposal, MixUp, Schema, StructuredPrompt} from '@yushiguang/sprint-contracts';
 
 /**
  * A fix aimed at one mix-up, for the stand-in helpers (a real model writes its own). It goes into
@@ -80,3 +80,12 @@ export const SAMPLE_STRUCTURED: StructuredPrompt = {
   ruleGroups: [],
   images: [],
 };
+
+/**
+ * The open draft the prompt editor of a version takes (#39): the newest one written from that
+ * version. A draft written from another version waits for that version's editor; one with no
+ * version (Prompt Design's first prompt) goes to whichever editor is open.
+ */
+export function editorDraft(open: AgentProposal[], versionId: string): AgentProposal | null {
+  return open.filter(p => p.state === 'open' && (p.payload.baseVersionId ?? versionId) === versionId).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null;
+}

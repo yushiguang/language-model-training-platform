@@ -1,5 +1,5 @@
 import type {AgentRuntimeContract, AgentRuntimeDeps, RequestContext} from '@yushiguang/sprint-contracts';
-import {draftImprovement, reflectPrompt, runAgentTurn, type ToolCaller} from './runtime.ts';
+import {reflectPrompt, runAgentTurn, type ToolCaller} from './runtime.ts';
 
 export * from './presets.ts';
 export * from './runtime.ts';
@@ -39,7 +39,6 @@ export function createAgentRuntime(deps: AgentRuntimeDeps): AgentRuntimeContract
         if (requestId) running.delete(requestId);
       }
     },
-    draftImprovement: ({projectId, ctx, ...input}) => draftImprovement(input, deps.llm, bind(projectId, null, ctx)),
     async cancel(requestId) {
       running.get(requestId)?.abort();
       running.delete(requestId);

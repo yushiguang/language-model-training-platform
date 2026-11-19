@@ -55,11 +55,8 @@ const toolsOf = (wf: ReturnType<typeof createWorkflow>, input: AgentTurnRequest)
 });
 
 const noHelpers = (): AgentRuntimeContract => ({
-  runTurn: async () => ({invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []}),
+  runTurn: async () => ({invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], skills: [], parseFailures: []}),
   reflectPrompt: async () => {
-    throw new Error('not used');
-  },
-  draftImprovement: async () => {
     throw new Error('not used');
   },
   cancel: async () => {},
@@ -98,7 +95,7 @@ test("two users in one process: a problem-report draft and a live turn belong to
         seen.bobSendsAlicesDraft = await tools.call({agent: 'front_desk', name: 'report_problem', args: {send: true}});
       }
       if (text.endsWith(': yes, send it')) seen[text] = await tools.call({agent: 'front_desk', name: 'report_problem', args: {send: true}});
-      return {invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
+      return {invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], skills: [], parseFailures: []};
     },
   }));
   const a = await api.createProject(ctxOf(alice), 'Alice project');
@@ -139,7 +136,7 @@ test("two users in one process: a helper reads a linked document as the person i
       ...noHelpers(),
       async runTurn(input: AgentTurnRequest) {
         await toolsOf(w, input).call({agent: 'front_desk', name: 'read_doc', args: {url: 'https://docs.example/guide'}});
-        return {invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
+        return {invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], skills: [], parseFailures: []};
       },
     }),
     {read: async (ctx, url) => (readers.push(`${ctx.user.name}:${url}`), {title: 'Guide', text: 'Label carefully.'})},
@@ -196,7 +193,7 @@ test('the tool host enforces the guards (review P4): preset tools only, the turn
       // This turn's id on another project.
       seen.otherProject = await refused(w.toolHost.call({agent: 'front_desk', name: 'get_page_view', args: {}, projectId: other, turnId: input.turnId, ctx: input.ctx}));
       seen.own = await refused(toolsOf(w, input).call({agent: 'front_desk', name: 'get_page_view', args: {}}));
-      return {invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
+      return {invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], skills: [], parseFailures: []};
     },
   }));
   const a = await api.createProject(ctxOf(alice), 'A');
@@ -221,7 +218,7 @@ test('sending a message returns once the turn started; the turn runs on, and a f
     async runTurn(input: AgentTurnRequest) {
       if (input.userText === 'fail') throw new Error('model down');
       await held;
-      return {invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], parseFailures: []};
+      return {invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], skills: [], parseFailures: []};
     },
   }));
   const a = await api.createProject(ctxOf(alice), 'A');

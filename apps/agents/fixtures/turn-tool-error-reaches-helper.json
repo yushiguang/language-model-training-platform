@@ -62,6 +62,7 @@
       }
     ],
     "proposal": null,
+    "skills": [],
     "toolCalls": [
       {
         "agent": "front_desk",

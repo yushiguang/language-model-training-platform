@@ -6,8 +6,6 @@ import type {
   AgentTurnEvent,
   AgentTurnOutput,
   AgentTurnRequest,
-  DraftImprovementOutput,
-  DraftImprovementRequest,
   LlmStreamChunk,
   OptimiserReflectOutput,
   OptimiserReflectRequest,
@@ -40,13 +38,12 @@ interface FixtureBase {
 }
 
 /** A fixture's request, by kind. */
-export type GoldenRequest = {kind: 'turn'; request: AgentTurnRequest} | {kind: 'reflect'; request: OptimiserReflectRequest} | {kind: 'improve'; request: DraftImprovementRequest};
+export type GoldenRequest = {kind: 'turn'; request: AgentTurnRequest} | {kind: 'reflect'; request: OptimiserReflectRequest};
 
 export type GoldenFixture = FixtureBase &
   (
     | {kind: 'turn'; request: AgentTurnRequest; expected: GoldenTurnOutput}
     | {kind: 'reflect'; request: OptimiserReflectRequest; expected: OptimiserReflectOutput}
-    | {kind: 'improve'; request: DraftImprovementRequest; expected: DraftImprovementOutput}
   );
 
 export function goldenTurnOutput(out: AgentTurnOutput): GoldenTurnOutput {
@@ -62,8 +59,7 @@ export function callContext(fx: GoldenRequest): Pick<AgentToolCall, 'projectId' 
 /** Sends the fixture's request to a runtime; a turn's output loses its timings. */
 export async function runRequest(rt: AgentRuntimeContract, fx: GoldenRequest): Promise<unknown> {
   if (fx.kind === 'turn') return goldenTurnOutput(await rt.runTurn(fx.request));
-  if (fx.kind === 'reflect') return rt.reflectPrompt(fx.request);
-  return rt.draftImprovement(fx.request);
+  return rt.reflectPrompt(fx.request);
 }
 
 /**

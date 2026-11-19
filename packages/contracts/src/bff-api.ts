@@ -366,8 +366,12 @@ export interface BffContract {
   stopOptimiser(req: RunRequest): Promise<void>;
   /** Retry on a Failed (or paused) run: queues it again; it resumes from the step that failed. */
   retryOptimiser(req: RunRequest): Promise<{runId: string}>;
-  /** Improve with AI: the Prompt helper drafts changes to a version and puts them in the editor (no labeling). */
-  improveWithAi(projectId: string, promptVersionId: string, locale?: Locale): Promise<void>;
+  /**
+   * Improve with AI: a Prompt helper turn that drafts changes to a version and puts them in the
+   * editor (no labeling). Returns once the turn is accepted, with its id, like a chat message; Ask
+   * AI follows it.
+   */
+  improveWithAi(projectId: string, promptVersionId: string, locale?: Locale): Promise<{turnId: string}>;
   /** Feature descriptions by key, for hover text (empty without a source). */
   featureInfo(keys: string[]): Promise<Record<string, FeatureInfo>>;
   /** A version's saved answers on one model, by example id. */

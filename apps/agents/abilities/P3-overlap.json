@@ -1,0 +1,130 @@
+{
+  "row": "P3",
+  "name": "Which values overlap, and whether a catch-all is missing",
+  "request": {
+    "userText": "Are my values clear? Which ones overlap?",
+    "page": {
+      "label": "Prompt Design",
+      "agent": "prompt_agent",
+      "intent": "revise_prompt",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_ability",
+      "task": "Label the format of short videos",
+      "prompt": {
+        "taskSummary": "Label the format of short videos.",
+        "features": {
+          "video": [
+            "Description"
+          ],
+          "photo_text": [
+            "Title",
+            "Description"
+          ],
+          "metadata": []
+        },
+        "label": {
+          "name": "format",
+          "kind": "single",
+          "values": [
+            {
+              "name": "Vlog",
+              "definition": "A video where the creator shows their day or explains something they do."
+            },
+            {
+              "name": "Tutorial",
+              "definition": "Shows how to do something, step by step."
+            }
+          ]
+        },
+        "ruleGroups": [],
+        "images": []
+      },
+      "history": [],
+      "pageView": {
+        "page": "prompt_design",
+        "title": "Prompt Design",
+        "summary": "Write the first prompt: what to label and the values.",
+        "data": {}
+      }
+    },
+    "locale": "en"
+  },
+  "tools": {
+    "get_confusions": {
+      "result": {
+        "label": {
+          "name": "format",
+          "kind": "single",
+          "values": [
+            {
+              "name": "Vlog",
+              "definition": "A video where the creator shows their day or explains something they do."
+            },
+            {
+              "name": "Tutorial",
+              "definition": "Shows how to do something, step by step."
+            }
+          ]
+        },
+        "scoredVersions": 3,
+        "mixUps": [
+          {
+            "kind": "confused",
+            "gold": "Tutorial",
+            "predicted": "Vlog",
+            "count": 14,
+            "inVersions": [
+              "v1",
+              "v2",
+              "v3"
+            ]
+          },
+          {
+            "kind": "missed",
+            "gold": "Vlog",
+            "predicted": null,
+            "count": 3,
+            "inVersions": [
+              "v1"
+            ]
+          }
+        ],
+        "balance": [
+          {
+            "value": "Vlog",
+            "goldLabeled": 38,
+            "rare": false,
+            "dominant": true
+          },
+          {
+            "value": "Tutorial",
+            "goldLabeled": 9,
+            "rare": false,
+            "dominant": false
+          }
+        ],
+        "note": "Mix-ups are counts summed over every scored version, never examples."
+      }
+    }
+  },
+  "expect": {
+    "calls": [
+      "get_confusions"
+    ],
+    "skills": [
+      "review_label_set"
+    ],
+    "notCalls": [
+      "try_prompt",
+      "score_version",
+      "start_optimiser"
+    ],
+    "reply": [
+      "Names Vlog and Tutorial as overlapping and quotes the words that overlap (\"explains something they do\" against \"shows how to do something\")",
+      "Points out there is no catch-all value such as Other for items that fit neither",
+      "Does not change the prompt unasked; offers to sharpen the definitions"
+    ]
+  }
+}

@@ -215,7 +215,13 @@ export const client: BffClient = {
       await turnEnded(req.projectId);
       return out;
     }),
-  improveWithAi: (projectId, versionId, locale) => asked(projectId, () => timedApi.improveWithAi(projectId, versionId, locale)),
+  // A Prompt helper turn (#39): Ask AI stays busy until it ended, as for a message.
+  improveWithAi: (projectId, versionId, locale) =>
+    asked(projectId, async () => {
+      const out = await timedApi.improveWithAi(projectId, versionId, locale);
+      await turnEnded(projectId);
+      return out;
+    }),
   subscribeChanges,
   subscribeAgentLive(listener) {
     liveListeners.add(listener);

@@ -1,0 +1,132 @@
+{
+  "row": "T8",
+  "name": "Why the Prompt helper made changes the user discarded",
+  "request": {
+    "userText": "Why did you make the changes I discarded earlier?",
+    "page": {
+      "label": "Prompt editor",
+      "agent": "prompt_agent",
+      "intent": "follow_up",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_ability",
+      "task": "Label the format of short videos",
+      "prompt": {
+        "taskSummary": "Label the format of short videos.",
+        "features": {
+          "video": [
+            "Description"
+          ],
+          "photo_text": [
+            "Title",
+            "Description"
+          ],
+          "metadata": []
+        },
+        "label": {
+          "name": "format",
+          "kind": "single",
+          "values": [
+            {
+              "name": "Vlog",
+              "definition": "A day in the creator's life."
+            },
+            {
+              "name": "Tutorial",
+              "definition": "Shows how to do something, step by step."
+            },
+            {
+              "name": "Other",
+              "definition": "Anything else."
+            }
+          ]
+        },
+        "ruleGroups": [],
+        "images": []
+      },
+      "history": [],
+      "pageView": {
+        "page": "prompt_edit",
+        "title": "Prompt editor",
+        "summary": "Edit a version and save it as a new one.",
+        "data": {}
+      }
+    },
+    "locale": "en"
+  },
+  "tools": {
+    "get_drafts": {
+      "result": {
+        "drafts": [
+          {
+            "at": "2026-11-19T07:00:00.000Z",
+            "state": "discarded",
+            "from": "v2",
+            "brief": "Improve v2",
+            "change": "Sharpen Vlog and Tutorial",
+            "changes": [
+              {
+                "text": "Shows the steps of a task, not just the result.",
+                "reason": "5 Tutorials were read as Vlog"
+              },
+              {
+                "text": "A recipe video is a Tutorial.",
+                "reason": "3 recipe videos were labeled Vlog by the model"
+              }
+            ],
+            "prompt": {
+              "taskSummary": "Label the format of short videos.",
+              "features": {
+                "video": [
+                  "Description"
+                ],
+                "photo_text": [
+                  "Title",
+                  "Description"
+                ],
+                "metadata": []
+              },
+              "label": {
+                "name": "format",
+                "kind": "single",
+                "values": [
+                  {
+                    "name": "Vlog",
+                    "definition": "A day in the creator's life."
+                  },
+                  {
+                    "name": "Tutorial",
+                    "definition": "Shows how to do something, step by step."
+                  },
+                  {
+                    "name": "Other",
+                    "definition": "Anything else."
+                  }
+                ]
+              },
+              "ruleGroups": [],
+              "images": []
+            }
+          }
+        ],
+        "total": 1,
+        "note": "\"open\": waiting on the page; \"approved\": saved as a version; \"discarded\": the user dropped it. Do not offer a discarded change again unless the user asks for it."
+      }
+    }
+  },
+  "expect": {
+    "calls": [
+      "get_drafts"
+    ],
+    "notCalls": [
+      "try_prompt",
+      "score_version",
+      "start_optimiser"
+    ],
+    "reply": [
+      "Recalls both changes of the discarded draft with their reasons (5 Tutorials read as Vlog; 3 recipe videos)",
+      "Does not write a new draft or offer the discarded changes again unasked"
+    ]
+  }
+}

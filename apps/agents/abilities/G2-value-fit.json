@@ -1,0 +1,102 @@
+{
+  "row": "G2",
+  "name": "Does a value fit this example: explain the definitions, leave the choice to the user",
+  "request": {
+    "userText": "Does Tutorial fit example 1042? I can't decide between Vlog and Tutorial.",
+    "page": {
+      "label": "Gold Labels",
+      "agent": "front_desk",
+      "intent": "answer",
+      "context": {}
+    },
+    "workspace": {
+      "projectId": "pr_ability",
+      "task": "Label the format of short videos",
+      "prompt": {
+        "taskSummary": "Label the format of short videos.",
+        "features": {
+          "video": [
+            "Description"
+          ],
+          "photo_text": [
+            "Title",
+            "Description"
+          ],
+          "metadata": []
+        },
+        "label": {
+          "name": "format",
+          "kind": "single",
+          "values": [
+            {
+              "name": "Vlog",
+              "definition": "A day in the creator's life."
+            },
+            {
+              "name": "Tutorial",
+              "definition": "Shows how to do something, step by step."
+            },
+            {
+              "name": "Other",
+              "definition": "Anything else."
+            }
+          ]
+        },
+        "ruleGroups": [],
+        "images": []
+      },
+      "history": [],
+      "pageView": {
+        "page": "gold",
+        "title": "Gold Labels",
+        "summary": "Give each example its correct answer.",
+        "data": {}
+      }
+    },
+    "locale": "en"
+  },
+  "tools": {
+    "get_examples": {
+      "result": {
+        "total": 1,
+        "examples": [
+          {
+            "id": "1042",
+            "title": "Morning routine: how I make cold brew",
+            "features": {
+              "Description": "my morning, and how I make cold brew step by step."
+            }
+          }
+        ]
+      }
+    },
+    "search_examples": {
+      "result": {
+        "total": 1,
+        "examples": [
+          {
+            "id": "1042",
+            "title": "Morning routine: how I make cold brew",
+            "features": {
+              "Description": "my morning, and how I make cold brew step by step."
+            }
+          }
+        ]
+      }
+    }
+  },
+  "expect": {
+    "calls": [],
+    "notCalls": [
+      "try_prompt",
+      "score_version",
+      "start_optimiser",
+      "get_gold_labels",
+      "get_predictions"
+    ],
+    "reply": [
+      "Explains what the Vlog and Tutorial definitions each say and which parts of the example each one speaks to",
+      "Does not say which value example 1042 should get; leaves the choice to the user"
+    ]
+  }
+}

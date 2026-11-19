@@ -68,6 +68,26 @@ export type AgentToolName =
   | 'compare_versions'
   /** Mismatches between a version and the gold labels, as counts only. */
   | 'get_mismatch_summary'
+  // Agent abilities (#39), step 1: reads for the questions the helpers could not answer.
+  /** Each step: approved or not, what its Approve button waits for, and the numbers behind it. */
+  | 'get_gates'
+  /** Labeling, Optimiser runs and taking examples that are running, with how far they are. */
+  | 'get_running_work'
+  /** What the last label uploads and the dataset's imports saved, skipped and refused, and why. */
+  | 'get_upload_result'
+  /** One Optimiser run round by round: the change, where it started and why, the dry run, the outcome. */
+  | 'get_optimiser_run'
+  /** The Prompt helper's drafts, discarded ones too, with their changes and reasons. */
+  | 'get_drafts'
+  /** The product guide: what the site's terms, pages and buttons mean. */
+  | 'read_guide'
+  // Agent abilities (#39), step 2: the briefs the skills start from.
+  /** A version's mistakes on the optimiser half: mix-ups, its weakest value and wrong examples (improve_from_mistakes). */
+  | 'get_mistakes'
+  /** Examples of the optimiser half one version gets right and another wrong, both answers and reasons (diagnose_score_change). */
+  | 'get_flips'
+  /** Which values are read as which across every scored version, as counts, and the label balance (review_label_set). */
+  | 'get_confusions'
   // Start-work tools: paid. They run at once when automatic starts are allowed, else they ask
   // the user with a card in the chat and the turn ends.
   | 'try_prompt'
@@ -76,6 +96,14 @@ export type AgentToolName =
   // 1.1.0 (spec 3): every helper can file a problem report; it sends only after the user says yes.
   /** Drafts a problem report, or sends the draft (`send: true`) once the user has agreed. */
   | 'report_problem';
+
+/**
+ * Skills (#39, step 2): a written workflow a helper follows for a whole task. A skill starts from
+ * a brief (one read tool), has its own instructions and answer shape, and may call only the tools
+ * it lists. A helper starts one by answering {"skill": {"name", "args"}}; the Improve with AI
+ * button starts `improve_from_mistakes` directly (intent "improve").
+ */
+export type AgentSkillName = 'improve_from_mistakes' | 'diagnose_score_change' | 'review_label_set' | 'plan_labeling';
 
 /** What a helper asks for: a tool by name, with its arguments. */
 export interface AgentToolRequest {
@@ -166,6 +194,8 @@ export interface AgentTurnOutput {
   messages: AgentEmittedMessage[];
   /** A structured prompt proposal, when the Prompt helper wrote or changed one. */
   proposal: AgentProposalDraft | null;
+  /** Skills the helpers ran in this turn (#39). */
+  skills: {agent: AgentPreset; name: AgentSkillName}[];
   /** Read tools the agents called during this turn, in order (also written to the audit log by the host). */
   toolCalls: {agent: AgentPreset; name: string; args: Record<string, unknown>; ok: boolean; ms: number}[];
   /** Model calls in this turn (tool loops included), and answers that weren't the asked JSON. For metrics. */
@@ -224,29 +254,6 @@ export interface OptimiserReflectOutput {
   change: string;
 }
 
-/** Improve with AI: the Prompt helper drafts several changes to a version, each with a reason. */
-export interface DraftImprovementInput {
-  version: string;
-  prompt: StructuredPrompt;
-  mixUps: MixUp[];
-  macroF1: number;
-  lowestValue: {value: string; f1: number} | null;
-  /** Mistakes on the eval set, with the gold label and the model's answer. */
-  mistakes: number;
-  /** Up to 8 examples of the optimiser half the version gets wrong, worst first (never the held-out half). */
-  examples?: ExampleBrief[];
-  /** The language the user reads the site in: the reply and reasons come in it (2026-11-16). */
-  locale?: Locale;
-}
-
-export interface DraftImprovementOutput {
-  prompt: StructuredPrompt;
-  /** One entry per change: `text` quotes the words it adds (or removes); `reason` shows on hover over its mark in the editor and in Ask AI. */
-  changes: {text: string; reason: string}[];
-  /** A few lines for Ask AI. */
-  reply: string;
-}
-
 /**
  * What the agent runtime is built with (spec 1.0.0, 7.1.3): the model, the tools of a project and
  * the progress port are injected once, so every call below is plain data in and out.
@@ -274,20 +281,12 @@ export interface OptimiserReflectRequest extends OptimiserReflectInput {
   ctx: RequestContext;
 }
 
-/** Improve with AI, for a project. */
-export interface DraftImprovementRequest extends DraftImprovementInput {
-  projectId: string;
-  ctx: RequestContext;
-}
-
 /** The agent runtime as the bff sees it (implemented by `apps/agents`, `createAgentRuntime`). */
 export interface AgentRuntimeContract {
   /** One Ask AI turn; progress goes to the injected `AgentProgressPort` under `turnId`. */
   runTurn(req: AgentTurnRequest): Promise<AgentTurnOutput>;
   /** One Optimiser change (or merge); the project's tools let it read feature descriptions. */
   reflectPrompt(req: OptimiserReflectRequest): Promise<OptimiserReflectOutput>;
-  /** Improve with AI: a draft with several marked changes, for the user to review and save. */
-  draftImprovement(req: DraftImprovementRequest): Promise<DraftImprovementOutput>;
   /** Stops a request started with a `requestId` (the Optimiser's Stop); unknown ids are ignored. */
   cancel(requestId: string): Promise<void>;
 }

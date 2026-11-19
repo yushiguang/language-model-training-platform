@@ -18,3 +18,4 @@ export * from './agent-guards.ts';
 export * from './label-file.ts';
 export * from './source-file.ts';
 export * from './frozen-features.ts';
+export * from './guide.ts';

@@ -1,0 +1,182 @@
+{
+  "name": "Improve with AI runs the skill improve_from_mistakes: it reads the mistakes and drafts each change with its reason",
+  "guards": [
+    "Improve with AI is a Prompt helper turn that runs the skill improve_from_mistakes (#39)",
+    "the skill reads its brief with get_mistakes, the version from the page",
+    "Improve with AI changes wording only and gives a reason for every change",
+    "the draft names the version it was written from (baseVersionId), and the chat gets one fixed line"
+  ],
+  "kind": "turn",
+  "request": {
+    "userText": "Improve v2",
+    "page": {
+      "label": "Edit prompt",
+      "agent": "prompt_agent",
+      "intent": "improve",
+      "context": {
+        "version": "v2"
+      }
+    },
+    "workspace": {
+      "projectId": "pr_fixture",
+      "task": "Tag short videos",
+      "prompt": null,
+      "history": [],
+      "pageView": null
+    },
+    "turnId": "turn_fixture",
+    "ctx": {
+      "requestId": "rq_fixture",
+      "user": {
+        "id": "u_fixture",
+        "name": "Fixture user"
+      },
+      "caller": "workflow",
+      "locale": "en"
+    },
+    "locale": "en"
+  },
+  "model": [
+    "{\"prompt\":{\"taskSummary\":\"Label the post.\",\"features\":{\"video\":[\"Description\"],\"photo_text\":[],\"metadata\":[]},\"label\":{\"name\":\"format\",\"kind\":\"single\",\"values\":[{\"name\":\"Vlog\",\"definition\":\"- a day in a life\\n- Does not apply when the post fits Clip better (a cut from a longer video).\"},{\"name\":\"Clip\",\"definition\":\"a cut from a longer video\"}]},\"ruleGroups\":[],\"images\":[]},\"changes\":[{\"text\":\"- Does not apply when the post fits Clip better (a cut from a longer video).\",\"reason\":\"5 Clip examples were read as Vlog\"}]}"
+  ],
+  "tools": [
+    {
+      "agent": "prompt_agent",
+      "name": "get_mistakes",
+      "args": {
+        "version": "v2"
+      },
+      "result": {
+        "version": "v2",
+        "versionId": "pv_fixture",
+        "prompt": {
+          "taskSummary": "Label the post.",
+          "features": {
+            "video": [
+              "Description"
+            ],
+            "photo_text": [],
+            "metadata": []
+          },
+          "label": {
+            "name": "format",
+            "kind": "single",
+            "values": [
+              {
+                "name": "Vlog",
+                "definition": "a day in a life"
+              },
+              {
+                "name": "Clip",
+                "definition": "a cut from a longer video"
+              }
+            ]
+          },
+          "ruleGroups": [],
+          "images": []
+        },
+        "mixUps": [
+          {
+            "kind": "confused",
+            "gold": "Clip",
+            "predicted": "Vlog",
+            "count": 5,
+            "exampleIds": []
+          }
+        ],
+        "macroF1": 0.5,
+        "lowestValue": null,
+        "mistakes": 5,
+        "examples": []
+      }
+    }
+  ],
+  "expected": {
+    "invocations": [
+      {
+        "from": "user",
+        "to": "prompt_agent",
+        "intent": "improve",
+        "note": ""
+      }
+    ],
+    "messages": [
+      {
+        "role": "agent",
+        "agent": "prompt_agent",
+        "text": "I made 1 change to v2. Hover each mark to see why.",
+        "msg": {
+          "key": "I made 1 change to {version}. Hover each mark to see why.",
+          "params": {
+            "version": "v2"
+          }
+        }
+      }
+    ],
+    "proposal": {
+      "kind": "prompt",
+      "agent": "prompt_agent",
+      "brief": "Improve v2",
+      "payload": {
+        "structured": {
+          "taskSummary": "Label the post.",
+          "features": {
+            "video": [
+              "Description"
+            ],
+            "photo_text": [],
+            "metadata": []
+          },
+          "label": {
+            "name": "format",
+            "kind": "single",
+            "values": [
+              {
+                "name": "Vlog",
+                "definition": "- a day in a life\n- Does not apply when the post fits Clip better (a cut from a longer video)."
+              },
+              {
+                "name": "Clip",
+                "definition": "a cut from a longer video"
+              }
+            ]
+          },
+          "ruleGroups": [],
+          "images": []
+        },
+        "change": "- Does not apply when the post fits Clip better (a cut from a longer video).",
+        "changes": [
+          {
+            "text": "- Does not apply when the post fits Clip better (a cut from a longer video).",
+            "reason": "5 Clip examples were read as Vlog"
+          }
+        ],
+        "baseVersionId": "pv_fixture",
+        "unmapped": []
+      }
+    },
+    "skills": [
+      {
+        "agent": "prompt_agent",
+        "name": "improve_from_mistakes"
+      }
+    ],
+    "toolCalls": [
+      {
+        "agent": "prompt_agent",
+        "name": "get_mistakes",
+        "args": {
+          "version": "v2"
+        },
+        "ok": true
+      }
+    ],
+    "modelCalls": [
+      {
+        "agent": "prompt_agent",
+        "model": "gpt-5.6-terra"
+      }
+    ],
+    "parseFailures": []
+  }
+}

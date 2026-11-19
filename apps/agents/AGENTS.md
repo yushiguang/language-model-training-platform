@@ -11,9 +11,11 @@ deployed as a dedicated microservice (or ported to Go alongside the BFF).
      in `@yushiguang/sprint-contracts/agent-api`. Each request carries the caller's `ctx`; every tool call
      goes to the one injected `AgentToolHost` with `projectId`, `turnId` and `ctx`
      (`AgentToolCall`). A turn's progress events go to the `AgentProgressPort` one at a time, in
-     order, and the turn answers after the last one landed. Inside, `runAgentTurn`,
-     `reflectPrompt` and `draftImprovement` (`src/runtime.ts`) call tools through a bound
-     `ToolCaller`.
+     order, and the turn answers after the last one landed. Inside, `runAgentTurn` and
+     `reflectPrompt` (`src/runtime.ts`) call tools through a bound `ToolCaller`.
+   - Skills (`src/skills.ts`, #39): a helper answers `{"skill": {...}}`, the runtime reads the
+     skill's brief tool and asks the helper again under the skill's instructions and tools.
+     Improve with AI is a Prompt helper turn (intent `improve`) that runs `improve_from_mistakes`.
    - Routes user messages starting from the page's active agent (`input.page.agent`), handles
      `front_desk` handoffs to specialist agents, and extracts structured `schema` or `prompt`
      proposals.

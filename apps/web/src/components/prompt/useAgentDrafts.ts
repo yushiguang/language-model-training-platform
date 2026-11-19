@@ -2,6 +2,7 @@
 
 import {useEffect, useState} from 'react';
 import type {AgentProposal} from '@yushiguang/sprint-contracts';
+import {editorDraft} from '@yushiguang/sprint-domain';
 import {closeProposal, openProposals, subscribeChanges, type ProjectState} from '@/backend-api';
 
 /** The Prompt helper's open draft for this project, if any (the newest); it updates as drafts come and go. */
@@ -21,17 +22,22 @@ export function useOpenDraft(state: ProjectState): AgentProposal | null {
 }
 
 /**
- * Loads the Prompt helper's latest open draft into the editor, where the user reviews and saves
- * it. Taking it into the page is what closes it: there is no Approve card in the chat.
+ * Loads the Prompt helper's open draft of this version into the editor, where the user reviews
+ * it. The draft stays open while it is on the page: Save closes it as approved and Discard as
+ * discarded (`closeDraft`), so the helper can recall a discarded draft (#39, T8). A draft written
+ * from another version is left for that version's editor, and a read-only view takes none.
  */
-export function useAgentDrafts(state: ProjectState, apply: (d: AgentProposal['payload']) => void) {
+export function useAgentDrafts(state: ProjectState, versionId: string, enabled: boolean, apply: (d: AgentProposal) => void) {
   useEffect(() => {
+    if (!enabled) return;
     let alive = true;
+    let taken: string | null = null;
     const check = async () => {
       const list = await openProposals(state.project.id);
-      if (!alive || !list[0]) return;
-      await closeProposal({projectId: state.project.id, proposalId: list[0].id, decision: 'approved'});
-      apply(list[0].payload);
+      const d = editorDraft(list, versionId);
+      if (!alive || !d || d.id === taken) return;
+      taken = d.id;
+      apply(d);
     };
     void check();
     const off = subscribeChanges(() => void check());
@@ -39,5 +45,10 @@ export function useAgentDrafts(state: ProjectState, apply: (d: AgentProposal['pa
       alive = false;
       off();
     };
-  }, [state.project.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [state.project.id, versionId, enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+/** Closes the draft the editor took: approved when the user saved it, discarded on Discard. */
+export async function closeDraft(projectId: string, proposalId: string | null, decision: 'approved' | 'discarded') {
+  if (proposalId) await closeProposal({projectId, proposalId, decision});
 }

@@ -378,7 +378,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
             ),
           );
           run.candidates++;
-          round = {...round, change: out.change || (other ? `Merged ${versionLabel(parent)} and ${versionLabel(other)}` : 'A change'), step: 'check'};
+          round = {...round, aimedAt: m.lowestValue, change: out.change || (other ? `Merged ${versionLabel(parent)} and ${versionLabel(other)}` : 'A change'), step: 'check'};
           await putRound(round);
 
           // Checks: a change may reword and tick features, never touch the label signature (gold

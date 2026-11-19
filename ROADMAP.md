@@ -6,15 +6,16 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Now
 
-- Nothing in progress. Next is picked from the list below.
+- **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
+  tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are in review in one
+  pull request: read tools, the ability cases, and skills (Improve with AI is now the Prompt
+  helper's skill `improve_from_mistakes`). Then step 3, action tools, with their cards drawn on
+  the UI design first.
 
 ## Next
 
 1. **First package release check.** The 1.2.0 packages are published; tag `v1.2.0` and check
    they install from GitHub Packages with a read-only token.
-2. **Agent abilities.** The user questions and actions the helpers should handle, turned into
-   tools, skills and acceptance cases for any agent runtime. Improve with AI becomes a Prompt
-   helper skill here. Needs the maintainers' list of abilities as an issue.
 
 ## Later
 

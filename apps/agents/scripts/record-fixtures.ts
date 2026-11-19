@@ -121,11 +121,17 @@ const CASES: Case[] = [
     request: {projectId: 'pr_fixture', ctx, mode: 'merge', prompt: withRules('Rule A.'), triedChanges: [], mixUps: [], macroF1: 0.5, lowestValue: null, other: {prompt: withRules('Rule B.'), change: 'Rule B'}},
   },
   {
-    file: 'improve-draft-with-reasons',
-    name: 'Improve with AI returns a draft with each change and its reason',
-    guards: ['Improve with AI changes wording only and gives a reason for every change'],
-    kind: 'improve',
-    request: {projectId: 'pr_fixture', ctx, version: 'v2', prompt, mixUps: [mixUp], macroF1: 0.5, lowestValue: null, mistakes: 5},
+    file: 'turn-improve-skill-draft',
+    name: 'Improve with AI runs the skill improve_from_mistakes: it reads the mistakes and drafts each change with its reason',
+    guards: [
+      'Improve with AI is a Prompt helper turn that runs the skill improve_from_mistakes (#39)',
+      'the skill reads its brief with get_mistakes, the version from the page',
+      'Improve with AI changes wording only and gives a reason for every change',
+      'the draft names the version it was written from (baseVersionId), and the chat gets one fixed line',
+    ],
+    kind: 'turn',
+    request: {userText: 'Improve v2', page: {label: 'Edit prompt', agent: 'prompt_agent', intent: 'improve', context: {version: 'v2'}}, workspace: workspace(), turnId: 'turn_fixture', ctx, locale: 'en'},
+    tools: {get_mistakes: {result: {version: 'v2', versionId: 'pv_fixture', prompt, mixUps: [mixUp], macroF1: 0.5, lowestValue: null, mistakes: 5, examples: []}}},
   },
 ];
 
