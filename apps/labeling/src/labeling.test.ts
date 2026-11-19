@@ -513,6 +513,52 @@ test('two processes, locks that cannot see each other: liveElsewhere keeps a liv
   assert.deepEqual([listed?.state, listed?.stopReason], ['paused', 'closed'], 'nothing live anywhere: the closed runner is reaped as before');
 });
 
+test('two processes: a task that finishes while liveElsewhere is being asked is never reaped over its finished state', async () => {
+  const {db, catalog, v, ids} = await setup(4, 'lab-two-process-finish-race');
+  const {DocRepo} = await import('@yushiguang/sprint-platform');
+  const a = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": "Vlog"}'), locks: memoryLocks()});
+  // The gated predicate stands for the job-store read in another unit: while it is in flight the
+  // runner finishes (its final patch lands, its lock and job end), and only then does the answer
+  // "nothing live" come back. The task the read returns and keeps must be the finished one.
+  const b = createLabeling({
+    db,
+    catalog: createCatalog(db),
+    gateway: fakeGateway(async () => '{"format": "Vlog"}'),
+    locks: memoryLocks(),
+    liveElsewhere: async task => {
+      await new DocRepo(db).patch('labeling_tasks', task.id, {state: 'done', finishedAt: new Date().toISOString()});
+      return false;
+    },
+  });
+  const t = await a.createTask(input(ids, v));
+  await new DocRepo(db).patch('labeling_tasks', t.id, {state: 'running'});
+  const listed = (await b.listTasks('pr_1')).find(x => x.id === t.id);
+  assert.equal(listed?.state, 'done', 'the finished state is adopted, not patched over');
+  assert.equal((await b.getTask(t.id))?.state, 'done', 'the stored task stays done, never paused');
+});
+
+test('two processes: a liveElsewhere that throws does not fail the read, and the task is not reaped on that read', async () => {
+  const {db, catalog, v, ids} = await setup(4, 'lab-two-process-live-elsewhere-throws');
+  const {DocRepo} = await import('@yushiguang/sprint-platform');
+  const a = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": "Vlog"}'), locks: memoryLocks()});
+  // A job-store blip behind the predicate: the read must still succeed, conservatively keeping
+  // the task running — a store that cannot answer never proves a runner is gone.
+  const b = createLabeling({
+    db,
+    catalog: createCatalog(db),
+    gateway: fakeGateway(async () => '{"format": "Vlog"}'),
+    locks: memoryLocks(),
+    liveElsewhere: async () => {
+      throw new Error('the job store did not answer');
+    },
+  });
+  const t = await a.createTask(input(ids, v));
+  await new DocRepo(db).patch('labeling_tasks', t.id, {state: 'running'});
+  const listed = (await b.listTasks('pr_1')).find(x => x.id === t.id);
+  assert.equal(listed?.state, 'running', 'the read succeeds and leaves the task running');
+  assert.equal((await b.getTask(t.id))?.state, 'running', 'nothing was persisted over it');
+});
+
 test('an answer saved by another runner while this call was in flight is not saved twice', async () => {
   const {db, catalog, v, ids} = await setup(1, 'lab-saved-meanwhile');
   const {DocRepo} = await import('@yushiguang/sprint-platform');

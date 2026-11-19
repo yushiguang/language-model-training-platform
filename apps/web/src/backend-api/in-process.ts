@@ -63,7 +63,7 @@ const labeling = createLabeling({
    * which it labels in-process.
    */
   liveElsewhere: async task => {
-    const live = await jobs.api.list(systemContext('labeling'), {projectId: task.projectId, states: ['queued', 'running']});
+    const live = await jobs.api.list(systemContext('labeling'), {projectId: task.projectId, kinds: ['labeling.runTask', 'optimiser.run'], states: ['queued', 'running']});
     return live.some(j => (j.kind === 'labeling.runTask' && j.args.taskId === task.id) || (task.purpose === 'optimiser' && j.kind === 'optimiser.run'));
   },
 });

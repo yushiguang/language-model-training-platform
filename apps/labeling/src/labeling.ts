@@ -473,7 +473,20 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         }
         // Nor when live work for it exists that this process's locks cannot see (a queued or
         // running job in another unit): only a task with no runner anywhere is left behind.
-        if (fresh && deps.liveElsewhere && (await deps.liveElsewhere(fresh))) continue;
+        if (fresh && deps.liveElsewhere) {
+          // A predicate that cannot answer (a job-store blip) proves nothing: do not reap on
+          // this read, and the read itself still succeeds.
+          const live = await deps.liveElsewhere(fresh).catch(() => true);
+          if (live) continue;
+          // The predicate was awaited after the re-read above, so the runner may have finished
+          // meanwhile: read once more, and a task that is no longer running is never patched over.
+          const after = await getTask(t.id);
+          if (!after) continue;
+          if (after.state !== 'running') {
+            Object.assign(t, after);
+            continue;
+          }
+        }
         t.state = 'paused';
         t.stopReason = 'closed';
         await repo.patch<LabelingTask>(TASKS, t.id, {state: 'paused', stopReason: 'closed'});

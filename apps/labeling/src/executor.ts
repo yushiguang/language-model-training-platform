@@ -11,8 +11,9 @@ import type {JobExecutor, LabelingContract} from '@yushiguang/sprint-contracts';
  * lock keeps a second runner off it until this one ends. That premise holds across processes
  * only when the composition root wires labeling with shared locks (`leaseLocks` over
  * `Platform.lockStore`, docs/integration.md; issue #46); with per-process locks it holds only
- * inside this process, and a second runner is kept from paying twice per example at most by the
- * saved-prediction re-check.
+ * inside this process, and a second runner that does slip through has already paid by the time
+ * the saved-prediction re-check runs (it follows the model call) — the re-check then keeps the
+ * store to one document, it does not prevent the duplicate call.
  */
 export function labelingExecutor(labeling: LabelingContract): JobExecutor {
   return {
