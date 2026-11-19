@@ -280,6 +280,11 @@ runtime and the golden fixtures hold the rules about what a helper answers. The 
 replies, tool answers and the expected output. Any agent runtime is accepted against them, and
 `apps/agents/src/fixtures.test.ts` replays them on the reference runtime.
 
+The bff has golden fixtures of its own (`apps/bff/fixtures/*.json`, format in its README): a
+small world (users and their tenants, items, item checks, the model's reply, stored records) and
+a sequence of `BffContract` calls with the result each must give, generated ids and times
+normalized. `apps/bff/src/fixtures.test.ts` replays them on the bff over the reference workflow.
+
 | Guard | Where it is enforced |
 |---|---|
 | A helper calls only the tools its preset lists (`PRESET_TOOLS`, `mayCallTool` in `packages/domain/src/agent-guards.ts`) | Tool host (refuses); the runtime also offers each helper its own tools only |

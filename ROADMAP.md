@@ -6,9 +6,7 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Now
 
-- **BFF golden fixtures.** The same plain-JSON cases as the agent fixtures, for `BffContract`
-  on the merged contract (request, stand-in data, expected result), so a server-side bff can be
-  held to them.
+- Nothing in progress. Next is picked from the list below.
 
 ## Next
 
@@ -27,6 +25,9 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Done
 
+- 2026-11-19: golden BFF fixtures: plain-JSON call sequences for `BffContract` over a small
+  world, replayed on every test run; a gold label is now checked against the project and the
+  label (#38).
 - 2026-11-18: frozen dataset snapshots: one features document per example, read by id in
   batches; items left out by the checks are counted (#32, #36).
 - 2026-11-18: Data Source: tenant data sources from item-id files, and datasets cut from them

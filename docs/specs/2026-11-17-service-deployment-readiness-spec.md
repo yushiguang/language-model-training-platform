@@ -402,7 +402,9 @@ Each item is its own `Contract change:` pull request.
    **Golden fixtures built** on branch `feat/agent-golden-fixtures`: 15 agent cases (turn,
    reflect, improve) in `apps/agents/fixtures/*.json`, recorded by
    `apps/agents/scripts/record-fixtures.ts` and replayed by `apps/agents/src/fixtures.test.ts`.
-   BFF fixtures are not built yet.
+   **BFF fixtures built (2026-11-19)** on branch `feat/bff-golden-fixtures`: 7 cases of
+   `BffContract` call sequences in `apps/bff/fixtures/*.json`, replayed by
+   `apps/bff/src/fixtures.test.ts` (`RECORD_FIXTURES=1` records them).
 
 ## 9. Verification
 

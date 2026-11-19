@@ -1,0 +1,247 @@
+{
+  "name": "Data sources belong to a tenant; a file counts its bad rows and repeats; more files add to it",
+  "guards": [
+    "Every tenant sees the built-in sample source",
+    "A file of item ids becomes a source of the caller's tenant; blank, unreadable and repeated rows are counted, not imported",
+    "A source name is unique in a tenant, ignoring case",
+    "A second file adds only new items",
+    "Another tenant sees none of it and cannot open it"
+  ],
+  "world": {
+    "users": {
+      "default": {
+        "id": "u_1",
+        "name": "Tester",
+        "organization": "org_a"
+      },
+      "other": {
+        "id": "u_2",
+        "name": "Other",
+        "organization": "org_b"
+      }
+    },
+    "reply": "{\"format\": \"Vlog\"}",
+    "builtIn": {
+      "name": "Sample videos",
+      "ids": [
+        "s1",
+        "s2",
+        "s3"
+      ]
+    }
+  },
+  "steps": [
+    {
+      "call": "listDataSources",
+      "args": [],
+      "expect": [
+        {
+          "builtIn": true,
+          "createdBy": "Sprint",
+          "files": 1,
+          "id": "$id:1",
+          "importing": null,
+          "items": 3,
+          "name": "Sample videos",
+          "notUsed": 3,
+          "updatedAt": "$time"
+        }
+      ]
+    },
+    {
+      "call": "createDataSource",
+      "args": [
+        {
+          "name": "Weekly feed",
+          "fileName": "feed.csv",
+          "text": "item_id,creator\nv1,a\nv2,b\n,c\nv1,d\nbad id!,e\nv3,f\n"
+        }
+      ],
+      "expect": {
+        "file": {
+          "bad": 2,
+          "done": 0,
+          "id": "$id:2",
+          "items": 0,
+          "name": "feed.csv",
+          "repeats": 1,
+          "rows": 6,
+          "seed": "$id:3",
+          "sourceId": "$id:4",
+          "state": "importing",
+          "tenantId": "org_a",
+          "uploadedAt": "$time",
+          "uploadedBy": "Tester"
+        },
+        "source": {
+          "builtIn": false,
+          "createdBy": "Tester",
+          "files": 1,
+          "id": "$id:4",
+          "importing": {
+            "done": 0,
+            "total": 3
+          },
+          "items": 0,
+          "name": "Weekly feed",
+          "notUsed": 0,
+          "updatedAt": "$time"
+        }
+      }
+    },
+    {
+      "settle": true
+    },
+    {
+      "call": "createDataSource",
+      "args": [
+        {
+          "name": "weekly FEED",
+          "fileName": "b.txt",
+          "text": "v9"
+        }
+      ],
+      "note": "the name is taken",
+      "expect": {
+        "error": "A data source with this name already exists."
+      }
+    },
+    {
+      "call": "createDataSource",
+      "args": [
+        {
+          "name": "x",
+          "fileName": "a.xlsx",
+          "text": "v1"
+        }
+      ],
+      "note": "not a file type it reads",
+      "expect": {
+        "error": "Upload a CSV, JSONL or TXT file of item IDs."
+      }
+    },
+    {
+      "call": "addSourceFile",
+      "args": [
+        {
+          "sourceId": "$id:4",
+          "fileName": "more.txt",
+          "text": "v3\nv4\nv5"
+        }
+      ],
+      "expect": {
+        "file": {
+          "bad": 0,
+          "done": 0,
+          "id": "$id:5",
+          "items": 0,
+          "name": "more.txt",
+          "repeats": 0,
+          "rows": 3,
+          "seed": "$id:6",
+          "sourceId": "$id:4",
+          "state": "importing",
+          "tenantId": "org_a",
+          "uploadedAt": "$time",
+          "uploadedBy": "Tester"
+        },
+        "source": {
+          "builtIn": false,
+          "createdBy": "Tester",
+          "files": 2,
+          "id": "$id:4",
+          "importing": {
+            "done": 0,
+            "total": 3
+          },
+          "items": 3,
+          "name": "Weekly feed",
+          "notUsed": 3,
+          "updatedAt": "$time"
+        }
+      }
+    },
+    {
+      "settle": true
+    },
+    {
+      "call": "getDataSource",
+      "args": [
+        "$id:4"
+      ],
+      "only": [
+        "source.items",
+        "source.notUsed",
+        "source.files",
+        "files#",
+        "taken",
+        "projects"
+      ],
+      "expect": {
+        "files#": 2,
+        "projects": 0,
+        "source.files": 2,
+        "source.items": 5,
+        "source.notUsed": 5,
+        "taken": 0
+      }
+    },
+    {
+      "call": "listDataSources",
+      "args": [],
+      "only": [
+        "0.name",
+        "0.builtIn",
+        "0.items",
+        "1.name",
+        "1.items",
+        "1.files",
+        "#"
+      ],
+      "expect": {
+        "#": 2,
+        "0.builtIn": false,
+        "0.items": 5,
+        "0.name": "Weekly feed",
+        "1.files": 1,
+        "1.items": 3,
+        "1.name": "Sample videos"
+      }
+    },
+    {
+      "call": "listDataSources",
+      "args": [],
+      "as": "other",
+      "only": [
+        "0.name",
+        "0.builtIn",
+        "#"
+      ],
+      "expect": {
+        "#": 1,
+        "0.builtIn": true,
+        "0.name": "Sample videos"
+      }
+    },
+    {
+      "call": "getDataSource",
+      "args": [
+        "$id:4"
+      ],
+      "as": "other",
+      "expect": null
+    },
+    {
+      "call": "addSourceFile",
+      "args": [
+        {
+          "sourceId": "$id:4",
+          "fileName": "x.txt",
+          "text": "v6"
+        }
+      ],
+      "as": "other",
+      "expectError": "This data source does not exist."
+    }
+  ]
+}

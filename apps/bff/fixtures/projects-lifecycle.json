@@ -1,0 +1,125 @@
+{
+  "name": "A project is created, listed, renamed and deleted",
+  "guards": [
+    "A new project is listed for its creator with its name",
+    "A rename trims the name and returns the name kept",
+    "An empty name is refused",
+    "A deleted project is gone from the list and reads as null"
+  ],
+  "world": {
+    "users": {
+      "default": {
+        "id": "u_1",
+        "name": "Tester",
+        "organization": "org_a"
+      }
+    },
+    "reply": "{\"format\": \"Vlog\"}"
+  },
+  "steps": [
+    {
+      "call": "listProjects",
+      "args": [],
+      "expect": []
+    },
+    {
+      "call": "createProject",
+      "args": [
+        "Shoe formats"
+      ],
+      "expect": {
+        "approvedNodes": [],
+        "createdAt": "$time",
+        "createdBy": "Tester",
+        "createdById": "u_1",
+        "id": "$id:1",
+        "kind": "prompt_tuning",
+        "name": "Shoe formats",
+        "settingsConfirmed": false,
+        "setupVersionId": "$id:2",
+        "snapshotId": null
+      }
+    },
+    {
+      "call": "listProjects",
+      "args": [],
+      "expect": [
+        {
+          "approvedNodes": [],
+          "createdAt": "$time",
+          "createdBy": "Tester",
+          "createdById": "u_1",
+          "id": "$id:1",
+          "kind": "prompt_tuning",
+          "name": "Shoe formats",
+          "settingsConfirmed": false,
+          "setupVersionId": "$id:2",
+          "snapshotId": null
+        }
+      ]
+    },
+    {
+      "call": "renameProject",
+      "args": [
+        {
+          "projectId": "$id:1",
+          "name": "  Video formats  "
+        }
+      ],
+      "expect": "Video formats"
+    },
+    {
+      "call": "renameProject",
+      "args": [
+        {
+          "projectId": "$id:1",
+          "name": "   "
+        }
+      ],
+      "note": "an empty name",
+      "expectError": "Give the project a name."
+    },
+    {
+      "call": "getProject",
+      "args": [
+        "$id:1"
+      ],
+      "expect": {
+        "approvedNodes": [],
+        "createdAt": "$time",
+        "createdBy": "Tester",
+        "createdById": "u_1",
+        "id": "$id:1",
+        "kind": "prompt_tuning",
+        "name": "Video formats",
+        "settingsConfirmed": false,
+        "setupVersionId": "$id:2",
+        "snapshotId": null
+      }
+    },
+    {
+      "call": "deleteProject",
+      "args": [
+        {
+          "projectId": "$id:1"
+        }
+      ],
+      "expect": null
+    },
+    {
+      "settle": true
+    },
+    {
+      "call": "getProject",
+      "args": [
+        "$id:1"
+      ],
+      "expect": null
+    },
+    {
+      "call": "listProjects",
+      "args": [],
+      "expect": []
+    }
+  ]
+}

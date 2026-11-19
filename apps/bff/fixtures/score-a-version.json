@@ -1,0 +1,498 @@
+{
+  "name": "A prompt version is created once per idempotency key, scored on the held-out half, and its mismatches listed",
+  "guards": [
+    "The same idempotency key never creates a version twice",
+    "Scoring returns once the labeling is queued, one run per model",
+    "After the run, the report scores the held-out half and each example has a prediction",
+    "A prediction that differs from the gold label is a mismatch"
+  ],
+  "world": {
+    "users": {
+      "default": {
+        "id": "u_1",
+        "name": "Tester",
+        "organization": "org_a"
+      }
+    },
+    "reply": "{\"format\": \"Vlog\"}",
+    "records": {
+      "setup_versions": [
+        {
+          "id": "sv_w",
+          "projectId": "pr_w",
+          "number": 1,
+          "schemaVersion": 1,
+          "task": "",
+          "schema": {
+            "name": "format",
+            "kind": "single",
+            "values": [
+              {
+                "name": "Vlog",
+                "definition": ""
+              },
+              {
+                "name": "Tutorial",
+                "definition": ""
+              }
+            ]
+          },
+          "thresholds": null,
+          "models": [
+            {
+              "endpoint": "A",
+              "maxOutputTokens": 150,
+              "temperature": null
+            }
+          ],
+          "steps": {
+            "schema": true,
+            "evaluation": true,
+            "models": true
+          },
+          "createdAt": "",
+          "createdBy": ""
+        }
+      ],
+      "dataset_snapshots": [
+        {
+          "id": "ds_w",
+          "projectId": "pr_w",
+          "number": 1,
+          "source": "sample",
+          "sourceName": "test",
+          "createdAt": "",
+          "counts": {
+            "rows": 4,
+            "valid": 4,
+            "invalid": 0,
+            "video": 4,
+            "photoText": 0
+          },
+          "split": {
+            "eval": 4,
+            "test": 0,
+            "train": 0
+          }
+        }
+      ],
+      "examples": [
+        {
+          "id": "ex_w0",
+          "snapshotId": "ds_w",
+          "externalId": "v0",
+          "type": "video",
+          "title": "Item 0",
+          "features": {
+            "Description": "A day in my life, part 0"
+          },
+          "split": "eval",
+          "optimiserHalf": true
+        },
+        {
+          "id": "ex_w1",
+          "snapshotId": "ds_w",
+          "externalId": "v1",
+          "type": "video",
+          "title": "Item 1",
+          "features": {
+            "Description": "A day in my life, part 1"
+          },
+          "split": "eval",
+          "optimiserHalf": false
+        },
+        {
+          "id": "ex_w2",
+          "snapshotId": "ds_w",
+          "externalId": "v2",
+          "type": "video",
+          "title": "Item 2",
+          "features": {
+            "Description": "How to fix a bike, step 2"
+          },
+          "split": "eval",
+          "optimiserHalf": true
+        },
+        {
+          "id": "ex_w3",
+          "snapshotId": "ds_w",
+          "externalId": "v3",
+          "type": "video",
+          "title": "Item 3",
+          "features": {
+            "Description": "How to fix a bike, step 3"
+          },
+          "split": "eval",
+          "optimiserHalf": false
+        }
+      ],
+      "gold_labels": [
+        {
+          "id": "gl_w0",
+          "projectId": "pr_w",
+          "exampleId": "ex_w0",
+          "schemaVersion": 1,
+          "answer": [
+            "Vlog"
+          ],
+          "source": "labeled",
+          "revealed": false,
+          "createdAt": "",
+          "createdBy": "Tester"
+        },
+        {
+          "id": "gl_w1",
+          "projectId": "pr_w",
+          "exampleId": "ex_w1",
+          "schemaVersion": 1,
+          "answer": [
+            "Vlog"
+          ],
+          "source": "labeled",
+          "revealed": false,
+          "createdAt": "",
+          "createdBy": "Tester"
+        },
+        {
+          "id": "gl_w2",
+          "projectId": "pr_w",
+          "exampleId": "ex_w2",
+          "schemaVersion": 1,
+          "answer": [
+            "Tutorial"
+          ],
+          "source": "labeled",
+          "revealed": false,
+          "createdAt": "",
+          "createdBy": "Tester"
+        },
+        {
+          "id": "gl_w3",
+          "projectId": "pr_w",
+          "exampleId": "ex_w3",
+          "schemaVersion": 1,
+          "answer": [
+            "Tutorial"
+          ],
+          "source": "labeled",
+          "revealed": false,
+          "createdAt": "",
+          "createdBy": "Tester"
+        }
+      ],
+      "projects": [
+        {
+          "id": "pr_w",
+          "name": "Formats",
+          "createdAt": "",
+          "createdBy": "Tester",
+          "kind": "prompt_tuning",
+          "settingsConfirmed": true,
+          "setupVersionId": "sv_w",
+          "snapshotId": "ds_w",
+          "approvedNodes": [
+            "prompt_design",
+            "dataset",
+            "gold"
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "call": "createVersion",
+      "args": [
+        {
+          "projectId": "pr_w",
+          "structured": {
+            "taskSummary": "Label this",
+            "features": {
+              "video": [
+                "Description"
+              ],
+              "photo_text": [],
+              "metadata": []
+            },
+            "label": {
+              "name": "format",
+              "kind": "single",
+              "values": [
+                {
+                  "name": "Vlog",
+                  "definition": ""
+                },
+                {
+                  "name": "Tutorial",
+                  "definition": ""
+                }
+              ]
+            },
+            "ruleGroups": [],
+            "images": []
+          },
+          "parentId": null,
+          "madeBy": "user",
+          "change": "First prompt",
+          "kind": "major",
+          "idempotencyKey": "k1"
+        }
+      ],
+      "only": [
+        "id",
+        "number",
+        "parentId",
+        "madeBy",
+        "change"
+      ],
+      "expect": {
+        "change": "First prompt",
+        "id": "$id:1",
+        "madeBy": "user",
+        "number": null,
+        "parentId": null
+      }
+    },
+    {
+      "call": "createVersion",
+      "args": [
+        {
+          "projectId": "pr_w",
+          "structured": {
+            "taskSummary": "Label this",
+            "features": {
+              "video": [
+                "Description"
+              ],
+              "photo_text": [],
+              "metadata": []
+            },
+            "label": {
+              "name": "format",
+              "kind": "single",
+              "values": [
+                {
+                  "name": "Vlog",
+                  "definition": ""
+                },
+                {
+                  "name": "Tutorial",
+                  "definition": ""
+                }
+              ]
+            },
+            "ruleGroups": [],
+            "images": []
+          },
+          "parentId": null,
+          "madeBy": "user",
+          "change": "First prompt",
+          "kind": "major",
+          "idempotencyKey": "k1"
+        }
+      ],
+      "only": [
+        "id",
+        "number"
+      ],
+      "note": "the same key again",
+      "expect": {
+        "id": "$id:1",
+        "number": null
+      }
+    },
+    {
+      "call": "scoreVersion",
+      "args": [
+        {
+          "projectId": "pr_w",
+          "promptVersionId": "$id:1"
+        }
+      ],
+      "only": [
+        "runIds#"
+      ],
+      "expect": {
+        "runIds#": 1
+      }
+    },
+    {
+      "settle": true
+    },
+    {
+      "call": "loadProjectState",
+      "args": [
+        "pr_w"
+      ],
+      "only": [
+        "versions#",
+        "reports#",
+        "reports.0.promptVersionId",
+        "reports.0.endpoint",
+        "reports.0.metrics",
+        "reports.0.rough"
+      ],
+      "expect": {
+        "reports#": 1,
+        "reports.0.endpoint": "A",
+        "reports.0.metrics": {
+          "accuracy": 0.5,
+          "costPer1000": 30,
+          "filtered": 0,
+          "invalid": 0,
+          "invalidRate": 0,
+          "lowestValue": {
+            "f1": 0,
+            "value": "Tutorial"
+          },
+          "macroF1": 0.334,
+          "mixUps": [
+            {
+              "count": 1,
+              "exampleIds": [
+                "ex_w3"
+              ],
+              "gold": "Tutorial",
+              "kind": "confused",
+              "predicted": "Vlog"
+            }
+          ],
+          "n": 2,
+          "total": 2,
+          "values": [
+            {
+              "f1": 0.667,
+              "precision": 0.5,
+              "recall": 1,
+              "support": 1,
+              "value": "Vlog"
+            },
+            {
+              "f1": 0,
+              "precision": 0,
+              "recall": 0,
+              "support": 1,
+              "value": "Tutorial"
+            }
+          ]
+        },
+        "reports.0.promptVersionId": "$id:1",
+        "reports.0.rough": true,
+        "versions#": 1
+      }
+    },
+    {
+      "call": "predictionsFor",
+      "args": [
+        "pr_w",
+        "$id:1",
+        "A",
+        {
+          "endpoint": "A",
+          "maxOutputTokens": 150,
+          "temperature": null
+        }
+      ],
+      "expect": {
+        "ex_w0": {
+          "answer": [
+            "Vlog"
+          ],
+          "costUsd": 0.03,
+          "createdAt": "$time",
+          "endpoint": "A",
+          "exampleId": "ex_w0",
+          "id": "$id:2",
+          "invalidReason": null,
+          "output": "{\"format\": \"Vlog\"}",
+          "projectId": "pr_w",
+          "promptVersionId": "$id:1",
+          "settingsHash": "68168fbe15206588",
+          "tokens": 150
+        },
+        "ex_w1": {
+          "answer": [
+            "Vlog"
+          ],
+          "costUsd": 0.03,
+          "createdAt": "$time",
+          "endpoint": "A",
+          "exampleId": "ex_w1",
+          "id": "$id:3",
+          "invalidReason": null,
+          "output": "{\"format\": \"Vlog\"}",
+          "projectId": "pr_w",
+          "promptVersionId": "$id:1",
+          "settingsHash": "68168fbe15206588",
+          "tokens": 150
+        },
+        "ex_w2": {
+          "answer": [
+            "Vlog"
+          ],
+          "costUsd": 0.03,
+          "createdAt": "$time",
+          "endpoint": "A",
+          "exampleId": "ex_w2",
+          "id": "$id:4",
+          "invalidReason": null,
+          "output": "{\"format\": \"Vlog\"}",
+          "projectId": "pr_w",
+          "promptVersionId": "$id:1",
+          "settingsHash": "68168fbe15206588",
+          "tokens": 150
+        },
+        "ex_w3": {
+          "answer": [
+            "Vlog"
+          ],
+          "costUsd": 0.03,
+          "createdAt": "$time",
+          "endpoint": "A",
+          "exampleId": "ex_w3",
+          "id": "$id:5",
+          "invalidReason": null,
+          "output": "{\"format\": \"Vlog\"}",
+          "projectId": "pr_w",
+          "promptVersionId": "$id:1",
+          "settingsHash": "68168fbe15206588",
+          "tokens": 150
+        }
+      }
+    },
+    {
+      "call": "mismatches",
+      "args": [
+        "pr_w",
+        "$id:1"
+      ],
+      "expect": {
+        "items": [
+          {
+            "exampleId": "ex_w2",
+            "of": 1,
+            "wrongIn": 1
+          },
+          {
+            "exampleId": "ex_w3",
+            "of": 1,
+            "wrongIn": 1
+          }
+        ],
+        "reviewed": 0,
+        "reviewedAll": 0,
+        "reviewedItems": [],
+        "versionId": "$id:1",
+        "versions": [
+          {
+            "best": true,
+            "id": "$id:1",
+            "label": "v1",
+            "score": 0.334
+          }
+        ],
+        "wrongEverywhere": 0
+      }
+    }
+  ]
+}
