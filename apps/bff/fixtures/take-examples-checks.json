@@ -1,0 +1,232 @@
+{
+  "name": "Taking examples from a source runs the item checks first and counts what they leave out",
+  "guards": [
+    "Asking for more items than are unused is refused with the counts",
+    "Items the checks leave out are counted by reason and never become examples",
+    "Taken items are used up in the source",
+    "Example features are read for the project's own examples"
+  ],
+  "world": {
+    "users": {
+      "default": {
+        "id": "u_1",
+        "name": "Tester",
+        "organization": "org_a"
+      }
+    },
+    "reply": "{\"format\": \"Vlog\"}",
+    "items": {
+      "k1": {
+        "type": "video",
+        "title": "One",
+        "features": {
+          "Description": "A day out"
+        }
+      },
+      "k2": {
+        "type": "video",
+        "title": "Two",
+        "features": {
+          "Description": "A bike repair"
+        }
+      },
+      "k3": {
+        "type": "photo_text",
+        "title": "Three",
+        "features": {
+          "Text": "A recipe"
+        }
+      },
+      "k4": {
+        "type": "video",
+        "title": "Four",
+        "features": {
+          "Description": "Too young"
+        }
+      }
+    },
+    "problems": {
+      "k4": "minor_creator"
+    }
+  },
+  "steps": [
+    {
+      "call": "createProject",
+      "args": [
+        "Formats"
+      ],
+      "expect": {
+        "approvedNodes": [],
+        "createdAt": "$time",
+        "createdBy": "Tester",
+        "createdById": "u_1",
+        "id": "$id:1",
+        "kind": "prompt_tuning",
+        "name": "Formats",
+        "settingsConfirmed": false,
+        "setupVersionId": "$id:2",
+        "snapshotId": null
+      }
+    },
+    {
+      "call": "createDataSource",
+      "args": [
+        {
+          "name": "Feed",
+          "fileName": "feed.txt",
+          "text": "k1\nk2\nk3\nk4\nk5"
+        }
+      ],
+      "expect": {
+        "file": {
+          "bad": 0,
+          "done": 0,
+          "id": "$id:3",
+          "items": 0,
+          "name": "feed.txt",
+          "repeats": 0,
+          "rows": 5,
+          "seed": "$id:4",
+          "sourceId": "$id:5",
+          "state": "importing",
+          "tenantId": "org_a",
+          "uploadedAt": "$time",
+          "uploadedBy": "Tester"
+        },
+        "source": {
+          "builtIn": false,
+          "createdBy": "Tester",
+          "files": 1,
+          "id": "$id:5",
+          "importing": {
+            "done": 0,
+            "total": 5
+          },
+          "items": 0,
+          "name": "Feed",
+          "notUsed": 0,
+          "updatedAt": "$time"
+        }
+      }
+    },
+    {
+      "settle": true
+    },
+    {
+      "call": "takeExamples",
+      "args": [
+        {
+          "projectId": "$id:1",
+          "picks": [
+            {
+              "sourceId": "$id:5",
+              "count": 6
+            }
+          ]
+        }
+      ],
+      "note": "more than the source holds",
+      "expectError": "Only 5 unused items are left in Feed; 6 were asked for."
+    },
+    {
+      "call": "takeExamples",
+      "args": [
+        {
+          "projectId": "$id:1",
+          "picks": []
+        }
+      ],
+      "note": "no pick",
+      "expectError": "Pick at least one data source."
+    },
+    {
+      "call": "takeExamples",
+      "args": [
+        {
+          "projectId": "$id:1",
+          "picks": [
+            {
+              "sourceId": "$id:5",
+              "count": 5
+            }
+          ]
+        }
+      ],
+      "only": [
+        "total",
+        "state",
+        "error"
+      ],
+      "expect": {
+        "error": null,
+        "state": "running",
+        "total": 5
+      }
+    },
+    {
+      "settle": true
+    },
+    {
+      "call": "loadProjectState",
+      "args": [
+        "$id:1"
+      ],
+      "only": [
+        "examples#",
+        "snapshot.counts",
+        "snapshot.split"
+      ],
+      "expect": {
+        "examples#": 3,
+        "snapshot.counts": {
+          "checks": {
+            "minorCreator": 1,
+            "missing": 1,
+            "notRecommendable": 0
+          },
+          "invalid": 2,
+          "photoText": 1,
+          "rows": 5,
+          "valid": 3,
+          "video": 2
+        },
+        "snapshot.split": {
+          "eval": 3,
+          "test": 0,
+          "train": 0
+        }
+      }
+    },
+    {
+      "call": "getDataSource",
+      "args": [
+        "$id:5"
+      ],
+      "only": [
+        "source.items",
+        "source.notUsed",
+        "taken",
+        "projects"
+      ],
+      "expect": {
+        "projects": 1,
+        "source.items": 5,
+        "source.notUsed": 0,
+        "taken": 5
+      }
+    },
+    {
+      "call": "projectStatus",
+      "args": [
+        "$id:1"
+      ],
+      "expect": {
+        "optimisation": [],
+        "projectId": "$id:1",
+        "revision": "$id:6",
+        "runs": [],
+        "samplingTask": null
+      }
+    }
+  ]
+}

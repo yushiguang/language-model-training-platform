@@ -1,0 +1,343 @@
+{
+  "name": "A call naming a project reaches only records of that project",
+  "guards": [
+    "A prompt version of another project is refused as not existing",
+    "Example features of another project are left out, not read",
+    "A gold label for an example of another project is refused",
+    "A run, a proposal or a parent version that does not exist is refused"
+  ],
+  "world": {
+    "users": {
+      "default": {
+        "id": "u_1",
+        "name": "Tester",
+        "organization": "org_a"
+      }
+    },
+    "reply": "{\"format\": \"Vlog\"}",
+    "records": {
+      "setup_versions": [
+        {
+          "id": "sv_w",
+          "projectId": "pr_w",
+          "number": 1,
+          "schemaVersion": 1,
+          "task": "",
+          "schema": {
+            "name": "format",
+            "kind": "single",
+            "values": [
+              {
+                "name": "Vlog",
+                "definition": ""
+              },
+              {
+                "name": "Tutorial",
+                "definition": ""
+              }
+            ]
+          },
+          "thresholds": null,
+          "models": [
+            {
+              "endpoint": "A",
+              "maxOutputTokens": 150,
+              "temperature": null
+            }
+          ],
+          "steps": {
+            "schema": true,
+            "evaluation": true,
+            "models": true
+          },
+          "createdAt": "",
+          "createdBy": ""
+        }
+      ],
+      "dataset_snapshots": [
+        {
+          "id": "ds_w",
+          "projectId": "pr_w",
+          "number": 1,
+          "source": "sample",
+          "sourceName": "test",
+          "createdAt": "",
+          "counts": {
+            "rows": 4,
+            "valid": 4,
+            "invalid": 0,
+            "video": 4,
+            "photoText": 0
+          },
+          "split": {
+            "eval": 4,
+            "test": 0,
+            "train": 0
+          }
+        }
+      ],
+      "examples": [
+        {
+          "id": "ex_w0",
+          "snapshotId": "ds_w",
+          "externalId": "v0",
+          "type": "video",
+          "title": "Item 0",
+          "features": {
+            "Description": "A day in my life, part 0"
+          },
+          "split": "eval",
+          "optimiserHalf": true
+        },
+        {
+          "id": "ex_w1",
+          "snapshotId": "ds_w",
+          "externalId": "v1",
+          "type": "video",
+          "title": "Item 1",
+          "features": {
+            "Description": "A day in my life, part 1"
+          },
+          "split": "eval",
+          "optimiserHalf": false
+        },
+        {
+          "id": "ex_w2",
+          "snapshotId": "ds_w",
+          "externalId": "v2",
+          "type": "video",
+          "title": "Item 2",
+          "features": {
+            "Description": "How to fix a bike, step 2"
+          },
+          "split": "eval",
+          "optimiserHalf": true
+        },
+        {
+          "id": "ex_w3",
+          "snapshotId": "ds_w",
+          "externalId": "v3",
+          "type": "video",
+          "title": "Item 3",
+          "features": {
+            "Description": "How to fix a bike, step 3"
+          },
+          "split": "eval",
+          "optimiserHalf": false
+        }
+      ],
+      "gold_labels": [
+        {
+          "id": "gl_w0",
+          "projectId": "pr_w",
+          "exampleId": "ex_w0",
+          "schemaVersion": 1,
+          "answer": [
+            "Vlog"
+          ],
+          "source": "labeled",
+          "revealed": false,
+          "createdAt": "",
+          "createdBy": "Tester"
+        },
+        {
+          "id": "gl_w1",
+          "projectId": "pr_w",
+          "exampleId": "ex_w1",
+          "schemaVersion": 1,
+          "answer": [
+            "Vlog"
+          ],
+          "source": "labeled",
+          "revealed": false,
+          "createdAt": "",
+          "createdBy": "Tester"
+        },
+        {
+          "id": "gl_w2",
+          "projectId": "pr_w",
+          "exampleId": "ex_w2",
+          "schemaVersion": 1,
+          "answer": [
+            "Tutorial"
+          ],
+          "source": "labeled",
+          "revealed": false,
+          "createdAt": "",
+          "createdBy": "Tester"
+        },
+        {
+          "id": "gl_w3",
+          "projectId": "pr_w",
+          "exampleId": "ex_w3",
+          "schemaVersion": 1,
+          "answer": [
+            "Tutorial"
+          ],
+          "source": "labeled",
+          "revealed": false,
+          "createdAt": "",
+          "createdBy": "Tester"
+        }
+      ],
+      "projects": [
+        {
+          "id": "pr_w",
+          "name": "Formats",
+          "createdAt": "",
+          "createdBy": "Tester",
+          "kind": "prompt_tuning",
+          "settingsConfirmed": true,
+          "setupVersionId": "sv_w",
+          "snapshotId": "ds_w",
+          "approvedNodes": [
+            "prompt_design",
+            "dataset",
+            "gold"
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "call": "createProject",
+      "args": [
+        "Other"
+      ],
+      "expect": {
+        "approvedNodes": [],
+        "createdAt": "$time",
+        "createdBy": "Tester",
+        "createdById": "u_1",
+        "id": "$id:1",
+        "kind": "prompt_tuning",
+        "name": "Other",
+        "settingsConfirmed": false,
+        "setupVersionId": "$id:2",
+        "snapshotId": null
+      }
+    },
+    {
+      "call": "getExampleFeatures",
+      "args": [
+        "pr_w",
+        [
+          "ex_w0",
+          "ex_w2"
+        ]
+      ],
+      "expect": {
+        "ex_w0": {
+          "Description": "A day in my life, part 0"
+        },
+        "ex_w2": {
+          "Description": "How to fix a bike, step 2"
+        }
+      }
+    },
+    {
+      "call": "getExampleFeatures",
+      "args": [
+        "$id:1",
+        [
+          "ex_w0"
+        ]
+      ],
+      "note": "the example is not in this project",
+      "expect": {}
+    },
+    {
+      "call": "exampleMedia",
+      "args": [
+        "$id:1",
+        "ex_w0"
+      ],
+      "expectError": "This example does not exist."
+    },
+    {
+      "call": "saveGold",
+      "args": [
+        "$id:1",
+        "ex_w0",
+        1,
+        [
+          "Vlog"
+        ],
+        false
+      ],
+      "note": "the example is in another project",
+      "expectError": "This example does not exist."
+    },
+    {
+      "call": "scoreVersion",
+      "args": [
+        {
+          "projectId": "pr_w",
+          "promptVersionId": "pv_missing"
+        }
+      ],
+      "expectError": "This version does not exist."
+    },
+    {
+      "call": "createVersion",
+      "args": [
+        {
+          "projectId": "pr_w",
+          "structured": {
+            "taskSummary": "Label this",
+            "features": {
+              "video": [
+                "Description"
+              ],
+              "photo_text": [],
+              "metadata": []
+            },
+            "label": {
+              "name": "format",
+              "kind": "single",
+              "values": [
+                {
+                  "name": "Vlog",
+                  "definition": ""
+                },
+                {
+                  "name": "Tutorial",
+                  "definition": ""
+                }
+              ]
+            },
+            "ruleGroups": [],
+            "images": []
+          },
+          "parentId": "pv_missing",
+          "madeBy": "user",
+          "change": "",
+          "kind": "minor"
+        }
+      ],
+      "expectError": "This version does not exist."
+    },
+    {
+      "call": "closeProposal",
+      "args": [
+        {
+          "projectId": "pr_w",
+          "proposalId": "ap_missing",
+          "decision": "approved"
+        }
+      ],
+      "expectError": "This suggestion does not exist."
+    },
+    {
+      "call": "stopRun",
+      "args": [
+        {
+          "projectId": "pr_w",
+          "runId": "lt_missing"
+        }
+      ],
+      "expectError": "This run does not exist."
+    }
+  ]
+}

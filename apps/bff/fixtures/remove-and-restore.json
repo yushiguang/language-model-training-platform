@@ -1,0 +1,284 @@
+{
+  "name": "Examples are removed with a reason and restored",
+  "guards": [
+    "A removed example leaves the eval set and is listed with its reason",
+    "Restoring brings it back",
+    "An example of no project dataset is refused"
+  ],
+  "world": {
+    "users": {
+      "default": {
+        "id": "u_1",
+        "name": "Tester",
+        "organization": "org_a"
+      }
+    },
+    "reply": "{\"format\": \"Vlog\"}",
+    "records": {
+      "setup_versions": [
+        {
+          "id": "sv_w",
+          "projectId": "pr_w",
+          "number": 1,
+          "schemaVersion": 1,
+          "task": "",
+          "schema": {
+            "name": "format",
+            "kind": "single",
+            "values": [
+              {
+                "name": "Vlog",
+                "definition": ""
+              },
+              {
+                "name": "Tutorial",
+                "definition": ""
+              }
+            ]
+          },
+          "thresholds": null,
+          "models": [
+            {
+              "endpoint": "A",
+              "maxOutputTokens": 150,
+              "temperature": null
+            }
+          ],
+          "steps": {
+            "schema": true,
+            "evaluation": true,
+            "models": true
+          },
+          "createdAt": "",
+          "createdBy": ""
+        }
+      ],
+      "dataset_snapshots": [
+        {
+          "id": "ds_w",
+          "projectId": "pr_w",
+          "number": 1,
+          "source": "sample",
+          "sourceName": "test",
+          "createdAt": "",
+          "counts": {
+            "rows": 4,
+            "valid": 4,
+            "invalid": 0,
+            "video": 4,
+            "photoText": 0
+          },
+          "split": {
+            "eval": 4,
+            "test": 0,
+            "train": 0
+          }
+        }
+      ],
+      "examples": [
+        {
+          "id": "ex_w0",
+          "snapshotId": "ds_w",
+          "externalId": "v0",
+          "type": "video",
+          "title": "Item 0",
+          "features": {
+            "Description": "A day in my life, part 0"
+          },
+          "split": "eval",
+          "optimiserHalf": true
+        },
+        {
+          "id": "ex_w1",
+          "snapshotId": "ds_w",
+          "externalId": "v1",
+          "type": "video",
+          "title": "Item 1",
+          "features": {
+            "Description": "A day in my life, part 1"
+          },
+          "split": "eval",
+          "optimiserHalf": false
+        },
+        {
+          "id": "ex_w2",
+          "snapshotId": "ds_w",
+          "externalId": "v2",
+          "type": "video",
+          "title": "Item 2",
+          "features": {
+            "Description": "How to fix a bike, step 2"
+          },
+          "split": "eval",
+          "optimiserHalf": true
+        },
+        {
+          "id": "ex_w3",
+          "snapshotId": "ds_w",
+          "externalId": "v3",
+          "type": "video",
+          "title": "Item 3",
+          "features": {
+            "Description": "How to fix a bike, step 3"
+          },
+          "split": "eval",
+          "optimiserHalf": false
+        }
+      ],
+      "gold_labels": [
+        {
+          "id": "gl_w0",
+          "projectId": "pr_w",
+          "exampleId": "ex_w0",
+          "schemaVersion": 1,
+          "answer": [
+            "Vlog"
+          ],
+          "source": "labeled",
+          "revealed": false,
+          "createdAt": "",
+          "createdBy": "Tester"
+        },
+        {
+          "id": "gl_w1",
+          "projectId": "pr_w",
+          "exampleId": "ex_w1",
+          "schemaVersion": 1,
+          "answer": [
+            "Vlog"
+          ],
+          "source": "labeled",
+          "revealed": false,
+          "createdAt": "",
+          "createdBy": "Tester"
+        },
+        {
+          "id": "gl_w2",
+          "projectId": "pr_w",
+          "exampleId": "ex_w2",
+          "schemaVersion": 1,
+          "answer": [
+            "Tutorial"
+          ],
+          "source": "labeled",
+          "revealed": false,
+          "createdAt": "",
+          "createdBy": "Tester"
+        },
+        {
+          "id": "gl_w3",
+          "projectId": "pr_w",
+          "exampleId": "ex_w3",
+          "schemaVersion": 1,
+          "answer": [
+            "Tutorial"
+          ],
+          "source": "labeled",
+          "revealed": false,
+          "createdAt": "",
+          "createdBy": "Tester"
+        }
+      ],
+      "projects": [
+        {
+          "id": "pr_w",
+          "name": "Formats",
+          "createdAt": "",
+          "createdBy": "Tester",
+          "kind": "prompt_tuning",
+          "settingsConfirmed": true,
+          "setupVersionId": "sv_w",
+          "snapshotId": "ds_w",
+          "approvedNodes": [
+            "prompt_design",
+            "dataset",
+            "gold"
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "call": "removeExamples",
+      "args": [
+        {
+          "projectId": "pr_w",
+          "exampleIds": [
+            "ex_w1"
+          ],
+          "reason": "broken"
+        }
+      ],
+      "expect": null
+    },
+    {
+      "call": "loadProjectState",
+      "args": [
+        "pr_w"
+      ],
+      "only": [
+        "examples#",
+        "removals"
+      ],
+      "expect": {
+        "examples#": 3,
+        "removals": [
+          {
+            "exampleId": "ex_w1",
+            "externalId": "v1",
+            "gold": [
+              "Vlog"
+            ],
+            "half": "held_out",
+            "id": "$id:1",
+            "projectId": "pr_w",
+            "reason": "broken",
+            "removedAt": "$time",
+            "removedBy": "Tester",
+            "restoredAt": null
+          }
+        ]
+      }
+    },
+    {
+      "call": "restoreExamples",
+      "args": [
+        {
+          "projectId": "pr_w",
+          "removalIds": [
+            "$id:1"
+          ]
+        }
+      ],
+      "expect": null
+    },
+    {
+      "call": "loadProjectState",
+      "args": [
+        "pr_w"
+      ],
+      "only": [
+        "examples#",
+        "removals"
+      ],
+      "expect": {
+        "examples#": 4,
+        "removals": []
+      }
+    },
+    {
+      "call": "removeExamples",
+      "args": [
+        {
+          "projectId": "pr_w",
+          "exampleIds": [
+            "ex_nope"
+          ],
+          "reason": "broken"
+        }
+      ],
+      "expectError": "Some of these examples are not in this eval dataset."
+    }
+  ]
+}

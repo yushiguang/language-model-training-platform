@@ -1,0 +1,254 @@
+{
+  "name": "Gold labels are saved one by one or uploaded; bad rows are named and skipped",
+  "guards": [
+    "A saved label is returned with its answer and who saved it",
+    "An answer that is not a value of the label is refused",
+    "An upload saves the rows it can read, skips items not in the dataset and names refused rows",
+    "A changed label is counted as changed"
+  ],
+  "world": {
+    "users": {
+      "default": {
+        "id": "u_1",
+        "name": "Tester",
+        "organization": "org_a"
+      }
+    },
+    "reply": "{\"format\": \"Vlog\"}",
+    "records": {
+      "setup_versions": [
+        {
+          "id": "sv_w",
+          "projectId": "pr_w",
+          "number": 1,
+          "schemaVersion": 1,
+          "task": "",
+          "schema": {
+            "name": "format",
+            "kind": "single",
+            "values": [
+              {
+                "name": "Vlog",
+                "definition": ""
+              },
+              {
+                "name": "Tutorial",
+                "definition": ""
+              }
+            ]
+          },
+          "thresholds": null,
+          "models": [
+            {
+              "endpoint": "A",
+              "maxOutputTokens": 150,
+              "temperature": null
+            }
+          ],
+          "steps": {
+            "schema": true,
+            "evaluation": true,
+            "models": true
+          },
+          "createdAt": "",
+          "createdBy": ""
+        }
+      ],
+      "dataset_snapshots": [
+        {
+          "id": "ds_w",
+          "projectId": "pr_w",
+          "number": 1,
+          "source": "sample",
+          "sourceName": "test",
+          "createdAt": "",
+          "counts": {
+            "rows": 4,
+            "valid": 4,
+            "invalid": 0,
+            "video": 4,
+            "photoText": 0
+          },
+          "split": {
+            "eval": 4,
+            "test": 0,
+            "train": 0
+          }
+        }
+      ],
+      "examples": [
+        {
+          "id": "ex_w0",
+          "snapshotId": "ds_w",
+          "externalId": "v0",
+          "type": "video",
+          "title": "Item 0",
+          "features": {
+            "Description": "A day in my life, part 0"
+          },
+          "split": "eval",
+          "optimiserHalf": true
+        },
+        {
+          "id": "ex_w1",
+          "snapshotId": "ds_w",
+          "externalId": "v1",
+          "type": "video",
+          "title": "Item 1",
+          "features": {
+            "Description": "A day in my life, part 1"
+          },
+          "split": "eval",
+          "optimiserHalf": false
+        },
+        {
+          "id": "ex_w2",
+          "snapshotId": "ds_w",
+          "externalId": "v2",
+          "type": "video",
+          "title": "Item 2",
+          "features": {
+            "Description": "How to fix a bike, step 2"
+          },
+          "split": "eval",
+          "optimiserHalf": true
+        },
+        {
+          "id": "ex_w3",
+          "snapshotId": "ds_w",
+          "externalId": "v3",
+          "type": "video",
+          "title": "Item 3",
+          "features": {
+            "Description": "How to fix a bike, step 3"
+          },
+          "split": "eval",
+          "optimiserHalf": false
+        }
+      ],
+      "projects": [
+        {
+          "id": "pr_w",
+          "name": "Formats",
+          "createdAt": "",
+          "createdBy": "Tester",
+          "kind": "prompt_tuning",
+          "settingsConfirmed": true,
+          "setupVersionId": "sv_w",
+          "snapshotId": "ds_w",
+          "approvedNodes": [
+            "prompt_design",
+            "dataset"
+          ]
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "call": "saveGold",
+      "args": [
+        "pr_w",
+        "ex_w0",
+        1,
+        [
+          "Vlog"
+        ],
+        false
+      ],
+      "expect": {
+        "answer": [
+          "Vlog"
+        ],
+        "createdAt": "$time",
+        "createdBy": "Tester",
+        "exampleId": "ex_w0",
+        "id": "$id:1",
+        "projectId": "pr_w",
+        "revealed": false,
+        "schemaVersion": 1,
+        "source": "labeled"
+      }
+    },
+    {
+      "call": "saveGold",
+      "args": [
+        "pr_w",
+        "ex_w1",
+        1,
+        [
+          "Cooking"
+        ],
+        false
+      ],
+      "note": "not a value of the label",
+      "expectError": "\"Cooking\" isn't a value of format."
+    },
+    {
+      "call": "uploadGoldText",
+      "args": [
+        "pr_w",
+        "labels.jsonl",
+        "{\"externalId\":\"v0\",\"answer\":\"Tutorial\"}\n{\"externalId\":\"v1\",\"answer\":\"Vlog\"}\n{\"externalId\":\"v2\",\"answer\":\"Cooking\"}\n{\"externalId\":\"nope\",\"answer\":\"Vlog\"}\nnot json\n"
+      ],
+      "expect": {
+        "notInDataset": 1,
+        "refused": [
+          {
+            "externalId": "v2",
+            "reason": "\"Cooking\" isn't a value of format",
+            "row": 3
+          },
+          {
+            "externalId": "",
+            "reason": "The row is not valid JSON",
+            "row": 5
+          }
+        ],
+        "replaced": 1,
+        "saved": 2,
+        "skipped": 3,
+        "unchanged": 0
+      }
+    },
+    {
+      "call": "loadProjectState",
+      "args": [
+        "pr_w"
+      ],
+      "only": [
+        "gold"
+      ],
+      "expect": {
+        "gold": {
+          "ex_w0": {
+            "answer": [
+              "Tutorial"
+            ],
+            "createdAt": "$time",
+            "createdBy": "Tester",
+            "exampleId": "ex_w0",
+            "id": "$id:2",
+            "projectId": "pr_w",
+            "revealed": false,
+            "schemaVersion": 1,
+            "source": "uploaded"
+          },
+          "ex_w1": {
+            "answer": [
+              "Vlog"
+            ],
+            "createdAt": "$time",
+            "createdBy": "Tester",
+            "exampleId": "ex_w1",
+            "id": "$id:3",
+            "projectId": "pr_w",
+            "revealed": false,
+            "schemaVersion": 1,
+            "source": "uploaded"
+          }
+        }
+      }
+    }
+  ]
+}

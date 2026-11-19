@@ -39,6 +39,11 @@ The agent runtime is not published: implement `AgentRuntimeContract`
 `apps/agents/fixtures/` (format in their README). `@yushiguang/sprint-agents` in this repository
 is the reference implementation.
 
+A bff written for another server (a Go service, say) is held to the golden BFF fixtures in
+`apps/bff/fixtures/` (format in their README): sequences of `BffContract` calls over a small
+world, with the result each call must give. `apps/bff/src/fixtures.test.ts` replays them on this
+repository's bff and workflow.
+
 A version's contract changes are listed in its pull requests (titles start with `Contract change:`).
 Before 1.0.0 of the packages, a minor version may break a contract.
 

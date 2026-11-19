@@ -11,6 +11,7 @@ import * as prompts from './services/prompts.ts';
 import * as settings from './services/settings.ts';
 import * as sources from './services/sources.ts';
 import * as work from './services/work.ts';
+import {answerProblem} from '@yushiguang/sprint-domain';
 import {agentToolHost} from './services/page-views.ts';
 import {optimiserHost} from './services/optimiser-host.ts';
 import {workflowExecutors} from './services/executors.ts';
@@ -80,6 +81,15 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     return {state, schema: state.setup.schema, schemaVersion: state.setup.schemaVersion};
   };
 
+  /** A gold label a person gives must be for an example of the project's eval dataset, and an answer to its label. */
+  const checkGold = async (w: Scope, projectId: string, exampleId: string, answer: string[] | undefined) => {
+    const state = await stateOf(w, projectId);
+    if (!state.examples.some(e => e.id === exampleId)) throw new Error('This example does not exist.');
+    if (!state.setup?.schema) throw new Error('Approve the prompt on Prompt Design first.');
+    const problem = answer ? answerProblem(answer, state.setup.schema) : null;
+    if (problem) throw new Error(`${problem}.`);
+  };
+
   const api: WorkflowContract = {
     async runtimeInfo(ctx) {
       const w = at(ctx);
@@ -121,7 +131,11 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     restoreExamples: (ctx, r) => governance.restoreExamples(at(ctx), r.projectId, r.removalIds),
     pruneDataset: (ctx, r) => governance.pruneDataset(at(ctx), r.projectId, r.mode, r.keep, r.value),
     addComment: (ctx, r) => governance.addComment(at(ctx), r.projectId, r.exampleId, r.text, r.promptVersionId ?? null),
-    saveGold: (ctx, projectId, exampleId, schemaVersion, answer, revealed, source) => dataset.saveGold(at(ctx), projectId, exampleId, schemaVersion, answer, revealed, source),
+    async saveGold(ctx, projectId, exampleId, schemaVersion, answer, revealed, source) {
+      const w = at(ctx);
+      await checkGold(w, projectId, exampleId, answer);
+      return dataset.saveGold(w, projectId, exampleId, schemaVersion, answer, revealed, source);
+    },
     async uploadGold(ctx, {projectId, lines}) {
       const w = at(ctx);
       const {state, schema, schemaVersion} = await withSchema(w, projectId);
@@ -138,7 +152,11 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
       return dataset.importBundledGold(w, projectId, schema, schemaVersion, state.examples);
     },
     mismatches: (ctx, projectId, versionId) => mismatch.mismatches(at(ctx), projectId, versionId),
-    reviewGold: (ctx, r) => mismatch.reviewGold(at(ctx), r.projectId, r.exampleId, r.promptVersionId, r.outcome, r.answer, r.note),
+    async reviewGold(ctx, r) {
+      const w = at(ctx);
+      if (r.outcome === 'changed') await checkGold(w, r.projectId, r.exampleId, r.answer);
+      return mismatch.reviewGold(w, r.projectId, r.exampleId, r.promptVersionId, r.outcome, r.answer, r.note);
+    },
     rebuildReports: (ctx, projectId) => mismatch.rebuildReports(at(ctx), projectId),
 
     async createVersion(ctx, r) {
