@@ -5,9 +5,8 @@ The platform is named **Sprint** (2026-11-09).
 The web app (`apps/web`) was rebuilt on 2026-11-06 to look like the approved "Unified UI" page of
 the UI canvas. The styles are a copy of the canvas styles (`apps/web/src/ui/kit.css`), and every
 page was compared with its board in screenshots at 1920 × 1080. This list is everything that still
-does not match, or that the canvas does not decide. Items that were approved or done between
-2026-11-06 and 2026-11-12 (acceptance rounds 3 to 6, the MVP review) are in
-[tmp/2026-11-ui-gaps-history.md](tmp/2026-11-ui-gaps-history.md).
+does not match, or that the canvas does not decide. Items that were approved or done are deleted
+from this list; git history keeps them.
 
 ## 1.0.0 screens, drawn from the build (2026-11-13)
 

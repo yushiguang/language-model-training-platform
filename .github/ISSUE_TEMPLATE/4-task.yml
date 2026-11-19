@@ -1,0 +1,19 @@
+name: Task
+description: Small and clear work, such as docs, a dependency update, a refactor or tests.
+title: "Task: "
+labels: ["kind/task"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A contributor posts a short **Findings and plan**. The work waits for a maintainer's go.
+  - type: textarea
+    id: what
+    attributes:
+      label: What and why
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Out of scope (optional)

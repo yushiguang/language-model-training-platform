@@ -1,0 +1,39 @@
+name: Design
+description: A worked-out function or technical design, ready for review and a delivery plan.
+title: "Design: "
+labels: ["kind/design"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A contributor reviews the design (gaps, conflicts with the current code and decisions, questions), then posts a delivery plan split into pull requests. Nothing is built until a maintainer approves both.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What the design achieves and why.
+    validations:
+      required: true
+  - type: textarea
+    id: design
+    attributes:
+      label: The design
+      description: The design itself, or links to the issues that hold its parts. Specifications are not committed to docs/.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: How we know it is done
+      description: What a person sees, or what a test checks.
+    validations:
+      required: true
+  - type: textarea
+    id: contracts
+    attributes:
+      label: Contracts and compatibility
+      description: Which contracts it touches, whether the change is additive or breaking, and whether old data or old clients must keep working.
+  - type: textarea
+    id: scope
+    attributes:
+      label: Out of scope

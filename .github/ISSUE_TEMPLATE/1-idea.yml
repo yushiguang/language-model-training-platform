@@ -1,0 +1,26 @@
+name: Idea
+description: A problem or an intuitive idea that needs investigation and discussion before anything is designed.
+title: "Idea: "
+labels: ["kind/idea"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A few lines are enough. A contributor investigates and posts an **Analysis** (how things work today, options, a recommendation, questions). Nothing is planned or built until a maintainer picks a direction.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem or the idea
+      description: What is wrong, missing or possible, from the user's or the system's side.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it matters
+      description: Who it helps and what happens if we do nothing.
+  - type: textarea
+    id: thoughts
+    attributes:
+      label: First thoughts (optional)
+      description: Any solution you have in mind, constraints, or things you are unsure about.

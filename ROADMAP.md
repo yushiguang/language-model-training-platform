@@ -26,6 +26,9 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Done
 
+- 2026-11-19: collaboration rules: five kinds of issue with their own templates, no code before
+  a maintainer's go on the issue, one open pull request at a time, evidence on every pull
+  request; `docs/tmp/` removed and `docs/specs/` marked as history (#41).
 - 2026-11-19: golden BFF fixtures: plain-JSON call sequences for `BffContract` over a small
   world, replayed on every test run; a gold label is now checked against the project and the
   label (#38).
