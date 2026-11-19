@@ -583,7 +583,10 @@ export interface SharedStatePort {
  * limiter leases accept); callers re-check saved work before paying again where it matters.
  */
 export interface LockStorePort {
-  /** Takes the lock for `owner` until `now + leaseMs`; false when another owner holds it. */
+  /**
+   * Takes the lock for `owner` until `now + leaseMs`; false when the lock is already held, by any
+   * owner including this one — locks are not re-entrant, so a holder asking again is refused.
+   */
   acquire(name: string, owner: string, leaseMs: number, now: number): Promise<boolean>;
   /** Extends the lease to `now + leaseMs`, if `owner` still holds it and it has not ended. */
   renew(name: string, owner: string, leaseMs: number, now: number): Promise<boolean>;
@@ -718,7 +721,7 @@ export interface Platform {
   sharedState?: SharedStatePort;
   /**
    * Where named locks are kept, shared by every process that may run the same work (issue #46).
-   * Optional: without it the composition root locks within one process (`browserLocks` in the
+   * Optional: without it a composition root locks within one process (`browserLocks` in the
    * browser, `memoryLocks` in one server process), which is right for the browser build and one
    * server process. A deployment with more than one process (BFF replicas, a second worker unit)
    * must supply a shared one and pass `leaseLocks(it)` to labeling, the workflow and the
