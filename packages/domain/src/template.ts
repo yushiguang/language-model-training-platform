@@ -256,15 +256,14 @@ export function renderPrompt(template: string, example: {type: ExampleType; feat
     const key = m[1];
     const value = example.features[key];
     if (isImageKey(key)) {
-      const urls = featureItems(value);
-      if (!urls.length) buf += 'none';
+      if (isFeatureEmpty(key, value)) buf += 'none';
       else {
         flush();
+        const urls = featureItems(value);
         urls.forEach((url, i) => parts.push({type: 'image', url, caption: `${labelOf(key)} ${i + 1} of ${urls.length} · from the example`, source: 'example', key}));
       }
     } else {
-      const s = featureText(value);
-      buf += s.trim() ? s : 'none';
+      buf += isFeatureEmpty(key, value) ? 'none' : featureText(value);
     }
   }
   buf += text.slice(last);
@@ -430,6 +429,16 @@ export function featureItems(v: FeatureValue | string | string[] | undefined | n
   if (typeof v === 'string') return v.trim() ? [v] : [];
   if (Array.isArray(v)) return v.filter(Boolean);
   return v.items ? v.items.filter(Boolean) : v.text?.trim() ? [v.text] : [];
+}
+
+/** Whether a single feature value is empty (matches `renderPrompt`'s `"none"` rule). */
+export function isFeatureEmpty(key: string, value: FeatureValue | string | string[] | undefined | null): boolean {
+  return isImageKey(key) ? featureItems(value).length === 0 : !featureText(value).trim();
+}
+
+/** Whether an example has at least one non-empty feature. */
+export function hasAnyFeature(features: Record<string, FeatureValue | string | string[] | undefined | null> | undefined | null): boolean {
+  return Object.entries(features ?? {}).some(([k, v]) => !isFeatureEmpty(k, v));
 }
 
 /** Features from a file or an older record (`string | string[]` per key) as `FeatureValue`s. */
