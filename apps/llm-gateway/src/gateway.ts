@@ -302,6 +302,11 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
           if (started || kind === 'aborted' || kind === 'rejected' || kind === 'filtered' || attempt >= delays.length) throw e;
           tm.counter('sprint_llm_retries_total', {endpoint: ep.id, purpose: ep.purpose, reason: kind});
           await sleep(Math.max(delays[attempt], retryAfter ?? 0), o.signal);
+        } finally {
+          // The consumer can close this generator at the yield above (it throws on an error
+          // chunk, or stops reading): then neither release above runs, and the permit's lease
+          // would be renewed indefinitely. Release is idempotent, so this is a no-op otherwise.
+          permit.release(started ? input + Math.ceil(chars / systemConfig().gateway.charsPerTokenEstimate) : undefined);
         }
       }
     },
