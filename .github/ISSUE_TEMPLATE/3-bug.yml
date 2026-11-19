@@ -1,0 +1,33 @@
+name: Bug
+description: Something is broken.
+title: "Bug: "
+labels: ["kind/bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A contributor reproduces the bug and finds its cause, then posts a **Findings and plan**. The fix waits for a maintainer's go.
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: From a fresh project when you can.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: Include screenshots, request ids or ticket ids from a problem report if you have them.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit, and page

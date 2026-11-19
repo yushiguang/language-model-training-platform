@@ -3,6 +3,13 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-19 (Collaboration rules, #41)
+
+- **No code before a go.** Work was being built before it was investigated or agreed, and more branches and pull requests were opened than a maintainer could follow. Every issue now gets a first comment by its kind (Analysis, Design review, Findings and plan, or an answer) and waits for a maintainer's go on the issue.
+- **Five kinds of issue** (idea, design, bug, task, question), because an idea needs discussion before design while a finished design needs review and a plan. The shape follows the Go proposal process, Rust RFCs and Kubernetes triage.
+- **One open pull request at a time, small, with evidence.** The maintainer checks evidence (tests, checks, screenshots) rather than code, and tries the product as a whole at intervals.
+- **No specs in `docs/`, no one-time docs in the repo.** Designs live on their issues; `docs/tmp/` is removed and `docs/specs/` is kept as history.
+
 ## 2026-11-18 (Frozen dataset snapshots, #32)
 
 - **An example's features are fetched once, when it is taken, and frozen** in their own document (`example_features`, id `snapshotId:externalId`), apart from the product records. The `examples` records are the dataset's index (id, kind, title, half, source) and never hold features; project state carries the index only. Scoring is reproducible and the feature service is not read again for every run.

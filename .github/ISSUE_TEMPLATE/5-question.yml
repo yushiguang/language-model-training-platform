@@ -1,0 +1,16 @@
+name: Question
+description: Ask how something works. Answered on the issue, with no code change.
+title: "Question: "
+labels: ["kind/question"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context (optional)
+      description: What you are trying to do, and where you looked.

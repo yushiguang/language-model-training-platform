@@ -41,7 +41,7 @@ reasoning is in [design-principles.md](design-principles.md).
 | Version | Scope | Status |
 | --- | --- | --- |
 | 0.x (the MVP line) | Training-set production in one browser tab, on stand-in services or the internal platform's adapters. Workflow: Setup, Dataset, Gold Labels, Prompt Engineering, Training Set | Built; replaced by 1.0.0 |
-| 1.0.0 | Prompt Tuning project: Prompt Design, Eval Dataset, Gold Labels, Prompt Tuning. Structured prompts, dataset governance, service contracts ready for RPC | Specified in [../specs/](../specs/). Phases 1 and 2 of 4 are built (contracts, structured prompts and the four steps) and described by [../architecture.md](../architecture.md); dataset governance, comments and motion are not built yet |
+| 1.0.0 | Prompt Tuning project: Prompt Design, Eval Dataset, Gold Labels, Prompt Tuning. Structured prompts, dataset governance, service contracts ready for RPC | Built, with 1.1.0 (languages, problem reports) and 1.2.0 (deployment readiness, Data Source, frozen dataset snapshots; packages published). Described by [../architecture.md](../architecture.md); the past specs are in [../specs/](../specs/) |
 | Later | Batch Labeling project (large-scale labeling with a tuned prompt), then student training, evaluation, release and monitoring | Contracts for batch labeling are designed in 1.0.0; the rest is not designed here |
 
 ### Why 1.0.0 changes the workflow

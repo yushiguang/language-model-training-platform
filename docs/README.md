@@ -1,7 +1,7 @@
 # Sprint documentation
 
 This folder is the design portfolio for Sprint: what the product is, how it is designed, how it
-is built, and what is specified next. Each fact has one home; other docs link to it.
+is built, and why. Each fact has one home; other docs link to it.
 
 ## Start here
 
@@ -9,9 +9,9 @@ is built, and what is specified next. Each fact has one home; other docs link to
 | --- | --- |
 | What Sprint is for and where it is going | [product/overview.md](product/overview.md) |
 | The principles every design is checked against | [product/design-principles.md](product/design-principles.md) |
-| How the system is built today (0.x) | [architecture.md](architecture.md) |
+| How the system is built today (1.2) | [architecture.md](architecture.md) |
 | Why a rule is the way it is | [decisions.md](decisions.md) |
-| Specifications of past releases | [specs/](specs/) |
+| Specifications of past releases (history) | [specs/](specs/) |
 | How to run Sprint on your own platform | [integration.md](integration.md) |
 | How to ask for a change and how it is reviewed | [../CONTRIBUTING.md](../CONTRIBUTING.md) |
 
@@ -31,9 +31,8 @@ docs/
 ├── architecture.md            apps and packages, model calls, labeling, scores, storage
 ├── decisions.md               decision log, newest first
 ├── ui-gaps.md                 open differences between the UI canvas and apps/web
-├── specs/                     release specifications ready to implement
-├── integration.md             the npm packages and the platform adapter contract
-└── tmp/                       one-time documents (reviews, closed lists); not a source of truth
+├── specs/                     past release specifications, kept as history
+└── integration.md             the npm packages and the platform adapter contract
 ```
 
 ## Versioning scheme (Semantic Versioning 2.0.0)
@@ -58,10 +57,9 @@ Sprint follows [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MINOR.PA
 | `docs/product/` | Everyone | **Why and for whom**: goal, users, division of work between code, helpers and people, principles. | Changes when the product direction changes, not with each feature. |
 | `docs/design/` | Designers, contributors, agents | **How a part is designed and why**, with its as-built detail: UI system, Optimiser, helpers, telemetry. | One doc per part. Say at the top which version it describes. Update with the code. |
 | `docs/architecture.md` and `docs/decisions.md` | All contributors and agents | **Living architecture and decision log**: how the system works today and why choices were made. | Update alongside code changes when architecture or product rules change. |
-| `docs/ui-gaps.md` | Design and frontend agents | **Design-system parity log**: open differences between the Unified UI canvas and `apps/web`. | Open items only. Closed items move to `docs/tmp/` or are deleted. |
-| `docs/specs/` | Contributors and reviewers | **Release specifications** written before issues were the way to ask for work. New requirements arrive as GitHub issues (see `CONTRIBUTING.md`). | When a spec is implemented, fold what lasts into the living docs and remove the spec. |
+| `docs/ui-gaps.md` | Design and frontend agents | **Design-system parity log**: open differences between the Unified UI canvas and `apps/web`. | Open items only. Closed items are deleted (git keeps them). |
+| `docs/specs/` | Whoever needs the trail | **Past release specifications** (1.0.0 to the deployment readiness work), written before issues were the way to ask for work. All are built. | History only, never a source of truth. No new specs are added: designs live on their issues (see `CONTRIBUTING.md`). |
 | `docs/integration.md` | Anyone deploying Sprint | **Integration guide**: the npm packages, the platform adapters a deployment provides, the build switches and transport seams, using `@yushiguang/sprint-contracts` interfaces only. | Interfaces and invariants only, never a particular platform's internals. |
-| `docs/tmp/` | Whoever needs the trail | **One-time documents**: review reports, acceptance rounds, investigations, closed lists. | Dated file names. Never a source of truth. Delete when no longer needed. See [tmp/README.md](tmp/README.md). |
 
 ## Sanitisation and boundary rules for public docs (`docs/**`)
 
@@ -73,7 +71,10 @@ Sprint follows [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MINOR.PA
 3. **Contract changes**: any change that alters `@yushiguang/sprint-contracts` lists additive vs.
    breaking changes, so every deployment can update its adapters with the release that carries it.
 
-## Active specifications (`docs/specs/`)
+## Past specifications (`docs/specs/`, history)
+
+All of these are built; what lasts from them is in the living docs. They are kept as a trail and
+are not read to work on the repo.
 
 - [`specs/2026-11-12-v1.0.0-workflow-and-ddd-spec.md`](specs/2026-11-12-v1.0.0-workflow-and-ddd-spec.md):
   **Sprint `v1.0.0` release spec**: Prompt Tuning workflow, structured prompt model, Eval Dataset
