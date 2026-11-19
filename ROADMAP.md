@@ -7,10 +7,8 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 ## Now
 
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
-  tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are in review in one
-  pull request: read tools, the ability cases, and skills (Improve with AI is now the Prompt
-  helper's skill `improve_from_mistakes`). Then step 3, action tools, with their cards drawn on
-  the UI design first.
+  tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are merged (see Done);
+  step 3, action tools, is next, with their cards drawn on the UI design first.
 
 ## Next
 
@@ -26,6 +24,8 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Done
 
+- 2026-11-19: Agent abilities steps 1 and 2: read tools, the ability cases, and skills (Improve
+  with AI is now the Prompt helper's skill `improve_from_mistakes`) (#39, #40).
 - 2026-11-19: collaboration rules: five kinds of issue with their own templates, no code before
   a maintainer's go on the issue, one open pull request at a time, evidence on every pull
   request; `docs/tmp/` removed and `docs/specs/` marked as history (#41).
