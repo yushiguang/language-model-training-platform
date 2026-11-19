@@ -32,6 +32,15 @@ export interface LabelingDeps {
    * signed URL made for this call (which may take a request, so it may return a Promise).
    */
   resolveUrl?: (url: string) => string | Promise<string>;
+  /**
+   * Whether work that this process cannot see through its locks is live for this task — in a
+   * server composition, a queued or running job for it (the composition root answers from the job
+   * module, whose lease the worker holds; issue #46). `listTasks` asks only for a task stored as
+   * running whose lock nobody reachable holds (a candidate orphan): true keeps it `running`,
+   * because a reader in another process must never falsify a live run as paused; left out, only
+   * the locks decide, as in the browser.
+   */
+  liveElsewhere?: (task: LabelingTask) => Promise<boolean>;
   /** Called after every write, with the project written to when known, so open pages refresh. */
   onChange?: (projectId?: string) => void;
   telemetry?: TelemetryPort;
@@ -252,11 +261,27 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
 
     /**
      * Labels one example under a lock on its prediction, so two tasks for the same version,
-     * model and settings in this browser never pay for the same example: the second one waits
-     * and then reuses the saved answer. Returns false when the lock is busy (try again later).
+     * model and settings never pay for the same example: the second one waits and then reuses
+     * the saved answer. That holds wherever the locks reach — every tab in the browser, every
+     * process when the composition wires `leaseLocks` over a shared lock store (issue #46).
+     * Returns false when the lock is busy (try again later).
      */
     const labelOne = async (exampleId: string, example: () => Promise<ExampleWithFeatures | null>): Promise<boolean> => {
       const id = predictionId(task.promptVersionId, task.endpoint, task.settingsHash, exampleId, again(exampleId) ? 2 : 1);
+      /**
+       * Saves a prediction, re-reading first: another runner whose locks this one cannot see
+       * (or a lock lease lost mid-call) may have saved the same deterministic prediction while
+       * this call was in flight, and then its answer is the saved one and nothing is stored
+       * twice. Honestly: this does not un-pay the call just made — keeping two runners from
+       * paying at all is the prediction lock's job, above; this only keeps the store to one
+       * document and the counters to one answer when that lock did not reach.
+       */
+      const savePrediction = async (pred: Prediction): Promise<{pred: Prediction; paid: boolean}> => {
+        const meanwhile = await repo.get<Prediction>(PREDICTIONS, pred.id);
+        if (meanwhile) return {pred: meanwhile, paid: false};
+        await repo.insert(PREDICTIONS, pred);
+        return {pred, paid: true};
+      };
       const r = await locks.run(`labeling:prediction:${id}`, async () => {
         const saved = await repo.get<Prediction>(PREDICTIONS, id);
         if (saved) return {pred: saved, paid: false};
@@ -280,8 +305,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           });
         if (!res) {
           const pred: Prediction = {id, projectId: task.projectId, promptVersionId: task.promptVersionId, endpoint: task.endpoint, settingsHash: task.settingsHash, exampleId, output: '', answer: null, invalidReason: 'Stopped by the safety filter', filtered: true, costUsd: 0, tokens: 0, createdAt: now()};
-          await repo.insert(PREDICTIONS, pred);
-          return {pred, paid: true};
+          return savePrediction(pred);
         }
         const parsed = parseOutput(res.text, schema);
         const pred: Prediction = {
@@ -299,8 +323,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           tokens: res.inputTokens + res.outputTokens + (res.reasoningTokens ?? 0),
           createdAt: now(),
         };
-        await repo.insert(PREDICTIONS, pred);
-        return {pred, paid: true};
+        return savePrediction(pred);
       });
       if (!r) return false;
       const {pred, paid} = r;
@@ -432,8 +455,9 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     getTask,
 
     /**
-     * A task stored as running that no tab runs any more was left by a closed page: it shows as
-     * paused, and running it again resumes from the predictions already saved.
+     * A task stored as running that no runner holds any more — through the locks every process
+     * shares, and through `liveElsewhere` where jobs run it — was left by a closed page or a dead
+     * worker: it shows as paused, and running it again resumes from the predictions already saved.
      */
     async listTasks(projectId: string) {
       const tasks = await repo.find<LabelingTask>(TASKS, {projectId}, 'createdAt desc');
@@ -447,6 +471,9 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           Object.assign(t, fresh);
           continue;
         }
+        // Nor when live work for it exists that this process's locks cannot see (a queued or
+        // running job in another unit): only a task with no runner anywhere is left behind.
+        if (fresh && deps.liveElsewhere && (await deps.liveElsewhere(fresh))) continue;
         t.state = 'paused';
         t.stopReason = 'closed';
         await repo.patch<LabelingTask>(TASKS, t.id, {state: 'paused', stopReason: 'closed'});

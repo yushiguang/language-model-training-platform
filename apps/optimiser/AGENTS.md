@@ -13,6 +13,10 @@ is the `optimiser.run` job: it calls `execute`, and a cancel is the user's Stop.
   the project's owner through `OptimiserHost` (the workflow implements it), so those rules live in
   one place.
 - Limits (rounds, retries, dry-run size) come from `systemConfig().optimiser`.
+- Shared locks (#46): `execute` runs the loop under the injected `LockPort` lock, and its
+  in-process labeling runs under labeling's locks. Across processes both must be the same
+  `leaseLocks` over `Platform.lockStore` the composition gives labeling and the workflow; on
+  per-process locks two worker replicas can run the same run and label the same examples.
 
 Rules: imports contracts and domain only. The catalog, labeling, the agent runtime, locks,
 telemetry and the host arrive through `createOptimiser`. Tests: the Auto Optimise tests in
