@@ -243,6 +243,8 @@ export interface ItemCheckCounts {
   minorCreator: number;
   /** Not publicly recommendable. */
   notRecommendable: number;
+  /** Passed checks/lookup with zero non-empty features (#48); omitted when 0. */
+  noFeatures?: number;
 }
 
 /** Why an example left the eval dataset (spec 1.0.0, 4.4). */
@@ -306,12 +308,43 @@ export interface DatasetSnapshot {
    * can no longer read every example's features.
    */
   featureSizes?: Partial<Record<ExampleType, Record<string, FeatureSize>>>;
+  /**
+   * Exact feature-missingness counts over the saved examples of this snapshot (#48). Missing on
+   * older snapshots.
+   */
+  featureMissingness?: FeatureMissingness;
 }
 
 /** The average size of one feature over a dataset's examples (#32). */
 export interface FeatureSize {
   chars: number;
   items: number;
+}
+
+/**
+ * Exact integer feature-missingness counts for one example type (#48): how many saved examples
+ * of that type exist, and for each feature key, how many of those examples have an empty value.
+ */
+export interface TypeFeatureMissingness {
+  /** Exact integer count of saved examples of this type. */
+  examples: number;
+  /** Feature key -> exact integer count of examples of this type where that feature is empty. */
+  missing: Record<string, number>;
+}
+
+/**
+ * Snapshot-level feature missingness summary (#48). Holds raw integer counts only (never rates),
+ * so callers compute rates on read without rounding drift.
+ */
+export interface FeatureMissingness {
+  version: 1;
+  /** Exact example and per-feature missing counts for each present example type. */
+  byType: Partial<Record<ExampleType, TypeFeatureMissingness>>;
+  /**
+   * Items that passed checks/lookup but were excluded for having zero non-empty features, counted
+   * per example type as exact integers.
+   */
+  zeroFeatureExcluded: Partial<Record<ExampleType, number>>;
 }
 
 /**
@@ -498,6 +531,8 @@ export interface EvalReport {
   endpoint: EndpointId;
   contextId: string;
   schemaVersion: number;
+  /** The dataset snapshot this report was scored against (#48). Missing on older reports. */
+  snapshotId?: string;
   settings: ModelSettings;
   metrics: Metrics;
   archived: boolean;
