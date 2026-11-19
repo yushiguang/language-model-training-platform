@@ -220,14 +220,19 @@ test('the prompt editor takes only a draft written from its own version (#39)', 
 test('isFeatureEmpty matches renderPrompt "none" behavior and hasAnyFeature detects non-empty features (#48)', () => {
   const cases: {key: string; value: unknown; empty: boolean}[] = [
     {key: 'Description', value: undefined, empty: true},
+    {key: 'Description', value: null, empty: true},
     {key: 'Description', value: '', empty: true},
     {key: 'Description', value: '   \n\t ', empty: true},
     {key: 'Description', value: {text: '  '}, empty: true},
     {key: 'Description', value: {items: []}, empty: true},
     {key: 'Description', value: {items: ['  ']}, empty: true},
     {key: 'Description', value: {text: 'hello'}, empty: false},
+    {key: 'Hashtags', value: '#a, #b', empty: false},
     {key: 'Hashtags', value: {items: ['#a', '#b']}, empty: false},
     {key: 'Frame', value: undefined, empty: true},
+    {key: 'Frame', value: null, empty: true},
+    {key: 'Frame', value: [], empty: true},
+    {key: 'Frame', value: ['f1.jpg'], empty: false},
     {key: 'Frame', value: {items: []}, empty: true},
     {key: 'Frame', value: {items: ['']}, empty: true},
     {key: 'Frame', value: {text: '   '}, empty: true},
@@ -236,8 +241,7 @@ test('isFeatureEmpty matches renderPrompt "none" behavior and hasAnyFeature dete
   ];
   for (const c of cases) {
     const features = c.value === undefined ? {} : {[c.key]: c.value as never};
-    const isVideo = c.key === 'Frame';
-    const exSel = isVideo ? {video: [c.key], photo_text: [], metadata: []} : {video: [], photo_text: [], metadata: [c.key]};
+    const exSel = c.key === 'Hashtags' ? {video: [], photo_text: [], metadata: [c.key]} : {video: [c.key], photo_text: [], metadata: []};
     const parts = renderPrompt(`X: {{${c.key}}}`, {type: 'video', features: features as never}, exSel);
     const renderedNone = parts.length === 1 && parts[0].type === 'text' && parts[0].text === 'X: none';
     assert.equal(isFeatureEmpty(c.key, c.value as never), c.empty, `${c.key} emptiness`);

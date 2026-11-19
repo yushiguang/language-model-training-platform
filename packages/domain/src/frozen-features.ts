@@ -85,7 +85,7 @@ export function mergeFeatureMissingness(a: FeatureMissingness | undefined, b: Fe
   return {version: 1, byType, zeroFeatureExcluded};
 }
 
-/** Removes `delta` from `a`, clamping counts at 0 and dropping a type entry at 0 examples. */
+/** Removes `delta` from `a`, clamping counts to `[0, examples]` and dropping a type entry at 0 examples. */
 export function subtractFeatureMissingness(a: FeatureMissingness | undefined, delta: FeatureMissingness | undefined): FeatureMissingness {
   const byType: Partial<Record<ExampleType, TypeFeatureMissingness>> = {};
   const zeroFeatureExcluded: Partial<Record<ExampleType, number>> = {};
@@ -96,7 +96,7 @@ export function subtractFeatureMissingness(a: FeatureMissingness | undefined, de
       const examples = Math.max(0, ta.examples - (tb?.examples ?? 0));
       if (examples > 0) {
         const missing: Record<string, number> = {};
-        for (const k of Object.keys(ta.missing)) missing[k] = Math.max(0, (ta.missing[k] ?? 0) - (tb?.missing[k] ?? 0));
+        for (const k of Object.keys(ta.missing)) missing[k] = Math.min(examples, Math.max(0, (ta.missing[k] ?? 0) - (tb?.missing[k] ?? 0)));
         byType[type] = {examples, missing};
       }
     }

@@ -81,6 +81,8 @@ test('mergeFeatureMissingness and subtractFeatureMissingness preserve counts, cl
   assert.equal(merged.byType.photo_text?.examples, 1);
   assert.deepEqual(merged.zeroFeatureExcluded, {video: 3, photo_text: 1});
   assert.deepEqual(mergeFeatureMissingness(undefined, b), b);
+  assert.deepEqual(mergeFeatureMissingness(a, undefined), a);
+  assert.deepEqual(subtractFeatureMissingness(undefined, a), {version: 1, byType: {}, zeroFeatureExcluded: {}});
 
   // Subtracting a removes photo_text completely (1 -> 0 examples) and reduces video (3 -> 1).
   const sub = subtractFeatureMissingness(merged, a);
@@ -89,17 +91,17 @@ test('mergeFeatureMissingness and subtractFeatureMissingness preserve counts, cl
   assert.equal(sub.byType.photo_text, undefined);
   assert.deepEqual(sub.zeroFeatureExcluded, {video: 2, photo_text: 1});
 
-  // Clamping at 0 when delta exceeds counts, and dropping a type when examples hit 0.
+  // Clamping at 0 and at post-subtraction examples (while missing < examples stays unclamped), and dropping a type when examples hit 0.
   const clamped = subtractFeatureMissingness(
-    {version: 1, byType: {video: {examples: 2, missing: {Description: 1, ASR: 2}}}, zeroFeatureExcluded: {video: 1}},
-    {version: 1, byType: {video: {examples: 1, missing: {Description: 5, ASR: 0}}}, zeroFeatureExcluded: {video: 4}},
+    {version: 1, byType: {video: {examples: 4, missing: {Description: 1, ASR: 4, Language: 2}}}, zeroFeatureExcluded: {video: 1}},
+    {version: 1, byType: {video: {examples: 1, missing: {Description: 5, ASR: 0, Language: 0}}}, zeroFeatureExcluded: {video: 4}},
   );
   assert.deepEqual(clamped, {
     version: 1,
-    byType: {video: {examples: 1, missing: {Description: 0, ASR: 2}}},
+    byType: {video: {examples: 3, missing: {Description: 0, ASR: 3, Language: 2}}},
     zeroFeatureExcluded: {},
   });
-  const dropped = subtractFeatureMissingness(clamped, {version: 1, byType: {video: {examples: 3, missing: {}}}, zeroFeatureExcluded: {}});
+  const dropped = subtractFeatureMissingness(clamped, {version: 1, byType: {video: {examples: 5, missing: {}}}, zeroFeatureExcluded: {}});
   assert.deepEqual(dropped, {version: 1, byType: {}, zeroFeatureExcluded: {}});
 });
 
@@ -128,6 +130,13 @@ test('featureMissingForGroup and summarizeMissingness compute exact rates per gr
   assert.ok(!summary.byType.video?.alwaysMissing.includes('Description'));
   assert.equal(summary.metadataMissing.find(m => m.key === 'Language')?.missing, 2);
   assert.equal(summarizeMissingness(undefined), null);
+  assert.deepEqual(summarizeMissingness(computeFeatureMissingness([], {video: 2})), {
+    totalExamples: 0,
+    totalZeroExcluded: 2,
+    zeroFeatureExcluded: {video: 2},
+    byType: {},
+    metadataMissing: [],
+  });
 });
 
 test('addChecks and checksTotal handle optional noFeatures and omit it when 0', () => {
