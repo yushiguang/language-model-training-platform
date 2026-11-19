@@ -76,6 +76,7 @@ Your module exports `createPlatform()` returning the `Platform` object from
 | `sharedState?: SharedStatePort` | Short-lived keys every server instance must see, with a TTL (`get`, `set(key, value, ttlMs)`, `delete`; values are plain JSON): the live Ask AI turn, the helper that keeps answering on a page, the running turn's caller and page, problem-report drafts. A shared store such as Redis in a server deployment | `memorySharedState` (a map in the page); not set: the composition root uses the same |
 | `limiterStore?: LimiterStorePort` | The gateway's rate-limit counts for every endpoint (`platform-api.ts`, spec 5), as whole atomic operations per endpoint: try to acquire (sliding QPM/TPM window, calls in flight, one FIFO queue of expiring tickets, hold after a busy reply), release, renew a permit's lease, leave the queue, penalize, stats. A Redis script per operation on one key per endpoint; prefer the store's own clock over the caller's `now` | `memoryLimiterStore` (memory of one process); not set: the composition root uses the same |
 | `jobStore?: JobStorePort` | Where background jobs are kept (`packages/contracts/src/jobs-api.ts`), as whole atomic operations so several runners never take the same job: enqueue once per idempotency key among queued and running jobs, claim the next job with a lease (fair across tenants), heartbeat, finish, requeue, cancel, and recover expired leases. Redis (SET NX PX and a script per operation) or SQL with conditional updates | `memoryJobStore` (memory of one process); not set: the composition root uses the same |
+| `lockStore?: LockStorePort` | Where named locks are kept (`platform-api.ts`), as whole atomic operations per lock name so one labeling task, one prediction and one Optimiser run have one runner in every process: acquire for an owner until its lease ends, renew and release only for that owner, `isHeld` only while a lease lasts. Redis (acquire as `SET NX PX`, the rest as a script per operation) or SQL with conditional updates; prefer the store's own clock over the caller's `now`. **Required for any deployment with more than one process** (BFF replicas plus a worker unit, a second worker unit): without it each process locks only for itself, a BFF replica reads a worker's running task as abandoned, and two runners can pay for the same example (issue #46). A server composition root turns it into the apps' locks with `leaseLocks` (below) | `memoryLockStore` (memory of one process); not set: a composition root locks in one process (`browserLocks` / `memoryLocks`), right for the browser build and one server process |
 | `standIns: string[]` | Names shown in the header while any stand-in is in use; empty in production | all |
 
 ## The page client: `@yushiguang/sprint-client-impl`
@@ -105,6 +106,21 @@ imports it and wraps it without reaching into `src/` paths: `createGateway` (`@y
 `createLabeling`'s `resolveUrl` turns a stored image URL into one the model can fetch. It may
 return a Promise, so a server can sign a URL per call; every image of a prompt is resolved at once
 before the call.
+
+Locks in a server composition root — a deployment's own wiring, as in this section; this
+repository's in-process root (`apps/web/src/backend-api/in-process.ts`) is a browser composition
+and still passes `browserLocks()` everywhere, so nothing in the browser build changes yet: build
+one locks object per process and pass that same object as `locks` to `createLabeling`,
+`createWorkflow` and `createOptimiser`, in the BFF units and the worker unit alike —
+`leaseLocks(platform.lockStore)` from `@yushiguang/sprint-platform` when the platform supplies a
+`lockStore`, else `browserLocks()` in the browser or `memoryLocks()` in a single server process.
+Every process must lock over the **same** store: the BFF units only read and enqueue, but
+labeling's `listTasks` asks `isHeld` whether a task lock is held before it calls a running task
+abandoned, so a lock store a BFF unit cannot see makes a live worker run look abandoned. Sharing
+one object inside a unit matters too: labeling calls `isHeld` for its task locks and the workflow
+calls `isHeld` for the Optimiser lock (which the Optimiser itself only ever takes through
+`locks.run`), so those checks only agree with the runs behind them when labeling, the workflow
+and the Optimiser were all built over the same locks.
 
 ## Endpoints and limits
 
