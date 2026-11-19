@@ -208,6 +208,79 @@ test('chatStream retries a 429 before the first chunk and slows the endpoint dow
   assert.equal(tries, 2);
 });
 
+/** A gateway whose only chat endpoint has one slot, counted in a store the test can inspect. */
+function oneSlotStreamGateway(stream: Platform['agent']['chatStream']) {
+  const store = memoryLimiterStore();
+  const p = fakePlatform(async () => ({text: '', inputTokens: 0, outputTokens: 0}), [
+    {id: 'chat-one', purpose: 'chat', model: 'gpt-5.6-terra', tier: 'reasoning', qpm: 100, tpm: 1_000_000, maxConcurrency: 1, priceIn: 1, priceOut: 4, supportsTemperature: false, active: true, assumed: false},
+  ]);
+  p.agent.chatStream = stream;
+  return {gw: createGateway(p, {sleep: noWait, limiterStore: store, limiterPollMs: 5}), store};
+}
+
+const chatOneLimits = {qpm: 100, tpm: 1_000_000, maxConcurrency: 1, windowMs: 60_000};
+/** Lets the permit's release land in the store before the test looks at it. */
+const tick = () => new Promise(r => setTimeout(r, 10));
+
+test('chatStream frees its slot when the consumer throws on an error chunk', async () => {
+  let calls = 0;
+  const {gw, store} = oneSlotStreamGateway(async function* () {
+    calls++;
+    if (calls === 1) {
+      yield {type: 'delta' as const, text: 'abcd'};
+      yield {type: 'error' as const, message: 'stream failed'};
+      return;
+    }
+    yield {type: 'delta' as const, text: 'ok'};
+    yield {type: 'done' as const, createdAt: ''};
+  });
+  // The agent runtime throws on an error chunk, inside its own loop (agents runtime callModel).
+  await assert.rejects(
+    (async () => {
+      for await (const c of gw.agentModel().chatStream(msg)) if (c.type === 'error') throw new Error(c.message);
+    })(),
+    /stream failed/,
+  );
+  await tick();
+  const st = await store.stats('chat-one', chatOneLimits, Date.now());
+  assert.equal(st.inFlight, 0, 'the slot was given back');
+  // Input 'hello' is 2 tokens (5 chars / 4); the yielded 'abcd' adds 1, not the 2000 reserved.
+  assert.equal(st.tokensInWindow, 3, 'the reservation was corrected to what was yielded');
+  // The endpoint's only slot is free at once, not when the 60 s lease would have ended.
+  const out: string[] = [];
+  for await (const c of gw.agentModel().chatStream(msg)) if (c.type === 'delta') out.push(c.text);
+  assert.deepEqual(out, ['ok']);
+});
+
+test('chatStream frees its slot when the consumer stops reading early', async () => {
+  let calls = 0;
+  const {gw, store} = oneSlotStreamGateway(async function* () {
+    calls++;
+    if (calls === 1) {
+      yield {type: 'delta' as const, text: 'abcdefgh'};
+      yield {type: 'delta' as const, text: 'never read'};
+      yield {type: 'done' as const, createdAt: ''};
+      return;
+    }
+    yield {type: 'delta' as const, text: 'ok'};
+    yield {type: 'done' as const, createdAt: ''};
+  });
+  const seen: string[] = [];
+  for await (const c of gw.agentModel().chatStream(msg)) {
+    if (c.type === 'delta') seen.push(c.text);
+    break;
+  }
+  assert.deepEqual(seen, ['abcdefgh']);
+  await tick();
+  const st = await store.stats('chat-one', chatOneLimits, Date.now());
+  assert.equal(st.inFlight, 0, 'the slot was given back');
+  // Only the chunk actually yielded counts: 2 input tokens + 8 chars / 4.
+  assert.equal(st.tokensInWindow, 4, 'the reservation was corrected to what was yielded');
+  const out: string[] = [];
+  for await (const c of gw.agentModel().chatStream(msg)) if (c.type === 'delta') out.push(c.text);
+  assert.deepEqual(out, ['ok']);
+});
+
 test('cancel(requestId) stops every call under that id, before or after it starts; other ids go on (spec 4.1)', async () => {
   // A model call that ends only when its signal (kept inside the gateway) is aborted.
   const gw = createGateway(
