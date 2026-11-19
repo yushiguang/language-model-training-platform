@@ -344,6 +344,86 @@ test('a helper that joined keeps answering on its page; on another page the page
   );
 });
 
+test('Ask AI attachments (#45): examples named in an attachment come from the project only, the readable half only, with their frozen features', async () => {
+  const seen: AgentTurnRequest[] = [];
+  const agents = {
+    async runTurn(input: AgentTurnRequest) {
+      seen.push(input);
+      return {invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], skills: [], parseFailures: []};
+    },
+    reflectPrompt: async () => ({prompt: sp(), change: ''}),
+    cancel: async () => {},
+  } satisfies AgentRuntimeContract;
+  const w = await world('b13', {agents});
+  // The tenant source would hand back every id named, held-out and foreign alike, with live features.
+  let lookups = 0;
+  let checks = 0;
+  const source: ExampleSource = {
+    async lookup(ids) {
+      lookups++;
+      return ids.map(externalId => ({externalId, type: 'video' as const, title: `tenant ${externalId}`, features: {Description: {text: `tenant features of ${externalId}`}}}));
+    },
+    async check(ids) {
+      checks++;
+      return ids.map(externalId => ({externalId, type: 'video' as const, problem: null}));
+    },
+  };
+  Object.assign(w.inst, {examples: source});
+  const snapshotId = 'ds_b13';
+  const frozen: Record<string, string> = {'123456': 'frozen features of the first', '123457': 'frozen features of the second'};
+  for (const [externalId, optimiserHalf] of [['123456', true], ['123457', false]] as const) {
+    await w.catalog.insert('examples', {id: `ex_b13_${externalId}`, snapshotId, externalId, type: 'video', title: `Project ${externalId}`, split: 'eval', optimiserHalf});
+    await w.catalog.insert('example_features', {id: `${snapshotId}:${externalId}`, snapshotId, externalId, type: 'video', features: {Description: {text: frozen[externalId]}}, fetchedAt: ''});
+  }
+  assert.equal((await w.state()).project.holdoutLocked, undefined, 'not locked before the turn');
+  const {sendUserMessage} = await import('./agents.ts');
+  const page = {label: 'Gold Labels', agent: 'front_desk' as const, intent: 'answer', context: {}, where: {page: 'gold' as const, params: {}}};
+  await sendUserMessage(w.ws, w.projectId, 'look at these', page, [{name: 'ids.txt', size: 30, content: 'please check 123456, 123457 and 999999'}]);
+  await w.inst.turnsIdle();
+  assert.equal(seen.length, 1);
+  // The first read locks the halves and balances them one last time, so which of the two is
+  // readable is read back from the locked state, not from the halves seeded above.
+  const locked = await w.state();
+  assert.equal(locked.project.holdoutLocked, true, 'naming a project example locks the holdout');
+  const named = locked.examples.filter(e => e.externalId in frozen);
+  const visible = named.filter(e => e.optimiserHalf);
+  const heldOut = named.filter(e => !e.optimiserHalf);
+  assert.deepEqual([visible.length, heldOut.length], [1, 1], 'the two named examples end one in each half');
+  assert.deepEqual(seen[0].workspace.attachedExamples, visible.map(e => ({externalId: e.externalId, type: 'video', title: e.title, features: {Description: {text: frozen[e.externalId]}}})));
+  assert.ok(!JSON.stringify(seen[0].workspace).includes(frozen[heldOut[0].externalId]), 'held-out features never reach the helper');
+  assert.ok(!JSON.stringify(seen[0].workspace).includes('tenant features'), 'nothing is resolved from the tenant source');
+  assert.deepEqual([lookups, checks], [0, 0], 'the tenant source is neither looked up nor checked');
+});
+
+test('Ask AI attachments (#45): an attachment naming no project example resolves nothing and does not lock the holdout', async () => {
+  const seen: AgentTurnRequest[] = [];
+  const agents = {
+    async runTurn(input: AgentTurnRequest) {
+      seen.push(input);
+      return {invocations: [], messages: [], proposal: null, toolCalls: [], modelCalls: [], skills: [], parseFailures: []};
+    },
+    reflectPrompt: async () => ({prompt: sp(), change: ''}),
+    cancel: async () => {},
+  } satisfies AgentRuntimeContract;
+  const w = await world('b14', {agents});
+  let lookups = 0;
+  const source: ExampleSource = {
+    async lookup(ids) {
+      lookups++;
+      return ids.map(externalId => ({externalId, type: 'video' as const, title: `tenant ${externalId}`, features: {Description: {text: `tenant features of ${externalId}`}}}));
+    },
+  };
+  Object.assign(w.inst, {examples: source});
+  const {sendUserMessage} = await import('./agents.ts');
+  const page = {label: 'Gold Labels', agent: 'front_desk' as const, intent: 'answer', context: {}, where: {page: 'gold' as const, params: {}}};
+  await sendUserMessage(w.ws, w.projectId, 'look at these', page, [{name: 'ids.txt', size: 22, content: 'please check 999999 and 888888'}]);
+  await w.inst.turnsIdle();
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].workspace.attachedExamples, undefined);
+  assert.equal(lookups, 0);
+  assert.equal((await w.state()).project.holdoutLocked, undefined, 'no project example was read, so nothing locks');
+});
+
 /** Gold: Tutorial on 0-7, Vlog on 8-9. The model is right on example i when i < 5 x (rule lines). */
 const goldOf = (id: string) => (Number(id) < 8 ? 'Tutorial' : 'Vlog');
 const ruled = (id: string, _n: number, prompt: string) => {

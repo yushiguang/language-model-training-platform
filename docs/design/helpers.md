@@ -93,6 +93,10 @@ the reply looks like broken JSON.
 helper:
 - the read tools (`get_examples`, `get_gold_labels`, `get_predictions`) leave held-out examples
   out and say so in a `note`; asking for one by id gives nothing;
+- examples resolved from ids named in an Ask AI attachment (`loadWorkspaceSnapshot` in
+  `apps/workflow/src/services/agents.ts`) come from the project's own dataset, with their frozen
+  features, and leave held-out examples out the same way; an id the project does not hold gives
+  nothing, and the tenant's example source is never asked for attachments;
 - `get_report` and the report page view give mix-ups as counts only, since reports are scored on
   the held-out half;
 - `try_prompt`, `get_mistakes` (Improve with AI's mistakes, mix-ups and wrong examples, from
@@ -203,7 +207,10 @@ a real model and reports the score.
 **The holdout lock.** The first tool call that returns examples (`get_examples`,
 `get_gold_labels`, `get_predictions`, `search_examples`, `try_prompt`, `get_mistakes`,
 `get_flips`) and Auto Optimise call `lockHoldout`: the halves are balanced one last time and then fixed for good, so an
-example a helper has read never moves into the scored half.
+example a helper has read never moves into the scored half. An Ask AI attachment that names a
+project example is such a first read too: the workspace snapshot locks before it reads that
+example's frozen features, and reads the halves again afterwards. An attachment naming no
+project example locks nothing.
 
 **Comments.** People's comments on an example (Gold Labels, both tabs) go to the Optimiser and
 Improve with AI as `ExampleBrief.comments`, for optimiser-half examples only. The instructions

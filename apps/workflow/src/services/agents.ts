@@ -12,12 +12,14 @@ import type {
   PageContext,
   StartRequest,
 } from '@yushiguang/sprint-contracts';
-import {agentName, newId, readStructured, structuredEquals, tidyStructured, versionLabel, msg} from '@yushiguang/sprint-domain';
+import {agentName, newId, readStructured, structuredEquals, tidyStructured, versionLabel, visibleToAgents, msg} from '@yushiguang/sprint-domain';
 import {loadProjectState} from './projects.ts';
 import {now, type Instance, type Scope} from './app.ts';
 import {joinedMsg, postEvent} from './chat-events.ts';
 import {beginTurn, endTurn, turnOf} from './turns.ts';
 import {getPageView} from './page-views.ts';
+import {lockHoldout} from './governance.ts';
+import {withFeatures} from './features.ts';
 
 /**
  * The progress port the agent runtime is built with (spec 1.0.0, 7.1.3; deployment readiness
@@ -101,7 +103,7 @@ async function loadWorkspaceSnapshot(w: Scope,
   page: PageContext,
   attachments?: ChatAttachment[],
 ): Promise<AgentWorkspaceSnapshot> {
-  const {catalog, examples} = w;
+  const {catalog} = w;
   const project = await catalog.get('projects', projectId);
   const setup = project?.setupVersionId ? await catalog.get('setup_versions', project.setupVersionId) : null;
   const history = await chatHistory(w, projectId);
@@ -112,18 +114,26 @@ async function loadWorkspaceSnapshot(w: Scope,
   const prompt = readStructured(page.context.prompt) ?? open?.payload.structured ?? newest?.structured ?? null;
   const task = prompt?.taskSummary || setup?.task || '';
 
+  // Examples named in an attachment come from this project's dataset only, never from the
+  // tenant source: an id the project does not hold, or one in the held-out half, gives nothing.
+  // Project examples were checked when they were taken (#32), so there is no lookup or check
+  // here; their frozen features are read instead. Naming a project example is a first read of
+  // examples, like the read tools': it locks the halves before any features are read, and the
+  // state is read again afterwards because that last balancing may have moved an example.
   let attachedExamples = undefined;
   if (attachments?.length) {
     const idCandidates = new Set<string>();
     for (const a of attachments) {
       if (!a.content) continue;
-      for (const m of a.content.matchAll(/\b(?:ext_\d+|\d{3,})\b/g)) {
-        idCandidates.add(m[0]);
-      }
+      for (const m of a.content.matchAll(/\b(?:ext_\d+|\d{3,})\b/g)) idCandidates.add(m[0]);
     }
-    if (idCandidates.size > 0) {
-      const found = await examples.lookup([...idCandidates].slice(0, 10));
-      if (found.length > 0) attachedExamples = found;
+    const candidateIds = [...idCandidates].slice(0, 10);
+    const state = candidateIds.length ? await loadProjectState(w, projectId) : null;
+    if (state && state.examples.some(e => candidateIds.includes(e.externalId))) {
+      await lockHoldout(w, projectId);
+      const locked = await loadProjectState(w, projectId);
+      const visible = (locked?.examples ?? []).filter(e => candidateIds.includes(e.externalId) && visibleToAgents(e));
+      if (visible.length) attachedExamples = (await withFeatures(w, visible, true)).map(({externalId, type, title, features}) => ({externalId, type, title, features}));
     }
   }
 
