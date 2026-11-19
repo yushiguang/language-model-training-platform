@@ -32,14 +32,13 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 - 2026-11-18: Data Source: tenant data sources from item-id files, and datasets cut from them
   without overlaps (#29, #30, #35).
 - 2026-11-18: 1.2.0 packages published to GitHub Packages.
-
-## Not planned
-
-- Warehouse tables as a data source (#33): skipped on 2026-11-19. The design stays on the issue.
-
 - 2026-11-18: Upload labels as its own action on Gold Labels (#31, #34).
 - 2026-11-18: contribution guide and npm packages on GitHub Packages, with fixes for #24 to #28
   (#23).
 - 2026-11-17: deployment readiness (#9): workflow module and thin bff, job module, contracts
   without signals, model registry and shared limiter, agent tool context with guards in the tool
   host, golden agent fixtures.
+
+## Not planned
+
+- Warehouse tables as a data source (#33): skipped on 2026-11-19. The design stays on the issue.
