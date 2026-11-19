@@ -205,3 +205,14 @@ test('label files: CSV with an id and an answer column, or JSONL; rows numbered 
   assert.deepEqual(jl.bad, [{row: 2, reason: 'The row is not valid JSON'}]);
   assert.ok('error' in readLabelFile('l.txt', '1 Food', 'topic'));
 });
+
+test('the prompt editor takes only a draft written from its own version (#39)', async () => {
+  const {editorDraft, SAMPLE_STRUCTURED} = await import('./index.ts');
+  const draft = (id: string, base: string | null, createdAt: string) => ({id, projectId: 'p', agent: 'prompt_agent' as const, kind: 'prompt' as const, payload: {structured: SAMPLE_STRUCTURED, baseVersionId: base, unmapped: []}, brief: '', state: 'open' as const, createdAt});
+  const v1 = draft('ap_1', 'pv_1', '2026-11-19T01:00:00Z');
+  const v2 = draft('ap_2', 'pv_2', '2026-11-19T02:00:00Z');
+  assert.equal(editorDraft([v2, v1], 'pv_1')?.id, 'ap_1', 'improving v1 from chat while v2 is open does not land in v2');
+  assert.equal(editorDraft([v1], 'pv_2'), null);
+  assert.equal(editorDraft([draft('ap_3', null, '2026-11-19T03:00:00Z')], 'pv_2')?.id, 'ap_3');
+  assert.equal(editorDraft([{...v1, state: 'discarded'}], 'pv_1'), null);
+});

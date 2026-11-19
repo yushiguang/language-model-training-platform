@@ -368,9 +368,10 @@ export interface BffContract {
   retryOptimiser(req: RunRequest): Promise<{runId: string}>;
   /**
    * Improve with AI: a Prompt helper turn that drafts changes to a version and puts them in the
-   * editor (no labeling). Returns once the turn is accepted, like a chat message; Ask AI follows it.
+   * editor (no labeling). Returns once the turn is accepted, with its id, like a chat message; Ask
+   * AI follows it.
    */
-  improveWithAi(projectId: string, promptVersionId: string, locale?: Locale): Promise<void>;
+  improveWithAi(projectId: string, promptVersionId: string, locale?: Locale): Promise<{turnId: string}>;
   /** Feature descriptions by key, for hover text (empty without a source). */
   featureInfo(keys: string[]): Promise<Record<string, FeatureInfo>>;
   /** A version's saved answers on one model, by example id. */

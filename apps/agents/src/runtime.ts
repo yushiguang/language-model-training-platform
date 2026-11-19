@@ -17,7 +17,7 @@ import type {
   AgentPreset,
   StructuredPrompt,
 } from '@yushiguang/sprint-contracts';
-import {FEATURES, HANDOFF_TARGETS, msg, msgText, PRESET_SKILLS, readStructured, rewordOnly, structuredEquals, systemConfig} from '@yushiguang/sprint-domain';
+import {FEATURES, HANDOFF_TARGETS, msg, msgText, PRESET_SKILLS, readStructured, rewordOnly, structuredEquals, systemConfig, tidyStructured} from '@yushiguang/sprint-domain';
 import {agentName, languageLine, presetModel, PRESETS, START_TOOLS, systemPrompt, TOOL_SPECS} from './presets.ts';
 import {SKILL_INTENTS, skillBlurb, SKILLS} from './skills.ts';
 
@@ -38,11 +38,15 @@ interface RawAgentReply {
   skill?: {name: AgentSkillName; args?: Record<string, unknown>};
   /** Improve with AI: each change with its reason. */
   changes?: unknown;
+  /** Improve with AI: one optional line for the user, after the fixed line. */
+  note?: unknown;
 }
 
 /** What a skill that drafts adds to its answer: the prompt it drafted from, and that version. */
 interface SkillDraft {
   base: StructuredPrompt;
+  /** The draft, tidied as the workflow saves it; null when it changes nothing. */
+  structured: StructuredPrompt | null;
   versionId: string | null;
   version: string | null;
   changes: {text: string; reason: string}[];
@@ -324,7 +328,15 @@ async function runSkill(llm: AgentModel, to: AgentPreset, name: AgentSkillName, 
   const b = brief as Record<string, unknown>;
   // Improve with AI: the reasons come in the user's language; the prompt keeps its own (2026-11-16).
   const lang = languageLine(input.locale) + (skill.drafts && input.locale === 'zh' ? ' Write each change\'s "reason" in Simplified Chinese too; "text" quotes the prompt\'s own words.' : '');
-  const context: Record<string, unknown> = {brief: {...b, examples: undefined}, args, ...(Array.isArray(b.examples) ? {examples: b.examples} : {}), pageView: input.workspace.pageView};
+  // The skill sees what the helper sees (the page's prompt with unsaved edits, the feature
+  // catalogue, recent chat) plus its brief; a drafting skill works on the brief's prompt.
+  const context: Record<string, unknown> = {
+    ...buildAgentContext(input, to),
+    ...(skill.drafts ? {prompt: b.prompt} : {}),
+    brief: {...b, examples: undefined},
+    args,
+    ...(Array.isArray(b.examples) ? {examples: b.examples} : {}),
+  };
   const messages: ModelMessage[] = [
     {role: 'system', content: `${systemPrompt(to)}\n\nYou are running the skill "${name}".\n${skill.instructions}\nAnswer shape: ${skill.shape}${toolBlurb(to, tools.host, skill.tools)}${lang}`},
     {role: 'user', content: withImages({preset: to, intent: name, page: input.page.label, userText: input.userText, context})},
@@ -333,8 +345,12 @@ async function runSkill(llm: AgentModel, to: AgentPreset, name: AgentSkillName, 
   if (!skill.drafts) return {...out, prompt: undefined};
   const base = readStructured(b.prompt) ?? input.workspace.prompt;
   if (!base) return {reply: out.reply};
-  const changes = Array.isArray(out.changes) ? (out.changes as {text?: unknown; reason?: unknown}[]).filter(c => c && typeof c.text === 'string').map(c => ({text: c.text as string, reason: typeof c.reason === 'string' ? c.reason : ''})) : [];
-  return {...out, prompt: reworded(base, out.prompt), draft: {base, versionId: typeof b.versionId === 'string' ? b.versionId : null, version: typeof b.version === 'string' ? b.version : null, changes}};
+  // Wording only, tidied as the workflow saves it: a draft equal to its version changes nothing,
+  // and then no change is listed, whatever the model wrote.
+  const structured = tidyStructured(reworded(base, out.prompt));
+  const changed = !structuredEquals(tidyStructured(base), structured);
+  const listed = Array.isArray(out.changes) ? (out.changes as {text?: unknown; reason?: unknown}[]).filter(c => c && typeof c.text === 'string' && c.text.trim()).map(c => ({text: c.text as string, reason: typeof c.reason === 'string' ? c.reason : ''})) : [];
+  return {...out, prompt: undefined, draft: {base, structured: changed ? structured : null, versionId: typeof b.versionId === 'string' ? b.versionId : null, version: typeof b.version === 'string' ? b.version : null, changes: changed ? listed : []}};
 }
 
 /**
@@ -391,14 +407,23 @@ export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?
   }
 
   const question = typeof out.question === 'string' ? out.question.trim() : '';
-  const draft = out.draft;
+  // A skill's draft (Improve with AI), unless the helper asked a question instead.
+  const draft = question ? undefined : out.draft;
   if (draft) {
-    // A skill's draft (Improve with AI): one fixed line; the reasons sit on the marks in the
-    // editor, so the chat does not repeat them.
+    // One fixed line that matches the draft; the reasons sit on the marks in the editor, so the
+    // chat does not repeat them. The helper's optional note follows.
     const n = draft.changes.length;
     const version = draft.version ?? '';
-    const line = n === 1 ? msg('I made 1 change to {version}. Hover each mark to see why.', {version}) : n ? msg('I made {n} changes to {version}. Hover each mark to see why.', {n, version}) : msg('I have no new change for {version}.', {version});
+    const line = !draft.structured
+      ? msg('I have no new change for {version}.', {version})
+      : n === 1
+        ? msg('I made 1 change to {version}. Hover each mark to see why.', {version})
+        : n
+          ? msg('I made {n} changes to {version}. Hover each mark to see why.', {n, version})
+          : msg('I changed {version}; the changes are marked in the editor.', {version});
     emit({role: 'agent', agent, text: msgText(line), msg: line});
+    const note = typeof out.note === 'string' ? out.note.trim() : '';
+    if (note) emit({role: 'agent', agent, text: note});
   } else {
     const text = [out.reply?.trim(), question].filter(Boolean).join('\n\n');
     if (text) emit({role: 'agent', agent, text});
@@ -406,18 +431,26 @@ export async function runAgentTurn(input: AgentTurnInput, llm: AgentModel, host?
 
   // A question, or an answer that leaves the prompt as it is, is a plain answer: no draft (R3-10).
   let proposal: AgentProposalDraft | null = null;
-  const base = draft?.base ?? input.workspace.prompt;
-  const structured = question ? null : readStructured(out.prompt, base ?? undefined);
-  const unmapped = Array.isArray(out.unmapped) ? out.unmapped.filter((x): x is string => typeof x === 'string' && !!x.trim()).map(x => x.trim()) : [];
-  if (structured && (!base || !structuredEquals(base, structured) || unmapped.length)) {
-    proposal = {
-      kind: 'prompt',
-      agent,
-      brief: draft ? `Improve ${draft.version ?? 'the version'}` : input.userText,
-      payload: draft
-        ? {structured, change: draft.changes.map(c => c.text).join('; ') || 'Improved with AI', changes: draft.changes, baseVersionId: draft.versionId, unmapped: []}
-        : {structured, ...(typeof out.change === 'string' && out.change.trim() ? {change: out.change.trim()} : {}), unmapped},
-    };
+  if (draft) {
+    if (draft.structured)
+      proposal = {
+        kind: 'prompt',
+        agent,
+        brief: `Improve ${draft.version ?? 'the version'}`,
+        payload: {structured: draft.structured, change: draft.changes.map(c => c.text).join('; ') || 'Improved with AI', changes: draft.changes, baseVersionId: draft.versionId, unmapped: []},
+      };
+  } else if (!out.draft) {
+    const base = input.workspace.prompt;
+    const structured = question ? null : readStructured(out.prompt, base ?? undefined);
+    const unmapped = Array.isArray(out.unmapped) ? out.unmapped.filter((x): x is string => typeof x === 'string' && !!x.trim()).map(x => x.trim()) : [];
+    if (structured && (!base || !structuredEquals(base, structured) || unmapped.length)) {
+      proposal = {
+        kind: 'prompt',
+        agent,
+        brief: input.userText,
+        payload: {structured, ...(typeof out.change === 'string' && out.change.trim() ? {change: out.change.trim()} : {}), unmapped},
+      };
+    }
   }
 
   return {invocations, messages, proposal, skills: tools.skills, toolCalls: tools.used, modelCalls: tools.modelCalls, parseFailures: tools.parseFailures};

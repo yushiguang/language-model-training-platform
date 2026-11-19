@@ -160,7 +160,9 @@ The front desk also reads `get_dataset_stats` and `search_examples` now, for lab
 
 **Skills** (step 2, `apps/agents/src/skills.ts`). A skill is a written workflow for a whole task.
 Each starts from a brief, one read tool the runtime calls with the skill's arguments, then asks the
-helper again with the skill's instructions and answer shape and only the skill's tools. A helper
+helper again with the skill's instructions and answer shape and only the skill's tools. The skill
+sees what the helper sees (the page's prompt, the feature catalogue for the Prompt helper, the
+recent chat, attachments) plus its brief; a drafting skill works on the brief's prompt. A helper
 runs one by answering `{"skill": {"name": ..., "args": {...}}}`; which helper may run which is
 `PRESET_SKILLS` in `packages/domain/src/agent-guards.ts`, and the brief and tools go through the
 tool host, so its guards hold. A skill the helper does not have, or a brief that fails, goes back
@@ -169,12 +171,20 @@ to the helper as a `skill_result` with the error. The turn's output lists the sk
 - `improve_from_mistakes` (Prompt helper): Improve with AI. Reads `get_mistakes` and drafts a few
   wording changes, each with its reason, on the version it read (`baseVersionId`). The button
   starts a Prompt helper turn with intent `improve` that runs the skill directly; asking in the
-  chat runs the same skill, so both give the same draft. The chat gets one fixed line ("I made 2
-  changes to v4. Hover each mark to see why.").
+  chat runs the same skill, so both give the same draft. The site writes the chat line from the
+  draft, so the two always agree: "I made 2 changes to v4. Hover each mark to see why.", "I
+  changed v4; the changes are marked in the editor." when the model listed none, or "I have no
+  new change for v4." when the prompt is unchanged (then no draft). The model's answer has no
+  "reply"; an optional "note" follows the line. The draft stays open in the editor of the version
+  it was written from (`editorDraft`, `packages/domain/src/drafts.ts`) until Save closes it as
+  approved or Discard as discarded, so `get_drafts` can recall a discarded one; the editor of
+  another version leaves it alone.
 - `diagnose_score_change` (Prompt and Scores helpers): why one version scored differently from
   another, from `get_flips`: the values that moved, the changed words and the examples behind them.
 - `review_label_set` (Prompt helper): which values overlap and whether a catch-all is missing,
-  from `get_confusions`. Never paid.
+  from `get_confusions` and the prompt on the page (unsaved edits included). On Prompt Design
+  before the first approval there is no saved label: `get_confusions` says so and the skill works
+  from the page's prompt. Never paid.
 - `plan_labeling` (front desk): which examples to label first, from `get_dataset_stats`, rare
   values first, with unlabeled items found by `search_examples` and listed by what they mention.
 `AgentRuntimeContract.draftImprovement` is gone; the workflow's `improveWithAi` starts the turn and

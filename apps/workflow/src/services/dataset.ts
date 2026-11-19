@@ -308,7 +308,11 @@ export async function uploadGold(w: Scope,
 /** Upload labels from a file: CSV or JSONL (`readLabelFile`). */
 export async function uploadGoldText(w: Scope, projectId: string, schema: Schema, schemaVersion: number, examples: Example[], name: string, text: string): Promise<GoldUploadResult> {
   const read = readLabelFile(name, text, schema.name);
-  if ('error' in read) return {saved: 0, skipped: 0, error: read.error};
+  if ('error' in read) {
+    // Refused as a whole: audited too, so a helper can say why (#39, D5).
+    await w.catalog.audit(projectId, (await w.user()).name, 'gold_labels.rejected', {file: name, error: read.error});
+    return {saved: 0, skipped: 0, error: read.error};
+  }
   const unreadable = read.bad.map(b => ({row: b.row, externalId: '', reason: b.reason}));
   return saveUploadedLabels(w, projectId, schema, schemaVersion, examples, read.rows, unreadable, {file: name, kind: 'file'});
 }

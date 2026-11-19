@@ -351,11 +351,8 @@ function improve(r: Req) {
     prompt = addRule(prompt, GENERAL, FALLBACK_RULE);
     changes.push({text: FALLBACK_RULE, reason: `${r.context.mistakes ?? 'Some'} examples are still wrong with no clear mix-up`});
   }
-  return {
-    reply: changes.length ? `I made ${changes.length} change${changes.length === 1 ? '' : 's'} to ${r.context.version}. Hover each mark to see why.` : `I have no new change for ${r.context.version}.`,
-    prompt,
-    changes,
-  };
+  // The site writes the chat line from the changes (#39).
+  return {prompt, changes};
 }
 
 /** The user says the site is broken, or asks to report a problem. */

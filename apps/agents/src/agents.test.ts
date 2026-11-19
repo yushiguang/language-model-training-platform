@@ -223,6 +223,44 @@ test('Improve with AI runs the skill: it reads the mistakes, then drafts each ch
   assert.deepEqual(out.messages.map(m => m.msg?.key), ['I made 1 change to {version}. Hover each mark to see why.']);
 });
 
+test('Improve with AI: the chat line always matches the draft, whatever the model lists (#39)', async () => {
+  const improved = {...optPrompt, taskSummary: 'Label the post by its format.'};
+  const llm = (o: object) => ({chat: async () => JSON.stringify(o)}) as unknown as Parameters<typeof runAgentTurn>[1];
+  const keys = (out: Awaited<ReturnType<typeof improveTurn>>['out']) => out.messages.map(m => m.msg?.key ?? m.text);
+  // A changed prompt with no changes listed: a draft, and a line that says so without a count.
+  const silent = (await improveTurn(llm({prompt: improved}), mistakesBrief())).out;
+  assert.ok(silent.proposal);
+  assert.deepEqual(keys(silent), ['I changed {version}; the changes are marked in the editor.']);
+  // Changes listed on an unchanged prompt: no draft, and the line says there is no change.
+  const empty = (await improveTurn(llm({prompt: optPrompt, changes: [{text: 'x', reason: 'y'}]}), mistakesBrief())).out;
+  assert.equal(empty.proposal, null);
+  assert.deepEqual(keys(empty), ['I have no new change for {version}.']);
+  // A question instead of a draft: the question, no draft.
+  const asked = (await improveTurn(llm({prompt: improved, changes: [{text: 'x', reason: 'y'}], question: 'Which value matters most?'}), mistakesBrief())).out;
+  assert.equal(asked.proposal, null);
+  assert.deepEqual(keys(asked), ['Which value matters most?']);
+  // The optional note follows the fixed line.
+  const noted = (await improveTurn(llm({prompt: improved, changes: [{text: 'by its format', reason: '5 Clips were read as Vlog'}], note: 'Vlog and Clip overlapped; I sharpened Vlog first.'}), mistakesBrief())).out;
+  assert.deepEqual(keys(noted), ['I made 1 change to {version}. Hover each mark to see why.', 'Vlog and Clip overlapped; I sharpened Vlog first.']);
+});
+
+test('a skill sees what its helper sees: the prompt on the page and the feature catalogue (#39)', async () => {
+  const bodies: string[] = [];
+  const llm = {chat: async (msgs: {role: string; content: string}[]) => (bodies.push(String(msgs[1].content)), JSON.stringify({reply: 'Label Tutorial first.', prompt: optPrompt, changes: []}))} as unknown as Parameters<typeof runAgentTurn>[1];
+  const host: ToolCaller = {call: async ({name}) => (name === 'get_dataset_stats' ? {values: []} : mistakesBrief())};
+  const page = {projectId: 'pr_1', task: '', prompt: {...optPrompt, taskSummary: 'Unsaved task.'}, history: [], pageView: null};
+  await runAgentTurn({userText: 'improve', page: {label: 'Edit prompt', agent: 'prompt_agent', intent: 'improve', context: {version: 'v2'}}, workspace: page}, llm, host);
+  const improve = JSON.parse(bodies[0]).context;
+  assert.ok(improve.featureCatalogue, 'the Prompt helper may tick features from the catalogue');
+  assert.equal(improve.prompt.taskSummary, optPrompt.taskSummary, 'a drafting skill works on the version it read');
+  const replies = [JSON.stringify({skill: {name: 'plan_labeling', args: {}}}), JSON.stringify({reply: 'Label Tutorial first.'})];
+  const fd = {chat: async (msgs: {role: string; content: string}[]) => (bodies.push(String(msgs[1].content)), replies.shift()!)} as unknown as Parameters<typeof runAgentTurn>[1];
+  await runAgentTurn({userText: 'Which examples first?', page: {label: 'Gold Labels', agent: 'front_desk', intent: 'answer', context: {}}, workspace: page}, fd, host);
+  const plan = JSON.parse(bodies.at(-1)!).context;
+  assert.equal(plan.prompt.taskSummary, 'Unsaved task.', 'the definitions on the page, unsaved edits included');
+  assert.ok(plan.brief);
+});
+
 test('a skill whose brief fails tells the helper why; a skill the helper does not have is refused', async () => {
   const seen: string[] = [];
   const replies = [JSON.stringify({skill: {name: 'improve_from_mistakes', args: {}}}), JSON.stringify({skill: {name: 'diagnose_score_change', args: {b: 'v9'}}}), JSON.stringify({reply: 'v9 has no scores yet.'})];

@@ -70,13 +70,16 @@ export async function runningWork(w: Scope, state: ProjectState) {
       stoppable: r.purpose !== 'optimiser',
     })),
     optimiser: optimiser.map(o => ({
+      state: o.state,
       round: o.round,
       maxRounds: o.maxRounds,
       startedFrom: labelOf(state, o.startVersionId),
-      now: stepLine(o.step, labelOf(state, o.stepVersionId), dryRunSize(state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && !!state.gold[e.id]).length)),
+      // A paused run does nothing until Retry: no step line, as on its progress panel.
+      now: o.state !== 'running' ? null : stepLine(o.step, labelOf(state, o.stepVersionId), dryRunSize(state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && !!state.gold[e.id]).length)),
     })),
     takingExamples: sampling && sampling.state === 'running' ? {fetched: sampling.fetched, of: sampling.total, saving: !!sampling.saving} : null,
-    dataSourceImports: imports.map(f => ({source: sources.find(s => s.id === f.sourceId)?.name ?? null, file: f.name, done: f.done, of: f.items, usedByThisProject: usedSources.has(f.sourceId)})),
+    // Before an import reserves its places (`start` unset), its size is the file's usable rows, as on Data Source.
+    dataSourceImports: imports.map(f => ({source: sources.find(s => s.id === f.sourceId)?.name ?? null, file: f.name, done: f.done, of: f.start == null ? f.rows - f.bad - f.repeats : f.items, usedByThisProject: usedSources.has(f.sourceId)})),
   };
   const nothing = !work.labeling.length && !work.optimiser.length && !work.takingExamples && !work.dataSourceImports.length;
   return {
@@ -88,7 +91,9 @@ export async function runningWork(w: Scope, state: ProjectState) {
 
 /** One upload's audit record, as the helpers read it. */
 function uploadView(a: AuditEntry) {
-  const d = a.data as {file?: string | null; saved?: number; replaced?: number; unchanged?: number; notInDataset?: number; refused?: number; refusedRows?: GoldUploadRefusal[]};
+  const d = a.data as {file?: string | null; saved?: number; replaced?: number; unchanged?: number; notInDataset?: number; refused?: number; refusedRows?: GoldUploadRefusal[]; error?: string};
+  // A file refused as a whole (wrong type, missing columns) saved nothing.
+  if (a.action === 'gold_labels.rejected') return {at: a.createdAt, by: a.actor, file: d.file ?? null, saved: 0, rejectedWholeFile: d.error ?? 'The file could not be read.'};
   return {
     at: a.createdAt,
     by: a.actor,
@@ -107,12 +112,19 @@ function uploadView(a: AuditEntry) {
 /** D5: what the last label uploads and the dataset's sources saved, skipped and refused, and why. */
 export async function uploadResult(w: Scope, state: ProjectState) {
   const projectId = state.project.id;
-  const uploads = (await w.catalog.find('audit_log', {projectId, action: 'gold_labels.uploaded'}, 'createdAt desc')).slice(0, 3).map(uploadView);
+  const audits = [...(await w.catalog.find('audit_log', {projectId, action: 'gold_labels.uploaded'})), ...(await w.catalog.find('audit_log', {projectId, action: 'gold_labels.rejected'}))];
+  const uploads = audits.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 3).map(uploadView);
   const counts = state.snapshot?.counts;
   const files: SourceFile[] = [];
   for (const line of state.datasetSources) files.push(...(await w.catalog.find('source_files', {sourceId: line.sourceId}, 'uploadedAt desc')));
+  // A file that failed added nothing, so its source may not be in this project's dataset: the
+  // organization's failed files are listed too (the newest few).
+  const failed = (await w.catalog.find('source_files', {tenantId: tenantOf(w)}, 'uploadedAt desc')).filter(f => f.state === 'failed' && !files.some(x => x.id === f.id)).slice(0, 3);
+  const sourceNames = failed.length ? await w.catalog.find('data_sources', {tenantId: tenantOf(w)}) : [];
+  const sampling = await getSamplingTask(w, projectId);
   return {
     labelUploads: uploads,
+    takingExamples: sampling && (sampling.state === 'failed' || sampling.state === 'stopped') ? {state: sampling.state, ...(sampling.error ? {error: sampling.error} : {})} : null,
     dataset: counts
       ? {
           itemsAsked: counts.rows,
@@ -122,8 +134,8 @@ export async function uploadResult(w: Scope, state: ProjectState) {
           notSaved: counts.notSaved ?? 0,
         }
       : null,
-    dataSourceFiles: files.map(f => ({
-      source: state.datasetSources.find(s => s.sourceId === f.sourceId)?.name ?? null,
+    dataSourceFiles: [...files, ...failed].map(f => ({
+      source: state.datasetSources.find(s => s.sourceId === f.sourceId)?.name ?? sourceNames.find(s => s.id === f.sourceId)?.name ?? null,
       file: f.name,
       rows: f.rows,
       noUsableItemId: f.bad,
@@ -132,7 +144,7 @@ export async function uploadResult(w: Scope, state: ProjectState) {
       state: f.state,
       ...(f.error ? {error: f.error} : {}),
     })),
-    note: 'Label uploads: rows for items not in the dataset are skipped; refused rows give their row number and reason. Taking examples: the checks leave out items that no longer exist (missing), whose creator is a minor (minorCreator) or that cannot be publicly recommended (notRecommendable). Data source files: rows with no usable item id and repeated ids are skipped.',
+    note: 'Label uploads: a file of the wrong type or without the needed columns is refused as a whole (rejectedWholeFile); rows for items not in the dataset are skipped; refused rows give their row number and reason. Taking examples: the checks leave out items that no longer exist (missing), whose creator is a minor (minorCreator) or that cannot be publicly recommended (notRecommendable). Data source files: rows with no usable item id and repeated ids are skipped.',
   };
 }
 
@@ -229,15 +241,28 @@ function findVersionRef(state: ProjectState, ref: unknown): PromptVersion | unde
   return state.versions.find(v => v.id === ref || versionLabel(v) === label || versionLabel(v) === `v${label}`);
 }
 
+/** A version's live report on one of the project's models, with that model's settings. */
+function reportOn(state: ProjectState, v: PromptVersion) {
+  const models = state.setup?.models ?? [];
+  for (const report of state.reports) {
+    if (report.promptVersionId !== v.id || report.archivedNow) continue;
+    const settings = models.find(m => m.endpoint === report.endpoint);
+    if (settings) return {report, settings};
+  }
+  return null;
+}
+
+const blankRef = (ref: unknown) => ref == null || (typeof ref === 'string' && !ref.trim());
+
 /** The scored report of a version on the project's model, or an error the helper can act on. */
 function scoredVersion(state: ProjectState, ref: unknown) {
-  const v = ref == null || ref === '' ? state.versions.find(x => state.reports.some(r => r.promptVersionId === x.id && !r.archivedNow)) : findVersionRef(state, ref);
-  if (!v) throw new Error(ref ? `There is no version "${String(ref)}". Versions: ${state.versions.map(versionLabel).join(', ')}.` : 'No version has scores yet.');
-  const report = state.reports.find(r => r.promptVersionId === v.id && !r.archivedNow);
-  if (!report) throw new Error(`${versionLabel(v)} has no scores yet.`);
-  const settings = state.setup?.models.find(m => m.endpoint === report.endpoint);
-  if (!settings || !state.setup?.schema) throw new Error(`${versionLabel(v)} has no scores on the project's model.`);
-  return {v, report, settings, setup: state.setup};
+  if (!state.setup?.schema) throw new Error('The project has no label yet.');
+  // Left out: the newest version with scores (a newer one may still be scoring, or was dropped).
+  const v = blankRef(ref) ? state.versions.find(x => reportOn(state, x)) : findVersionRef(state, ref);
+  if (!v) throw new Error(blankRef(ref) ? 'No version has scores yet.' : `There is no version "${String(ref)}". Versions: ${state.versions.map(versionLabel).join(', ')}.`);
+  const on = reportOn(state, v);
+  if (!on) throw new Error(state.reports.some(r => r.promptVersionId === v.id && !r.archivedNow) ? `${versionLabel(v)} has no scores on the project's model.` : `${versionLabel(v)} has no scores yet.`);
+  return {v, report: on.report, settings: on.settings, setup: state.setup};
 }
 
 /**
@@ -273,8 +298,17 @@ export async function mistakes(w: Scope, state: ProjectState, ref: unknown) {
  * of the optimiser half one version gets right and the other wrong, with both answers and reasons.
  */
 export async function flips(w: Scope, state: ProjectState, aRef: unknown, bRef: unknown) {
-  const b = scoredVersion(state, bRef ?? state.versions[0]?.id);
-  const a = scoredVersion(state, aRef ?? state.versions.find(x => x.id === b.v.parentId)?.id ?? state.versions[1]?.id);
+  const b = scoredVersion(state, bRef);
+  // Left out: b's parent when it has scores, else the next older scored version.
+  let aPick: unknown = aRef;
+  if (blankRef(aRef)) {
+    const parent = state.versions.find(x => x.id === b.v.parentId);
+    const older = state.versions.slice(state.versions.indexOf(b.v) + 1).find(x => reportOn(state, x));
+    const pick = parent && reportOn(state, parent) ? parent : older;
+    if (!pick) throw new Error(`No version older than ${versionLabel(b.v)} has scores to compare it with.`);
+    aPick = pick.id;
+  }
+  const a = scoredVersion(state, aPick);
   if (a.v.id === b.v.id) throw new Error('Name two different versions.');
   if (a.report.endpoint !== b.report.endpoint) throw new Error('The two versions were scored on different models.');
   const [pa, pb] = await Promise.all([a, b].map(x => w.labeling.predictions(x.v.id, x.report.endpoint, settingsHash(x.settings)).then(toMap)));
@@ -283,8 +317,10 @@ export async function flips(w: Scope, state: ProjectState, aRef: unknown, bRef: 
   const row = (id: string) => ({a: pa.get(id)!.answer, aReason: pa.get(id)!.reason ?? null, b: pb.get(id)!.answer, bReason: pb.get(id)!.reason ?? null});
   const fixed = half.filter(e => !ok(pa, e.id) && ok(pb, e.id));
   const broken = half.filter(e => ok(pa, e.id) && !ok(pb, e.id));
+  // The features either prompt reads: b may have got worse by unticking one a relied on.
+  const keys = new Set([...promptKeys(a.v), ...promptKeys(b.v)]);
   const brief = async (list: typeof half) =>
-    (await withFeatures(w, list.slice(0, 6), true)).map(e => ({id: e.externalId, title: e.title, gold: state.gold[e.id]!.answer, ...row(e.id), features: Object.fromEntries(Object.entries(e.features).filter(([k]) => promptKeys(b.v).has(k) && !isImageKey(k)).map(([k, x]) => [k, featureText(x).slice(0, 400)]))}));
+    (await withFeatures(w, list.slice(0, 6), true)).map(e => ({id: e.externalId, title: e.title, gold: state.gold[e.id]!.answer, ...row(e.id), features: Object.fromEntries(Object.entries(e.features).filter(([k]) => keys.has(k) && !isImageKey(k)).map(([k, x]) => [k, featureText(x).slice(0, 400)]))}));
   const score = (x: typeof a) => ({macroF1: r2(x.report.metrics.macroF1), values: Object.fromEntries(x.report.metrics.values.map(y => [y.value, r2(y.f1)]))});
   return {
     a: {version: versionLabel(a.v), change: a.v.change || null, scores: score(a)},
@@ -301,7 +337,9 @@ export async function flips(w: Scope, state: ProjectState, aRef: unknown, bRef: 
 /** P3: which values are read as which across every scored version (counts), and the label balance. */
 export function confusions(state: ProjectState) {
   const schema = state.setup?.schema;
-  if (!schema) throw new Error('The project has no label yet.');
+  // Before the first prompt is approved there is no saved label and nothing scored: the helper
+  // reviews the label in the prompt on the page.
+  if (!schema) return {label: null, scoredVersions: 0, mixUps: [], balance: [], note: 'No label is saved yet (the first prompt is not approved): review the label in the prompt on the page. Nothing is scored yet.'};
   const pairs = new Map<string, {gold: string | null; predicted: string | null; kind: string; count: number; versions: Set<string>}>();
   for (const r of state.reports.filter(x => !x.archivedNow)) {
     const v = state.versions.find(x => x.id === r.promptVersionId);
@@ -320,6 +358,6 @@ export function confusions(state: ProjectState) {
     scoredVersions: new Set(state.reports.filter(x => !x.archivedNow).map(x => x.promptVersionId)).size,
     mixUps: [...pairs.values()].sort((x, y) => y.count - x.count).slice(0, 10).map(p => ({kind: p.kind, gold: p.gold, predicted: p.predicted, count: p.count, inVersions: [...p.versions]})),
     balance: b.values.map(v => ({value: v.value, goldLabeled: v.count, rare: v.rare, dominant: v.dominant})),
-    note: 'Mix-ups are counts summed over every scored version, never examples.',
+    note: 'This is the saved label; the prompt on the page may have newer, unsaved definitions. Mix-ups are counts summed over every scored version, never examples.',
   };
 }

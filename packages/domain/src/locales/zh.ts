@@ -638,6 +638,7 @@ export const ZH: Readonly<Record<string, string>> = {
   "{action} failed. {why}": "{action}失败。{why}",
   "I made 1 change to {version}. Hover each mark to see why.": "我对 {version} 做了 1 处修改。把鼠标移到标记上可查看原因。",
   "I made {n} changes to {version}. Hover each mark to see why.": "我对 {version} 做了 {n} 处修改。把鼠标移到标记上可查看原因。",
+  "I changed {version}; the changes are marked in the editor.": "我修改了 {version}，修改处已在编辑器中标出。",
   "I have no new change for {version}.": "我对 {version} 没有新的修改。",
 
   // Data Source (#29, #30).

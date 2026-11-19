@@ -8,7 +8,7 @@ import {ALL_KEYS, canScore, checkStructured, MADE_BY, nextVersion, sameSignature
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {FullPromptButton, StructuredEditor} from '@/components/prompt/StructuredEditor';
-import {useAgentDrafts} from '@/components/prompt/useAgentDrafts';
+import {closeDraft, useAgentDrafts} from '@/components/prompt/useAgentDrafts';
 import {createVersion, featureInfo, scoreVersion, track, type ProjectState} from '@/backend-api';
 import {Badge, Banner, Button, Empty, num, PageHead} from '@/ui';
 import {t, tm} from '@/i18n';
@@ -51,6 +51,8 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
   const [change, setChange] = useState('');
   const [madeBy, setMadeBy] = useState<'user' | 'prompt_agent'>('user');
   const [helperChanges, setHelperChanges] = useState<{text: string; reason: string}[]>([]);
+  // The helper's draft on the page, open until the user saves or discards it.
+  const [proposalId, setProposalId] = useState<string | null>(null);
   const issues = useMemo(() => checkStructured(draft), [draft]);
   const dirty = !structuredEquals(draft, base);
   // Save (main): the next minor of this version's major (v2 -> v2.1). Save as vN: the next major.
@@ -85,17 +87,18 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
       context: {prompt: draft, unsaved: dirty, version: {label: versionLabel(version), madeBy: MADE_BY[version.madeBy], change: version.change}},
     });
   }, [version.id, JSON.stringify(draft), dirty]); // eslint-disable-line react-hooks/exhaustive-deps
-  useAgentDrafts(state, d => {
-    if (readOnly) return;
-    setDraft(d.structured);
-    setChange(d.change ?? '');
-    setHelperChanges(d.changes ?? []);
+  useAgentDrafts(state, version.id, !readOnly, d => {
+    setProposalId(d.id);
+    setDraft(d.payload.structured);
+    setChange(d.payload.change ?? '');
+    setHelperChanges(d.payload.changes ?? []);
     setMadeBy('prompt_agent');
   });
 
   // A failed save shows the page's red banner with Retry (the Button reports it).
   const save = async (kind: 'minor' | 'major') => {
     const v = await createVersion({projectId: state.project.id, structured: draft, parentId: version.id, madeBy, change: change || structuredChangeSummary(base, draft), kind});
+    await closeDraft(state.project.id, proposalId, 'approved').catch(() => undefined);
     // Saving is the user's start: the new version is scored right away, once scores can be made
     // (enough gold labels, and Project Settings confirmed; spec 2.5). A change to the label
     // or values leaves no gold labels to score on until they are re-checked.
@@ -103,6 +106,8 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
     await go(href('/prompt'));
   };
   const discard = () => {
+    void closeDraft(state.project.id, proposalId, 'discarded').catch(() => undefined);
+    setProposalId(null);
     setDraft(base);
     setChange('');
     setHelperChanges([]);

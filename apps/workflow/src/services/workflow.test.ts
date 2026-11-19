@@ -1404,6 +1404,12 @@ test('agent abilities (#39): get_upload_result gives refused rows by number and 
   assert.deepEqual(u.refusedRows, [{row: 2, reason: '"Cooking" isn\'t a value of format'}, {row: 4, reason: 'The row is not valid JSON'}]);
   assert.ok(!JSON.stringify(r.labelUploads).includes('"1"'), 'no item id');
   assert.equal(r.dataset.examplesSaved, EVAL);
+  // A file refused as a whole is listed too, newest first, with why.
+  await new Promise(res => setTimeout(res, 5));
+  const bad = await uploadGoldText(w.ws, w.projectId, schema, 1, s.examples, 'labels.pdf', 'x');
+  assert.ok(bad.error);
+  const again = (await tools.call({agent: 'front_desk', name: 'get_upload_result', args: {}})) as {labelUploads: {file: string; saved: number; rejectedWholeFile?: string}[]};
+  assert.deepEqual([again.labelUploads.length, again.labelUploads[0].file, again.labelUploads[0].saved, again.labelUploads[0].rejectedWholeFile], [2, 'labels.pdf', 0, bad.error]);
 });
 
 test('agent abilities (#39): get_optimiser_run explains each round; numbering starts at the first run', async () => {
@@ -1474,6 +1480,12 @@ test('agent abilities (#39): get_flips and get_confusions read two scored versio
   // b defaults to the newest scored and a to the one before it.
   const d = (await tools.call({agent: 'evaluation_agent', name: 'get_flips', args: {}})) as {a: {version: string}; b: {version: string}};
   assert.deepEqual([d.a.version, d.b.version], ['v1', 'v2']);
+  // A newer version still unscored (or dropped after a dry run) is skipped by the defaults, and
+  // an empty name counts as left out.
+  await w.newVersion('RULE 2');
+  const later = (await tools.call({agent: 'evaluation_agent', name: 'get_flips', args: {a: '', b: ''}})) as {a: {version: string}; b: {version: string}};
+  assert.deepEqual([later.a.version, later.b.version], ['v1', 'v2']);
+  await assert.rejects(tools.call({agent: 'evaluation_agent', name: 'get_flips', args: {b: 'v1'}}), /No version older than v1 has scores/);
   await assert.rejects(tools.call({agent: 'evaluation_agent', name: 'get_flips', args: {a: 'v2', b: 'v2'}}), /two different versions/);
   await assert.rejects(tools.call({agent: 'front_desk', name: 'get_flips', args: {}}), /cannot use get_flips/);
 
@@ -1484,6 +1496,13 @@ test('agent abilities (#39): get_flips and get_confusions read two scored versio
   assert.deepEqual(top.inVersions.sort(), ['v1', 'v2'], 'summed over the versions it comes back in');
   assert.ok(c.mixUps.every(m => !('exampleIds' in m)), 'counts only, never examples');
   assert.deepEqual(c.balance.map(b => b.value).sort(), [...schema.values.map(v => v.name)].sort());
+  // On Prompt Design before v1 is approved there is no saved label: the review works from the
+  // prompt on the page, with nothing scored.
+  const {confusions} = await import('./agent-reads.ts');
+  const st = await w.state();
+  const early = confusions({...st, setup: {...st.setup!, schema: null}} as never) as {label: null; mixUps: unknown[]; note: string};
+  assert.deepEqual([early.label, early.mixUps], [null, []]);
+  assert.match(early.note, /prompt on the page/);
 });
 
 test('agent abilities (#39): Improve with AI is a Prompt helper turn, and its draft goes on the version it improves', async () => {
@@ -1514,4 +1533,9 @@ test('agent abilities (#39): Improve with AI is a Prompt helper turn, and its dr
   const chat = await chatHistory(w.ws, w.projectId);
   assert.equal(chat.filter(m => m.role === 'user').length, 0, 'a button, not a message');
   assert.deepEqual(chat.filter(m => m.role === 'event').map(m => m.msg?.key).slice(-2), ['{who} asked the Prompt helper to improve {version}', '{who} put a draft on {page}']);
+  // Discard in the editor closes the draft as discarded, and the helper can recall it (T8).
+  const {closeProposal} = await import('./agents.ts');
+  await closeProposal(w.ws, p, 'discarded');
+  const drafts = (await toolsOf(w).call({agent: 'prompt_agent', name: 'get_drafts', args: {}})) as {drafts: {state: string; from: string; changes: {reason: string}[]}[]};
+  assert.deepEqual([drafts.drafts[0].state, drafts.drafts[0].from, drafts.drafts[0].changes[0].reason], ['discarded', 'v1', '5 Tutorials were read as Vlog']);
 });

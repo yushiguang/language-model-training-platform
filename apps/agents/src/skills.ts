@@ -42,7 +42,7 @@ export const SKILLS: Record<AgentSkillName, Skill> = {
     tools: ['read_feature_info'],
     drafts: true,
     working: args => (version(args) ? msg('Reading the {version} mistakes…', {version: version(args)!}) : msg('Reading the mistakes…')),
-    shape: `{"reply": string, "prompt": ${PROMPT_SHAPE}, "changes": [{"text": string, "reason": string}]}`,
+    shape: `{"prompt": ${PROMPT_SHAPE}, "changes": [{"text": string, "reason": string}], "note"?: string}`,
     instructions: `"brief.prompt" is the version's structured prompt, and "brief.examples" holds a few of its wrong answers: the gold label, the model's answer, the features, and when there is one the model's own short "reason" for its answer. When the site could not read the model's reply, "invalid" says why (for example a value that is not in the labels). Read them to find what the prompt fails to say: the reason often shows which words the model leaned on, or which rule it misread. When people commented on an example, "comments" holds their words: it is their reading of what the label means, so build it into the prompt's rules and never argue with it.
 - Change wording only here: definitions, rule groups, the task summary, and ticked features. Keep the label's key, its single or multi select and every value name exactly as they are; the site ignores any other change.
 - Look for a pattern first: several mistakes with the same cause. Fix patterns before single cases.
@@ -50,7 +50,8 @@ export const SKILLS: Record<AgentSkillName, Skill> = {
 - Make a few targeted changes, not a rewrite. Keep what already works.
 - You may tick or untick a feature when the mistakes point to it; read its description with read_feature_info first.
 - Gold labels are the user's to judge, never yours. When an example's gold label looks odd against the value's own definition, write no rule to match it and work on the other mistakes; do not say which label is right or wrong.
-- When the mistakes come from two values whose definitions overlap, sharpen those two definitions first, and say so in "reply".
+- When the mistakes come from two values whose definitions overlap, sharpen those two definitions first, and say so in "note".
+- The site writes the chat line ("I made 2 changes to v4…") from your changes. "note" is optional: one short line only when something needs saying beyond the changes, such as the overlap above or why nothing could be changed. Never repeat the reasons there.
 - Give each change a one-line reason that cites the mistakes, for example "5 Complaints were read as Question", and cite examples by "externalId" where it helps. Each change's "text" quotes the words it adds, or the words it removes when it only removes, so the editor can put the reason on the right mark.`,
   },
   diagnose_score_change: {
@@ -75,7 +76,7 @@ export const SKILLS: Record<AgentSkillName, Skill> = {
     tools: [],
     working: () => msg('Reviewing the values…'),
     shape: '{"reply": string}',
-    instructions: `"brief" holds the label with each value's definition, which values the scored versions read as which (counts summed over versions), and how many gold labels each value has. Nothing here costs anything; never start paid work in this skill.
+    instructions: `"brief" holds the saved label with each value's definition, which values the scored versions read as which (counts summed over versions), and how many gold labels each value has. "prompt" is the prompt on the page, unsaved edits included: review its label, which may be newer than the saved one. Before the first prompt is approved, "brief.label" is null and nothing is scored: work from "prompt" alone. Nothing here costs anything; never start paid work in this skill.
 - Find the pairs of values a real item could fit both of: from the definitions, and from mix-ups that come back in several versions. For each pair, quote the words that overlap and say what would tell them apart.
 - On a single-select label, check there is a catch-all such as "Other" or "None" unless every item fits a named value; on a multi-select label, check the catch-all is marked to stand alone.
 - Name values that are rare (too few gold labels to score fairly) or dominant.
@@ -89,7 +90,7 @@ export const SKILLS: Record<AgentSkillName, Skill> = {
     tools: ['search_examples'],
     working: () => msg('Planning which examples to label…'),
     shape: '{"reply": string}',
-    instructions: `"brief" is the label balance: gold labels per value and per half, which values are rare or dominant, and how many examples wait for a gold label.
+    instructions: `"brief" is the label balance: gold labels per value and per half, which values are rare or dominant, and how many examples wait for a gold label. "prompt" holds each value's definition.
 - Start with the rare values: for each, how many more gold labels it needs (at least 4 in all and 2 in each half).
 - To find unlabeled examples worth labeling first, search for words from a rare value's definition with search_examples and "unlabeledOnly": true. List at most five item ids per value, as "examples that mention ...".
 - Never say which value an example has or looks like: list them by what they mention, and leave the label to the user.

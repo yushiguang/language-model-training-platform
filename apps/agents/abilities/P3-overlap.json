@@ -82,7 +82,7 @@
             ]
           },
           {
-            "kind": "invalid",
+            "kind": "missed",
             "gold": "Vlog",
             "predicted": null,
             "count": 3,

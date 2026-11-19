@@ -37,7 +37,7 @@
     "locale": "en"
   },
   "model": [
-    "{\"reply\":\"I made 1 change to v2. Hover each mark to see why.\",\"prompt\":{\"taskSummary\":\"Label the post.\",\"features\":{\"video\":[\"Description\"],\"photo_text\":[],\"metadata\":[]},\"label\":{\"name\":\"format\",\"kind\":\"single\",\"values\":[{\"name\":\"Vlog\",\"definition\":\"- a day in a life\\n- Does not apply when the post fits Clip better (a cut from a longer video).\"},{\"name\":\"Clip\",\"definition\":\"a cut from a longer video\"}]},\"ruleGroups\":[],\"images\":[]},\"changes\":[{\"text\":\"- Does not apply when the post fits Clip better (a cut from a longer video).\",\"reason\":\"5 Clip examples were read as Vlog\"}]}"
+    "{\"prompt\":{\"taskSummary\":\"Label the post.\",\"features\":{\"video\":[\"Description\"],\"photo_text\":[],\"metadata\":[]},\"label\":{\"name\":\"format\",\"kind\":\"single\",\"values\":[{\"name\":\"Vlog\",\"definition\":\"- a day in a life\\n- Does not apply when the post fits Clip better (a cut from a longer video).\"},{\"name\":\"Clip\",\"definition\":\"a cut from a longer video\"}]},\"ruleGroups\":[],\"images\":[]},\"changes\":[{\"text\":\"- Does not apply when the post fits Clip better (a cut from a longer video).\",\"reason\":\"5 Clip examples were read as Vlog\"}]}"
   ],
   "tools": [
     {
