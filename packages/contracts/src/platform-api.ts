@@ -566,6 +566,33 @@ export interface SharedStatePort {
   delete(key: string): Promise<void>;
 }
 
+/**
+ * Named locks shared by every process that may run the same work (deployment readiness spec, 2;
+ * issue #46), so one labeling task, one prediction and one Optimiser run have one runner across
+ * BFF replicas and worker units, not one per process. Each method is one atomic step on one lock
+ * name (`name`): a Redis implementation runs each as a script (acquire as `SET NX PX`); SQL as
+ * one conditional update. `@yushiguang/sprint-platform` has the in-memory one (`memoryLockStore`)
+ * and the adapter that turns it into the locks the apps take (`leaseLocks`).
+ *
+ * A lock is a lease, as a job's and a limiter permit's are: `acquire` takes it only when it is
+ * free or its lease has ended, `renew` and `release` count only for the `owner` that took it, and
+ * `isHeld` is true only while the lease lasts, so a process that dies without releasing never
+ * wedges the work — the lock frees when the lease ends. `now` is the caller's epoch milliseconds;
+ * a shared store may use its own clock instead, so the replicas' clocks need not agree. A runner
+ * frozen longer than its lease can lose the lock mid-run (the same fencing limit the job and
+ * limiter leases accept); callers re-check saved work before paying again where it matters.
+ */
+export interface LockStorePort {
+  /** Takes the lock for `owner` until `now + leaseMs`; false when another owner holds it. */
+  acquire(name: string, owner: string, leaseMs: number, now: number): Promise<boolean>;
+  /** Extends the lease to `now + leaseMs`, if `owner` still holds it and it has not ended. */
+  renew(name: string, owner: string, leaseMs: number, now: number): Promise<boolean>;
+  /** Frees the lock, if `owner` still holds it; another owner's lock is left alone. */
+  release(name: string, owner: string): Promise<void>;
+  /** True while some owner's lease on the lock lasts at `now`. */
+  isHeld(name: string, now: number): Promise<boolean>;
+}
+
 /** One endpoint's limits, as the gateway's registry has them. */
 export interface LimiterLimits {
   /** Requests per window. */
@@ -689,6 +716,15 @@ export interface Platform {
    * memory of its own process, which is right for the browser build and one server replica.
    */
   sharedState?: SharedStatePort;
+  /**
+   * Where named locks are kept, shared by every process that may run the same work (issue #46).
+   * Optional: without it the composition root locks within one process (`browserLocks` in the
+   * browser, `memoryLocks` in one server process), which is right for the browser build and one
+   * server process. A deployment with more than one process (BFF replicas, a second worker unit)
+   * must supply a shared one and pass `leaseLocks(it)` to labeling, the workflow and the
+   * Optimiser. See docs/integration.md, "Building the server's own composition".
+   */
+  lockStore?: LockStorePort;
   /**
    * Where problem reports go (spec 1.1.0, 3.3). Optional: without it the helpers say reports
    * cannot be sent here. See docs/integration.md, "Problem reports".
