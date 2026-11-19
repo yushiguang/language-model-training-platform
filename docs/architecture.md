@@ -290,7 +290,7 @@ normalized. `apps/bff/src/fixtures.test.ts` replays them on the bff over the ref
 | A helper calls only the tools its preset lists (`PRESET_TOOLS`, `mayCallTool` in `packages/domain/src/agent-guards.ts`) | Tool host (refuses); the runtime also offers each helper its own tools only |
 | The project exists and is not being deleted | Tool host |
 | A call for a turn runs as that turn's user and only on that turn's project; an ended turn lends no one | Tool host (`turnOf` in `services/turns.ts`) |
-| No helper reads the held-out half (`visibleToAgents`); the first read of examples locks the halves | Tool host |
+| No helper reads the held-out half (`visibleToAgents`); the first read of examples locks the halves | Tool host; the Ask AI workspace snapshot (`services/agents.ts`) for examples named in attachments, which it resolves from the project's own dataset only |
 | Start tools start work at once and say so in the chat | Tool host (`services/starts.ts`) |
 | A problem report is sent only after the user answered its draft | Tool host (`services/problems.ts`) |
 | Proposals never save themselves: a draft is saved as a version only by the user | Workflow (`sendUserMessage` stores a proposal; no tool saves a version) |
