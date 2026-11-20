@@ -32,8 +32,8 @@ export function productGuide(): Record<string, GuideTopic> {
     },
     eval_dataset: {
       title: 'Eval Dataset',
-      aliases: ['dataset', 'add examples', 'take examples', 'examples'],
-      text: `Eval Dataset holds the examples the prompt is scored on. Add examples takes them from one or more data sources. Before an item's features are fetched, the site checks it: an item that no longer exists, whose creator is a minor, or that cannot be publicly recommended is left out, and the "items left out" line counts them by reason. The dataset needs at least ${minEvalHard} examples to continue; about ${minEvalRecommended} or more gold-labeled ones give a score worth reading. Examples can be removed with a reason and restored.`,
+      aliases: ['dataset', 'add examples', 'take examples', 'examples', 'feature missingness', 'missing features'],
+      text: `Eval Dataset holds the examples the prompt is scored on. Add examples takes them from one or more data sources. Before an item's features are fetched, the site checks it: an item that no longer exists, whose creator is a minor, or that cannot be publicly recommended is left out, and items with no non-empty features are left out too; the "items left out" line counts them by reason. Feature missingness is recorded for the dataset and shown per feature so empty inputs are visible before tuning. The dataset needs at least ${minEvalHard} examples to continue; about ${minEvalRecommended} or more gold-labeled ones give a score worth reading. Examples can be removed with a reason and restored.`,
     },
     gold_labels: {
       title: 'Gold Labels',
