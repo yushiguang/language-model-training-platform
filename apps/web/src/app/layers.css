@@ -1,0 +1,7 @@
+/*
+ * Cascade-layer order, declared once and imported first (before globals.css), because Next.js
+ * hoists CSS imports above inline rules. Astryx: reset < astryx-base < astryx-theme. The old kit
+ * (kit.css, app.css) sits in `legacy` above them, so today's pages look the same while pages
+ * move to Astryx one at a time; `legacy` goes away with the last of them.
+ */
+@layer reset, astryx-base, astryx-theme, legacy;
