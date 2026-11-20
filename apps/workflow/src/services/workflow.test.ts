@@ -977,7 +977,7 @@ test('problem report (1.1.0): without a ticket port the helper is told to send t
 });
 
 /** Every item id is a video the example service knows, except ids starting with "gone". */
-const knownItems = {lookup: async (ids: string[]) => ids.filter(id => !id.startsWith('gone')).map(externalId => ({externalId, type: 'video' as const, title: '', features: {}}))};
+const knownItems = {lookup: async (ids: string[]) => ids.filter(id => !id.startsWith('gone')).map(externalId => ({externalId, type: 'video' as const, title: '', features: {Description: {text: externalId}}}))};
 
 /** A data source of the world's tenant made from `ids`, imported. */
 async function sourceOf(w: Awaited<ReturnType<typeof world>>, name: string, ids: string[]) {
@@ -1371,7 +1371,7 @@ test('frozen snapshots (#32): a take checks each item, counts what is left out p
       lookups.push(ids.length);
       // The feature service fails once: the batch is tried again, the take goes on.
       if (failOnce-- > 0) throw new Error('feature service down');
-      // i05 passes its checks but no features come back: kept, with none.
+      // i05 passes its checks but no features come back: excluded as noFeatures (#48, superseding #32).
       return ids.filter(id => id !== 'i05').map(externalId => ({externalId, type: 'video' as const, title: `t ${externalId}`, features: {Description: {text: `about ${externalId}`}}}));
     },
     async check(ids) {
@@ -1391,20 +1391,20 @@ test('frozen snapshots (#32): a take checks each item, counts what is left out p
     await w.jobs.idle();
     const state = (await loadProjectState(w.ws, p.id))!;
     const snap = state.snapshot!;
-    assert.deepEqual(snap.counts.checks, {missing: 1, minorCreator: 2, notRecommendable: 1});
-    assert.deepEqual([snap.counts.valid, snap.counts.invalid, state.examples.length], [16, 4, 16]);
+    assert.deepEqual(snap.counts.checks, {missing: 1, minorCreator: 2, notRecommendable: 1, noFeatures: 1});
+    assert.deepEqual([snap.counts.valid, snap.counts.invalid, state.examples.length], [15, 5, 15]);
     assert.ok(lookups.every(n => n <= 7), 'features are fetched a batch at a time');
     assert.ok(state.examples.every(e => !('features' in e)), 'project state carries the index only');
     assert.equal(state.examples.find(e => e.externalId === 'i06')?.type, 'photo_text', 'the kind comes from the checks');
+    assert.equal(state.examples.find(e => e.externalId === 'i05'), undefined, 'zero-feature item i05 is excluded');
     const stored = await w.catalog.find('examples', {snapshotId: snap.id});
     assert.ok(stored.every(e => !('features' in e)), 'example records hold no features');
     const docs = await w.catalog.find('example_features', {snapshotId: snap.id});
-    assert.equal(docs.length, 16);
+    assert.equal(docs.length, 15);
     assert.ok(docs.every(d => d.id === `${snap.id}:${d.externalId}`));
     assert.ok((snap.featureSizes?.video?.Description?.chars ?? 0) > 0, 'average sizes are kept for estimates');
     const i07 = state.examples.find(e => e.externalId === 'i07')!;
-    const i05 = state.examples.find(e => e.externalId === 'i05')!;
-    assert.deepEqual(await exampleFeatures(w.ws, p.id, [i07.id, i05.id]), {[i07.id]: {Description: {text: 'about i07'}}, [i05.id]: {}});
+    assert.deepEqual(await exampleFeatures(w.ws, p.id, [i07.id]), {[i07.id]: {Description: {text: 'about i07'}}});
     // Another project's examples are never read through this one.
     const other = await createProject(w.ws, 'Other');
     assert.deepEqual(await exampleFeatures(w.ws, other.id, [i07.id]), {});
@@ -1414,8 +1414,8 @@ test('frozen snapshots (#32): a take checks each item, counts what is left out p
     await takeExamples(w.ws, p.id, [{sourceId: more, count: 3}]);
     await w.jobs.idle();
     const after = (await loadProjectState(w.ws, p.id))!.snapshot!;
-    assert.deepEqual([after.counts.valid, after.counts.checks], [18, {missing: 2, minorCreator: 2, notRecommendable: 1}]);
-    assert.equal((await w.catalog.find('example_features', {snapshotId: snap.id})).length, 18);
+    assert.deepEqual([after.counts.valid, after.counts.checks], [17, {missing: 2, minorCreator: 2, notRecommendable: 1, noFeatures: 1}]);
+    assert.equal((await w.catalog.find('example_features', {snapshotId: snap.id})).length, 17);
   } finally {
     configureSystem();
   }
@@ -1618,4 +1618,244 @@ test('agent abilities (#39): Improve with AI is a Prompt helper turn, and its dr
   await closeProposal(w.ws, p, 'discarded');
   const drafts = (await toolsOf(w).call({agent: 'prompt_agent', name: 'get_drafts', args: {}})) as {drafts: {state: string; from: string; changes: {reason: string}[]}[]};
   assert.deepEqual([drafts.drafts[0].state, drafts.drafts[0].from, drafts.drafts[0].changes[0].reason], ['discarded', 'v1', '5 Tutorials were read as Vlog']);
+});
+
+test('feature missingness (#48): take excludes zero-feature items, persists exact integer missingness, and names no-feature items when all are excluded', async () => {
+  const w = await world('fm1', {gold: null});
+  const items: Record<string, {type: 'video' | 'photo_text'; features: Record<string, {text?: string; items?: string[]}>} | null> = {
+    v1: {type: 'video', features: {Description: {text: 'hello'}, ASR: {text: 'speech'}, Language: {text: 'en'}}},
+    v2: {type: 'video', features: {Description: {text: 'only desc'}, ASR: {text: '   '}, Cover: {items: []}}},
+    v3: {type: 'video', features: {Description: {text: '  '}, Cover: {items: []}}}, // zero non-empty features
+    v4: null, // passes check as video, omitted by lookup -> zero-feature excluded
+    p1: {type: 'photo_text', features: {Title: {text: 'pic'}, Images: {items: ['https://example.invalid/1.jpg']}, Language: {text: 'en'}}},
+    p2: {type: 'photo_text', features: {}}, // zero non-empty features
+  };
+  Object.assign(w.inst, {
+    examples: {
+      async check(ids: string[]) {
+        return ids.map(externalId => ({externalId, type: externalId.startsWith('p') ? ('photo_text' as const) : ('video' as const), problem: null}));
+      },
+      async lookup(ids: string[]) {
+        return ids
+          .filter(id => items[id] != null)
+          .map(externalId => ({externalId, type: items[externalId]!.type, title: `t ${externalId}`, features: items[externalId]!.features}));
+      },
+    } satisfies ExampleSource,
+  });
+  const {createProject} = await import('./projects.ts');
+  const {takeExamples, getSamplingTask} = await import('./dataset.ts');
+  const p = await createProject(w.ws, 'Missingness');
+  const src = await sourceOf(w, 'Mix', ['v1', 'v2', 'v3', 'v4', 'p1', 'p2']);
+  await takeExamples(w.ws, p.id, [{sourceId: src, count: 6}]);
+  await w.jobs.idle();
+  const state = (await loadProjectState(w.ws, p.id))!;
+  const snap = state.snapshot!;
+  assert.deepEqual(state.examples.map(e => e.externalId).sort(), ['p1', 'v1', 'v2']);
+  assert.deepEqual(snap.counts.checks, {missing: 0, minorCreator: 0, notRecommendable: 0, noFeatures: 3});
+  assert.deepEqual([snap.counts.valid, snap.counts.invalid], [3, 3]);
+  const fm = snap.featureMissingness!;
+  assert.equal(fm.version, 1);
+  assert.deepEqual(fm.zeroFeatureExcluded, {video: 2, photo_text: 1});
+  assert.equal(fm.byType.video?.examples, 2);
+  assert.equal(fm.byType.video?.missing.Description, 0);
+  assert.equal(fm.byType.video?.missing.ASR, 1);
+  assert.equal(fm.byType.video?.missing.Cover, 2);
+  assert.equal(fm.byType.video?.missing.Language, 1);
+  assert.equal(fm.byType.photo_text?.examples, 1);
+  assert.equal(fm.byType.photo_text?.missing.Title, 0);
+  assert.equal(fm.byType.photo_text?.missing.Images, 0);
+  assert.equal(fm.byType.photo_text?.missing.Description, 1);
+  assert.equal(fm.byType.photo_text?.missing.Language, 0);
+
+  // When every item in a new dataset has no features, the error says "with no features".
+  const pEmpty = await createProject(w.ws, 'AllEmpty');
+  const emptySrc = await sourceOf(w, 'Empty', ['v3', 'v4', 'p2']);
+  await takeExamples(w.ws, pEmpty.id, [{sourceId: emptySrc, count: 3}]);
+  await w.jobs.idle();
+  assert.match((await getSamplingTask(w.ws, pEmpty.id))?.error ?? '', /None of these items can be used: 3 with no features/);
+});
+
+test('feature missingness (#48): append merges missingness, zero-added append still accumulates exclusions, and legacy snapshots stay undefined', async () => {
+  const w = await world('fm2', {gold: null});
+  const items: Record<string, {type: 'video' | 'photo_text'; features: Record<string, {text?: string}>}> = {
+    a1: {type: 'video', features: {Description: {text: 'one'}, ASR: {text: 'say'}}},
+    a2: {type: 'video', features: {Description: {text: 'two'}}},
+    a3: {type: 'video', features: {}},
+    a4: {type: 'photo_text', features: {}},
+  };
+  Object.assign(w.inst, {
+    examples: {
+      async check(ids: string[]) {
+        return ids.map(externalId => ({externalId, type: items[externalId]?.type ?? 'video', problem: null}));
+      },
+      async lookup(ids: string[]) {
+        return ids.map(externalId => ({externalId, type: items[externalId].type, title: externalId, features: items[externalId].features}));
+      },
+    } satisfies ExampleSource,
+  });
+  const {createProject} = await import('./projects.ts');
+  const {takeExamples} = await import('./dataset.ts');
+  const p = await createProject(w.ws, 'Append');
+  const s1 = await sourceOf(w, 'S1', ['a1']);
+  await takeExamples(w.ws, p.id, [{sourceId: s1, count: 1}]);
+  await w.jobs.idle();
+  // Append usable + zero-feature item.
+  const s2 = await sourceOf(w, 'S2', ['a2', 'a3']);
+  await takeExamples(w.ws, p.id, [{sourceId: s2, count: 2}]);
+  await w.jobs.idle();
+  const mid = (await loadProjectState(w.ws, p.id))!.snapshot!;
+  assert.equal(mid.featureMissingness?.byType.video?.examples, 2);
+  assert.equal(mid.featureMissingness?.byType.video?.missing.ASR, 1);
+  assert.deepEqual(mid.featureMissingness?.zeroFeatureExcluded, {video: 1});
+  assert.equal(mid.counts.checks?.noFeatures, 1);
+  // Zero-added append: duplicate a1 + zero-feature a4.
+  const s3 = await sourceOf(w, 'S3', ['a1', 'a4']);
+  await takeExamples(w.ws, p.id, [{sourceId: s3, count: 2}]);
+  await w.jobs.idle();
+  const after = (await loadProjectState(w.ws, p.id))!.snapshot!;
+  assert.equal(after.featureMissingness?.byType.video?.examples, 2);
+  assert.deepEqual(after.featureMissingness?.zeroFeatureExcluded, {video: 1, photo_text: 1});
+  assert.equal(after.counts.checks?.noFeatures, 2);
+
+  // Legacy snapshot (no featureMissingness, valid > 0) stays undefined after append.
+  const {appendExamples} = await import('./governance.ts');
+  const legacyBefore = (await loadProjectState(w.ws, w.projectId))!.snapshot!;
+  assert.equal(legacyBefore.featureMissingness, undefined);
+  await appendExamples(w.ws, w.projectId, [{externalId: 'leg1', type: 'video', title: 'L1', features: {Description: {text: 'hi'}}}], 'sources', 1, {missing: 0, minorCreator: 0, notRecommendable: 0, noFeatures: 1}, {video: 1});
+  const legacyAfter = (await loadProjectState(w.ws, w.projectId))!.snapshot!;
+  assert.equal(legacyAfter.featureMissingness, undefined);
+  assert.equal(legacyAfter.counts.checks?.noFeatures, 1);
+});
+
+test('feature missingness (#48): remove, restore, and prune live-adjust byType, and stats failure never blocks removal', async () => {
+  const w = await world('fm3', {gold: null});
+  const items: Record<string, {type: 'video' | 'photo_text'; features: Record<string, {text?: string}>}> = {
+    v1: {type: 'video', features: {Description: {text: 'd1'}, ASR: {text: 'a1'}}},
+    v2: {type: 'video', features: {Description: {text: 'd2'}}},
+    v3: {type: 'video', features: {Description: {text: 'd3'}}},
+    p1: {type: 'photo_text', features: {Title: {text: 'p1'}}},
+    z1: {type: 'video', features: {}},
+  };
+  Object.assign(w.inst, {
+    examples: {
+      async check(ids: string[]) {
+        return ids.map(externalId => ({externalId, type: items[externalId].type, problem: null}));
+      },
+      async lookup(ids: string[]) {
+        return ids.map(externalId => ({externalId, type: items[externalId].type, title: externalId, features: items[externalId].features}));
+      },
+    } satisfies ExampleSource,
+  });
+  const {createProject} = await import('./projects.ts');
+  const {takeExamples} = await import('./dataset.ts');
+  const {removeExamples, restoreExamples, pruneDataset} = await import('./governance.ts');
+  const p = await createProject(w.ws, 'LiveAdjust');
+  const src = await sourceOf(w, 'Src', ['v1', 'v2', 'v3', 'p1', 'z1']);
+  await takeExamples(w.ws, p.id, [{sourceId: src, count: 5}]);
+  await w.jobs.idle();
+
+  const initial = (await loadProjectState(w.ws, p.id))!;
+  assert.equal(initial.snapshot?.featureMissingness?.byType.video?.examples, 3);
+  assert.equal(initial.snapshot?.featureMissingness?.byType.video?.missing.ASR, 2);
+  assert.equal(initial.snapshot?.featureMissingness?.byType.photo_text?.examples, 1);
+  assert.deepEqual(initial.snapshot?.featureMissingness?.zeroFeatureExcluded, {video: 1});
+
+  // Remove v2 (missing ASR) and p1 (only photo_text example): byType updates, photo_text drops, zeroFeatureExcluded preserved.
+  const v2 = initial.examples.find(e => e.externalId === 'v2')!;
+  const p1 = initial.examples.find(e => e.externalId === 'p1')!;
+  await removeExamples(w.ws, p.id, [v2.id, p1.id], 'broken');
+  const afterRemove = (await loadProjectState(w.ws, p.id))!;
+  assert.equal(afterRemove.snapshot?.featureMissingness?.byType.video?.examples, 2);
+  assert.equal(afterRemove.snapshot?.featureMissingness?.byType.video?.missing.ASR, 1);
+  assert.equal(afterRemove.snapshot?.featureMissingness?.byType.photo_text, undefined);
+  assert.deepEqual(afterRemove.snapshot?.featureMissingness?.zeroFeatureExcluded, {video: 1});
+
+  // Restore both: exact counts return.
+  await restoreExamples(w.ws, p.id, afterRemove.removals.map(r => r.id));
+  const afterRestore = (await loadProjectState(w.ws, p.id))!;
+  assert.equal(afterRestore.snapshot?.featureMissingness?.byType.video?.examples, 3);
+  assert.equal(afterRestore.snapshot?.featureMissingness?.byType.video?.missing.ASR, 2);
+  assert.equal(afterRestore.snapshot?.featureMissingness?.byType.photo_text?.examples, 1);
+  assert.deepEqual(afterRestore.snapshot?.featureMissingness?.zeroFeatureExcluded, {video: 1});
+
+  // pruneDataset adjusts via removeExamples.
+  const pruned = await pruneDataset(w.ws, p.id, 'unlabeled', 2);
+  assert.equal(pruned, 2);
+  const afterPrune = (await loadProjectState(w.ws, p.id))!;
+  const liveTotal = (afterPrune.snapshot?.featureMissingness?.byType.video?.examples ?? 0) + (afterPrune.snapshot?.featureMissingness?.byType.photo_text?.examples ?? 0);
+  assert.equal(liveTotal, 2);
+
+  // Best-effort: if reading features fails during removal, removal still succeeds.
+  const orig = w.catalog.exampleFeatures;
+  w.catalog.exampleFeatures = async () => {
+    throw new Error('store unavailable');
+  };
+  try {
+    const victim = afterPrune.examples[0];
+    assert.equal(await removeExamples(w.ws, p.id, [victim.id], 'broken'), 1);
+    assert.equal((await loadProjectState(w.ws, p.id))!.examples.length, 1);
+  } finally {
+    w.catalog.exampleFeatures = orig;
+  }
+});
+
+test('feature missingness (#48): buildReport stamps snapshotId and helpers expose aggregates only without locking holdout', async () => {
+  const w = await world('fm4', {gold: goldOf});
+  await w.newVersion();
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
+  const scored = await w.state();
+  assert.equal(scored.reports[0].snapshotId, scored.snapshot!.id, 'EvalReport.snapshotId stamped from scored examples');
+
+  // Create a fresh project via takeExamples so featureMissingness is populated and holdout is unlocked.
+  const {createProject} = await import('./projects.ts');
+  const {takeExamples} = await import('./dataset.ts');
+  const {getPageView} = await import('./page-views.ts');
+  Object.assign(w.inst, {
+    examples: {
+      async check(ids: string[]) {
+        return ids.map(externalId => ({externalId, type: 'video' as const, problem: null}));
+      },
+      async lookup(ids: string[]) {
+        return ids.map(externalId => ({externalId, type: 'video' as const, title: `t ${externalId}`, features: externalId === 'ex_zero_secret' ? ({} as Record<string, {text: string}>) : {Description: {text: `desc ${externalId}`}}}));
+      },
+    } satisfies ExampleSource,
+  });
+  const p = await createProject(w.ws, 'HelperAgg');
+  const src = await sourceOf(w, 'S', ['ex_alpha_1', 'ex_beta_2', 'ex_zero_secret']);
+  await takeExamples(w.ws, p.id, [{sourceId: src, count: 3}]);
+  await w.jobs.idle();
+
+  const host = agentToolHost(w.inst);
+  const stats = (await host.call({agent: 'front_desk', name: 'get_dataset_stats', args: {}, projectId: p.id, turnId: null, ctx: w.ws.ctx})) as {
+    featureMissingness: {
+      totalExamples: number;
+      zeroFeatureExcluded: Record<string, number>;
+      byType: {video?: {examples: number; missingFeatures: {key: string; missing: number; total: number; rate: number}[]}};
+    };
+  };
+  assert.equal(stats.featureMissingness.totalExamples, 2);
+  assert.deepEqual(stats.featureMissingness.zeroFeatureExcluded, {video: 1});
+  assert.equal(stats.featureMissingness.byType.video?.examples, 2);
+  const asr = stats.featureMissingness.byType.video?.missingFeatures.find(f => f.key === 'ASR');
+  assert.deepEqual(asr, {key: 'ASR', missing: 2, total: 2, rate: 1});
+  assert.equal(stats.featureMissingness.byType.video?.missingFeatures.find(f => f.key === 'Description'), undefined, 'features with missing === 0 are omitted');
+  const serialized = JSON.stringify(stats);
+  for (const ex of (await loadProjectState(w.ws, p.id))!.examples) {
+    assert.ok(!serialized.includes(ex.id), 'get_dataset_stats contains no example id');
+    assert.ok(!serialized.includes(ex.externalId), 'get_dataset_stats contains no external id');
+  }
+  assert.ok(!serialized.includes('ex_zero_secret'), 'get_dataset_stats contains no excluded item id');
+  assert.ok(!(await loadProjectState(w.ws, p.id))!.project.holdoutLocked, 'get_dataset_stats does not lock holdout');
+
+  for (const page of ['dataset', 'prompt_design', 'prompt_edit'] as const) {
+    const view = await getPageView(w.ws, p.id, {page, params: {}});
+    const fm = view.data.featureMissingness as typeof stats.featureMissingness | null;
+    assert.ok(fm, `${page} page view includes featureMissingness`);
+    assert.equal(fm.totalExamples, 2);
+    assert.ok(!JSON.stringify(fm).includes('ex_alpha_1'), `${page} featureMissingness contains no example ids`);
+  }
+
+  const upload = (await host.call({agent: 'front_desk', name: 'get_upload_result', args: {}, projectId: p.id, turnId: null, ctx: w.ws.ctx})) as {note: string};
+  assert.match(upload.note, /noFeatures/);
 });

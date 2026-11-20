@@ -359,14 +359,19 @@ side is right.
   Improve with AI, Auto Optimise). From then on `Project.holdoutLocked` is set and no example ever
   changes half; an added example is placed in the half that keeps the two even.
 - *Adding.* Add examples takes more from one or more data sources (#29): ids already in the
-  dataset (removed ones too) are skipped, and nothing there changes. The evaluation context counts gold-labeled examples
+  dataset (removed ones too) are skipped, and nothing there changes. Items with zero non-empty
+  features are excluded and counted (`checks.noFeatures`, `featureMissingness.zeroFeatureExcluded`,
+  #48); `featureMissingness` merges across appends (while legacy snapshots without it stay
+  `undefined`). The evaluation context counts gold-labeled examples
   only, so an unlabeled example is *pending*: it is left out of scores, does not make them stale,
   and is counted on Eval Dataset and next to the score. Its gold label does make scores stale
   (Rebuild scores).
 - *Removing.* Remove example on Gold Labels, Remove unlabeled and Downsample on Eval Dataset
   (`pickToPrune`: evenly from both halves) soft-delete examples (`Example.removed`). Each removal
   writes a `DatasetRemoval` with the half and gold label at the time, why, who and when; Restore
-  puts the example back in its half. The score line names how many gold-labeled examples were
+  puts the example back in its half. Removals and restores live-adjust `DatasetSnapshot.featureMissingness.byType`
+  via batched by-id `featuresOf` reads (best-effort so stats failures never block removal or
+  restore). The score line names how many gold-labeled examples were
   removed before the score was worked out.
 - *Comments.* `LabelComment` records (`label_comments`), append-only, from Save on either Gold
   Labels tab; a comment on Mismatches keeps the version. Helpers read comments on optimiser-half
@@ -420,7 +425,9 @@ application `id` to the store's document id.
 Frozen features (#32) live apart from the product records: one `example_features` document per
 example, read by id only (`CatalogContract.exampleFeatures`, a batch at a time). Project state
 carries the examples' index and no features; the labeling run, Gold Labels, the helpers and the
-Optimiser each read the features of the examples they use.
+Optimiser each read the features of the examples they use. `DatasetSnapshot` stores `featureSizes`
+and exact integer `featureMissingness` counts (#48) over its live examples so estimates, pages and
+helpers never scan `example_features`; `EvalReport.snapshotId` records which snapshot was scored.
 
 ## Where the rules live
 

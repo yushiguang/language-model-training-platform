@@ -1,6 +1,7 @@
-import type {DatasetRemoval, DatasetSnapshot, Example, ExampleFeatures, ExampleWithFeatures, ItemCheckCounts, LabelComment, RawExample, RemovalReason} from '@yushiguang/sprint-contracts';
-import {addChecks, assignEvalHalves, checksTotal, featureDocId, featureSizes, mergeFeatureSizes, newId, pickToPrune, systemConfig} from '@yushiguang/sprint-domain';
+import type {DatasetRemoval, DatasetSnapshot, Example, ExampleFeatures, ExampleType, ExampleWithFeatures, ItemCheckCounts, LabelComment, RawExample, RemovalReason} from '@yushiguang/sprint-contracts';
+import {addChecks, assignEvalHalves, checksTotal, computeFeatureMissingness, featureDocId, featureSizes, mergeFeatureMissingness, mergeFeatureSizes, newId, noChecks, pickToPrune, subtractFeatureMissingness, systemConfig} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
+import {featuresOf} from './features.ts';
 import {loadProjectState} from './projects.ts';
 
 /**
@@ -50,10 +51,22 @@ export async function insertExamplesSettled(w: Scope, examples: NewExample[], pa
   return saved;
 }
 
-/** The average feature sizes of a dataset with the examples just saved (#32), for estimates. */
-export function frozenFacts(snap: Pick<DatasetSnapshot, 'featureSizes' | 'counts'> | null, saved: NewExample[]): Pick<DatasetSnapshot, 'featureSizes'> {
+/** The average feature sizes (#32) and exact feature-missingness counts (#48) for saved examples. */
+export function frozenFacts(
+  snap: Pick<DatasetSnapshot, 'featureSizes' | 'featureMissingness' | 'counts'> | null,
+  saved: NewExample[],
+  zeroExcluded: Partial<Record<ExampleType, number>> = {},
+): Pick<DatasetSnapshot, 'featureSizes' | 'featureMissingness'> {
   const kinds = (list: {type: string}[]) => ({video: list.filter(e => e.type === 'video').length, photo_text: list.filter(e => e.type === 'photo_text').length});
-  return {featureSizes: mergeFeatureSizes(snap?.featureSizes, {video: snap?.counts.video ?? 0, photo_text: snap?.counts.photoText ?? 0}, featureSizes(saved), kinds(saved))};
+  const sizes = mergeFeatureSizes(snap?.featureSizes, {video: snap?.counts.video ?? 0, photo_text: snap?.counts.photoText ?? 0}, featureSizes(saved), kinds(saved));
+  // Legacy snapshots without featureMissingness stay undefined once they already have valid examples.
+  const legacy = !!snap && !snap.featureMissingness && snap.counts.valid > 0;
+  if (legacy) return {featureSizes: sizes};
+  const delta = computeFeatureMissingness(saved, zeroExcluded);
+  return {
+    featureSizes: sizes,
+    featureMissingness: snap?.featureMissingness ? mergeFeatureMissingness(snap.featureMissingness, delta) : delta,
+  };
 }
 
 /**
@@ -106,6 +119,7 @@ export async function appendExamples(
   source: DatasetSnapshot['source'],
   invalid = 0,
   checks?: ItemCheckCounts,
+  zeroExcluded?: Partial<Record<ExampleType, number>>,
 ): Promise<{added: number; duplicates: number; notSaved: number}> {
   const {catalog, user} = w;
   const project = await catalog.get('projects', projectId);
@@ -120,6 +134,7 @@ export async function appendExamples(
     fresh.push(r);
   }
   const duplicates = raws.length - fresh.length;
+  const hasZeroExcluded = Object.values(zeroExcluded ?? {}).some(n => (n ?? 0) > 0);
   let saved: NewExample[] = [];
   if (fresh.length) {
     const live = existing.filter(e => !e.removed);
@@ -146,20 +161,23 @@ export async function appendExamples(
         video: snap.counts.video + saved.filter(r => r.type === 'video').length,
         photoText: snap.counts.photoText + saved.filter(r => r.type === 'photo_text').length,
         ...(snap.counts.notSaved || saved.length < fresh.length ? {notSaved: (snap.counts.notSaved ?? 0) + fresh.length - saved.length} : {}),
-        ...(snap.counts.checks || checks ? {checks: addChecks(snap.counts.checks, checks ?? {missing: 0, minorCreator: 0, notRecommendable: 0})} : {}),
+        ...(snap.counts.checks || checks ? {checks: addChecks(snap.counts.checks, checks ?? noChecks())} : {}),
       },
       split: {eval: (snap.split?.eval ?? 0) + saved.length, test: 0, train: 0},
-      ...frozenFacts(snap, saved),
+      ...frozenFacts(snap, saved, zeroExcluded),
     });
-  } else if (invalid || (checks && checksTotal(checks))) {
+  } else if (invalid || (checks && checksTotal(checks)) || hasZeroExcluded) {
     // Nothing new to add, but items were left out: they are still counted on the dataset.
+    const legacy = !snap.featureMissingness && snap.counts.valid > 0;
+    const missingnessPatch = hasZeroExcluded && !legacy ? {featureMissingness: mergeFeatureMissingness(snap.featureMissingness, computeFeatureMissingness([], zeroExcluded))} : {};
     await catalog.patch('dataset_snapshots', snap.id, {
       counts: {
         ...snap.counts,
         rows: snap.counts.rows + invalid,
         invalid: snap.counts.invalid + invalid,
-        ...(snap.counts.checks || checks ? {checks: addChecks(snap.counts.checks, checks ?? {missing: 0, minorCreator: 0, notRecommendable: 0})} : {}),
+        ...(snap.counts.checks || checks ? {checks: addChecks(snap.counts.checks, checks ?? noChecks())} : {}),
       },
+      ...missingnessPatch,
     });
   }
   const notSaved = fresh.length - saved.length;
@@ -167,6 +185,25 @@ export async function appendExamples(
   w.tm.event('dataset_appended', {source, added: saved.length, duplicates});
   w.emitChange(projectId);
   return {added: saved.length, duplicates, notSaved};
+}
+
+/**
+ * Best-effort live adjustment of snapshot `featureMissingness.byType` on remove/restore (#48):
+ * reads the affected examples' frozen features by id in `dataset.featureBatch` batches and
+ * subtracts/merges with clamping. Never throws so stats failures never block removal or restore.
+ */
+async function adjustSnapshotMissingness(w: Scope, snapshotId: string, examples: Example[], op: 'remove' | 'restore'): Promise<void> {
+  if (!examples.length) return;
+  try {
+    const snap = await w.catalog.get('dataset_snapshots', snapshotId);
+    if (!snap?.featureMissingness) return;
+    const features = await featuresOf(w, examples);
+    const delta = computeFeatureMissingness(examples.map(e => ({type: e.type, features: features.get(e.id) ?? {}})));
+    const next = op === 'remove' ? subtractFeatureMissingness(snap.featureMissingness, delta) : mergeFeatureMissingness(snap.featureMissingness, delta);
+    await w.catalog.patch('dataset_snapshots', snap.id, {featureMissingness: next});
+  } catch {
+    // Best-effort: never block removing or restoring examples.
+  }
 }
 
 /**
@@ -197,6 +234,7 @@ export async function removeExamples(w: Scope, projectId: string, exampleIds: st
   if (!records.length) return 0;
   await catalog.insertMany('dataset_removals', records);
   await catalog.patchMany('examples', targets.map(e => ({id: e.id, patch: {removed: true}})));
+  if (state.snapshot) await adjustSnapshotMissingness(w, state.snapshot.id, targets, 'remove');
   await catalog.audit(projectId, who, 'dataset.remove', {reason, count: records.length, withGold: records.filter(r => r.gold).length});
   w.tm.event('dataset_examples_removed', {reason, count: records.length, with_gold: records.filter(r => r.gold).length});
   w.emitChange(projectId);
@@ -211,6 +249,18 @@ export async function restoreExamples(w: Scope, projectId: string, removalIds: s
   const at = now();
   await catalog.patchMany('dataset_removals', removals.map(r => ({id: r.id, patch: {restoredAt: at}})));
   await catalog.patchMany('examples', removals.map(r => ({id: r.exampleId, patch: {removed: false}})));
+  try {
+    const restored = await catalog.findByIds('examples', removals.map(r => r.exampleId));
+    const bySnap = new Map<string, Example[]>();
+    for (const e of restored) {
+      const list = bySnap.get(e.snapshotId) ?? [];
+      list.push(e);
+      bySnap.set(e.snapshotId, list);
+    }
+    for (const [snapshotId, list] of bySnap) await adjustSnapshotMissingness(w, snapshotId, list, 'restore');
+  } catch {
+    // Best-effort: never block restoring examples.
+  }
   await catalog.audit(projectId, (await user()).name, 'dataset.restore', {count: removals.length});
   w.tm.event('dataset_examples_restored', {count: removals.length});
   w.emitChange(projectId);

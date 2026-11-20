@@ -144,6 +144,7 @@ export async function buildReport(w: Scope,
     return null;
   }
   const items: Scored[] = scoredOn.map(e => ({exampleId: e.id, gold: gold[e.id].answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd}));
+  const snapshotId = scoredOn[0]?.snapshotId;
   const report: EvalReport = {
     id: newId('er'),
     projectId,
@@ -151,6 +152,7 @@ export async function buildReport(w: Scope,
     endpoint,
     contextId,
     schemaVersion: setup.schemaVersion,
+    ...(snapshotId ? {snapshotId} : {}),
     settings,
     metrics: computeMetrics(setup.schema, items),
     archived: false,
