@@ -6,6 +6,7 @@ import {PageTelemetry} from '@/components/PageTelemetry';
 import {track} from '@/backend-api';
 import {LocaleProvider} from '@/i18n';
 import {UiProvider} from '@/ui';
+import {AstryxTheme} from '@/ui/astryx';
 
 const localeChanged = (locale: 'en' | 'zh') => track('locale_changed', {locale});
 
@@ -21,7 +22,9 @@ const stable = (
 export function Providers({children}: {children: React.ReactNode}) {
   return (
     <LocaleProvider keep={stable} onChange={localeChanged}>
-      <UiProvider>{children}</UiProvider>
+      <AstryxTheme>
+        <UiProvider>{children}</UiProvider>
+      </AstryxTheme>
     </LocaleProvider>
   );
 }
