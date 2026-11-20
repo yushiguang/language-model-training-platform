@@ -1,7 +1,7 @@
-import type {AgentToolCall, AgentToolHost, EndpointId, Example, ExampleWithFeatures, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@yushiguang/sprint-contracts';
+import type {AgentToolCall, AgentToolHost, DatasetSnapshot, EndpointId, Example, ExampleWithFeatures, PageId, PageLocation, PageView, ProjectState, PromptVersion} from '@yushiguang/sprint-contracts';
 import {agentStart, isStartTool} from './starts.ts';
 import {reportProblem} from './problems.ts';
-import {aiSuggestion, featureItems, featureText, labelBalance, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, normalizeStructured, matchRuleGroup, settingsHash, stepLine, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap, sameAnswer, newId, mayCallTool, agentName} from '@yushiguang/sprint-domain';
+import {aiSuggestion, featureItems, featureText, labelBalance, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, normalizeStructured, matchRuleGroup, settingsHash, stepLine, summarizeMissingness, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap, sameAnswer, newId, mayCallTool, agentName} from '@yushiguang/sprint-domain';
 import type {Instance, Scope} from './app.ts';
 import {turnOf} from './turns.ts';
 import {lockHoldout} from './governance.ts';
@@ -169,6 +169,33 @@ function adviceOf(state: ProjectState) {
   return a ? {nextStep: a.title, reason: a.text} : null;
 }
 
+/**
+ * Aggregate feature missingness for helpers (#48): per-type counts, features with missing > 0
+ * ({key, missing, total, rate}) and zero-feature exclusions. Counts only, never example ids.
+ */
+function missingnessView(snapshot: DatasetSnapshot | null | undefined) {
+  const s = summarizeMissingness(snapshot?.featureMissingness);
+  if (!s) return null;
+  const stat = (f: {key: string; missing: number; total: number; rate: number}) => ({key: f.key, missing: f.missing, total: f.total, rate: r2(f.rate)});
+  return {
+    totalExamples: s.totalExamples,
+    zeroFeatureExcluded: s.zeroFeatureExcluded,
+    totalZeroExcluded: s.totalZeroExcluded,
+    byType: Object.fromEntries(
+      Object.entries(s.byType).map(([type, t]) => [
+        type,
+        {
+          examples: t.examples,
+          zeroExcluded: t.zeroExcluded,
+          missingFeatures: t.missingFeatures.map(stat),
+          alwaysMissing: t.alwaysMissing,
+        },
+      ]),
+    ),
+    metadataMissing: s.metadataMissing.map(stat),
+  };
+}
+
 function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, unknown>): PageView {
   const {page, params} = loc;
   const s = state.setup;
@@ -183,6 +210,7 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
         approved: !!v,
         prompt: v ? v.structured : null,
         settings,
+        featureMissingness: missingnessView(state.snapshot),
       });
     }
     case 'dataset': {
@@ -191,6 +219,7 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
         snapshot: snap ? {number: snap.number, source: snap.source, name: snap.sourceName, counts: snap.counts} : null,
         // Spec 1.0.0, 4.4: what scores rest on now (get_dataset_stats has the label balance).
         now: snap ? datasetCounts(state) : null,
+        featureMissingness: missingnessView(snap),
         sampling: state.samplingTask ? {state: state.samplingTask.state, done: state.samplingTask.fetched, total: state.samplingTask.total, ...(state.samplingTask.error ? {error: state.samplingTask.error} : {})} : null,
         // Where the examples came from (#29): live examples per data source.
         sources: state.datasetSources.map(l => ({name: l.name, examples: l.examples})),
@@ -215,7 +244,10 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
     }
     case 'prompt_edit': {
       const v = findVersion(state, params.v) ?? state.versions[0];
-      return base(v ? `Editing ${versionLabel(v)}. Saving makes a new version, which is scored right away.` : 'Writing the first prompt version.', {version: v ? versionDetail(state, v) : null});
+      return base(v ? `Editing ${versionLabel(v)}. Saving makes a new version, which is scored right away.` : 'Writing the first prompt version.', {
+        version: v ? versionDetail(state, v) : null,
+        featureMissingness: missingnessView(state.snapshot),
+      });
     }
     default:
       return base(`Project ${state.project.name}.`, {steps: state.facts.approved});
@@ -285,7 +317,8 @@ function datasetStats(state: ProjectState) {
     // Per-value counts by half are aggregates: they name no example, so the held-out half stays unread.
     label: schema?.name ?? null,
     values: b?.values.map(v => ({value: v.value, goldLabeled: v.count, readableHalf: v.optimiser, heldOutHalf: v.heldOut, rare: v.rare, dominant: v.dominant})) ?? [],
-    note: 'Rare: fewer than 4 gold labels, or fewer than 2 in a half; one miss moves Macro-F1 a lot. Dominant: over 70% of the labeled examples.',
+    featureMissingness: missingnessView(state.snapshot),
+    note: 'Rare: fewer than 4 gold labels, or fewer than 2 in a half; one miss moves Macro-F1 a lot. Dominant: over 70% of the labeled examples. Feature missingness gives aggregate counts and rates per feature only (never example ids).',
   };
 }
 

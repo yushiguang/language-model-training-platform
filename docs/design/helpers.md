@@ -127,8 +127,10 @@ the user stops them from the page.
 **Reads added in 1.0.0** (spec 6.4, phase 3), for every preset:
 - `get_project_summary`: the steps done, the settings, the eval dataset in numbers (examples,
   gold-labeled, pending, removed) and the best version;
-- `get_dataset_stats`: the label balance per value and half, rare and dominant values (counts
-  only, so the held-out half stays unread);
+- `get_dataset_stats`: the label balance per value and half, rare and dominant values, and
+  aggregate feature missingness (per-type missing counts/rates and zero-feature exclusions, #48) —
+  counts only, no example ids, so the held-out half stays unread and unlocked; `dataset`,
+  `prompt_design` and `prompt_edit` page views carry the same `featureMissingness` aggregate;
 - `search_examples`: examples whose title or text features contain the words, from the readable
   half only, optionally only unlabeled ones;
 - `compare_versions`: which parts of two structured prompts differ, and their scores per value;
@@ -141,8 +143,8 @@ the user stops them from the page.
 - `get_running_work` (every helper): labeling, Optimiser runs, taking examples and data source
   imports that run now, how far each is, and where its Stop button is;
 - `get_upload_result` (every helper): the last label uploads (refused rows by row number and
-  reason, never their item ids, since one could be held out), what the item checks left out, and
-  what the data source files skipped;
+  reason, never their item ids, since one could be held out), what the item checks left out
+  (including items with no features, `noFeatures`), and what the data source files skipped;
 - `get_optimiser_run` (Prompt and Scores helpers): one run round by round: where each change
   started and why, the value it aimed at (`OptimiserRound.aimedAt`), the dry run, the outcome
   and what it means, and why the run stopped;

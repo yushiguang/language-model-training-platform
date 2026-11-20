@@ -144,7 +144,7 @@ export async function uploadResult(w: Scope, state: ProjectState) {
       state: f.state,
       ...(f.error ? {error: f.error} : {}),
     })),
-    note: 'Label uploads: a file of the wrong type or without the needed columns is refused as a whole (rejectedWholeFile); rows for items not in the dataset are skipped; refused rows give their row number and reason. Taking examples: the checks leave out items that no longer exist (missing), whose creator is a minor (minorCreator) or that cannot be publicly recommended (notRecommendable). Data source files: rows with no usable item id and repeated ids are skipped.',
+    note: 'Label uploads: a file of the wrong type or without the needed columns is refused as a whole (rejectedWholeFile); rows for items not in the dataset are skipped; refused rows give their row number and reason. Taking examples: the checks leave out items that no longer exist (missing), whose creator is a minor (minorCreator), that cannot be publicly recommended (notRecommendable), or that have no non-empty features (noFeatures). Data source files: rows with no usable item id and repeated ids are skipped.',
   };
 }
 

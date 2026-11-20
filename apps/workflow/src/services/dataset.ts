@@ -1,5 +1,5 @@
-import type {Answer, DatasetSnapshot, Example, ExampleMedia, ItemCheckCounts, GoldLabel, GoldUploadRefusal, GoldUploadResult, Job, JobControl, JobOutcome, RawExample, SamplingTask, Schema, SourcePick} from '@yushiguang/sprint-contracts';
-import {checksTotal, countProblem, hashString, newId, noChecks, readGoldAnswerWhy, systemConfig, readLabelFile, sameAnswer, type LabelFileRow} from '@yushiguang/sprint-domain';
+import type {Answer, DatasetSnapshot, Example, ExampleMedia, ExampleType, ItemCheckCounts, GoldLabel, GoldUploadRefusal, GoldUploadResult, Job, JobControl, JobOutcome, RawExample, SamplingTask, Schema, SourcePick} from '@yushiguang/sprint-contracts';
+import {checksTotal, countProblem, hasAnyFeature, hashString, newId, noChecks, readGoldAnswerWhy, systemConfig, readLabelFile, sameAnswer, type LabelFileRow} from '@yushiguang/sprint-domain';
 import {latestGold} from './evaluation.ts';
 import {now, type Scope} from './app.ts';
 import {appendExamples, frozenFacts, insertExamplesSettled, type NewExample} from './governance.ts';
@@ -49,7 +49,16 @@ export async function stopSampleDataset(w: Scope, projectId: string): Promise<vo
 
 type Taken = RawExample & {sourceId?: string; sourceFileId?: string; fetchedAt?: string};
 
-async function saveSnapshot(w: Scope, projectId: string, all: Taken[], source: DatasetSnapshot['source'], sourceName: string, invalid = 0, checks?: ItemCheckCounts): Promise<DatasetSnapshot> {
+async function saveSnapshot(
+  w: Scope,
+  projectId: string,
+  all: Taken[],
+  source: DatasetSnapshot['source'],
+  sourceName: string,
+  invalid = 0,
+  checks?: ItemCheckCounts,
+  zeroExcluded?: Partial<Record<ExampleType, number>>,
+): Promise<DatasetSnapshot> {
   const {catalog, user} = w;
   const prev = await catalog.find('dataset_snapshots', {projectId});
   const snapshotId = newId('ds');
@@ -88,7 +97,7 @@ async function saveSnapshot(w: Scope, projectId: string, all: Taken[], source: D
     },
     // Every valid example of a Prompt Tuning project is in the eval dataset (spec 1.0.0, 2.1).
     split: {eval: raws.length, test: 0, train: 0},
-    ...frozenFacts(null, raws),
+    ...frozenFacts(null, raws, zeroExcluded),
   };
   snap.counts.rows = all.length + invalid;
   // The snapshot is saved after its examples, so a half-saved upload is never picked up.
@@ -158,6 +167,11 @@ async function take(w: Scope, job: Job, ctl: JobControl, progress: JobControl['p
   const names: string[] = [];
   const raws: Taken[] = [];
   const checks = noChecks();
+  const zeroExcluded: Partial<Record<ExampleType, number>> = {};
+  const excludeZero = (type: ExampleType) => {
+    checks.noFeatures = (checks.noFeatures ?? 0) + 1;
+    zeroExcluded[type] = (zeroExcluded[type] ?? 0) + 1;
+  };
   // Set once the examples are in: a failure after it keeps the segments, since their items are.
   let saved = false;
   try {
@@ -167,8 +181,9 @@ async function take(w: Scope, job: Job, ctl: JobControl, progress: JobControl['p
       names.push((await catalog.get('data_sources', p.sourceId))?.name ?? p.sourceId);
       wanted.push(...items.map(i => ({...i, sourceId: p.sourceId})));
     }
-    // Materialise (#32): each batch is checked (gone, a creator under 18, not recommendable), then
-    // the usable items' features are fetched once and frozen with the dataset.
+    // Materialise (#32, #48): each batch is checked (gone, a creator under 18, not recommendable),
+    // then the usable items' features are fetched once and frozen with the dataset; items with zero
+    // non-empty features are excluded and counted.
     const batch = Math.max(1, systemConfig().dataset.featureBatch);
     for (let i = 0; i < wanted.length; i += batch) {
       if (ctl.signal.aborted) break;
@@ -186,10 +201,14 @@ async function take(w: Scope, job: Job, ctl: JobControl, progress: JobControl['p
       for (const x of usable) {
         const r = found.get(x.externalId);
         const c = checked?.get(x.externalId);
-        if (r) raws.push({...r, ...(c?.type ? {type: c.type} : {}), sourceId: x.sourceId, sourceFileId: x.fileId, fetchedAt});
-        // Checked as fine but no features came back: kept, with none (the item is there).
-        else if (c?.type) raws.push({externalId: x.externalId, type: c.type, title: x.externalId, features: {}, sourceId: x.sourceId, sourceFileId: x.fileId, fetchedAt});
-        else countProblem(checks, 'missing');
+        if (r) {
+          const type = c?.type ?? r.type;
+          if (hasAnyFeature(r.features)) raws.push({...r, type, sourceId: x.sourceId, sourceFileId: x.fileId, fetchedAt});
+          else excludeZero(type);
+        } else if (c?.type) {
+          // Checked as fine but lookup returned no features (#48): excluded instead of saved empty.
+          excludeZero(c.type);
+        } else countProblem(checks, 'missing');
       }
       fetched = Math.min(n, i + part.length);
       await progress({done: fetched, total: n});
@@ -214,8 +233,8 @@ async function take(w: Scope, job: Job, ctl: JobControl, progress: JobControl['p
     // cannot start empty, and the error says which checks left the items out.
     if (!raws.length && !append) throw new Error(checks.missing === notFound ? 'None of these items could be found. Check the data source file.' : `None of these items can be used: ${leftOutText(checks)}.`);
     await progress({done: n, total: n, saving: true});
-    if (append) await appendExamples(w, projectId, raws, 'sources', notFound, checks);
-    else await saveSnapshot(w, projectId, raws, 'sources', names.join(', '), notFound, checks);
+    if (append) await appendExamples(w, projectId, raws, 'sources', notFound, checks, zeroExcluded);
+    else await saveSnapshot(w, projectId, raws, 'sources', names.join(', '), notFound, checks, zeroExcluded);
     saved = true;
     ended('done');
     // Each segment records how many of its items went in: the examples actually saved. A record
@@ -239,7 +258,12 @@ async function take(w: Scope, job: Job, ctl: JobControl, progress: JobControl['p
 
 /** What the checks left out, in words: "2 not found, 1 from a creator under 18". */
 function leftOutText(c: ItemCheckCounts): string {
-  return [c.missing && `${c.missing} not found`, c.minorCreator && `${c.minorCreator} from a creator under 18`, c.notRecommendable && `${c.notRecommendable} not publicly recommendable`].filter(Boolean).join(', ');
+  return [
+    c.missing && `${c.missing} not found`,
+    c.minorCreator && `${c.minorCreator} from a creator under 18`,
+    c.notRecommendable && `${c.notRecommendable} not publicly recommendable`,
+    c.noFeatures && `${c.noFeatures} with no features`,
+  ].filter(Boolean).join(', ');
 }
 
 /** A call to the example service, tried twice more when it throws; the take fails after that. */
