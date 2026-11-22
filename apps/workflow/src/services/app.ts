@@ -101,6 +101,8 @@ export interface Instance extends WorkflowDeps, Connected {
     cannotBuild: Set<string>;
     /** Saved answers on the whole eval set, by version, model and settings (R5-5). */
     fullAnswers: Map<string, Map<string, Prediction>>;
+    /** Projects saved before `Project.tenantId` are given one once per instance, before the first read. */
+    tenantsBackfilled?: Promise<void>;
   };
   /** The scope one call runs in. */
   scope(ctx: RequestContext): Scope;

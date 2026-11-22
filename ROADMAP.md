@@ -9,7 +9,9 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 - **Server design for the reworked Prompt Tuning project** (#59). Permissions, a job queue with
   per-endpoint limits, bulk storage, a config module and notifications, delivered as the
   numbered pull requests in the issue. The design doc is merged (#60); step 1, the config
-  module, is in review (#61); step 2, permissions and tenant isolation, is next.
+  module, is merged (#61). Step 2, permissions and tenant isolation (#63), is in progress: its
+  contract change (project tenant, permission ports, the Optimiser's caller) first, then the
+  checks.
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
   tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are merged (see Done);
   step 3, action tools, is next, with their cards drawn on the UI design first.

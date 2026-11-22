@@ -12,6 +12,9 @@ where it matters, why. The code follows these; change a line here when a decisio
 - **Write-once bulk data goes to object storage** (feature snapshots, model answers, training sets); records that are queried or edited one by one stay in MySQL.
 - **Configuration moves to a config platform** read by string key with a local cache; job limits are config keys.
 - **Tenant configuration is read explicitly, never through a global** (#61): `systemConfig()` stays the synchronous process-level value, refreshed by `@yushiguang/sprint-config`; tenant keys are read only through `config.forTenant(tenantId)` on the workflow scope and the job control, so concurrent requests of two tenants cannot see each other's values. `TenantConfigPort` is removed: it had no caller, and its merged-struct shape could not be cached per key.
+- **Every project belongs to a tenant** (#63): `Project.tenantId` is required. Records saved before it belong to `DEFAULT_TENANT` (`default`, the tenant of a caller with none, as data sources already used); each workflow instance writes it once before its first read of projects.
+- **The Optimiser runs as the person who started the run** (#63), not as a fixed `optimiser` identity: `OptimiserContract.startRun` / `execute` / `stopRun` and every `OptimiserHost` call take the caller's context, and `execute` gets the `optimiser.run` job's. Its helper (`reflectPrompt`) is asked with the same context. Otherwise the permission checks would see a caller that holds no permission, or one that holds every tenant's.
+- **Permission writes go through `PermissionAdminPort`** (#63): members and roles of a tenant, project write grants. Idempotent, the caller's context first on every change; the in-process stand-in is `memoryPermissionAdmin`.
 
 ## 2026-11-20 (Dataset feature missingness and zero-feature exclusion, #48)
 

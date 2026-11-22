@@ -194,7 +194,8 @@
             "prompt_design",
             "dataset",
             "gold"
-          ]
+          ],
+          "tenantId": "org_a"
         }
       ]
     }
@@ -215,7 +216,8 @@
         "name": "Other",
         "settingsConfirmed": false,
         "setupVersionId": "$id:2",
-        "snapshotId": null
+        "snapshotId": null,
+        "tenantId": "org_a"
       }
     },
     {

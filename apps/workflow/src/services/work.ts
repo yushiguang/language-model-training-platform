@@ -191,7 +191,7 @@ export async function startOptimiser(w: Scope, projectId: string, maxRounds = sy
   if (!state || !endpoint) throw new Error('Pick a labeling model in Project Settings first.');
   // The Optimiser reads examples: the halves are fixed from here on (spec 1.0.0, 4.2).
   await lockHoldout(w, projectId);
-  const run = await optimiserService(w).startRun({projectId, endpoint, maxRounds, startVersionId, auto: opts.auto});
+  const run = await optimiserService(w).startRun(w.ctx, {projectId, endpoint, maxRounds, startVersionId, auto: opts.auto});
   await queueRun(w, projectId, run.id);
   return {runId: run.id};
 }
@@ -213,7 +213,7 @@ export async function stopOptimiser(w: Scope, projectId: string, runId: string):
   await runOf(w, projectId, runId);
   const jobs = (await activeJobs(w, projectId, ['optimiser.run'])).filter(j => j.args.runId === runId);
   for (const j of jobs) await w.jobs.cancel(w.ctx, j.id);
-  if (!jobs.length) await optimiserService(w).stopRun(runId);
+  if (!jobs.length) await optimiserService(w).stopRun(w.ctx, runId);
 }
 
 /** Retry on a Failed run, or Resume on a paused one: queues it again; it goes on from the step it stopped at. */

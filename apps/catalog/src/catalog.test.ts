@@ -25,7 +25,7 @@ test('catalog numbers prompt versions from what is stored: minors under the pare
 
 test('catalog patch changes only the given fields; findByIds returns the asked records', async () => {
   const c = createCatalog(localDocRuntime('cat-2'));
-  await c.insert('projects', {id: 'pr_1', name: 'P', createdAt: '', createdBy: 'me', setupVersionId: null, snapshotId: null, approvedNodes: []});
+  await c.insert('projects', {id: 'pr_1', tenantId: 'default', name: 'P', createdAt: '', createdBy: 'me', setupVersionId: null, snapshotId: null, approvedNodes: []});
   await c.patch('projects', 'pr_1', {snapshotId: 'ds_1'});
   await c.patch('projects', 'pr_1', {approvedNodes: ['prompt_design']});
   const p = await c.get('projects', 'pr_1');
@@ -61,7 +61,7 @@ test('frozen features (#32): exampleFeatures answers plain JSON that survives a 
     },
   } as typeof db;
   const c = createCatalog(watched);
-  await c.insert('projects', {id: 'pr_f', name: 'F', createdAt: '', createdBy: 'me', setupVersionId: null, snapshotId: 'ds_f', approvedNodes: []});
+  await c.insert('projects', {id: 'pr_f', tenantId: 'default', name: 'F', createdAt: '', createdBy: 'me', setupVersionId: null, snapshotId: 'ds_f', approvedNodes: []});
   await c.insert('dataset_snapshots', {id: 'ds_f', projectId: 'pr_f', number: 1, source: 'sources', sourceName: '', createdAt: '', counts: {rows: 3, valid: 3, invalid: 0, video: 3, photoText: 0}, split: null});
   const ids = ['a', 'b', 'c'];
   await c.insertMany('examples', ids.map(x => ({id: `ex_${x}`, snapshotId: 'ds_f', externalId: x, type: 'video' as const, title: '', split: 'eval' as const, optimiserHalf: false})));

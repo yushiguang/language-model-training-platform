@@ -1,8 +1,8 @@
-import {DocFieldValue, type GateApproval, type Job, type JobOutcome, type LabelComment, type NodeId, type Project, type ProjectState, type ProjectStatus, type WorkflowFacts} from '@yushiguang/sprint-contracts';
+import {DEFAULT_TENANT, DocFieldValue, type GateApproval, type Job, type JobOutcome, type LabelComment, type NodeId, type Project, type ProjectState, type ProjectStatus, type WorkflowFacts} from '@yushiguang/sprint-contracts';
 import {asAnswerOrNull, compareVersions, contextIdFor, gate, judge, newId, scoresUpdating, systemConfig} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {getSamplingTask} from './dataset.ts';
-import {datasetSources, retireCuts} from './sources.ts';
+import {datasetSources, retireCuts, tenantOf} from './sources.ts';
 import {latestGold} from './evaluation.ts';
 import {runView} from './views.ts';
 import {initSettings} from './settings.ts';
@@ -11,15 +11,31 @@ import {balanceHalves} from './governance.ts';
 
 export type {ProjectState};
 
+/**
+ * Projects saved before `Project.tenantId` existed belong to `DEFAULT_TENANT` (the tenant of a
+ * caller with none, as data sources use): written once per instance, before the first read of
+ * projects. Safe to run again and from two instances at once: both write the same value.
+ */
+export function backfillTenants(w: Scope): Promise<void> {
+  w.local.tenantsBackfilled ??= (async () => {
+    const old = (await w.catalog.find('projects', {})).filter(p => !p.tenantId);
+    for (const p of old) await w.catalog.patch('projects', p.id, {tenantId: DEFAULT_TENANT});
+  })();
+  // A failed write is tried again by the next read.
+  w.local.tenantsBackfilled.catch(() => (w.local.tenantsBackfilled = undefined));
+  return w.local.tenantsBackfilled;
+}
+
 /** Projects, newest first; one whose deletion was accepted is gone at once. */
 export async function listProjects(w: Scope): Promise<Project[]> {
+  await backfillTenants(w);
   return (await w.catalog.find('projects', {}, 'createdAt desc')).filter(p => !p.deleting);
 }
 
 export async function createProject(w: Scope, name: string): Promise<Project> {
   const {catalog, user} = w;
   const u = await user();
-  const p: Project = {id: newId('pr'), name: cleanName(name), createdAt: now(), createdBy: u.name, createdById: u.id, kind: 'prompt_tuning', settingsConfirmed: false, setupVersionId: null, snapshotId: null, approvedNodes: []};
+  const p: Project = {id: newId('pr'), tenantId: tenantOf(w), name: cleanName(name), createdAt: now(), createdBy: u.name, createdById: u.id, kind: 'prompt_tuning', settingsConfirmed: false, setupVersionId: null, snapshotId: null, approvedNodes: []};
   await catalog.insert('projects', p);
   // Project Settings start from defaults (the first active model, the default pass rule); the
   // user confirms them once, before the first paid run.
@@ -52,6 +68,7 @@ export async function renameProject(w: Scope, projectId: string, name: string): 
 }
 
 export async function getProject(w: Scope, id: string): Promise<Project | null> {
+  await backfillTenants(w);
   const p = await w.catalog.get('projects', id);
   return p && !p.deleting ? p : null;
 }

@@ -4,7 +4,10 @@ Auto Optimise: the GEPA loop ported to TypeScript (design: `docs/design/optimise
 `OptimiserContract` (`packages/contracts/src/optimiser-api.ts`): `startRun` (saves a run, or
 returns the open one), `execute` (runs or resumes it until it ends), `stopRun`, `getRun`,
 `listRuns`, `isRunning`. Owns the `optimisation_runs` records. `optimiserExecutor` (`executor.ts`)
-is the `optimiser.run` job: it calls `execute`, and a cancel is the user's Stop.
+is the `optimiser.run` job: it calls `execute` with the job's context, and a cancel is the user's
+Stop. A run goes on as that context (the person who started it, and the tenant): every
+`OptimiserHost` call and the helper's `reflectPrompt` carry it (#63), so the workflow checks them
+like any other call. There is no Optimiser identity of its own.
 
 - `src/optimiser.ts`: `createOptimiser(deps)`. One round picks a parent from the Pareto front,
   asks the agent runtime for a change (or a merge), checks it, dry-runs it, labels the eval set,

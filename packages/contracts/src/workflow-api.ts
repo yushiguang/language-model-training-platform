@@ -1,5 +1,5 @@
 import type {BffContract, RuntimeInfo} from './bff-api.ts';
-import type {RequestContext} from './platform-api.ts';
+import type {PermissionPoint, RequestContext} from './platform-api.ts';
 
 /**
  * Contract 6: the application module (`@yushiguang/sprint-workflow`, deployment readiness spec, 2).
@@ -36,5 +36,9 @@ export interface RpcRequest {
   args: unknown[];
 }
 
-/** A call's outcome: the result, or an error a client can show (`code` as in `errors.ts`). */
-export type RpcResponse = {result: unknown} | {error: {code: string; message: string}};
+/**
+ * A call's outcome: the result, or an error a client can show (`code` as in `errors.ts`).
+ * `permission`: the permission point an `AccessDeniedError` (`code: 'forbidden'`) was missing,
+ * so the page's "insufficient access" dialog can name it.
+ */
+export type RpcResponse = {result: unknown} | {error: {code: string; message: string; permission?: PermissionPoint}};

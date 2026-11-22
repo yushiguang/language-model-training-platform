@@ -1,3 +1,5 @@
+import type {PermissionPoint} from './platform-api.ts';
+
 /**
  * Shared error type for model calls. Platform adapters should throw `LlmCallError` so the gateway
  * can tell a busy endpoint (retry later) from a rejected request (never retry).
@@ -34,4 +36,20 @@ export function errorKindOf(e: unknown): LlmErrorKind {
     if (err.status >= 400 && err.status < 500) return 'rejected';
   }
   return 'server';
+}
+
+/**
+ * The caller lacks the permission point an action needs (docs/design/server.md, 2). Pages show the
+ * "insufficient access" dialog, whose button goes to the external permission platform. A project
+ * of another tenant is never this error: it reads as not existing.
+ */
+export class AccessDeniedError extends Error {
+  readonly code = 'forbidden';
+  readonly permission: PermissionPoint;
+
+  constructor(permission: PermissionPoint, message = 'You do not have access to do this.') {
+    super(message);
+    this.name = 'AccessDeniedError';
+    this.permission = permission;
+  }
 }

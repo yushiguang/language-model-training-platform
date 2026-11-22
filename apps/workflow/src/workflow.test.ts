@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {AccessDeniedError} from '@yushiguang/sprint-contracts';
 import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, CallerUser, DocumentSource, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, PageContext, RequestContext, TicketSubmission, WorkflowContract} from '@yushiguang/sprint-contracts';
 import {createCatalog} from '@yushiguang/sprint-catalog';
 import {createLabeling, memoryLocks} from '@yushiguang/sprint-labeling';
@@ -170,6 +171,9 @@ test('loopback: arguments, results and errors cross as JSON, as they would over 
       throw Object.assign(new Error('This version does not exist.'), {code: 'not_found'});
     },
     async nothing() {},
+    async denied() {
+      throw new AccessDeniedError('project_write');
+    },
   };
   const api = loopback(impl);
   const arg = {when: undefined, keep: 1};
@@ -179,6 +183,7 @@ test('loopback: arguments, results and errors cross as JSON, as they would over 
   assert.equal(arg.keep, 1, 'the caller gets a copy');
   await assert.rejects(api.fails(), (e: Error & {code?: string}) => e.message === 'This version does not exist.' && e.code === 'not_found');
   assert.equal(await api.nothing(), null);
+  await assert.rejects(api.denied(), (e: Error) => e instanceof AccessDeniedError && e.code === 'forbidden' && e.permission === 'project_write', 'a missing permission keeps its class and point');
 });
 
 test('the tool host enforces the guards (review P4): preset tools only, the turn\'s own project, no deleted project', async () => {
