@@ -12,8 +12,10 @@ functions in `packages/domain/src/config.ts`; this app does the I/O around them.
   - `start()` refreshes now, then every `refreshMs` (default 30 s) and on the port's pushes;
     `stop()` ends both.
   - `reader.forTenant(tenantId)`: `get(key)` reads `tenant.<tenantId>.<key>`, cached per key for
-    `ttlMs` (default 30 s); in an outage the last value read is used. `jobLimit(target)` walks
-    the lookup order and never throws.
+    `ttlMs` (default 30 s), one read per key at a time; in an outage the last value read is used
+    and the platform is not asked again for `retryMs` (default 5 s). A push marks the cache stale
+    but keeps the values, and a read or refresh that started before a newer one never overwrites
+    it. `jobLimit(target)` walks the lookup order and never throws.
 
 Who calls it: the composition root builds one per process when `Platform.configStore` is set and
 passes `reader` to the job module and the workflow.

@@ -80,3 +80,48 @@ test('tenant values are cached for the TTL, the old value is used in an outage, 
   config.stop();
   configureSystem();
 });
+
+test('a push keeps the old values for an outage; a failing platform is asked again only after retryMs', async () => {
+  let now = 0;
+  let calls = 0;
+  const inner = memoryConfig({'tenant.t1.jobs.limit.model': '3'});
+  const port = {...inner, get: (k: string) => (calls++, inner.get(k))};
+  const config = createConfig({port, ttlMs: 1000, retryMs: 500, clock: () => now});
+  const t1 = config.reader.forTenant('t1');
+  assert.equal(await t1.jobLimit(model('m')), 3);
+  await config.start();
+  inner.down(true);
+  inner.set('tenant.t2.jobs.limit.model', '9');
+  assert.equal(await t1.get('jobs.limit.model'), '3', 'a push followed by an outage keeps the old value');
+  assert.equal(await t1.jobLimit(model('m')), 3);
+  const before = calls;
+  assert.equal(await t1.jobLimit(model('m')), 3);
+  assert.equal(calls, before, 'within retryMs the platform is not asked again');
+  now = 600;
+  await t1.jobLimit(model('m'));
+  assert.equal(calls, before + 2, 'after retryMs it is (both keys of the lookup)');
+  config.stop();
+  configureSystem();
+});
+
+test('reads of one key share one call; an older refresh that lands last is dropped', async () => {
+  let calls = 0;
+  const gates: Array<(v: Record<string, string | null>) => void> = [];
+  const port = {
+    get: async () => (calls++, await new Promise<string | null>(r => setTimeout(() => r('2'), 5))),
+    getMany: () => new Promise<Record<string, string | null>>(r => gates.push(r)),
+  };
+  const config = createConfig({port});
+  const t1 = config.reader.forTenant('t1');
+  assert.deepEqual(await Promise.all([t1.get('x'), t1.get('x')]), ['2', '2']);
+  assert.equal(calls, 1);
+
+  const first = config.refresh();
+  const second = config.refresh();
+  gates[1]({'jobs.limit.compute': '7'});
+  assert.equal(await second, true);
+  gates[0]({'jobs.limit.compute': '3'});
+  assert.equal(await first, false);
+  assert.equal(systemConfig().jobs.limit.compute, 7, 'the newer answer stays in force');
+  configureSystem();
+});

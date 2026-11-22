@@ -79,6 +79,25 @@ function leaves(node: unknown, prefix: string, out: Array<[string, unknown]>): A
 /** Every process-level key, in a fixed order. */
 export const systemConfigKeys = (): string[] => leaves(DEFAULT_SYSTEM_CONFIG, '', []).map(([k]) => k);
 
+const TIERS = new Set(['fast', 'balanced', 'reasoning']);
+const isLimitNumber = (x: unknown) => typeof x === 'number' && Number.isFinite(x) && x >= 0;
+const isModelLimits = (x: unknown) => isPlain(x) && TIERS.has(x.tier as string) && isLimitNumber(x.qpm) && isLimitNumber(x.tpm) && isLimitNumber(x.maxConcurrency);
+
+/**
+ * Keys whose values need more than their type: the job limits are whole numbers of at least 1,
+ * a model tier is one of three, and every entry of the assumed limits is a whole `ModelLimits`,
+ * since the gateway reads them without checking again.
+ */
+const STRICT: Record<string, (raw: string) => unknown> = {
+  'jobs.limit.model': raw => parseJobLimit(raw) ?? undefined,
+  'jobs.limit.compute': raw => parseJobLimit(raw) ?? undefined,
+  'gateway.unknownModelLimits.tier': raw => (TIERS.has(raw.trim()) ? raw.trim() : undefined),
+  'gateway.assumedLimits': raw => {
+    const v = parseLike({}, raw);
+    return isPlain(v) && Object.values(v).every(isModelLimits) ? v : undefined;
+  },
+};
+
 /** `raw` parsed like `sample` (the default), or undefined when it is not a valid value of that type. */
 function parseLike(sample: unknown, raw: string): unknown {
   if (typeof sample === 'number') {
@@ -107,7 +126,7 @@ export function parseSystemConfig(values: Record<string, string | null | undefin
   for (const [key, sample] of leaves(DEFAULT_SYSTEM_CONFIG, '', [])) {
     const raw = values[key];
     if (raw === null || raw === undefined) continue;
-    const v = parseLike(sample, raw);
+    const v = STRICT[key] ? STRICT[key](raw) : parseLike(sample, raw);
     if (v === undefined) {
       invalid.push(key);
       continue;

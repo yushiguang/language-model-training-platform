@@ -69,3 +69,12 @@ test('job limits: tenant endpoint, then tenant model, then the process value; co
   assert.equal(await reader.forTenant(undefined).jobLimit({kind: 'compute'}), 3);
   configureSystem();
 });
+
+test('config values: job limits, tiers and assumed limits are checked beyond their type', async () => {
+  const {parseSystemConfig} = await import('./index.ts');
+  for (const bad of ['0', '-1', '1.5']) assert.deepEqual(parseSystemConfig({'jobs.limit.model': bad, 'jobs.limit.compute': bad}).invalid.sort(), ['jobs.limit.compute', 'jobs.limit.model'], bad);
+  assert.deepEqual(parseSystemConfig({'gateway.unknownModelLimits.tier': 'slow'}).invalid, ['gateway.unknownModelLimits.tier']);
+  assert.deepEqual(parseSystemConfig({'gateway.assumedLimits': '{"gpt-5.4": "bad"}'}).invalid, ['gateway.assumedLimits']);
+  assert.deepEqual(parseSystemConfig({'gateway.assumedLimits': '{"m": {"tier": "fast", "qpm": 100}}'}).invalid, ['gateway.assumedLimits']);
+  assert.deepEqual(parseSystemConfig({'jobs.limit.model': '2'}).overrides, {jobs: {limit: {model: 2}}});
+});

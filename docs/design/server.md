@@ -239,7 +239,7 @@ export interface ConfigReader {
 ### 7.2 key 和值
 
 - `SystemConfig` 每个叶子对应一个 key，就是它的点号路径，例如 `labeling.maxFailedShare`、`gateway.unknownModelLimits.tier`。key 不固定的映射整体是一个 key：`gateway.assumedLimits`，值是 JSON。
-- 值按默认值的类型解析：数字、字符串、JSON（数组和 `gateway.assumedLimits`）。解析不了的值被忽略，用下一层的值，并通过 `onProblem` 报出来；一个坏值不影响其他 key。
+- 值按默认值的类型解析：数字、字符串、JSON（数组和 `gateway.assumedLimits`）。有几项查得更严：`jobs.limit.model` / `jobs.limit.compute` 必须是不小于 1 的整数，`gateway.unknownModelLimits.tier` 只能是 `fast` / `balanced` / `reasoning`，`gateway.assumedLimits` 的每一项都要有合法的 `tier` 和非负的 `qpm` / `tpm` / `maxConcurrency`。解析不了的值被忽略，用下一层的值，并通过 `onProblem` 报出来；一个坏值不影响其他 key。
 - `SystemConfig` 新增 `jobs.limit.model`（默认 1）和 `jobs.limit.compute`（默认 10）。
 - 规则都是 `packages/domain/src/config.ts` 里的纯函数：`systemConfigKeys`、`parseSystemConfig`、`tenantKey`、`jobLimitKeys`、`parseJobLimit`、`processConfigReader`。
 
@@ -248,7 +248,7 @@ export interface ConfigReader {
 配置模块是新应用 `apps/config`（`@yushiguang/sprint-config`），`createConfig({port, base, ttlMs, refreshMs, onProblem})`：
 
 - **进程级的值**：`refresh()` 读所有进程级 key（有 `getMany` 就一次读完），按“默认值 → `Platform.config` → 配置平台”的顺序合并，再通过 `configureSystem` 生效。`start()` 立刻刷新一次，之后每 30 秒一次，配置平台推送时也刷新。读失败时保留现在生效的值。`systemConfig()` 仍然无参、同步，`packages/domain` 不做 I/O。
-- **租户级覆盖**：只能显式按租户读。工作流的 `Scope` 上是 `w.config.forTenant(w.ctx.tenantId)`，任务执行器拿到的 `JobControl` 上是 `ctl.config.forTenant(job.ctx.tenantId)`。不在请求里改全局值，避免并发请求之间串租户。每个 key 缓存 30 秒（`ttlMs`），配置平台出错时用缓存里的旧值。
+- **租户级覆盖**：只能显式按租户读。工作流的 `Scope` 上是 `w.config.forTenant(w.ctx.tenantId)`，任务执行器拿到的 `JobControl` 上是 `ctl.config.forTenant(job.ctx.tenantId)`。不在请求里改全局值，避免并发请求之间串租户。每个 key 缓存 30 秒（`ttlMs`），同一个 key 同时只发一次读取。配置平台出错时用缓存里的旧值，5 秒（`retryMs`）内不再去问它。配置平台推送变更时只把缓存标为过期、不删旧值，所以推送后紧接着故障也还有旧值可用；推送前发出的读取不会把更旧的结果写回缓存，较早发出但较晚返回的 `refresh()` 也会被丢弃。
 - 没有注入配置模块时（测试、没有 `configStore` 的部署），`createJobs` 和 `createWorkflow` 用 `processConfigReader()`：租户没有自己的值，只用进程级的值。
 - 组合根（`apps/web/src/backend-api/in-process.ts`）在有 `configStore` 时建一个配置模块，把 `reader` 传给任务模块和工作流。
 
