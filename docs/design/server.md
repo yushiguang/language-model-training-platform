@@ -159,6 +159,7 @@ COMMIT;
 ### 5.4 代码改动
 
 - `JobRequest` 加 `concurrencyKey`，由入队方按第 5.1 节算出。
+- `JobRequest` 加 `finally?: JobRequest`：任务以任何终态（完成、失败、取消）结束时都入队它；现有的 `then` 仍然只在完成时触发。优化器的链式推进（第 4.4 节）靠它，这样没有定时巡检的浏览器端和测试里，打标失败或被取消后优化器也能转入 Failed / 已停止。打标任务被停止时的终态统一为 `cancelled`（现在返回 `paused`），在第 5 步对齐。
 - `JobStorePort.claimNext` 改为按键限并发：参数加上限查询函数，MySQL 实现用上面的 SQL；内存替身按同样的规则实现，并补一致性测试。
 - `JobStorePort` 加 `countAhead(concurrencyKey, createdAt): Promise<number>`，用 `jobs(concurrency_key, state, created_at)` 索引直接查排队位置，不用 `find` 扫。
 - 现在的打标状态 `needs_attention` 在页面上统一显示为 Failed。
@@ -205,7 +206,7 @@ export interface ObjectStorePort {
 
 ```ts
 export interface ConfigPort {
-  /** 没配置的 key 返回 null，从不抛错。 */
+  /** 没配置的 key 返回 null（不抛“找不到”类错误）；配置平台不可用、超时或读取出错时抛错，由 Sprint 的缓存层接住并继续用旧值。 */
   get(key: string): Promise<string | null>;
   /** 可选：一次读多个 key，用于启动和定时刷新。 */
   getMany?(keys: string[]): Promise<Record<string, string | null>>;
@@ -251,7 +252,7 @@ export interface ConfigPort {
 | --- | --- |
 | `Project.tenantId` | 破坏性：现有记录要迁移 |
 | `PermissionAdminPort`；`AuthorizationRequest.permission` | 新增 |
-| `JobRequest.concurrencyKey`、`claimNext` 按键限并发、`countAhead` | 破坏性：部署方的 `JobStorePort` 要改 |
+| `JobRequest.concurrencyKey` 和 `finally`、`claimNext` 按键限并发、`countAhead` | 破坏性：部署方的 `JobStorePort` 要改 |
 | `ConfigPort`（`get`，可选 `getMany` / `subscribe`），移除 `TenantConfigPort` | 破坏性 |
 | `NotificationPort`（尽力而为） | 新增 |
 | `OptimiserContract.startRun` / `execute` / `stopRun`、`OptimiserHost` 每次调用和 `reflectPrompt` 带调用方上下文 | 破坏性（第 2 步） |
@@ -266,7 +267,7 @@ export interface ConfigPort {
 
 1. 配置模块：`ConfigPort` 和替身，进程级刷新、`config.forTenant`。
 2. 权限和租户隔离：`Project.tenantId`、`createWorkflow` 读写都接入 `AuthorizationPort`、按租户过滤和校验、系统调用方规则、接口权限点表、`PermissionAdminPort`。同一步把调用方上下文传给优化器（`OptimiserContract.startRun` / `execute` / `stopRun`、`OptimiserHost`、`reflectPrompt`），否则这一步合并后优化器会被权限校验拒绝。放在任务队列前面，因为并发键要用到项目的租户。
-3. 任务队列：`concurrencyKey`、按键限并发的 `claimNext`、排队位置、失败状态统一。
+3. 任务队列：`concurrencyKey`、`finally`（任何终态都续链）、按键限并发的 `claimNext`、排队位置、失败状态统一。
 4. 模型和网关：模型按租户读取、请求带 `tenantId`、限流键改为“租户 + endpoint”。
 5. 优化器改为按 `(runId, round, step)` 推进的链式任务：每个打标阶段入队，巡检识别等打标的运行，Stop 取消排队中和运行中的打标。
 6. 通知端口。
