@@ -248,3 +248,14 @@ test('list and get read through the store: by project, kind and state, newest fi
   j.state = 'done';
   assert.equal((await jobs.api.get(ctx(), j.id))?.state, 'queued');
 });
+
+test('an executor reads configuration for the job tenant through its control', async () => {
+  const seen: number[] = [];
+  const config = {forTenant: (tenantId: string | undefined) => ({get: async () => null, jobLimit: async () => (tenantId === 't1' ? 7 : 1)})};
+  const jobs = createJobs({store: memoryJobStore(), config});
+  jobs.register({kind: 'report.build', run: async (job, ctl) => (seen.push(await ctl.config.forTenant(job.ctx.tenantId).jobLimit({kind: 'compute'})), {state: 'done'})});
+  await jobs.api.enqueue(ctx('t1'), {kind: 'report.build', projectId: null, args: {}});
+  await jobs.api.enqueue(ctx(), {kind: 'report.build', projectId: null, args: {}, idempotencyKey: 'b'});
+  await jobs.idle();
+  assert.deepEqual(seen.sort(), [1, 7]);
+});

@@ -1,5 +1,5 @@
-import {NO_TELEMETRY, type Job, type JobContext, type JobControl, type JobExecutor, type JobKind, type JobOutcome, type JobProgress, type JobRequest, type JobsContract, type JobStorePort, type RequestContext, type TelemetryPort} from '@yushiguang/sprint-contracts';
-import {newId} from '@yushiguang/sprint-domain';
+import {NO_TELEMETRY, type ConfigReader, type Job, type JobContext, type JobControl, type JobExecutor, type JobKind, type JobOutcome, type JobProgress, type JobRequest, type JobsContract, type JobStorePort, type RequestContext, type TelemetryPort} from '@yushiguang/sprint-contracts';
+import {newId, processConfigReader} from '@yushiguang/sprint-domain';
 
 /**
  * The job module (`@yushiguang/sprint-jobs`, deployment readiness spec, 3): one way to run every piece of
@@ -29,6 +29,8 @@ export interface JobsDeps {
   /** Start queued jobs in this process as soon as they are enqueued here (default true). */
   runOnEnqueue?: boolean;
   telemetry?: TelemetryPort;
+  /** Configuration for the executors (`JobControl.config`). Default: process-level values only. */
+  config?: ConfigReader;
   clock?: () => number;
 }
 
@@ -73,6 +75,7 @@ export function createJobs(deps: JobsDeps): Jobs {
   const runOnEnqueue = deps.runOnEnqueue ?? true;
   const tm = deps.telemetry ?? NO_TELEMETRY;
   const clock = deps.clock ?? Date.now;
+  const config = deps.config ?? processConfigReader();
   const nowIso = () => new Date(clock()).toISOString();
 
   const executors = new Map<JobKind, JobExecutor>();
@@ -179,6 +182,7 @@ export function createJobs(deps: JobsDeps): Jobs {
         emit();
       },
       cancelled: () => r.cancelled,
+      config,
     };
     emit();
     void (async () => {

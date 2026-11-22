@@ -62,11 +62,11 @@ test('a release that failed halfway resumes: a re-run skips what was published a
   // The re-run says what it skipped and ends with every package there exactly once.
   const out = run();
   assert.match(out, /Skipped @test\/contracts@1\.2\.0: already published\./);
-  assert.match(out, /Published 6, skipped 5 already published/);
+  assert.match(out, /Published 7, skipped 5 already published/);
   const all = JSON.parse(readFileSync(registry, 'utf8')).published;
   assert.equal(all.length, PUBLISHED.length);
   assert.equal(new Set(all).size, PUBLISHED.length);
 
   // A third run publishes nothing.
-  assert.match(run(), /Published 0, skipped 11 already published/);
+  assert.match(run(), /Published 0, skipped 12 already published/);
 });

@@ -24,6 +24,7 @@ version, by the `Release packages` workflow:
 | `@yushiguang/sprint-workflow` | `createWorkflow`, `systemContext` |
 | `@yushiguang/sprint-bff` | `createBffApi` |
 | `@yushiguang/sprint-telemetry` | `createTelemetry` |
+| `@yushiguang/sprint-config` | `createConfig` |
 
 Each package is compiled JavaScript (ES modules) with type declarations, and depends on the exact
 same version of the others it uses. To install, point the scope at GitHub Packages with a token
@@ -77,6 +78,7 @@ Your module exports `createPlatform()` returning the `Platform` object from
 | `limiterStore?: LimiterStorePort` | The gateway's rate-limit counts for every endpoint (`platform-api.ts`, spec 5), as whole atomic operations per endpoint: try to acquire (sliding QPM/TPM window, calls in flight, one FIFO queue of expiring tickets, hold after a busy reply), release, renew a permit's lease, leave the queue, penalize, stats. A Redis script per operation on one key per endpoint; prefer the store's own clock over the caller's `now` | `memoryLimiterStore` (memory of one process); not set: the composition root uses the same |
 | `jobStore?: JobStorePort` | Where background jobs are kept (`packages/contracts/src/jobs-api.ts`), as whole atomic operations so several runners never take the same job: enqueue once per idempotency key among queued and running jobs, claim the next job with a lease (fair across tenants), heartbeat, finish, requeue, cancel, and recover expired leases. Redis (SET NX PX and a script per operation) or SQL with conditional updates | `memoryJobStore` (memory of one process); not set: the composition root uses the same |
 | `lockStore?: LockStorePort` | Where named locks are kept (`platform-api.ts`), as whole atomic operations per lock name so one labeling task, one prediction and one Optimiser run have one runner in every process: acquire for an owner until its lease ends, renew and release only for that owner, `isHeld` only while a lease lasts. Redis (acquire as `SET NX PX`, the rest as a script per operation) or SQL with conditional updates; prefer the store's own clock over the caller's `now`. **Required for any deployment with more than one process** (BFF replicas plus a worker unit, a second worker unit): without it each process locks only for itself, a BFF replica reads a worker's running task as abandoned, and two runners can pay for the same example (issue #46). A server composition root turns it into the apps' locks with `leaseLocks` (below) | `memoryLockStore` (memory of one process); not set: a composition root locks in one process (`browserLocks` / `memoryLocks`), right for the browser build and one server process |
+| `configStore?: ConfigPort` | The configuration platform (`platform-api.ts`; `docs/design/server.md`, 7): `get(key)` gives the string value of a logical key such as `labeling.maxFailedShare` or `tenant.<tenantId>.jobs.limit.model`, **null when it is not set**, and **throws** when the platform is down, times out or fails, so the cache keeps the value it had. Optional `getMany(keys)` (one read for the periodic refresh) and `subscribe(onChange)` (pushed changes). A platform that wants keys registered up front can keep every logical key in one JSON map key and read it inside the adapter | `memoryConfig` (a map in the page); not set: only `config` applies |
 | `standIns: string[]` | Names shown in the header while any stand-in is in use; empty in production | all |
 
 ## The page client: `@yushiguang/sprint-client-impl`
@@ -100,7 +102,7 @@ imports it and wraps it without reaching into `src/` paths: `createGateway` (`@y
 `createCatalog` (`@yushiguang/sprint-catalog`), `createLabeling` with `memoryLocks` and `browserLocks`
 (`@yushiguang/sprint-labeling`), `createAgentRuntime` (`@yushiguang/sprint-agents`), `createOptimiser`
 (`@yushiguang/sprint-optimiser`), `createWorkflow` and `systemContext` (`@yushiguang/sprint-workflow`), `createBffApi`
-(`@yushiguang/sprint-bff`), `createTelemetry` (`@yushiguang/sprint-telemetry`), and the stand-ins plus `loopback`
+(`@yushiguang/sprint-bff`), `createTelemetry` (`@yushiguang/sprint-telemetry`), `createConfig` (`@yushiguang/sprint-config`), and the stand-ins plus `loopback`
 (`@yushiguang/sprint-platform`). `in-process.ts` is the worked example of wiring them.
 
 `createLabeling`'s `resolveUrl` turns a stored image URL into one the model can fetch. It may
@@ -126,6 +128,14 @@ labeling and also pass labeling `liveElsewhere`, answered from `jobs.api.list` a
 root does (a queued or running `labeling.runTask` job by task id, or an `optimiser.run` job by
 project for an optimiser-purpose task): a task that is live as job work is then never read as
 abandoned either, even by a unit whose locks cannot see the runner.
+
+Configuration in a server composition root: when the platform has a `configStore`, build
+`createConfig({port: platform.configStore, base: platform.config})` once per process, call
+`configureSystem(platform.config)` first and then `await config.start()` (it reads every
+process-level key, puts it in force with `configureSystem`, and refreshes every 30 s and on
+pushed changes), and pass `config.reader` as `config` to `createJobs` and `createWorkflow`, as
+the in-process root does. Executors then read `ctl.config.forTenant(job.ctx.tenantId)`, workflow
+services `w.config.forTenant(w.ctx.tenantId)`. `stop()` before the process exits.
 
 ## Endpoints and limits
 

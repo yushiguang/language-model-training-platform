@@ -1,9 +1,7 @@
-import type {AuthorizationPort, TenantConfigPort} from '@yushiguang/sprint-contracts';
+import type {AuthorizationPort} from '@yushiguang/sprint-contracts';
 
 /**
- * Single-tenant stand-ins for the enterprise ports: one tenant with no overrides, and every action
- * allowed. (The job store's stand-in is `memoryJobStore`.)
+ * Single-tenant stand-in for the permission port: every action allowed. (The job store's
+ * stand-in is `memoryJobStore`, the configuration platform's `memoryConfig`.)
  */
-export const singleTenantConfig = (): TenantConfigPort => ({configFor: async () => ({})});
-
 export const allowAll = (): AuthorizationPort => ({allowed: async () => true});

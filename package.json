@@ -16,6 +16,7 @@
     "apps/workflow",
     "apps/bff",
     "apps/telemetry",
+    "apps/config",
     "apps/web"
   ],
   "scripts": {

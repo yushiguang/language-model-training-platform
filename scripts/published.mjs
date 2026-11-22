@@ -14,4 +14,5 @@ export const PUBLISHED = [
   'apps/workflow',
   'apps/bff',
   'apps/telemetry',
+  'apps/config',
 ];

@@ -119,11 +119,17 @@ changes either way.
 
 `SystemConfig` (`packages/contracts/src/config.ts`) holds every threshold, limit and estimate,
 grouped by area; the defaults are `DEFAULT_SYSTEM_CONFIG` in `packages/domain/src/config.ts`.
-Code reads `systemConfig()` at the time of use. A hosting adapter overrides any value through
-`Platform.config`, merged over the defaults at startup. `Platform` also has optional ports for
-per-tenant configuration and permission checks (`RequestContext`, `TenantConfigPort`,
-`AuthorizationPort`), with single-tenant stand-ins, and a job store (`JobStorePort`, stand-in
-`memoryJobStore`).
+Code reads `systemConfig()` at the time of use; it stays synchronous and pure. Values come in
+three layers: the defaults, `Platform.config` (fixed overrides), and the configuration platform
+(`Platform.configStore`, a `ConfigPort`), one string key per leaf such as
+`labeling.maxFailedShare`. The config module (`@yushiguang/sprint-config`) reads the platform,
+refreshes the process-level values every 30 s and applies them with `configureSystem`; when the
+platform fails it keeps what it had. Tenant overrides are read explicitly, never through a
+global: workflow services call `w.config.forTenant(w.ctx.tenantId)` and job executors
+`ctl.config.forTenant(job.ctx.tenantId)`. Today only the job concurrency limits have tenant
+keys (`TenantConfig.jobLimit`, lookup order in `docs/design/server.md`, 7). `Platform` also has
+an optional permission port (`AuthorizationPort`, stand-in `allowAll`) and a job store
+(`JobStorePort`, stand-in `memoryJobStore`).
 
 ### Background work is jobs (deployment readiness spec, 3)
 

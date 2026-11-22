@@ -654,9 +654,51 @@ export interface LimiterStorePort {
   stats(key: string, limits: LimiterLimits, now: number): Promise<LimiterStats>;
 }
 
-/** Per-tenant overrides of the system configuration. */
-export interface TenantConfigPort {
-  configFor(ctx: RequestContext): Promise<DeepPartial<SystemConfig>>;
+/**
+ * The configuration platform (docs/design/server.md, 7): string keys to string values. Keys are
+ * Sprint's logical keys (`labeling.maxFailedShare`, `tenant.<tenantId>.jobs.limit.model`); an
+ * adapter whose platform wants keys registered up front may keep them all in one JSON map key.
+ * Sprint caches what it reads (`@yushiguang/sprint-config`), so a slow or failing platform never
+ * stops a call.
+ */
+export interface ConfigPort {
+  /**
+   * The value of `key`, or null when it is not set (never a "not found" error). Throws when the
+   * platform is down, times out or fails to read: the cache then keeps the value it had.
+   */
+  get(key: string): Promise<string | null>;
+  /** Optional: several keys in one read (start-up and the periodic refresh). Same rules as `get`. */
+  getMany?(keys: string[]): Promise<Record<string, string | null>>;
+  /** Optional: the platform pushes changes; `onChange` drops the cache. Returns the unsubscribe. */
+  subscribe?(onChange: () => void): () => void;
+}
+
+/** Which job concurrency limit: a model task on one endpoint, or a compute-only task. */
+export type JobLimitTarget = {kind: 'model'; endpointId: string} | {kind: 'compute'};
+
+/** One tenant's view of the configuration: its own keys first, then the process-level values. */
+export interface TenantConfig {
+  /**
+   * The tenant's value of `key` (read as `tenant.<tenantId>.<key>`), or null when it has none.
+   * During an outage it gives the value last read; it throws only when it never read one.
+   */
+  get(key: string): Promise<string | null>;
+  /**
+   * The concurrency limit for a job (docs/design/server.md, 7). Model tasks:
+   * `tenant.<id>.jobs.limit.endpoint.<endpointId>`, then `tenant.<id>.jobs.limit.model`, then
+   * `jobs.limit.model`. Compute tasks: `tenant.<id>.jobs.limit.compute`, then `jobs.limit.compute`.
+   * The first valid one wins. Never throws.
+   */
+  jobLimit(target: JobLimitTarget): Promise<number>;
+}
+
+/**
+ * Reads configuration for one tenant, explicitly: there is no per-request global, so two
+ * requests of two tenants never see each other's values. Without a tenant, only the
+ * process-level values apply.
+ */
+export interface ConfigReader {
+  forTenant(tenantId: string | undefined): TenantConfig;
 }
 
 export interface AuthorizationRequest {
@@ -700,8 +742,12 @@ export interface Platform {
    * a hosting adapter tunes them without code edits.
    */
   config?: DeepPartial<SystemConfig>;
-  /** Per-tenant configuration. Optional: without it every tenant gets `config`. */
-  tenantConfig?: TenantConfigPort;
+  /**
+   * The configuration platform (docs/design/server.md, 7). Its values go over `config`, which
+   * goes over the defaults; tenant keys override the job limits. Optional: without it only
+   * `config` applies (stand-in: `memoryConfig`).
+   */
+  configStore?: ConfigPort;
   /** Permission checks. Optional: without it every signed-in user may do everything. */
   authorization?: AuthorizationPort;
   /**
