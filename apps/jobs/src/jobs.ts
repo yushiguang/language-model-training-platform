@@ -95,6 +95,9 @@ export function createJobs(deps: JobsDeps): Jobs {
   const jobId = () => `job_${clock().toString(36).padStart(9, '0')}${(seq++ % 1296).toString(36).padStart(2, '0')}${newId('').slice(1, 9)}`;
 
   let draining = false;
+  /** Drain passes ended, and jobs claimed, so far: `idle()` sees a pass that took nothing. */
+  let passes = 0;
+  let claimed = 0;
   let again = false;
 
   function contextOf(ctx: RequestContext | JobContext): JobContext {
@@ -115,8 +118,15 @@ export function createJobs(deps: JobsDeps): Jobs {
     return config.forTenant(parsed.tenantId).jobLimit(parsed.target);
   }
 
-  async function enqueue(ctx: RequestContext | JobContext, req: JobRequest): Promise<Job> {
+  /** Refuses a request whose key, or the key of anything it chains, is not a concurrency key. */
+  function checkKeys(req: JobRequest) {
     if (!parseConcurrencyKey(req.concurrencyKey)) throw new Error(`Not a job concurrency key: "${req.concurrencyKey}".`);
+    if (req.then) checkKeys(req.then);
+    if (req.finally) checkKeys(req.finally);
+  }
+
+  async function enqueue(ctx: RequestContext | JobContext, req: JobRequest): Promise<Job> {
+    checkKeys(req);
     const job: Job = {
       id: jobId(),
       kind: req.kind,
@@ -242,7 +252,6 @@ export function createJobs(deps: JobsDeps): Jobs {
       const ended = await finish(job, outcome);
       tm.histogram('sprint_job_duration_seconds', (clock() - startedAt) / 1000, {job_kind: job.kind});
       tm.counter('sprint_jobs_ended_total', {job_kind: job.kind, outcome: ended === 'error' ? 'store_error' : ended ? ended.state : 'lost'});
-      done();
       // The chained job follows work that ended done. A lost lease queues nothing: the runner
       // that took the job over chains it. When the store kept failing, the job stays running
       // until its lease ends; the sweep then runs it again, and that run chains. On the job's
@@ -252,6 +261,9 @@ export function createJobs(deps: JobsDeps): Jobs {
       // The end that this runner saved (a lost lease or a store that kept failing saved none:
       // the runner that took over, or the sweep that fails the job, queues it).
       if (ended && ended !== 'error') await afterEnd(ended);
+      // Only now: what follows is in the store before this runner counts the job gone, wakes
+      // `idle()` and drains again.
+      done();
     })();
     function done() {
       clearInterval(timer);
@@ -284,6 +296,7 @@ export function createJobs(deps: JobsDeps): Jobs {
           while (running.size < concurrency) {
             const job = await store.claimNext([...executors.keys()], owner, leaseMs, nowIso(), limitOf);
             if (!job) break;
+            claimed++;
             start(job);
           }
         } while (again);
@@ -291,6 +304,7 @@ export function createJobs(deps: JobsDeps): Jobs {
         // The store did not answer: the next enqueue, poll or sweep tries again.
       } finally {
         draining = false;
+        passes++;
         emit();
       }
     })();
@@ -339,11 +353,16 @@ export function createJobs(deps: JobsDeps): Jobs {
       return () => clearInterval(t);
     },
     async idle() {
+      // The drain this call started, and the claims before it: a whole pass that took nothing
+      // means what is queued waits for a key's limit (another runner holds it), not for us.
+      let mine: {pass: number; claimed: number} | null = null;
       for (;;) {
         if (!running.size && !draining) {
           const now = nowIso();
           const queued = await store.find({states: ['queued']});
           if (!queued.some(j => executors.has(j.kind) && (!j.notBefore || j.notBefore <= now))) return;
+          if (mine && passes > mine.pass && claimed === mine.claimed) return;
+          mine = {pass: passes, claimed};
           drain();
         }
         await new Promise<void>(resolve => {

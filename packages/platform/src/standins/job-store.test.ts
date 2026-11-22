@@ -56,6 +56,14 @@ export function jobStoreCases(name: string, make: () => JobStorePort | Promise<J
     assert.deepEqual(ids, ['a_1', 'b_1', 'a_2', 'a_3'], "b's one job does not wait behind a's queue");
   });
 
+  test(`${name}: turns stay strict when claims share one moment`, async () => {
+    const s = await make();
+    await fill(s, ['a_1', 'a_2', 'a_3', 'b_1', 'b_2', 'b_3'].map((id, i) => job(id, `compute:${id[0]}`, at(i), 'report.build')));
+    const ids = [];
+    for (let i = 0; i < 6; i++) ids.push((await claim(s, at(100), limits({}, 10)))?.id);
+    assert.deepEqual(ids, ['a_1', 'b_1', 'a_2', 'b_2', 'a_3', 'b_3']);
+  });
+
   test(`${name}: within a key, by creation time and then id; only due jobs of the asked kinds`, async () => {
     const s = await make();
     await fill(s, [
@@ -104,7 +112,7 @@ export function jobStoreCases(name: string, make: () => JobStorePort | Promise<J
   test(`${name}: enqueueOnce keeps one active job per idempotency key, across keys`, async () => {
     const s = await make();
     const a = await s.enqueueOnce(job('j_1', 'model:t1:e1', at(1), 'labeling.runTask', {idempotencyKey: 'label:lt_1'}));
-    const b = await s.enqueueOnce(job('j_2', 'model:t1:e1', at(2), 'labeling.runTask', {idempotencyKey: 'label:lt_1'}));
+    const b = await s.enqueueOnce(job('j_2', 'compute:t1', at(2), 'report.build', {idempotencyKey: 'label:lt_1'}));
     assert.deepEqual([a.created, b.created, b.job.id], [true, false, 'j_1']);
   });
 }

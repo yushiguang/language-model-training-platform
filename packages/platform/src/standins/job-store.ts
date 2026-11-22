@@ -12,8 +12,12 @@ import {ACTIVE_JOB_STATES, type Job, type JobFilter, type JobKind, type JobStore
  */
 export function memoryJobStore(): JobStorePort {
   const jobs = new Map<string, string>();
-  /** The `job_keys` rows: when each concurrency key last had a job claimed (null: never). */
-  const keys = new Map<string, string | null>();
+  /**
+   * The `job_keys` rows: when each concurrency key last had a job claimed (null: never), with a
+   * claim number that keeps the turns strict when several claims share one millisecond.
+   */
+  const keys = new Map<string, {at: string; seq: number} | null>();
+  let seq = 0;
   const read = (id: string): Job | null => {
     const j = jobs.get(id);
     return j ? (JSON.parse(j) as Job) : null;
@@ -22,13 +26,16 @@ export function memoryJobStore(): JobStorePort {
   const all = () => [...jobs.keys()].map(id => read(id)!);
   const active = (j: Job) => ACTIVE_JOB_STATES.includes(j.state);
   const matches = (j: Job, f: JobFilter) => (f.projectId === undefined || j.projectId === f.projectId) && (!f.kinds || f.kinds.includes(j.kind)) && (!f.states || f.states.includes(j.state));
+  /** Code-unit order, as a binary collation in SQL (and as `countAhead` compares). */
+  const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
   /** Oldest first, as `ORDER BY created_at, id`. */
-  const byAge = (a: Job, b: Job) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id);
-  /** Never-claimed keys first, then the key claimed longest ago; ties by the key itself. */
+  const byAge = (a: Job, b: Job) => cmp(a.createdAt, b.createdAt) || cmp(a.id, b.id);
+  /** Never-claimed keys first (by the key itself), then the key claimed longest ago. */
   const byTurn = (a: string, b: string) => {
     const x = keys.get(a) ?? null;
     const y = keys.get(b) ?? null;
-    return x === y ? a.localeCompare(b) : x === null ? -1 : y === null ? 1 : x.localeCompare(y);
+    if (!x || !y) return x === y ? cmp(a, b) : x ? 1 : -1;
+    return cmp(x.at, y.at) || x.seq - y.seq;
   };
   const holds = (j: Job | null, owner: string): j is Job => !!j && j.state === 'running' && j.lease?.owner === owner;
 
@@ -62,7 +69,7 @@ export function memoryJobStore(): JobStorePort {
         if (!next) continue;
         const claimed: Job = {...next, state: 'running', attempts: next.attempts + 1, lease: {owner, until: plus(now, leaseMs)}, startedAt: next.startedAt ?? now, heartbeatAt: now};
         write(claimed);
-        keys.set(key, now);
+        keys.set(key, {at: now, seq: ++seq});
         return read(claimed.id);
       }
       return null;

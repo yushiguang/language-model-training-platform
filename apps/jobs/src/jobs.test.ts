@@ -295,9 +295,46 @@ test("a key's limit comes from the configuration of its tenant and target, acros
   await b.idle();
 });
 
-test('a job whose key is not a concurrency key is refused at enqueue', async () => {
-  const jobs = createJobs({store: memoryJobStore()});
-  await assert.rejects(jobs.api.enqueue(ctx(), {kind: 'report.build', concurrencyKey: 'gpt-5.x', projectId: null, args: {}}), /Not a job concurrency key/);
+test('a job whose key, or the key of what it chains, is not a concurrency key is refused at enqueue', async () => {
+  const store = memoryJobStore();
+  const jobs = createJobs({store});
+  const bad = {kind: 'report.build' as const, concurrencyKey: 'gpt-5.x', projectId: null, args: {}};
+  await assert.rejects(jobs.api.enqueue(ctx(), bad), /Not a job concurrency key/);
+  await assert.rejects(jobs.api.enqueue(ctx(), {...bad, concurrencyKey: KEY, then: bad}), /Not a job concurrency key/);
+  await assert.rejects(jobs.api.enqueue(ctx(), {...bad, concurrencyKey: KEY, finally: {...bad, concurrencyKey: KEY, then: bad}}), /Not a job concurrency key/);
+  assert.deepEqual(await store.find({}), [], 'nothing was queued');
+});
+
+test('idle() of a free runner returns while the only queued work waits for a key another runner fills', async () => {
+  const store = memoryJobStore();
+  const busy = createJobs({store, owner: 'busy'});
+  const free = createJobs({store, owner: 'free', runOnEnqueue: false});
+  const m = manual('labeling.runTask');
+  busy.register(m.executor);
+  free.register(manual('labeling.runTask').executor);
+  const req = {kind: 'labeling.runTask' as const, concurrencyKey: 'model:t1:A', projectId: 'pr_1', args: {}};
+  await busy.api.enqueue(ctx('t1'), req);
+  await until(() => m.runs.length === 1, 'the first job');
+  await busy.api.enqueue(ctx('t1'), req);
+  await free.idle();
+  assert.equal((await store.find({states: ['queued']})).length, 1, 'still queued: the key is full');
+  m.runs[0].end({state: 'done'});
+  await until(() => m.runs.length === 2, 'the second job');
+  m.runs[1].end({state: 'done'});
+  await busy.idle();
+});
+
+test('a finished job queues what follows before the runner counts it gone (server worker mode)', async () => {
+  const store = memoryJobStore();
+  const jobs = createJobs({store, runOnEnqueue: false});
+  const ran: string[] = [];
+  jobs.register({kind: 'labeling.runTask', run: async () => (ran.push('label'), {state: 'failed', error: 'x'})});
+  jobs.register({kind: 'report.build', run: async () => (ran.push('finally'), {state: 'done'})});
+  await jobs.api.enqueue(ctx(), {kind: 'labeling.runTask', concurrencyKey: KEY, projectId: 'pr_1', args: {}, finally: {kind: 'report.build', concurrencyKey: KEY, projectId: 'pr_1', args: {}}});
+  jobs.drain();
+  // No poll and no idle(): only the drain at the end of the first job can take the finally.
+  await until(() => ran.length === 2, 'the finally, taken by the drain after the end');
+  assert.deepEqual(ran, ['label', 'finally']);
 });
 
 test('finally follows every end: done, failed, cancelled while running, cancelled while queued, failed by the sweep; then only done', async () => {
