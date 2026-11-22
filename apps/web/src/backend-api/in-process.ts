@@ -8,6 +8,7 @@ import {createAgentRuntime} from '@yushiguang/sprint-agents';
 import {createPlatform} from '@yushiguang/sprint-platform-impl';
 import {leaseLocks, loopback, memoryJobStore, memoryLimiterStore, memorySharedState} from '@yushiguang/sprint-platform';
 import {createJobs} from '@yushiguang/sprint-jobs';
+import {createConfig} from '@yushiguang/sprint-config';
 import {createOptimiser, optimiserExecutor} from '@yushiguang/sprint-optimiser';
 import {createWorkflow, systemContext} from '@yushiguang/sprint-workflow';
 import {createBffApi} from '@yushiguang/sprint-bff';
@@ -24,6 +25,13 @@ const platform = createPlatform();
 const APP_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? '0.1.0';
 /** The system's tunable numbers: the defaults with the platform's overrides on top. */
 configureSystem(platform.config);
+/**
+ * The configuration platform's values go over those (docs/design/server.md, 7), refreshed every
+ * 30 s; until the first read lands, the values above are in force. Tenants read their job limits
+ * through `config.reader`.
+ */
+const config = platform.configStore ? createConfig({port: platform.configStore, base: platform.config}) : null;
+void config?.start();
 /** Metrics and product events go to the platform's sink; with none, they stay in memory. */
 const telemetry = createTelemetry({
   sink: platform.telemetry ?? {pushMetrics: async () => {}, pushEvents: async () => {}},
@@ -40,7 +48,7 @@ const catalog = createCatalog(platform.db, {telemetry});
  * pages' tick picks the work up again, as before). Built before labeling, whose orphan check
  * below reads the queue.
  */
-const jobs = createJobs({store: platform.jobStore ?? memoryJobStore(), telemetry});
+const jobs = createJobs({store: platform.jobStore ?? memoryJobStore(), telemetry, config: config?.reader});
 /**
  * One locks object for labeling, the workflow and the Optimiser in this process (issue #46):
  * over the platform's shared lock store when it supplies one (a server composition), so a lock
@@ -68,7 +76,7 @@ const labeling = createLabeling({
   },
 });
 /** The application module, with no state of its own; short-lived shared state goes to the platform's store. */
-const workflow = createWorkflow({jobs: jobs.api, catalog, labeling, gateway, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, tickets: platform.tickets, appVersion: APP_VERSION, standIns: platform.standIns, telemetry, locks, sharedState: platform.sharedState ?? memorySharedState()});
+const workflow = createWorkflow({jobs: jobs.api, catalog, labeling, gateway, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, tickets: platform.tickets, appVersion: APP_VERSION, standIns: platform.standIns, telemetry, locks, sharedState: platform.sharedState ?? memorySharedState(), config: config?.reader});
 /** The helpers, built once with their model, the project tools and where live progress goes. */
 const agentRuntime = createAgentRuntime({llm: gateway.agentModel(), tools: workflow.toolHost, progress: workflow.agentProgress});
 const optimiser = createOptimiser({catalog, labeling, agents: agentRuntime, host: workflow.optimiserHost, locks, telemetry, onChange: projectId => workflow.changed(projectId)});

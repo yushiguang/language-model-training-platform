@@ -1,4 +1,4 @@
-import type {RequestContext} from './platform-api.ts';
+import type {ConfigReader, RequestContext} from './platform-api.ts';
 
 /**
  * Contract: background work (deployment readiness spec, 3). Every piece of work that outlives a
@@ -96,6 +96,8 @@ export interface JobControl {
    * (another runner took the job over, and resumes it from the saved records).
    */
   cancelled(): boolean;
+  /** Configuration, read per tenant: `config.forTenant(job.ctx.tenantId)`. */
+  readonly config: ConfigReader;
 }
 
 /**

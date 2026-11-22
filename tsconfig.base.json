@@ -27,7 +27,8 @@
       "@yushiguang/sprint-workflow": ["./apps/workflow/src/index.ts"],
       "@yushiguang/sprint-jobs": ["./apps/jobs/src/index.ts"],
       "@yushiguang/sprint-bff": ["./apps/bff/src/index.ts"],
-      "@yushiguang/sprint-telemetry": ["./apps/telemetry/src/index.ts"]
+      "@yushiguang/sprint-telemetry": ["./apps/telemetry/src/index.ts"],
+      "@yushiguang/sprint-config": ["./apps/config/src/index.ts"]
     }
   }
 }

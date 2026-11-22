@@ -20,7 +20,8 @@
     "apps/jobs/src/**/*.ts",
     "apps/workflow/src/**/*.ts",
     "apps/bff/src/**/*.ts",
-    "apps/telemetry/src/**/*.ts"
+    "apps/telemetry/src/**/*.ts",
+    "apps/config/src/**/*.ts"
   ],
   "exclude": ["**/*.test.ts", "packages/domain/src/locales/used-keys.ts"]
 }

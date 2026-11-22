@@ -47,6 +47,9 @@
       "@yushiguang/sprint-telemetry": [
         "../../apps/telemetry/src/index.ts"
       ],
+      "@yushiguang/sprint-config": [
+        "../../apps/config/src/index.ts"
+      ],
       "@yushiguang/sprint-client-impl": [
         "./src/backend-api/in-process.ts"
       ],

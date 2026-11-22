@@ -11,6 +11,7 @@ where it matters, why. The code follows these; change a line here when a decisio
 - **Jobs are queued in MySQL with a concurrency key**: tenant + endpoint for model work (limit 1, first in first out), tenant + compute for the rest (limit 10). Workers poll and claim with `FOR UPDATE SKIP LOCKED` on a per-key lock row; no message queue for now, because a partitioned queue cannot cap per-key concurrency, cancel a queued job or report a queue position.
 - **Write-once bulk data goes to object storage** (feature snapshots, model answers, training sets); records that are queried or edited one by one stay in MySQL.
 - **Configuration moves to a config platform** read by string key with a local cache; job limits are config keys.
+- **Tenant configuration is read explicitly, never through a global** (#61): `systemConfig()` stays the synchronous process-level value, refreshed by `@yushiguang/sprint-config`; tenant keys are read only through `config.forTenant(tenantId)` on the workflow scope and the job control, so concurrent requests of two tenants cannot see each other's values. `TenantConfigPort` is removed: it had no caller, and its merged-struct shape could not be cached per key.
 
 ## 2026-11-20 (Dataset feature missingness and zero-feature exclusion, #48)
 

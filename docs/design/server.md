@@ -201,8 +201,11 @@ export interface ObjectStorePort {
 
 ## 7. 配置模块
 
-- 新增配置基建模块。配置从文件迁到配置平台，按字符串 key 查字符串 value。
-- 新接口 `ConfigPort`，带本地缓存（默认 30 秒过期），配置平台不可用时用缓存里的旧值：
+已实现（#61）。配置从文件迁到配置平台，按字符串 key 查字符串 value。
+
+### 7.1 接口
+
+`packages/contracts/src/platform-api.ts`：
 
 ```ts
 export interface ConfigPort {
@@ -210,21 +213,53 @@ export interface ConfigPort {
   get(key: string): Promise<string | null>;
   /** 可选：一次读多个 key，用于启动和定时刷新。 */
   getMany?(keys: string[]): Promise<Record<string, string | null>>;
-  /** 可选：配置平台推送变更时回调，不用等缓存过期。返回取消订阅的函数。 */
+  /** 可选：配置平台推送变更时回调，缓存马上作废。返回取消订阅的函数。 */
   subscribe?(onChange: () => void): () => void;
+}
+
+export type JobLimitTarget = {kind: 'model'; endpointId: string} | {kind: 'compute'};
+
+export interface TenantConfig {
+  /** 读 `tenant.<tenantId>.<key>`；没配置返回 null。平台不可用时用上次读到的值，从没读到过才抛错。 */
+  get(key: string): Promise<string | null>;
+  /** 任务并发上限，按 7.3 的顺序找，不抛错。 */
+  jobLimit(target: JobLimitTarget): Promise<number>;
+}
+
+export interface ConfigReader {
+  /** 没有租户时只用进程级的值。 */
+  forTenant(tenantId: string | undefined): TenantConfig;
 }
 ```
 
-- 很多配置平台要求事先登记固定的 key，不能按“租户 × endpoint”临时造 key。所以适配器可以把所有逻辑 key 放进配置平台里的一个 JSON 映射 key，Sprint 只认逻辑 key。
-- 现在的 `SystemConfig` 每一项对应一个 key（例如 `labeling.maxFailedShare`），值是字符串，由模块按类型解析；没配置的用 `DEFAULT_SYSTEM_CONFIG`。
-- 分两层读：
-  - **进程级默认值**：配置模块在服务端应用里定时刷新（`packages/domain` 是纯逻辑包，不能做 I/O），刷新后通过 `configureSystem` 注入。`systemConfig()` 仍然无参、同步，只返回进程级的值。
-  - **租户级覆盖**：key 加租户前缀，例如 `tenant.<tenantId>.jobs.limit.model`。只能显式按租户读：请求的 `Scope` 和任务上下文提供 `config.forTenant(tenantId)`。不在请求里改全局值，避免并发请求之间串租户。
-- 本次支持租户覆盖的只有任务并发上限，其余配置项只有进程级的值。以后哪一项要按租户覆盖，再把它的调用方改成从 `Scope` 读。
-- 并发上限的 key 和查找顺序（先找到的生效）：
-  - 模型任务：`tenant.<tenantId>.jobs.limit.endpoint.<endpointId>` → `tenant.<tenantId>.jobs.limit.model` → `jobs.limit.model`（默认 1）。
-  - 常规任务：`tenant.<tenantId>.jobs.limit.compute` → `jobs.limit.compute`（默认 10）。
-- `TenantConfigPort` 由 `ConfigPort` 取代。
+- `Platform.configStore?: ConfigPort` 是配置平台的适配器，替身是 `@yushiguang/sprint-platform` 的 `memoryConfig()`（进程内的 map，测试可以模拟推送和故障）。
+- `TenantConfigPort` 和 `Platform.tenantConfig` 已删除。
+- 很多配置平台要求事先登记固定的 key，不能按“租户 × endpoint”临时造 key。适配器可以把所有逻辑 key 放进配置平台里的一个 JSON 映射 key，Sprint 只认逻辑 key。
+
+### 7.2 key 和值
+
+- `SystemConfig` 每个叶子对应一个 key，就是它的点号路径，例如 `labeling.maxFailedShare`、`gateway.unknownModelLimits.tier`。key 不固定的映射整体是一个 key：`gateway.assumedLimits`，值是 JSON。
+- 值按默认值的类型解析：数字、字符串、JSON（数组和 `gateway.assumedLimits`）。解析不了的值被忽略，用下一层的值，并通过 `onProblem` 报出来；一个坏值不影响其他 key。
+- `SystemConfig` 新增 `jobs.limit.model`（默认 1）和 `jobs.limit.compute`（默认 10）。
+- 规则都是 `packages/domain/src/config.ts` 里的纯函数：`systemConfigKeys`、`parseSystemConfig`、`tenantKey`、`jobLimitKeys`、`parseJobLimit`、`processConfigReader`。
+
+### 7.3 两层读取
+
+配置模块是新应用 `apps/config`（`@yushiguang/sprint-config`），`createConfig({port, base, ttlMs, refreshMs, onProblem})`：
+
+- **进程级的值**：`refresh()` 读所有进程级 key（有 `getMany` 就一次读完），按“默认值 → `Platform.config` → 配置平台”的顺序合并，再通过 `configureSystem` 生效。`start()` 立刻刷新一次，之后每 30 秒一次，配置平台推送时也刷新。读失败时保留现在生效的值。`systemConfig()` 仍然无参、同步，`packages/domain` 不做 I/O。
+- **租户级覆盖**：只能显式按租户读。工作流的 `Scope` 上是 `w.config.forTenant(w.ctx.tenantId)`，任务执行器拿到的 `JobControl` 上是 `ctl.config.forTenant(job.ctx.tenantId)`。不在请求里改全局值，避免并发请求之间串租户。每个 key 缓存 30 秒（`ttlMs`），配置平台出错时用缓存里的旧值。
+- 没有注入配置模块时（测试、没有 `configStore` 的部署），`createJobs` 和 `createWorkflow` 用 `processConfigReader()`：租户没有自己的值，只用进程级的值。
+- 组合根（`apps/web/src/backend-api/in-process.ts`）在有 `configStore` 时建一个配置模块，把 `reader` 传给任务模块和工作流。
+
+本次支持租户覆盖的只有任务并发上限，其余配置项只有进程级的值。以后哪一项要按租户覆盖，再把它的调用方改成从 `forTenant` 读。
+
+并发上限的 key 和查找顺序（先找到合法值的生效；合法值是不小于 1 的整数）：
+
+- 模型任务：`tenant.<tenantId>.jobs.limit.endpoint.<endpointId>` → `tenant.<tenantId>.jobs.limit.model` → `jobs.limit.model`（默认 1）。
+- 常规任务：`tenant.<tenantId>.jobs.limit.compute` → `jobs.limit.compute`（默认 10）。
+
+第 3 步的任务队列用 `jobLimit` 判断每个并发键的空位。
 
 ## 8. 通知
 
@@ -253,7 +288,7 @@ export interface ConfigPort {
 | `Project.tenantId` | 破坏性：现有记录要迁移 |
 | `PermissionAdminPort`；`AuthorizationRequest.permission` | 新增 |
 | `JobRequest.concurrencyKey` 和 `finally`、`claimNext` 按键限并发、`countAhead` | 破坏性：部署方的 `JobStorePort` 要改 |
-| `ConfigPort`（`get`，可选 `getMany` / `subscribe`），移除 `TenantConfigPort` | 破坏性 |
+| `ConfigPort`（`get`，可选 `getMany` / `subscribe`），移除 `TenantConfigPort` | 破坏性（第 1 步，#61 已完成） |
 | `NotificationPort`（尽力而为） | 新增 |
 | `OptimiserContract.startRun` / `execute` / `stopRun`、`OptimiserHost` 每次调用和 `reflectPrompt` 带调用方上下文 | 破坏性（第 2 步） |
 | `OptimiserHost.label` 改为入队打标任务，打标任务 `args` 带 `optimiserRunId` / `round` / `step` | 破坏性（第 5 步） |

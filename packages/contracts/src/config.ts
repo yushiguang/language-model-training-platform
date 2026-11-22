@@ -1,7 +1,8 @@
 /**
  * Every tunable number of the system in one typed struct (spec 1.0.0, section 7.4). The defaults
  * live in `@yushiguang/sprint-domain` (`DEFAULT_SYSTEM_CONFIG`); a hosting adapter overrides any of them through
- * `Platform.config`, merged at startup. Plain JSON, so it maps 1:1 to an IDL struct.
+ * `Platform.config` and the configuration platform (`ConfigPort`, one string key per leaf, such as
+ * `labeling.maxFailedShare`). Plain JSON, so it maps 1:1 to an IDL struct.
  */
 export interface ModelLimits {
   tier: 'fast' | 'balanced' | 'reasoning';
@@ -89,6 +90,14 @@ export interface SystemConfig {
   project: {
     /** A project name is cut at this many characters (spec 1.1.0, 1.2). */
     nameMaxChars: number;
+  };
+  jobs: {
+    /**
+     * How many jobs of one concurrency key run at once (docs/design/server.md, 5.1 and 7): model
+     * tasks per tenant and endpoint, compute-only tasks per tenant. A tenant may override both
+     * through the configuration platform (`TenantConfig.jobLimit`).
+     */
+    limit: {model: number; compute: number};
   };
   reports: {
     /** How many pages, failed calls and script errors the browser keeps for a problem report. */

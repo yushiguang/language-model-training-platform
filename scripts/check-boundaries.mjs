@@ -40,6 +40,7 @@ const RULES = [
   {dir: 'apps/workflow/src', allow: ['@yushiguang/sprint-contracts', '@yushiguang/sprint-domain'], tests: ['@yushiguang/sprint-platform', '@yushiguang/sprint-catalog', '@yushiguang/sprint-labeling', '@yushiguang/sprint-optimiser', '@yushiguang/sprint-jobs']},
   {dir: 'apps/bff/src', allow: ['@yushiguang/sprint-contracts', '@yushiguang/sprint-domain'], tests: ['@yushiguang/sprint-platform', '@yushiguang/sprint-workflow', '@yushiguang/sprint-catalog', '@yushiguang/sprint-labeling', '@yushiguang/sprint-jobs']},
   {dir: 'apps/telemetry/src', allow: ['@yushiguang/sprint-contracts']},
+  {dir: 'apps/config/src', allow: ['@yushiguang/sprint-contracts', '@yushiguang/sprint-domain'], tests: ['@yushiguang/sprint-platform']},
   {dir: 'apps/web/src/backend-api', allow: '*'},
   {dir: 'apps/web/src', allow: ['@yushiguang/sprint-contracts', '@yushiguang/sprint-domain', '@/backend-api', '@/components', '@/ui', '@/i18n']},
 ];
@@ -66,6 +67,7 @@ const ALIASES = {
   '@yushiguang/sprint-jobs': 'apps/jobs/src/index.ts',
   '@yushiguang/sprint-bff': 'apps/bff/src/index.ts',
   '@yushiguang/sprint-telemetry': 'apps/telemetry/src/index.ts',
+  '@yushiguang/sprint-config': 'apps/config/src/index.ts',
   '@yushiguang/sprint-client-impl': 'apps/web/src/backend-api/in-process.ts',
   '@/*': 'apps/web/src/*',
 };

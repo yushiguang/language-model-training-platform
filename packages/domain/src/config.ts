@@ -1,4 +1,4 @@
-import type {DeepPartial, SystemConfig} from '@yushiguang/sprint-contracts';
+import type {ConfigReader, DeepPartial, JobLimitTarget, SystemConfig} from '@yushiguang/sprint-contracts';
 
 /** The defaults of every tunable number (spec 1.0.0, section 7.4). */
 export const DEFAULT_SYSTEM_CONFIG: SystemConfig = {
@@ -34,6 +34,7 @@ export const DEFAULT_SYSTEM_CONFIG: SystemConfig = {
   agent: {maxToolCalls: 4, maxToolResultChars: 12_000, recentHistoryCount: 8, maxDocChars: 20_000, maxAttachmentChars: 8_000, tryTemplateMaxExamples: 5},
   ui: {activePollMs: 5000, sweepMs: 60_000, changeDebounceMs: 120, minActionPendingMs: 220},
   project: {nameMaxChars: 80},
+  jobs: {limit: {model: 1, compute: 10}},
   reports: {diagnosticsKeep: 10, actionLines: 15, messageMaxChars: 300},
 };
 
@@ -61,3 +62,93 @@ export function configureSystem(overrides?: DeepPartial<SystemConfig>): SystemCo
   current = mergeConfig(DEFAULT_SYSTEM_CONFIG, overrides);
   return current;
 }
+
+/**
+ * Keys of the configuration platform (docs/design/server.md, 7): one per leaf of `SystemConfig`,
+ * its path with dots (`labeling.maxFailedShare`). A leaf is a number, a string, or JSON (an array,
+ * or a map whose keys are not fixed, such as `gateway.assumedLimits`).
+ */
+const JSON_LEAVES = new Set(['gateway.assumedLimits']);
+
+function leaves(node: unknown, prefix: string, out: Array<[string, unknown]>): Array<[string, unknown]> {
+  if (isPlain(node) && !JSON_LEAVES.has(prefix)) for (const [k, v] of Object.entries(node)) leaves(v, prefix ? `${prefix}.${k}` : k, out);
+  else out.push([prefix, node]);
+  return out;
+}
+
+/** Every process-level key, in a fixed order. */
+export const systemConfigKeys = (): string[] => leaves(DEFAULT_SYSTEM_CONFIG, '', []).map(([k]) => k);
+
+/** `raw` parsed like `sample` (the default), or undefined when it is not a valid value of that type. */
+function parseLike(sample: unknown, raw: string): unknown {
+  if (typeof sample === 'number') {
+    const n = raw.trim() === '' ? NaN : Number(raw);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  if (typeof sample === 'string') return raw.trim() === '' ? undefined : raw.trim();
+  let v: unknown;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (Array.isArray(sample)) return Array.isArray(v) && v.every(x => sample.length === 0 || typeof x === typeof sample[0]) ? v : undefined;
+  return isPlain(v) ? v : undefined;
+}
+
+/**
+ * The overrides that `values` (key to raw string, from the configuration platform) give. Unset
+ * keys (null) are left out; a value that does not parse as its type is left out too and named in
+ * `invalid`, so one bad entry never breaks the rest.
+ */
+export function parseSystemConfig(values: Record<string, string | null | undefined>): {overrides: DeepPartial<SystemConfig>; invalid: string[]} {
+  const overrides: Record<string, unknown> = {};
+  const invalid: string[] = [];
+  for (const [key, sample] of leaves(DEFAULT_SYSTEM_CONFIG, '', [])) {
+    const raw = values[key];
+    if (raw === null || raw === undefined) continue;
+    const v = parseLike(sample, raw);
+    if (v === undefined) {
+      invalid.push(key);
+      continue;
+    }
+    const path = key.split('.');
+    let at = overrides;
+    for (const p of path.slice(0, -1)) at = (at[p] ??= {}) as Record<string, unknown>;
+    at[path[path.length - 1]] = v;
+  }
+  return {overrides: overrides as DeepPartial<SystemConfig>, invalid};
+}
+
+/** A tenant's key for a logical key: `tenant.<tenantId>.<key>`. */
+export const tenantKey = (tenantId: string, key: string): string => `tenant.${tenantId}.${key}`;
+
+/**
+ * The keys a job limit is looked up under, first match wins (docs/design/server.md, 7); the
+ * process-level value (`systemConfig().jobs.limit`) comes after them. Without a tenant, none.
+ */
+export function jobLimitKeys(tenantId: string | undefined, target: JobLimitTarget): string[] {
+  if (!tenantId) return [];
+  return target.kind === 'model'
+    ? [tenantKey(tenantId, `jobs.limit.endpoint.${target.endpointId}`), tenantKey(tenantId, 'jobs.limit.model')]
+    : [tenantKey(tenantId, 'jobs.limit.compute')];
+}
+
+/** A job limit as written in the configuration: a whole number of at least 1, or null. */
+export function parseJobLimit(raw: string | null | undefined): number | null {
+  if (raw === null || raw === undefined || !/^\s*\d+\s*$/.test(raw)) return null;
+  const n = Number(raw);
+  return n >= 1 && Number.isSafeInteger(n) ? n : null;
+}
+
+/** The process-level job limit, once no tenant key matched. */
+export const processJobLimit = (target: JobLimitTarget): number => systemConfig().jobs.limit[target.kind];
+
+/**
+ * A `ConfigReader` with no configuration platform: tenants have no keys of their own, so every
+ * tenant gets the process-level values. What the job module and the workflow use when nothing is
+ * injected (tests, and the browser build before the composition root wires one).
+ */
+export const processConfigReader = (): ConfigReader => ({
+  forTenant: () => ({get: async () => null, jobLimit: async target => processJobLimit(target)}),
+});

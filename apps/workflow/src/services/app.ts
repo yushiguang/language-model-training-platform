@@ -1,5 +1,5 @@
-import {NO_TELEMETRY, type TicketPort, type AgentRuntimeContract, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@yushiguang/sprint-contracts';
-import {newId} from '@yushiguang/sprint-domain';
+import {NO_TELEMETRY, type ConfigReader, type TicketPort, type AgentRuntimeContract, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@yushiguang/sprint-contracts';
+import {newId, processConfigReader} from '@yushiguang/sprint-domain';
 
 /**
  * The workflow module's wiring (deployment readiness spec, 2). `createWorkflow` builds one
@@ -52,6 +52,11 @@ export interface WorkflowDeps {
    * so a labeling run does not write the revision once per example.
    */
   revisionCoalesceMs?: number;
+  /**
+   * Configuration read per tenant (docs/design/server.md, 7): `w.config.forTenant(w.ctx.tenantId)`.
+   * Default: process-level values only.
+   */
+  config?: ConfigReader;
 }
 
 /** Built after the workflow, since they call back into it (`connect`). */
@@ -63,6 +68,7 @@ export interface Connected {
 
 export interface Instance extends WorkflowDeps, Connected {
   locks: WorkLocks;
+  config: ConfigReader;
   tm: TelemetryPort;
   shared: SharedStatePort;
   /**
@@ -117,6 +123,7 @@ export function createInstance(deps: WorkflowDeps): Instance & {connect(c: Conne
     ...deps,
     agents: notConnected,
     locks: deps.locks ?? memoryWorkLocks(),
+    config: deps.config ?? processConfigReader(),
     tm: deps.telemetry ?? NO_TELEMETRY,
     shared: deps.sharedState,
     emitChange(projectId) {
