@@ -42,8 +42,8 @@ reads and writes through the catalog, starts labeling tasks, and asks the agent 
   call carried when no turn runs. The Optimiser's host runs as the run's context (the person who
   started it).
 - `services/access.ts`: permissions and tenant isolation (docs/design/server.md, 2.3).
-  `authorize(w, action, permission, projectId)` checks the project's tenant, then asks
-  `AuthorizationPort` unless the caller is `SYSTEM_CALLER`. Every contract method goes through it
+  `authorize(w, action, permission, projectId)` asks `AuthorizationPort` first (unless the
+  caller is `SYSTEM_CALLER`), before any record is read, then checks the project's tenant. Every contract method goes through it
   by `WORKFLOW_PERMISSIONS` (`@yushiguang/sprint-domain`), and so do every tool call, every
   workflow job and every `OptimiserHost` call. A new entry point that reads or writes a project
   must call it too. `systemScope` is Sprint's own context in a tenant (the sweep, a page's tick);

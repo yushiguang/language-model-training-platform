@@ -727,7 +727,10 @@ export interface AuthorizationRequest {
   action: string;
   /** The permission point the action needs, from the workflow's table: adapters need no map of their own. */
   permission: PermissionPoint;
-  /** Set for every action on one project; the workflow has already checked its tenant. */
+  /**
+   * Set for every action on one project. Asked before the workflow reads the project, so it may not
+   * exist or may belong to another tenant: answer for `ctx.tenantId` only.
+   */
   projectId?: string;
 }
 
