@@ -1,6 +1,6 @@
 import type {EndpointId, Job, JobOutcome, JobRequest, LabelingTask, ProjectState, PromptVersion, StartedRuns} from '@yushiguang/sprint-contracts';
 import {autoSpendUsd, dueStarts, settingsHash, versionLabel, type DueStart, systemConfig, msg} from '@yushiguang/sprint-domain';
-import type {Scope} from './app.ts';
+import {now, type Scope} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {buildReport, findTask, settingsFor} from './evaluation.ts';
 import {modelName} from './page-views.ts';
@@ -221,6 +221,15 @@ export async function stopOptimiser(w: Scope, projectId: string, runId: string):
   const jobs = (await activeJobs(w, projectId, ['optimiser.run'])).filter(j => j.args.runId === runId);
   for (const j of jobs) await w.jobs.cancel(w.ctx, j.id);
   if (!jobs.length) await optimiserService(w).stopRun(w.ctx, runId);
+  // A run whose job was still waiting never started its loop, so nothing else ends it: it is
+  // stopped here, as a Stop on a running one ends.
+  else if (jobs.every(j => j.state === 'queued')) {
+    const run = await optimiserService(w).getRun(runId);
+    if (run && ['running', 'paused', 'failed'].includes(run.state)) {
+      await w.catalog.patch('optimisation_runs', runId, {state: 'stopped', stopReason: 'user', error: null, finishedAt: now(), step: null, stepStartedAt: null, stepVersionId: null});
+      w.emitChange(projectId);
+    }
+  }
 }
 
 /** Retry on a Failed run, or Resume on a paused one: queues it again; it goes on from the step it stopped at. */

@@ -186,20 +186,21 @@ test('labeling waits for its endpoint: one labeling job per tenant and endpoint 
   const s0 = await w.state();
   const make = (ids: string[]) => w.labeling.createTask({projectId: w.projectId, purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: ids, createdBy: 'Tester'});
   const repo = new DocRepo(w.db);
-  for (const t of [await make(s0.examples.map(e => e.id)), await make(s0.examples.map(e => e.id).slice(0, 3))]) await repo.patch('labeling_tasks', t.id, {state: 'paused', stopReason: 'closed'});
+  const ids = s0.examples.map(e => e.id);
+  for (const t of [await make(ids), await make(ids.slice(0, 3)), await make(ids.slice(0, 5))]) await repo.patch('labeling_tasks', t.id, {state: 'paused', stopReason: 'closed'});
   await tick(w.ws, await w.state());
   const labelJobs = () => w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask']});
   await until(async () => (await labelJobs()).some(j => j.state === 'running'), 'the first task starts');
   const jobs = await labelJobs();
-  assert.deepEqual(jobs.map(j => j.concurrencyKey), ['model:default:A', 'model:default:A'], "the project's tenant and the task's model");
-  assert.deepEqual(jobs.map(j => j.state).sort(), ['queued', 'running'], 'the second waits for the endpoint');
-  assert.equal(await w.jobs.api.ahead(w.ws.ctx, jobs.find(j => j.state === 'queued')!.id), 0);
-  // Pages see the waiting task's place; the state the workflow works from does not.
-  const waitingTask = String(jobs.find(j => j.state === 'queued')!.args.taskId);
+  assert.deepEqual(new Set(jobs.map(j => j.concurrencyKey)), new Set(['model:default:A']), "the project's tenant and the task's model");
+  assert.deepEqual(jobs.map(j => j.state).sort(), ['queued', 'queued', 'running'], 'the others wait for the endpoint');
+  const waiting = jobs.filter(j => j.state === 'queued').sort((a, b) => a.createdAt.localeCompare(b.createdAt) || (a.id < b.id ? -1 : 1));
+  assert.deepEqual(await Promise.all(waiting.map(j => w.jobs.api.ahead(w.ws.ctx, j.id))), [0, 1]);
+  // Pages see each waiting task's place; the state the workflow works from does not.
   const view = (await withQueue(w.ws, w.projectId, await w.state()))!;
-  assert.deepEqual(view.runs.find(r => r.id === waitingTask)?.queue, {ahead: 0});
-  assert.equal(view.runs.filter(r => r.queue).length, 1, 'the running task has no place in the queue');
-  assert.equal((await w.state()).runs.find(r => r.id === waitingTask)?.queue, undefined);
+  assert.deepEqual(waiting.map(j => view.runs.find(r => r.id === j.args.taskId)?.queue), [{ahead: 0}, {ahead: 1}]);
+  assert.equal(view.runs.filter(r => r.queue).length, 2, 'the running task has no place in the queue');
+  assert.ok((await w.state()).runs.every(r => !r.queue));
   await until(async () => (await w.state()).runs.every(r => r.state === 'done'), 'both tasks, one after the other');
   const reports = await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['report.build']});
   assert.ok(reports.length && reports.every(j => j.concurrencyKey === 'compute:default'));
@@ -478,6 +479,26 @@ const ruleAgent = (fail: {left: number} = {left: 0}): AgentRuntimeContract => ({
     const k = (rulesOf(input.prompt).match(/RULE/g) ?? []).length + 1;
     return {prompt: withRules(input.prompt, `${rulesOf(input.prompt)}\nRULE ${k}`.trim()), change: `rule ${k}`};
   },
+});
+
+test('an Optimiser run waiting for its model shows its place, and Stop ends it as stopped (#66)', async () => {
+  const w = await world('b5d', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf, delayMs: 30});
+  const v = await w.newVersion();
+  const s0 = await w.state();
+  // A labeling task holds the model.
+  const task = await w.labeling.createTask({projectId: w.projectId, purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: s0.examples.map(e => e.id), createdBy: 'Tester'});
+  await new DocRepo(w.db).patch('labeling_tasks', task.id, {state: 'paused', stopReason: 'closed'});
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask'], states: ['running']})).length === 1, 'the labeling job');
+  const {startOptimiser, stopOptimiser} = await import('./work.ts');
+  const {runId} = await startOptimiser(w.ws, w.projectId, 10);
+  const view = (await withQueue(w.ws, w.projectId, await w.state()))!;
+  assert.deepEqual(view.optimisation.find(o => o.id === runId)?.queue, {ahead: 0});
+  await stopOptimiser(w.ws, w.projectId, runId);
+  const after = (await w.state()).optimisation.find(o => o.id === runId)!;
+  assert.deepEqual([after.state, after.stopReason], ['stopped', 'user'], 'it never started, and does not wait as running');
+  await w.jobs.idle();
+  assert.equal((await w.state()).optimisation.find(o => o.id === runId)?.state, 'stopped');
 });
 
 test('Auto Optimise: dry run, full labeling, stops when a version passes; versions are minors of the run major', async () => {

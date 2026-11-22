@@ -118,7 +118,7 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
     setSel(id);
   };
   const sel = list.find(v => v.id === selId) ?? (run?.stepVersionId ? list.find(v => v.id === run.stepVersionId) : undefined) ?? list[0];
-  const running = state.runs.some(r => r.state === 'running') || state.optimisation.some(o => o.state === 'running');
+  const running = state.runs.some(busy) || state.optimisation.some(busy);
 
   useEffect(() => {
     setPage({...VERSIONS_PAGE, label: `Prompt Tuning · ${versionLabel(sel)}`, context: {version: versionLabel(sel)}});
@@ -129,7 +129,7 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
   const points = [...scored].reverse().flatMap(({v, s}) => (s ? [{label: versionLabel(v), score: s.score, passed: s.passed && !s.rough}] : []));
   const selInfo = info.get(sel.id);
   const selDropped = selInfo?.round.outcome === 'dropped';
-  const selRunning = runsFor(state, sel.id).some(r => r.state === 'running' && r.purpose !== 'optimiser');
+  const selRunning = runsFor(state, sel.id).some(r => busy(r) && r.purpose !== 'optimiser');
   // A version labeled while the eval set has no gold labels: what can be known without scores.
   const selNoGold = !showPanel && !selDropped && !selRunning && !versionScore(state, sel.id) && labeledRuns(state, sel.id).length > 0;
   const pick = (id: string) => choose(run && id === run.stepVersionId ? null : id);
@@ -137,7 +137,7 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
   const rowRight = (v: PromptVersion, s: {score: number; passed: boolean; rough: boolean} | null) => {
     const o = info.get(v.id)?.round;
     const lab = labeledRuns(state, v.id)[0];
-    if (o?.outcome === 'running' || runsFor(state, v.id).some(r => r.state === 'running' && r.purpose !== 'optimiser')) return <Badge text={t('Running')} tone="run" />;
+    if (o?.outcome === 'running' || runsFor(state, v.id).some(r => r.state === 'running' && !r.queue && r.purpose !== 'optimiser')) return <Badge text={t('Running')} tone="run" />;
     const waiting = runsFor(state, v.id).find(r => r.queue && r.purpose !== 'optimiser');
     if (waiting?.queue) return <Badge text={queuedText(waiting.queue)} icon={false} />;
     if (o?.outcome === 'dropped')
@@ -402,6 +402,9 @@ const parentWhy = (r: OptimiserRound, parent: string) =>
 /** A waiting job's place: "Queued", or "Queued · 2 ahead" when others go first. */
 const queuedText = (q: JobQueuePlace) => (q.ahead ? t('Queued · {n} ahead', {n: q.ahead}) : t('Queued'));
 
+/** Running, or waiting for the model: either way it is under way and can be stopped. */
+const busy = (r: {state: string; queue?: JobQueuePlace}) => r.state === 'running' || !!r.queue;
+
 /** The Optimiser's progress panel: round, where it started, what it does now, every round so far. */
 function OptimiserPanel({state, run, box, onShow}: {state: ProjectState; run: OptimisationRun; box: Box; onShow: (versionId: string) => void}) {
   const label = (id: string | null) => {
@@ -420,7 +423,7 @@ function OptimiserPanel({state, run, box, onShow}: {state: ProjectState; run: Op
     ) : (
       <Badge text={run.state === 'stopped' ? t('Stopped') : t('Paused')} icon={false} />
     );
-  const act = over ? undefined : run.state === 'running' ? <Button label={t('Stop')} icon="stop" onClick={() => stopOptimiser({projectId: run.projectId, runId: run.id})} /> : <Button label={run.state === 'failed' ? t('Retry') : t('Resume')} kind="primary" onClick={() => void retryOptimiser({projectId: run.projectId, runId: run.id})} />;
+  const act = over ? undefined : run.state === 'running' || run.queue ? <Button label={t('Stop')} icon="stop" onClick={() => stopOptimiser({projectId: run.projectId, runId: run.id})} /> : <Button label={run.state === 'failed' ? t('Retry') : t('Resume')} kind="primary" onClick={() => void retryOptimiser({projectId: run.projectId, runId: run.id})} />;
   const half = state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && !!state.gold[e.id]).length;
   const task = run.stepVersionId ? state.runs.find(r => r.promptVersionId === run.stepVersionId && r.endpoint === run.endpoint && r.state === 'running') : undefined;
   // Best so far: the highest score among the start version and the changes this run kept.
@@ -596,7 +599,9 @@ function DroppedCard({state, v, round, box}: {state: ProjectState; v: PromptVers
 }
 
 function RunningCard({state, v, box}: {state: ProjectState; v: PromptVersion; box: Box}) {
-  const runs = runsFor(state, v.id).filter(r => r.state === 'running');
+  const runs = runsFor(state, v.id).filter(busy);
+  // Waiting for the model when none of them labels yet.
+  const waiting = runs.every(r => r.queue) ? runs.find(r => r.queue)?.queue : undefined;
   const done = runs.reduce((n, r) => n + r.done, 0);
   const total = runs.reduce((n, r) => n + r.total, 0);
   return (
@@ -605,7 +610,7 @@ function RunningCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
         <span className="card-t" style={{fontSize: 17, lineHeight: '24px', fontWeight: 700}}>
           {t('Prompt {version}', {version: versionLabel(v)})}
         </span>
-        <Badge text={t('Running')} tone="run" />
+        {waiting ? <Badge text={queuedText(waiting)} icon={false} /> : <Badge text={t('Running')} tone="run" />}
         <span className="t-3" style={{fontSize: 13}}>
           {t('Created {time}', {time: dateTime(v.createdAt)})}
         </span>
@@ -940,7 +945,7 @@ function Advice({state, selId, onStarted, onSwitch}: {state: ProjectState; selId
  */
 function useRebuildFirst(state: ProjectState) {
   const [then, setThen] = useState<{run: () => void | Promise<unknown>} | null>(null);
-  const running = state.runs.some(r => r.state === 'running') || state.optimisation.some(o => o.state === 'running');
+  const running = state.runs.some(busy) || state.optimisation.some(busy);
   const stale = !!state.scoresUpdating && !running;
   const ask = (run: () => void | Promise<unknown>): void | Promise<unknown> => (stale ? setThen({run}) : run());
   const dialog = then && (
