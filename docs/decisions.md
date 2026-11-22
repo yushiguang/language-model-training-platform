@@ -3,6 +3,15 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-22 (Server design after the frontend review, #59)
+
+- **Three permission points only**: read (every tenant member), project write (requested; the creator and labelers get it), tenant write (tenant admins). All are kept on an external permission platform; the gateway checks each interface, and the server checks again through `AuthorizationPort` because agent tools and jobs bypass the gateway.
+- **A data source is one file of sample IDs.** Features are fetched by ID when examples join the dataset and frozen in object storage.
+- **No approvals.** A step is done when its condition holds; scores are built only when every label set is done; a changed scoring basis is applied to history only by a manual Rescore.
+- **Jobs are queued in MySQL with a concurrency key**: tenant + endpoint for model work (limit 1, first in first out), tenant + compute for the rest (limit 10). Workers poll and claim with `FOR UPDATE SKIP LOCKED` on a per-key lock row; no message queue for now, because a partitioned queue cannot cap per-key concurrency, cancel a queued job or report a queue position.
+- **Write-once bulk data goes to object storage** (feature snapshots, model answers, training sets); records that are queried or edited one by one stay in MySQL.
+- **Configuration moves to a config platform** read by string key with a local cache; job limits are config keys.
+
 ## 2026-11-20 (Dataset feature missingness and zero-feature exclusion, #48)
 
 - **Zero-feature items are excluded at take time and counted** (explicitly superseding #32's "kept, with none" clause). After lookup, any item with `hasAnyFeature(features) === false` — including one that passed item checks with a type but was omitted by lookup — is left out instead of saved as an empty example, incrementing `DatasetSnapshot.counts.checks.noFeatures` (omitted when 0) and `DatasetSnapshot.featureMissingness.zeroFeatureExcluded[type]`. "Missing" is the exact emptiness rule `renderPrompt` uses (`isFeatureEmpty` in `packages/domain/src/template.ts`).
