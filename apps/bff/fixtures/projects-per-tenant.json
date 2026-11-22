@@ -1,0 +1,125 @@
+{
+  "name": "Projects belong to a tenant: another tenant cannot list, read or change them",
+  "guards": [
+    "A new project belongs to the caller's tenant",
+    "listProjects returns the caller's tenant's projects only",
+    "A read naming another tenant's project answers as for a project that does not exist",
+    "A write naming another tenant's project fails as for a project that does not exist"
+  ],
+  "world": {
+    "users": {
+      "default": {
+        "id": "u_1",
+        "name": "Tester",
+        "organization": "org_a"
+      },
+      "other": {
+        "id": "u_2",
+        "name": "Other",
+        "organization": "org_b"
+      }
+    },
+    "reply": "{\"format\": \"Vlog\"}"
+  },
+  "steps": [
+    {
+      "call": "createProject",
+      "args": [
+        "Formats"
+      ],
+      "only": [
+        "id",
+        "tenantId"
+      ],
+      "expect": {
+        "id": "$id:1",
+        "tenantId": "org_a"
+      }
+    },
+    {
+      "call": "createProject",
+      "as": "other",
+      "args": [
+        "Their project"
+      ],
+      "only": [
+        "id",
+        "tenantId"
+      ],
+      "expect": {
+        "id": "$id:2",
+        "tenantId": "org_b"
+      }
+    },
+    {
+      "call": "listProjects",
+      "args": [],
+      "only": [
+        "#",
+        "0.name"
+      ],
+      "expect": {
+        "#": 1,
+        "0.name": "Formats"
+      }
+    },
+    {
+      "call": "getProject",
+      "as": "other",
+      "args": [
+        "$id:1"
+      ],
+      "note": "a project of another tenant reads as missing",
+      "expect": null
+    },
+    {
+      "call": "loadProjectState",
+      "as": "other",
+      "args": [
+        "$id:1"
+      ],
+      "expect": null
+    },
+    {
+      "call": "renameProject",
+      "as": "other",
+      "args": [
+        {
+          "projectId": "$id:1",
+          "name": "Taken over"
+        }
+      ],
+      "expectError": "This project does not exist."
+    },
+    {
+      "call": "chatHistory",
+      "as": "other",
+      "args": [
+        "$id:1"
+      ],
+      "expectError": "This project does not exist."
+    },
+    {
+      "call": "deleteProject",
+      "as": "other",
+      "args": [
+        {
+          "projectId": "$id:1"
+        }
+      ],
+      "expectError": "This project does not exist."
+    },
+    {
+      "call": "getProject",
+      "args": [
+        "$id:1"
+      ],
+      "only": [
+        "name"
+      ],
+      "expect": {
+        "name": "Formats"
+      }
+    }
+  ]
+}

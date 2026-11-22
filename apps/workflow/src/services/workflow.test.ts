@@ -1893,3 +1893,33 @@ test('projects saved before tenants (#63) are given the default tenant at the fi
   assert.ok((await listProjects(ws)).every(p => p.tenantId === 'default'));
   assert.equal((await w.catalog.get('projects', 'pr_t63b_old'))?.tenantId, 'default', 'written back, not only filled on read');
 });
+
+test('Optimiser with permission checks on (#63): a run started by a writer runs to the end, every step checked as that writer', async () => {
+  const w = await world('t63c', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf});
+  const asked: string[] = [];
+  Object.assign(w.inst, {
+    authorization: {
+      async allowed(ctx: RequestContext, r: {action: string; permission: string}) {
+        asked.push(`${ctx.user.id}:${r.action}:${r.permission}`);
+        return ctx.user.id === 'u_1';
+      },
+    },
+  });
+  await w.newVersion();
+  const {startOptimiser} = await import('./work.ts');
+  await startOptimiser(w.ws, w.projectId, 10);
+  await w.jobs.idle();
+  const run = (await w.state()).optimisation[0];
+  assert.equal(run.state, 'done', run.error ?? '');
+  assert.ok(asked.includes('u_1:optimiser.label:project_write') && asked.includes('u_1:optimiser.createVersion:project_write'));
+  assert.ok(asked.every(a => a.startsWith('u_1:')));
+  // A job runs later, so it is checked again as the person who queued it.
+  await scoreVersion(w.ws, w.projectId, (await w.state()).versions.at(-1)!);
+  await w.jobs.idle();
+  assert.ok(asked.includes('u_1:job.report.build:project_write'));
+  const bob = w.inst.scope({requestId: 'rq_bob', user: {id: 'u_2', name: 'Bob'}, caller: 'test'});
+  const v = await w.newVersion();
+  await scoreVersion(bob, w.projectId, v);
+  await w.jobs.idle();
+  assert.equal((await w.state()).reports.some(r => r.promptVersionId === v.id), false, "a job queued by someone without project write does not build the report");
+});

@@ -1,5 +1,6 @@
 import type {AgentProgressPort, AgentToolHost, EventStreamPort, EventTopic, JobExecutor, OptimiserHost, RequestContext, WorkflowContract} from '@yushiguang/sprint-contracts';
-import {createInstance, systemContext, type Connected, type Scope, type WorkflowDeps} from './services/app.ts';
+import {createInstance, type Connected, type Scope, type WorkflowDeps} from './services/app.ts';
+import {authorize, NO_PROJECT, systemScope} from './services/access.ts';
 import * as agents from './services/agents.ts';
 import * as dataset from './services/dataset.ts';
 import * as evaluation from './services/evaluation.ts';
@@ -11,7 +12,7 @@ import * as prompts from './services/prompts.ts';
 import * as settings from './services/settings.ts';
 import * as sources from './services/sources.ts';
 import * as work from './services/work.ts';
-import {answerProblem} from '@yushiguang/sprint-domain';
+import {answerProblem, projectIdOf, WORKFLOW_PERMISSIONS} from '@yushiguang/sprint-domain';
 import {agentToolHost} from './services/page-views.ts';
 import {optimiserHost} from './services/optimiser-host.ts';
 import {workflowExecutors} from './services/executors.ts';
@@ -104,8 +105,12 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     approveNode: (ctx, projectId, node) => projects.approveNode(at(ctx), projectId, node),
     deleteProject: (ctx, r) => projects.deleteProject(at(ctx), r.projectId),
     renameProject: (ctx, r) => projects.renameProject(at(ctx), r.projectId, r.name),
+    // The caller only needs to read the project: the work its check queues runs as Sprint in the
+    // project's tenant, as the server's sweep does (docs/design/server.md, 2.2).
     async tick(ctx, {projectId}) {
-      const w = at(ctx);
+      const p = await projects.getProject(at(ctx), projectId);
+      if (!p) return;
+      const w = systemScope(inst, p.tenantId, ctx);
       const state = await projects.loadProjectState(w, projectId);
       if (state) await work.tick(w, state);
     },
@@ -196,7 +201,7 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
   };
 
   return {
-    api,
+    api: guarded(api),
     events: {
       subscribe: (topic: EventTopic, listener: () => void) => (topic === 'changes' ? inst.onChange(listener) : inst.onLive(listener)),
     },
@@ -208,12 +213,40 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     connect: c => inst.connect(c),
     turnsIdle: () => inst.turnsIdle(),
     executors: workflowExecutors(inst),
+    // Every tenant's projects, each checked as Sprint in the project's own tenant.
     async sweep() {
-      const w = at(systemContext('sweep'));
-      for (const p of await projects.listProjects(w)) {
+      for (const p of await projects.allProjects(inst)) {
+        const w = systemScope(inst, p.tenantId);
         const state = await projects.loadProjectState(w, p.id);
         if (state) await work.drive(w, state);
       }
     },
   };
+
+  /**
+   * Every method checked before it runs (docs/design/server.md, 2): the project it names must be
+   * the caller's tenant's, and the caller must hold the method's permission point from
+   * `WORKFLOW_PERMISSIONS`. The reads that answer null for a missing project answer null for
+   * another tenant's too.
+   */
+  function guarded(raw: WorkflowContract): WorkflowContract {
+    const out = {} as Record<string, unknown>;
+    for (const name of Object.keys(raw) as (keyof WorkflowContract)[]) {
+      const rule = WORKFLOW_PERMISSIONS[name];
+      const fn = raw[name] as (ctx: RequestContext, ...args: unknown[]) => Promise<unknown>;
+      out[name] = async (ctx: RequestContext, ...args: unknown[]) => {
+        try {
+          await authorize(at(ctx), `workflow.${name}`, rule.permission, projectIdOf(rule, args));
+        } catch (e) {
+          if (NULL_WHEN_MISSING.has(name) && (e as Error).message === NO_PROJECT) return null;
+          throw e;
+        }
+        return fn(ctx, ...args);
+      };
+    }
+    return out as WorkflowContract;
+  }
 }
+
+/** Reads that answer null for a project that does not exist. */
+const NULL_WHEN_MISSING = new Set<keyof WorkflowContract>(['getProject', 'loadProjectState', 'projectStatus']);

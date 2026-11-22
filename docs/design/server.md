@@ -1,6 +1,6 @@
 # 服务端设计：提示词优化项目
 
-> 描述的版本：计划中，尚未实现。按 #59 的交付计划分 PR 实现，每个 PR 合并时把对应章节改成已实现的样子。
+> 描述的版本：计划中，按 #59 的交付计划分 PR 实现，每个 PR 合并时把对应章节改成已实现的样子。已实现：第 2 节（权限，#63）、第 7 节（配置，#61）。
 
 本文把前端整体评审（2026-11-22）里定下的规则落到服务端：权限、项目类型、数据源与特征、工作流规则、异步任务、批量数据存储、配置和通知。页面的设计见 [ui.md](ui.md)，现有架构见 [../architecture.md](../architecture.md)。
 
@@ -35,18 +35,44 @@
 - **租户隔离**：网关只知道接口要什么权限点，不知道某个 `projectId` 属于哪个租户。所以服务端每个按 `projectId` 读或写的入口都要校验 `project.tenantId === ctx.tenantId`，`listProjects` 按 `ctx.tenantId` 过滤。用户被移出租户后，AI 的读工具也会被拦下。
 - **系统自己触发的工作**：定时巡检（`workflow.sweep()`）和优化器不是某个用户发起的。巡检按项目取出 `project.tenantId`，以内部系统调用方（`caller = 'system'`，网关外部无法伪造）的身份执行；`AuthorizationPort` 对内部系统调用方只校验租户一致，不查外部平台。优化器不再用固定的系统身份，而是把 `optimiser.run` 任务的 `JobContext`（真实入队人和租户）传给 `OptimiserHost` 的每次调用和 `reflectPrompt`。
 
-### 2.3 代码改动
+### 2.3 实现（#63 已完成）
 
-- `AuthorizationPort.allowed(ctx, {action, projectId})` 已有，但 `createWorkflow` 还没有接入，现在是全放行的替身。要在 `createWorkflow` 里接入，在每个读和写操作前调用，包括 AI 工具宿主（`agentToolHost`）的读工具。
-- 每个 `service.method` 标注所需的权限点（读 / 项目写 / 租户写），生成一张表给网关用。
-- `AuthorizationRequest` 加 `permission: 'read' | 'project_write' | 'tenant_write'`，由工作流按这张表填好，外部权限平台的适配器不用再维护一份 `service.method → 权限点` 的映射。
-- `Project` 加 `tenantId`（必填）。
-- 新增 `PermissionAdminPort`，给成员页面和“设为标注人”用，替身实现放在 `packages/platform`：
-  - 租户：`listTenantMembers(tenantId)`、`addTenantMember(tenantId, userId, role)`、`removeTenantMember(tenantId, userId)`、`setTenantRole(tenantId, userId, role)`，`role` 是 `admin` 或 `member`。
-  - 项目：`listProjectWriters(tenantId, projectId)`、`grantProjectWrite(tenantId, projectId, userId)`、`revokeProjectWrite(tenantId, projectId, userId)`。
-  - 每个会改动的方法（`addTenantMember`、`removeTenantMember`、`setTenantRole`、`grantProjectWrite`、`revokeProjectWrite`）第一个参数是 `ctx: RequestContext`，外部平台可以记下是谁操作的，用于审计。
-  - 每个方法都是幂等的，重复调用结果一样。
-- **外部授权失败时**：授权调用自动重试 3 次。设标注人时先授权、成功后再保存，授权失败就不保存并提示用户。创建项目时先建项目、再给创建者授权，授权失败就删掉刚建的项目并提示用户，不会留下一个创建者进不去的项目。
+**Contract**（`packages/contracts`）：
+
+- `Project.tenantId: string`（必填）。没有这个字段的旧记录，每个工作流实例在第一次读项目前补成 `DEFAULT_TENANT`（`default`，和没有租户的调用方、数据源用的是同一个值），写回存储，重复执行结果一样。
+- `PermissionPoint = 'read' | 'project_write' | 'tenant_write'`；`AuthorizationRequest = {action, permission, projectId?}`，`permission` 由工作流填好，外部权限平台的适配器只回答“这个人在 `ctx.tenantId` 下有没有这个权限点”（项目写还要看 `projectId`）。
+- `SYSTEM_CALLER = 'system'`：Sprint 自己的调用方。bff 总是写自己的 `caller`，所以外部无法伪造。
+- `PermissionAdminPort`（`Platform.permissionAdmin`，替身 `memoryPermissionAdmin`）：`listTenantMembers(tenantId)`、`addTenantMember(ctx, tenantId, userId, role)`、`removeTenantMember(ctx, tenantId, userId)`、`setTenantRole(ctx, tenantId, userId, role)`、`listProjectWriters(tenantId, projectId)`、`grantProjectWrite(ctx, tenantId, projectId, userId)`、`revokeProjectWrite(ctx, tenantId, projectId, userId)`。`role` 是 `admin` 或 `member`；改动方法第一个参数是 `ctx`，供外部平台审计；全部幂等。
+- `AccessDeniedError`：缺权限时抛出，`code = 'forbidden'`（跨 RPC 也保留），页面据此弹“权限不足”。
+- 优化器：`OptimiserContract.startRun(ctx, …)` / `execute(ctx, runId)` / `stopRun(ctx, runId)`，`OptimiserHost` 每个方法第一个参数是 `ctx`。`optimiser.run` 任务把 `job.ctx`（入队人和租户）传给 `execute`，运行里每次调用 `OptimiserHost` 和 `reflectPrompt` 都用它，不再有固定的“优化器”身份。
+
+**接口权限点表**：`packages/domain/src/permissions.ts` 的 `WORKFLOW_PERMISSIONS`，`WorkflowContract` 每个方法一行：权限点（`null` 只要求登录，目前只有 `runtimeInfo`）和项目 id 在哪（第一个参数、请求对象的 `projectId`，或不针对项目）。类型保证新方法必须登记。网关可以直接用这张表，两边不会不一致。要点：
+
+| 权限点 | 方法 |
+| --- | --- |
+| 只要登录 | `runtimeInfo` |
+| 读 | 列表和读取（`listProjects`、`getProject`、`loadProjectState`、`projectStatus`、数据源列表和详情、样本、特征、不一致、预测、聊天记录、提议列表）；`createProject`（任何成员都能建）；`tick`；`sendUserMessage`（问 AI 是读，AI 要开始工作时它的工具再查项目写） |
+| 项目写 | 其余改项目的方法：下一步、改名、删除、设置、取样本和增删、人工标签、复核、重建分数、建版本、打分、停止、优化器开始 / 停止 / 重试、Improve with AI、写评论、处理提议 |
+| 租户写 | `createDataSource`、`addSourceFile` |
+
+**校验在哪里做**（`apps/workflow/src/services/access.ts` 的 `authorize`）：
+
+1. 带 `projectId` 的，先读项目记录（包括正在删除的），`project.tenantId` 和调用方的租户（`ctx.tenantId`，没有时是 `default`）不一致就当作项目不存在：`getProject` / `loadProjectState` / `projectStatus` 返回 null，其余报“This project does not exist.”。项目确实不存在时交给方法本身报错。
+2. 调用方是 `SYSTEM_CALLER` 时到此为止（只校验租户）。
+3. 没有接 `AuthorizationPort` 时到此为止（浏览器版本，全放行）。否则调 `allowed(ctx, {action, permission, projectId})`，不通过抛 `AccessDeniedError`。
+
+用到 `authorize` 的入口：
+
+- `createWorkflow` 的每个 contract 方法，按表校验（`action = workflow.<方法>`）。`listProjects` 另外按调用方租户过滤。
+- AI 工具宿主（`agentToolHost`）每次工具调用，以发起这一轮的用户身份：读工具要读，开始工作的工具（`try_prompt`、`score_version`、`start_optimiser`）要项目写（`action = tool.<工具名>`）。用户在一轮对话中途被移出租户，下一次工具调用就被拦下。
+- 工作流的异步任务执行时，以入队人的 `JobContext` 再查一次（`action = job.<类型>`）：`report.build`、`dataset.sample`、`project.delete` 要项目写，`source.ingest` 要租户写。`labeling.runTask` 在打标模块里执行，不经过工作流，它的入队入口已经查过。
+- `OptimiserHost` 每次调用，以运行的上下文（`action = optimiser.<方法>`）：读状态、特征、评论、半边分数要读；打标、打分、确认、建版本、写动作行要项目写。
+
+**系统调用方**：`sweep()` 列出所有租户的项目，每个项目用 `systemScope(项目的 tenantId)` 推进。页面的 `tick` 先按表要求调用方有读权限，再以同样的系统身份在项目的租户里推进，所以只读的成员打开页面也能让自动开始的工作排进队列，这些工作执行时只校验租户。
+
+**创建项目**：先建项目和默认设置，再调 `grantProjectWrite(ctx, tenantId, projectId, 创建者)`，失败后再试 3 次（等待 200 ms 起翻倍）；还失败就删掉刚建的项目，提示“项目没能创建，再试一次”。重试工具 `withRetries` 第 8 步“设为标注人”也用：那时先授权，成功后再保存。
+
+**没做的**：成员页面的接口和前端（前端 PR）；网关侧的校验（部署方按 `WORKFLOW_PERMISSIONS` 配置）。
 
 ## 3. 数据源与特征
 
@@ -285,12 +311,12 @@ export interface ConfigReader {
 
 | 改动 | 类型 |
 | --- | --- |
-| `Project.tenantId` | 破坏性：现有记录要迁移 |
-| `PermissionAdminPort`；`AuthorizationRequest.permission` | 新增 |
+| `Project.tenantId` | 破坏性：现有记录要迁移（第 2 步，#63 已完成） |
+| `PermissionAdminPort`；`AuthorizationRequest.permission` | 新增（第 2 步，#63 已完成） |
 | `JobRequest.concurrencyKey` 和 `finally`、`claimNext` 按键限并发、`countAhead` | 破坏性：部署方的 `JobStorePort` 要改 |
 | `ConfigPort`（`get`，可选 `getMany` / `subscribe`），移除 `TenantConfigPort` | 破坏性（第 1 步，#61 已完成） |
 | `NotificationPort`（尽力而为） | 新增 |
-| `OptimiserContract.startRun` / `execute` / `stopRun`、`OptimiserHost` 每次调用和 `reflectPrompt` 带调用方上下文 | 破坏性（第 2 步） |
+| `OptimiserContract.startRun` / `execute` / `stopRun`、`OptimiserHost` 每次调用和 `reflectPrompt` 带调用方上下文 | 破坏性（第 2 步，#63 已完成） |
 | `OptimiserHost.label` 改为入队打标任务，打标任务 `args` 带 `optimiserRunId` / `round` / `step` | 破坏性（第 5 步） |
 | `LabelCallRequest`、对话请求和 `TryTemplateInput`（Prompt helper 的试跑）带 `tenantId`；模型按租户读取；`LabelingModels` / `AgentModel` 接受动态 endpoint；限流键改为“租户 + endpoint” | 破坏性：部署方的网关适配和限流存储要改 |
 | `ObjectStorePort`；基于它的 `LabelingStorePort`、`FeatureStorePort` | 新增（issue #58） |

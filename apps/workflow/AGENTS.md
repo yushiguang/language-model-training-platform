@@ -38,8 +38,16 @@ reads and writes through the catalog, starts labeling tasks, and asks the agent 
   server that drains before it stops). A failed turn posts "Sorry, I could not answer that".
 - Events (`changes`, `agent_live`) carry no data; a client reads again through the contract
   (`getAgentLive` for the live turn).
-- A helper's tool runs as the user whose turn it is (`turn:{projectId}`), or as the helper with a
-  system context when no turn runs. The Optimiser's host runs with a system context (`optimiser`).
+- A helper's tool runs as the user whose turn it is (`turn:{projectId}`), or as the context the
+  call carried when no turn runs. The Optimiser's host runs as the run's context (the person who
+  started it).
+- `services/access.ts`: permissions and tenant isolation (docs/design/server.md, 2.3).
+  `authorize(w, action, permission, projectId)` checks the project's tenant, then asks
+  `AuthorizationPort` unless the caller is `SYSTEM_CALLER`. Every contract method goes through it
+  by `WORKFLOW_PERMISSIONS` (`@yushiguang/sprint-domain`), and so do every tool call, every
+  workflow job and every `OptimiserHost` call. A new entry point that reads or writes a project
+  must call it too. `systemScope` is Sprint's own context in a tenant (the sweep, a page's tick);
+  `withRetries` wraps permission-platform writes.
 - `services/projects.ts`: `loadProjectState` (one read for a page), `projectStatus` (the light
   read, review G9), gates, approvals. `emitChange(projectId)` also gives the project a new
   revision (`app.ts`, `projectRevisions`): pass the project whenever there is one.

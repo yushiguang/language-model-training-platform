@@ -1,4 +1,4 @@
-import {NO_TELEMETRY, type ConfigReader, type TicketPort, type AgentRuntimeContract, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@yushiguang/sprint-contracts';
+import {NO_TELEMETRY, type AuthorizationPort, type PermissionAdminPort, type ConfigReader, type TicketPort, type AgentRuntimeContract, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@yushiguang/sprint-contracts';
 import {newId, processConfigReader} from '@yushiguang/sprint-domain';
 
 /**
@@ -57,6 +57,15 @@ export interface WorkflowDeps {
    * Default: process-level values only.
    */
   config?: ConfigReader;
+  /**
+   * Asks the permission platform before every read and write (docs/design/server.md, 2). Without
+   * it every signed-in caller may do everything; the tenant of a project is checked either way.
+   */
+  authorization?: AuthorizationPort;
+  /** Writes permissions (the creator's project write). Without it no grant is written. */
+  permissionAdmin?: PermissionAdminPort;
+  /** The first wait before a failed grant is tried again (default 200 ms, doubling; tests pass 0). */
+  grantRetryMs?: number;
 }
 
 /** Built after the workflow, since they call back into it (`connect`). */

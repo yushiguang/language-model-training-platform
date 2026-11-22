@@ -1,6 +1,7 @@
 import {DEFAULT_TENANT, DocFieldValue, type GateApproval, type Job, type JobOutcome, type LabelComment, type NodeId, type Project, type ProjectState, type ProjectStatus, type WorkflowFacts} from '@yushiguang/sprint-contracts';
 import {asAnswerOrNull, compareVersions, contextIdFor, gate, judge, newId, scoresUpdating, systemConfig} from '@yushiguang/sprint-domain';
-import {now, type Scope} from './app.ts';
+import {now, type Instance, type Scope} from './app.ts';
+import {withRetries} from './access.ts';
 import {getSamplingTask} from './dataset.ts';
 import {datasetSources, retireCuts, tenantOf} from './sources.ts';
 import {latestGold} from './evaluation.ts';
@@ -26,10 +27,17 @@ export function backfillTenants(w: Scope): Promise<void> {
   return w.local.tenantsBackfilled;
 }
 
-/** Projects, newest first; one whose deletion was accepted is gone at once. */
+/** The caller's tenant's projects, newest first; one whose deletion was accepted is gone at once. */
 export async function listProjects(w: Scope): Promise<Project[]> {
   await backfillTenants(w);
-  return (await w.catalog.find('projects', {}, 'createdAt desc')).filter(p => !p.deleting);
+  return (await w.catalog.find('projects', {tenantId: tenantOf(w)}, 'createdAt desc')).filter(p => !p.deleting);
+}
+
+/** Every tenant's projects, for Sprint's own sweep; never for a caller. */
+export async function allProjects(inst: Instance): Promise<Project[]> {
+  const w = inst.scope({requestId: 'rq_sweep', user: {id: 'system', name: 'system'}});
+  await backfillTenants(w);
+  return (await w.catalog.find('projects', {})).filter(p => !p.deleting);
 }
 
 export async function createProject(w: Scope, name: string): Promise<Project> {
@@ -40,6 +48,17 @@ export async function createProject(w: Scope, name: string): Promise<Project> {
   // Project Settings start from defaults (the first active model, the default pass rule); the
   // user confirms them once, before the first paid run.
   p.setupVersionId = (await initSettings(w, p.id)).id;
+  // The creator gets project write on the permission platform. Without it the creator could not
+  // open their own project, so a grant that still fails after its retries removes the project.
+  if (w.permissionAdmin) {
+    const admin = w.permissionAdmin;
+    try {
+      await withRetries(() => admin.grantProjectWrite(w.ctx, p.tenantId, p.id, u.id), 3, w.grantRetryMs ?? 200);
+    } catch {
+      await catalog.deleteProject(p.id);
+      throw new Error('The project could not be created: edit access for you could not be saved. Try again.');
+    }
+  }
   await catalog.audit(p.id, u.name, 'project.create', {name});
   w.tm.setContext({projectId: p.id});
   w.tm.event('project_created', {});

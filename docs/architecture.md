@@ -131,7 +131,8 @@ keys (`TenantConfig.jobLimit`, lookup order in `docs/design/server.md`, 7). `Pla
 optional permission ports (`AuthorizationPort` asks whether a caller holds a permission point,
 stand-in `allowAll`; `PermissionAdminPort` writes members, roles and project write grants,
 stand-in `memoryPermissionAdmin`) and a job store (`JobStorePort`, stand-in `memoryJobStore`).
-Every project carries its `tenantId`.
+Every project carries its `tenantId`. The workflow checks the tenant and the permission point of
+every call, agent tool, job and Optimiser step (`services/access.ts`, by `WORKFLOW_PERMISSIONS`).
 
 ### Background work is jobs (deployment readiness spec, 3)
 

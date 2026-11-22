@@ -150,6 +150,15 @@ A deployment supplies two optional ports in `Platform`:
   for the members pages and labelers. Every method must be idempotent; the ones that change
   something get the caller's context first, for the platform's audit trail.
 
+Pass both to `createWorkflow` (`authorization`, `permissionAdmin`), as the in-process root does.
+The workflow then checks every contract call, agent tool call, workflow job and Optimiser step
+(docs/design/server.md, 2.3): first that the project named is the caller's tenant's (another
+tenant's project reads as missing), then the permission point. A denied call throws
+`AccessDeniedError` (`code: 'forbidden'`, kept across RPC). A gateway in front of the bff can be
+configured from the same table, `WORKFLOW_PERMISSIONS` in `@yushiguang/sprint-domain`: each method's
+permission point and where its project id is. Creating a project grants its creator project
+write through `permissionAdmin`; when that still fails after three retries the project is removed.
+
 Breaking in #63: `Project.tenantId` is required. A deployment with project records saved before
 it gives each one its tenant (the workflow writes `default` on records that have none). Custom
 `OptimiserHost` or `OptimiserContract` wrappers take the caller's context as the first argument.

@@ -1,6 +1,7 @@
-import type {OptimiserHost, ProjectState, PromptVersion, RequestContext} from '@yushiguang/sprint-contracts';
+import type {OptimiserHost, PermissionPoint, ProjectState, PromptVersion, RequestContext} from '@yushiguang/sprint-contracts';
 import {visibleToAgents} from '@yushiguang/sprint-domain';
 import type {Instance, Scope} from './app.ts';
+import {authorize} from './access.ts';
 import {postEvent} from './chat-events.ts';
 import {buildReport, confirmScore, labelEvalSet, labelExamples, scoreOnOptimiserHalf} from './evaluation.ts';
 import {labelComments} from './mismatches.ts';
@@ -17,6 +18,38 @@ import {createVersion} from './prompts.ts';
  * Optimiser can be connected after.
  */
 export function optimiserHost(inst: Instance): OptimiserHost {
+  return guardHost(inst, hostCalls(inst));
+}
+
+/** What each host call needs: reads of the project, or writes to it (labeling spends, versions are saved). */
+const HOST_PERMISSIONS: {[K in keyof OptimiserHost]: PermissionPoint} = {
+  loadState: 'read',
+  exampleFeatures: 'read',
+  labelComments: 'read',
+  halfScore: 'read',
+  label: 'project_write',
+  score: 'project_write',
+  confirmScore: 'project_write',
+  createVersion: 'project_write',
+  postEvent: 'project_write',
+};
+
+/** Each call checked as the run's caller, like every other call (docs/design/server.md, 2.2). */
+function guardHost(inst: Instance, raw: OptimiserHost): OptimiserHost {
+  const out = {} as Record<string, unknown>;
+  for (const name of Object.keys(raw) as (keyof OptimiserHost)[]) {
+    const fn = raw[name] as (ctx: RequestContext, ...a: unknown[]) => Promise<unknown>;
+    out[name] = async (ctx: RequestContext, ...a: unknown[]) => {
+      const first = a[0];
+      const projectId = typeof first === 'string' ? first : (first as {projectId: string}).projectId;
+      await authorize(inst.scope(ctx), `optimiser.${name}`, HOST_PERMISSIONS[name], projectId);
+      return fn(ctx, ...a);
+    };
+  }
+  return out as unknown as OptimiserHost;
+}
+
+function hostCalls(inst: Instance): OptimiserHost {
   const at = (ctx: RequestContext): Scope => inst.scope(ctx);
   const loaded = async (w: Scope, projectId: string) => {
     const state = await loadProjectState(w, projectId);

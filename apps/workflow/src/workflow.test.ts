@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {AccessDeniedError} from '@yushiguang/sprint-contracts';
+import type {AuthorizationPort, AuthorizationRequest} from '@yushiguang/sprint-contracts';
 import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, CallerUser, DocumentSource, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, PageContext, RequestContext, TicketSubmission, WorkflowContract} from '@yushiguang/sprint-contracts';
 import {createCatalog} from '@yushiguang/sprint-catalog';
 import {createLabeling, memoryLocks} from '@yushiguang/sprint-labeling';
 import {createJobs} from '@yushiguang/sprint-jobs';
-import {localDocRuntime, loopback, memoryJobStore, memorySharedState} from '@yushiguang/sprint-platform';
+import {localDocRuntime, loopback, memoryJobStore, memoryPermissionAdmin, memorySharedState} from '@yushiguang/sprint-platform';
 import {createWorkflow} from './workflow.ts';
+import type {WorkflowDeps} from './services/app.ts';
 
 /**
  * The workflow as a channel sees it (deployment readiness spec, 2): `createWorkflow` and its
@@ -22,7 +24,7 @@ const ctxOf = (user: CallerUser): RequestContext => ({requestId: `rq_${++n}`, us
 const page = (agent: PageContext['agent'] = 'front_desk'): PageContext => ({label: 'Projects', agent, intent: 'answer', context: {}, where: {page: 'projects', params: {}}});
 
 /** A workflow over the real catalog and labeling, with a fake model and the given helpers. */
-function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) => AgentRuntimeContract, documents?: DocumentSource) {
+function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) => AgentRuntimeContract, documents?: DocumentSource, access: Pick<WorkflowDeps, 'authorization' | 'permissionAdmin'> = {}) {
   const db = localDocRuntime(prefix);
   const catalog = createCatalog(db);
   const gateway = {
@@ -45,6 +47,8 @@ function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) =
     jobs: createJobs({store: memoryJobStore()}).api,
     ...(documents ? {documents} : {}),
     tickets: {submit: async t => (tickets.push(t), {ticketId: `T-${tickets.length}`})},
+    grantRetryMs: 0,
+    ...access,
   });
   wf.connect({agents: agents(wf)});
   return {wf, api: loopback(wf.api) as WorkflowContract, catalog, tickets};
@@ -126,7 +130,7 @@ test("two users in one process: a problem-report draft and a live turn belong to
   assert.deepEqual(await textsOf(ctxOf(alice), a.id), ['alice: it broke', 'alice: yes, send it']);
   assert.deepEqual(await textsOf(ctxOf(bob), b.id), ['bob: it broke', 'bob: yes, send it']);
   // With no turn, a helper's tool runs as the context the call carried.
-  await wf.toolHost.call({agent: 'prompt_agent', name: 'get_project_summary', args: {}, projectId: a.id, turnId: null, ctx: ctxOf(alice)});
+  await wf.toolHost.call({agent: 'prompt_agent', name: 'list_versions', args: {}, projectId: a.id, turnId: null, ctx: ctxOf(alice)});
 });
 
 test("two users in one process: a helper reads a linked document as the person it answers (gap G3)", async () => {
@@ -240,4 +244,102 @@ test('sending a message returns once the turn started; the turn runs on, and a f
   assert.equal(await api.getAgentLive(ctxOf(alice), a.id), null, 'a failed turn ends too');
   const last = (await api.chatHistory(ctxOf(alice), a.id)).at(-1);
   assert.deepEqual([last?.role, last?.agent, last?.msg?.key], ['agent', 'front_desk', 'Sorry, I could not answer that. Please ask again.']);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Permissions and tenant isolation (#63, docs/design/server.md, 2)
+
+const eve: CallerUser = {id: 'u_eve', name: 'Eve'};
+const inTenant = (user: CallerUser, tenantId: string): RequestContext => ({...ctxOf(user), tenantId});
+
+/** The permission platform as the stand-in store sees it: read = member, project write = granted, tenant write = admin. */
+function checking(admin = memoryPermissionAdmin()) {
+  const asked: AuthorizationRequest[] = [];
+  const authorization: AuthorizationPort = {
+    async allowed(ctx, r) {
+      asked.push(r);
+      const t = ctx.tenantId ?? 'default';
+      const role = admin.roleOf(t, ctx.user.id);
+      if (r.permission === 'read') return role !== null;
+      if (r.permission === 'tenant_write') return role === 'admin';
+      return role !== null && admin.canWrite(t, r.projectId!, ctx.user.id);
+    },
+  };
+  return {admin, authorization, asked};
+}
+
+test('tenant isolation (#63): another tenant cannot list, read, change or point a helper at a project', async () => {
+  const {wf, api} = world('wf-tenants', noHelpers);
+  const mine = await api.createProject(inTenant(alice, 't1'), 'Mine');
+  await api.createProject(inTenant(eve, 't2'), 'Theirs');
+  assert.equal(mine.tenantId, 't1');
+  assert.deepEqual((await api.listProjects(inTenant(alice, 't1'))).map(p => p.name), ['Mine']);
+  assert.deepEqual((await api.listProjects(inTenant(eve, 't2'))).map(p => p.name), ['Theirs']);
+  const evil = inTenant(eve, 't2');
+  assert.equal(await api.getProject(evil, mine.id), null);
+  assert.equal(await api.loadProjectState(evil, mine.id), null);
+  await assert.rejects(api.renameProject(evil, {projectId: mine.id, name: 'x'}), /does not exist/);
+  await assert.rejects(api.deleteProject(evil, {projectId: mine.id}), /does not exist/);
+  await assert.rejects(api.chatHistory(evil, mine.id), /does not exist/);
+  await assert.rejects(wf.toolHost.call({agent: 'front_desk', name: 'list_versions', args: {}, projectId: mine.id, turnId: null, ctx: evil}), /not found/);
+  assert.equal((await api.getProject(inTenant(alice, 't1'), mine.id))?.name, 'Mine', 'untouched');
+});
+
+test('permissions (#63): the creator gets project write; a member only reads; a removed member is stopped, helper reads included', async () => {
+  const perms = checking();
+  const sys = {requestId: 'rq_setup', user: {id: 'u_admin', name: 'Admin'}};
+  await perms.admin.addTenantMember(sys, 't1', alice.id, 'member');
+  await perms.admin.addTenantMember(sys, 't1', bob.id, 'member');
+  const {wf, api} = world('wf-perms', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
+  const p = await api.createProject(inTenant(alice, 't1'), 'Formats');
+  assert.deepEqual(await perms.admin.listProjectWriters('t1', p.id), [alice.id], 'the creator holds project write');
+  await api.renameProject(inTenant(alice, 't1'), {projectId: p.id, name: 'Formats 2'});
+  assert.ok(await api.loadProjectState(inTenant(bob, 't1'), p.id), 'a member reads');
+  await assert.rejects(api.renameProject(inTenant(bob, 't1'), {projectId: p.id, name: 'x'}), {code: 'forbidden'});
+  await assert.rejects(api.createDataSource(inTenant(alice, 't1'), {name: 's', fileName: 'a.csv', text: 'id\n1\n'}), {code: 'forbidden'});
+  await assert.rejects(api.listProjects(inTenant(eve, 't1')), {code: 'forbidden'}, 'not a member: no read');
+  const tool = (user: CallerUser, name: AgentToolRequest['name']) => wf.toolHost.call({agent: 'front_desk', name, args: {}, projectId: p.id, turnId: null, ctx: inTenant(user, 't1')});
+  assert.ok(await tool(bob, 'list_versions'), "a member's helper reads");
+  await perms.admin.removeTenantMember(sys, 't1', bob.id);
+  await assert.rejects(tool(bob, 'list_versions'), {code: 'forbidden'}, 'removed from the tenant: the read tool is stopped too');
+  // Every check names its permission point and project, from the workflow's table.
+  assert.ok(perms.asked.some(r => r.action === 'workflow.renameProject' && r.permission === 'project_write' && r.projectId === p.id));
+  assert.ok(perms.asked.some(r => r.action === 'tool.list_versions' && r.permission === 'read'));
+});
+
+test("permissions (#63): Sprint's own work (the sweep, a page's check) is checked for the tenant only", async () => {
+  // Only Alice is let in. Sprint's own caller is never asked about, so its work goes on.
+  const asked: string[] = [];
+  const authorization: AuthorizationPort = {
+    async allowed(ctx, r) {
+      asked.push(`${ctx.user.id}:${r.action}`);
+      return ctx.user.id === alice.id;
+    },
+  };
+  const {wf, api} = world('wf-system', noHelpers, undefined, {authorization});
+  const p = await api.createProject(inTenant(alice, 't1'), 'Formats');
+  await api.tick(inTenant(alice, 't1'), {projectId: p.id});
+  await wf.sweep();
+  assert.ok(asked.length > 0 && asked.every(a => a.startsWith(`${alice.id}:`)), `only people are asked about: ${asked.join(', ')}`);
+  await assert.rejects(api.tick(inTenant(bob, 't1'), {projectId: p.id}), {code: 'forbidden'}, "a page's check still needs its caller to read");
+  // The system caller is held to the project's tenant all the same.
+  await assert.rejects(api.renameProject({requestId: 'rq_x', user: {id: 'system', name: 'system'}, caller: 'system', tenantId: 't2'}, {projectId: p.id, name: 'x'}), /does not exist/);
+});
+
+test('creating a project (#63): a grant that keeps failing removes the new project; one that recovers keeps it', async () => {
+  const admin = memoryPermissionAdmin();
+  let failures = Infinity;
+  const flaky = {
+    ...admin,
+    async grantProjectWrite(...a: Parameters<typeof admin.grantProjectWrite>) {
+      if (failures-- > 0) throw new Error('permission platform down');
+      return admin.grantProjectWrite(...a);
+    },
+  };
+  const {api, catalog} = world('wf-grant', noHelpers, undefined, {permissionAdmin: flaky});
+  await assert.rejects(api.createProject(inTenant(alice, 't1'), 'Lost'), /could not be created/);
+  assert.deepEqual(await catalog.find('projects', {}), [], 'no project left that its creator cannot open');
+  failures = 3;
+  const p = await api.createProject(inTenant(alice, 't1'), 'Kept');
+  assert.deepEqual(await admin.listProjectWriters('t1', p.id), [alice.id], 'three failed tries, then the fourth works');
 });

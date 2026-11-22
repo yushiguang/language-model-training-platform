@@ -194,7 +194,8 @@
             "prompt_design",
             "dataset",
             "gold"
-          ]
+          ],
+          "tenantId": "org_a"
         }
       ]
     }
