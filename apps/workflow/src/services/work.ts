@@ -195,7 +195,7 @@ export async function startOptimiser(w: Scope, projectId: string, maxRounds = sy
   // The Optimiser reads examples: the halves are fixed from here on (spec 1.0.0, 4.2).
   await lockHoldout(w, projectId);
   const run = await optimiserService(w).startRun(w.ctx, {projectId, endpoint, maxRounds, startVersionId, auto: opts.auto});
-  await queueRun(w, projectId, run.id, endpoint);
+  await queueRun(w, projectId, run.id, run.endpoint);
   return {runId: run.id};
 }
 

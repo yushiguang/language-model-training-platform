@@ -372,3 +372,16 @@ test('finally follows every end: done, failed, cancelled while running, cancelle
   await jobs.idle();
   assert.deepEqual(after.sort(), ['cancelled:Ann', 'done:Ann', 'failed:Ann', 'lost:Ann', 'queued:Ann', 'then:done:Ann'].sort(), 'paused is not an end; then follows done only');
 });
+
+test('job ids sort in the order this runner made them, within one millisecond and across', async () => {
+  let now = Date.parse('2026-11-22T10:00:00Z');
+  const store = memoryJobStore();
+  const jobs = createJobs({store, runOnEnqueue: false, clock: () => now});
+  const ids: string[] = [];
+  for (let i = 0; i < 1400; i++) {
+    if (i === 700) now += 1;
+    const j = await jobs.api.enqueue(ctx(), {kind: 'report.build', concurrencyKey: KEY, projectId: 'pr_1', args: {i}});
+    ids.push(j.id);
+  }
+  assert.deepEqual([...ids].sort(), ids);
+});

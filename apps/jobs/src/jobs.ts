@@ -92,7 +92,11 @@ export function createJobs(deps: JobsDeps): Jobs {
    * two jobs enqueued in the same millisecond by this runner still go in the order they came.
    */
   let seq = 0;
-  const jobId = () => `job_${clock().toString(36).padStart(9, '0')}${(seq++ % 1296).toString(36).padStart(2, '0')}${newId('').slice(1, 9)}`;
+  let seqMs = -1;
+  const jobId = (ms: number) => {
+    if (ms !== seqMs) [seqMs, seq] = [ms, 0];
+    return `job_${ms.toString(36).padStart(9, '0')}${(seq++).toString(36).padStart(4, '0')}${newId('').slice(1, 9)}`;
+  };
 
   let draining = false;
   /** Drain passes ended, and jobs claimed, so far: `idle()` sees a pass that took nothing. */
@@ -127,8 +131,10 @@ export function createJobs(deps: JobsDeps): Jobs {
 
   async function enqueue(ctx: RequestContext | JobContext, req: JobRequest): Promise<Job> {
     checkKeys(req);
+    // One clock reading for the id and the creation time, so both sort the same way.
+    const at = clock();
     const job: Job = {
-      id: jobId(),
+      id: jobId(at),
       kind: req.kind,
       projectId: req.projectId,
       args: req.args,
@@ -144,7 +150,7 @@ export function createJobs(deps: JobsDeps): Jobs {
       cancelRequested: false,
       ctx: contextOf(ctx),
       lease: null,
-      createdAt: nowIso(),
+      createdAt: new Date(at).toISOString(),
       startedAt: null,
       heartbeatAt: null,
       endedAt: null,
