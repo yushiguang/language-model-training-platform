@@ -17,6 +17,8 @@ import {beginTurn, endTurn, turnOf} from './turns.ts';
 import {agentToolHost} from './page-views.ts';
 import {agentStart} from './starts.ts';
 import {scoreVersion, tick} from './work.ts';
+import {withQueue} from './queue.ts';
+import {jobState, runView} from './views.ts';
 import {compilePrompt, DEFAULT_THRESHOLDS, versionLabel} from '@yushiguang/sprint-domain';
 
 const schema: Schema = {name: 'format', kind: 'single', values: [{name: 'Vlog', definition: ''}, {name: 'Tutorial', definition: ''}]};
@@ -192,9 +194,22 @@ test('labeling waits for its endpoint: one labeling job per tenant and endpoint 
   assert.deepEqual(jobs.map(j => j.concurrencyKey), ['model:default:A', 'model:default:A'], "the project's tenant and the task's model");
   assert.deepEqual(jobs.map(j => j.state).sort(), ['queued', 'running'], 'the second waits for the endpoint');
   assert.equal(await w.jobs.api.ahead(w.ws.ctx, jobs.find(j => j.state === 'queued')!.id), 0);
+  // Pages see the waiting task's place; the state the workflow works from does not.
+  const waitingTask = String(jobs.find(j => j.state === 'queued')!.args.taskId);
+  const view = (await withQueue(w.ws, w.projectId, await w.state()))!;
+  assert.deepEqual(view.runs.find(r => r.id === waitingTask)?.queue, {ahead: 0});
+  assert.equal(view.runs.filter(r => r.queue).length, 1, 'the running task has no place in the queue');
+  assert.equal((await w.state()).runs.find(r => r.id === waitingTask)?.queue, undefined);
   await until(async () => (await w.state()).runs.every(r => r.state === 'done'), 'both tasks, one after the other');
   const reports = await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['report.build']});
   assert.ok(reports.length && reports.every(j => j.concurrencyKey === 'compute:default'));
+});
+
+test('a task that needs attention shows as Failed on pages, with its message (#66)', () => {
+  const base = {id: 'lt_1', projectId: 'pr_1', promptVersionId: 'pv_1', endpoint: 'A', done: 8, total: 10, valid: 8, invalid: 0, failed: 2, costUsd: 0, error: 'Some examples could not be labeled.', createdAt: '', startedAt: '', finishedAt: null, createdBy: 'Tester', purpose: 'eval'};
+  const view = runView({...base, state: 'needs_attention'} as unknown as Parameters<typeof runView>[0]);
+  assert.deepEqual([view.state, view.error], ['failed', 'Some examples could not be labeled.']);
+  assert.equal(jobState('failed'), 'failed');
 });
 
 test('agent start tools start at once, with no card, and leave an action line', async () => {

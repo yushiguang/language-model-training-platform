@@ -2,7 +2,7 @@
 
 import {useGo} from '@/components/nav';
 import {useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode} from 'react';
-import type {Answer, LabelingRun, MismatchList, OptimisationRun, OptimiserRound, PageContext, PromptVersion} from '@yushiguang/sprint-contracts';
+import type {Answer, JobQueuePlace, LabelingRun, MismatchList, OptimisationRun, OptimiserRound, PageContext, PromptVersion} from '@yushiguang/sprint-contracts';
 import {aiSuggestion, canScore, compilePrompt, dryRunSize, optimiserVersions, stepMsg, versionLabel, systemConfig, withNewestReports, type SuggestionAction} from '@yushiguang/sprint-domain';
 import {Frame, ProjectPage, useOpenAskAi} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
@@ -138,6 +138,8 @@ function Versions({state, setPage}: {state: ProjectState; setPage: (p: PageConte
     const o = info.get(v.id)?.round;
     const lab = labeledRuns(state, v.id)[0];
     if (o?.outcome === 'running' || runsFor(state, v.id).some(r => r.state === 'running' && r.purpose !== 'optimiser')) return <Badge text={t('Running')} tone="run" />;
+    const waiting = runsFor(state, v.id).find(r => r.queue && r.purpose !== 'optimiser');
+    if (waiting?.queue) return <Badge text={queuedText(waiting.queue)} icon={false} />;
     if (o?.outcome === 'dropped')
       return (
         <span className="badge b-gray">
@@ -397,6 +399,9 @@ const parentWhy = (r: OptimiserRound, parent: string) =>
         ? t('{version} is the best version on 1 example of the optimiser half. Versions that are best on more examples are picked more often', {version: parent})
         : t('{version} is the best version on {n} examples of the optimiser half. Versions that are best on more examples are picked more often', {version: parent, n: r.parentWins});
 
+/** A waiting job's place: "Queued", or "Queued · 2 ahead" when others go first. */
+const queuedText = (q: JobQueuePlace) => (q.ahead ? t('Queued · {n} ahead', {n: q.ahead}) : t('Queued'));
+
 /** The Optimiser's progress panel: round, where it started, what it does now, every round so far. */
 function OptimiserPanel({state, run, box, onShow}: {state: ProjectState; run: OptimisationRun; box: Box; onShow: (versionId: string) => void}) {
   const label = (id: string | null) => {
@@ -404,8 +409,9 @@ function OptimiserPanel({state, run, box, onShow}: {state: ProjectState; run: Op
     return v ? versionLabel(v) : null;
   };
   const over = run.state === 'done' || run.state === 'stopped';
-  const tag =
-    run.state === 'running' ? (
+  const tag = run.queue ? (
+    <Badge text={queuedText(run.queue)} icon={false} />
+  ) : run.state === 'running' ? (
       <Badge text={t('Running')} tone="run" />
     ) : run.state === 'failed' ? (
       <Badge text={t('Failed')} tone="err" />
@@ -420,8 +426,11 @@ function OptimiserPanel({state, run, box, onShow}: {state: ProjectState; run: Op
   // Best so far: the highest score among the start version and the changes this run kept.
   const tried = [{id: run.startVersionId, s: versionScore(state, run.startVersionId)?.score}, ...run.history.filter(h => h.outcome === 'kept' && h.score != null).map(h => ({id: h.versionId, s: h.score!}))];
   const top = tried.filter(x => x.s != null).sort((a, b) => b.s! - a.s!)[0];
-  const now =
-    run.state === 'running' ? (
+  const now = run.queue ? (
+    <div className="t-3" style={{padding: '16px 0 8px', fontSize: 13}}>
+      {t('Waiting for the model to be free.')}
+    </div>
+  ) : run.state === 'running' ? (
       <div className="col" style={{gap: 8, padding: '16px 0 8px'}}>
         <div className="row" style={{gap: 8}}>
           <div className="live grow">

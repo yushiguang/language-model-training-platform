@@ -484,6 +484,13 @@ export interface LabelingRun {
   purpose?: 'eval' | 'optimiser' | 'test';
   /** What runs started by code spent on it (metrics and the audit; there is no cap). */
   autoCostUsd?: number;
+  /** Page views only: set while its job waits for the model ("Queued · 2 ahead"). */
+  queue?: JobQueuePlace;
+}
+
+/** Where a waiting job stands: how many jobs for the same model (or compute) go before it. */
+export interface JobQueuePlace {
+  ahead: number;
 }
 
 export interface ValueMetrics {
@@ -640,6 +647,8 @@ export interface OptimisationRun {
   finishedAt: string | null;
   /** Started by an agent's start tool, after the user asked in Ask AI; shown as an action line. */
   auto?: boolean;
+  /** Page views only, never stored: set while its job waits for the model. */
+  queue?: JobQueuePlace;
 }
 
 export interface GateApproval {
