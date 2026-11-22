@@ -9,6 +9,7 @@ import {runView} from './views.ts';
 import {initSettings} from './settings.ts';
 import {indexOnly} from './features.ts';
 import {balanceHalves} from './governance.ts';
+import {computeKey} from './queue.ts';
 
 export type {ProjectState};
 
@@ -230,7 +231,7 @@ export async function deleteProject(w: Scope, projectId: string): Promise<void> 
   await catalog.patch('projects', projectId, {deleting: true});
   await catalog.audit(null, (await user()).name, 'project.deleted', {projectId});
   w.tm.event('project_deleted', {versions: state.versions.length, examples: state.examples.length, gold_labels: Object.keys(state.gold).length});
-  await w.jobs.enqueue(w.ctx, {kind: 'project.delete', projectId, args: {}, idempotencyKey: `delete:${projectId}`});
+  await w.jobs.enqueue(w.ctx, {kind: 'project.delete', projectId, concurrencyKey: computeKey(w), args: {}, idempotencyKey: `delete:${projectId}`});
   w.emitChange(projectId);
 }
 
