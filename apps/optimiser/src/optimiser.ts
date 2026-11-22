@@ -41,10 +41,19 @@ async function cancellable<T>(signal: AbortSignal, fn: (requestId: string) => Pr
 /** The host with one run's context bound: what the loop calls (every call runs as the run's caller). */
 type RunHost = {[K in keyof OptimiserHost]: OptimiserHost[K] extends (ctx: RequestContext, ...a: infer A) => infer R ? (...a: A) => R : never};
 
+/** Each method named, so a host that is a class instance or a proxy binds too. */
 function bindHost(host: OptimiserHost, ctx: RequestContext): RunHost {
-  const out = {} as Record<string, unknown>;
-  for (const k of Object.keys(host) as (keyof OptimiserHost)[]) out[k] = (...a: unknown[]) => (host[k] as (...x: unknown[]) => unknown)(ctx, ...a);
-  return out as RunHost;
+  return {
+    loadState: projectId => host.loadState(ctx, projectId),
+    exampleFeatures: (projectId, exampleIds) => host.exampleFeatures(ctx, projectId, exampleIds),
+    label: req => host.label(ctx, req),
+    score: req => host.score(ctx, req),
+    confirmScore: req => host.confirmScore(ctx, req),
+    halfScore: req => host.halfScore(ctx, req),
+    createVersion: req => host.createVersion(ctx, req),
+    labelComments: projectId => host.labelComments(ctx, projectId),
+    postEvent: req => host.postEvent(ctx, req),
+  };
 }
 
 export interface OptimiserDeps {
@@ -545,7 +554,9 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       const run = await catalog.get('optimisation_runs', runId);
       if (!run) return;
       for (const t of await labeling.listTasks(run.projectId)) if (t.purpose === 'optimiser' && t.state === 'running') await labeling.stopTask(t.id);
-      await deps.host.postEvent(ctx, {projectId: run.projectId, event: 'stop', actor: 'user', what: msg('stopped the Optimiser'), link: {path: '/prompt'}});
+      // The action line is best effort: the run has stopped either way, even if it cannot be
+      // written (the run's caller may have lost access since it started).
+      await deps.host.postEvent(ctx, {projectId: run.projectId, event: 'stop', actor: 'user', what: msg('stopped the Optimiser'), link: {path: '/prompt'}}).catch(() => undefined);
     },
 
     getRun: runId => catalog.get('optimisation_runs', runId),

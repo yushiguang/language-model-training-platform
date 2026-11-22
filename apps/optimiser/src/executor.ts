@@ -16,7 +16,7 @@ export function optimiserExecutor(optimiser: OptimiserContract): JobExecutor {
     async run(job, ctl) {
       const runId = String(job.args.runId);
       const stop = () => {
-        if (ctl.cancelled()) void optimiser.stopRun(job.ctx, runId);
+        if (ctl.cancelled()) optimiser.stopRun(job.ctx, runId).catch(() => undefined);
       };
       ctl.signal.addEventListener('abort', stop);
       try {

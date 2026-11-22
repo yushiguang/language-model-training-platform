@@ -1,4 +1,4 @@
-import type {RpcResponse} from '@yushiguang/sprint-contracts';
+import {AccessDeniedError, type RpcResponse} from '@yushiguang/sprint-contracts';
 
 /**
  * A service contract as it would be served behind RPC, in this process (deployment readiness
@@ -21,10 +21,14 @@ export function loopback<T extends object>(impl: T): T {
         const result = await (fn as (...a: unknown[]) => unknown).apply(impl, sent);
         res = {result: result === undefined ? null : result};
       } catch (e) {
-        res = {error: {code: (e as {code?: string}).code ?? 'error', message: e instanceof Error ? e.message : String(e)}};
+        res = {error: {code: (e as {code?: string}).code ?? 'error', message: e instanceof Error ? e.message : String(e), ...(e instanceof AccessDeniedError ? {permission: e.permission} : {})}};
       }
       const back = JSON.parse(JSON.stringify(res)) as RpcResponse;
-      if ('error' in back) throw Object.assign(new Error(back.error.message), {code: back.error.code});
+      if ('error' in back) {
+        // A missing permission comes back as the same error class, naming the permission point.
+        if (back.error.code === 'forbidden' && back.error.permission) throw new AccessDeniedError(back.error.permission, back.error.message);
+        throw Object.assign(new Error(back.error.message), {code: back.error.code});
+      }
       return back.result;
     };
   }
