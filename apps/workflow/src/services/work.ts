@@ -226,8 +226,15 @@ export async function stopOptimiser(w: Scope, projectId: string, runId: string):
   // Read again after the cancel: a job another runner took meanwhile stops through its loop.
   const after = await Promise.all(jobs.map(j => w.jobs.get(w.ctx, j.id)));
   if (!after.every(j => j?.state === 'cancelled')) return;
-  const run = await optimiserService(w).getRun(runId);
+  // A loop may still hold the run though its job was cancelled while queued: one whose lease
+  // lapsed (the sweep queued the job again) keeps running. Here it is stopped and ends the run
+  // itself; one in another process holds the run's lock, and its own save would write over a
+  // stop written here, so the run is left to it, as `drive` leaves it.
+  const optimiser = optimiserService(w);
+  await optimiser.stopRun(w.ctx, runId);
+  const run = await optimiser.getRun(runId);
   if (!run || !['running', 'paused', 'failed'].includes(run.state)) return;
+  if ((await optimiser.isRunning(runId)) || (await w.locks.isHeld(optimiserLock(projectId, run.endpoint)))) return;
   const last = run.history.at(-1);
   const history = last?.outcome === 'running' ? [...run.history.slice(0, -1), {...last, outcome: 'stopped' as const}] : run.history;
   await w.catalog.patch('optimisation_runs', runId, {state: 'stopped', stopReason: 'user', error: null, finishedAt: now(), step: null, stepStartedAt: null, stepVersionId: null, history});

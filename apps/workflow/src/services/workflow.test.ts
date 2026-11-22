@@ -512,6 +512,26 @@ test('an Optimiser run waiting for its model shows its place, and Stop ends it a
   assert.equal((await w.state()).optimisation.find(o => o.id === runId)?.state, 'stopped');
 });
 
+test('Stop on an Optimiser run whose queued job is cancelled leaves it to a runner that still holds its lock (#66)', async () => {
+  const w = await world('b5e', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf, delayMs: 30});
+  const v = await w.newVersion();
+  const s0 = await w.state();
+  const task = await w.labeling.createTask({projectId: w.projectId, purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: s0.examples.map(e => e.id), createdBy: 'Tester'});
+  await new DocRepo(w.db).patch('labeling_tasks', task.id, {state: 'paused', stopReason: 'closed'});
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask'], states: ['running']})).length === 1, 'the labeling job');
+  const {startOptimiser, stopOptimiser} = await import('./work.ts');
+  const {runId} = await startOptimiser(w.ws, w.projectId, 10);
+  await w.catalog.patch('optimisation_runs', runId, {state: 'running'});
+  // A runner whose lease lapsed (its job queued again) still holds the run's lock: its own loop
+  // and save decide how the run ends, so the Stop here writes nothing over it.
+  await w.ws.locks.run(`optimiser:${w.projectId}:A`, async () => {
+    await stopOptimiser(w.ws, w.projectId, runId);
+  });
+  assert.equal((await w.state()).optimisation.find(o => o.id === runId)?.state, 'running');
+  await w.jobs.idle();
+});
+
 test('Auto Optimise: dry run, full labeling, stops when a version passes; versions are minors of the run major', async () => {
   const w = await world('b20', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf});
   await w.newVersion();
