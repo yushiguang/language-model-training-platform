@@ -103,7 +103,7 @@ export async function stopRun(w: Scope, projectId: string, runId: string): Promi
   const {labeling, catalog} = w;
   const t = await labeling.getTask(runId);
   if (!t || t.projectId !== projectId) throw new Error('This run does not exist.');
-  for (const job of await w.jobs.list(w.ctx, {projectId, kinds: ['labeling.runTask'], states: ['queued']})) if (job.args.taskId === runId) await w.jobs.cancel(w.ctx, job.id);
+  for (const job of await w.jobs.list(w.ctx, {projectId, kinds: ['labeling.runTask'], states: ['queued', 'running']})) if (job.args.taskId === runId) await w.jobs.cancel(w.ctx, job.id);
   // Awaited: a task that was only waiting is stopped before the page's next check reads it.
   await labeling.stopTask(runId);
   void (async () => {

@@ -580,12 +580,22 @@ test('an answer saved by another runner while this call was in flight is not sav
 test('Stop on a task no runner holds ends it as stopped; a Stop asked of a live one is kept until no runner holds it (#66)', async () => {
   const {db, catalog, v, ids} = await setup(4, 'lab-stop-idle');
   let live = true;
-  const lab = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": "Vlog"}'), locks: memoryLocks(), liveElsewhere: async () => live});
   const {DocRepo} = await import('@yushiguang/sprint-platform');
-  // Waiting in the queue (never started): stopped at once.
+  const lab = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": "Vlog"}'), locks: memoryLocks(), liveElsewhere: async () => live});
+  // Its job is starting (live elsewhere), though the record still says queued: the request waits.
+  const starting = await lab.createTask(input(ids, v));
+  await lab.stopTask(starting.id);
+  assert.deepEqual([(await lab.getTask(starting.id))?.state, (await lab.getTask(starting.id))?.stopRequested], ['queued', true]);
+  // Waiting in the queue with no runner anywhere (its job cancelled): stopped at once.
+  live = false;
   const queued = await lab.createTask(input(ids, v));
   await lab.stopTask(queued.id);
   assert.deepEqual([(await lab.getTask(queued.id))?.state, (await lab.getTask(queued.id))?.stopReason], ['stopped', 'user']);
+  // A task that already ended gets no request left over.
+  await new DocRepo(db).patch('labeling_tasks', queued.id, {state: 'needs_attention'});
+  await lab.stopTask(queued.id);
+  assert.deepEqual([(await lab.getTask(queued.id))?.state, (await lab.getTask(queued.id))?.stopRequested], ['needs_attention', false]);
+  live = true;
   // Running in another unit: the request waits for that runner.
   const elsewhere = await lab.createTask(input(ids, v));
   await new DocRepo(db).patch('labeling_tasks', elsewhere.id, {state: 'running'});
