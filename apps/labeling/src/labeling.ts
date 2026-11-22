@@ -186,16 +186,23 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
    */
   async function stopIfIdle(taskId: string): Promise<LabelingTask | null> {
     const request = async (t: LabelingTask | null) => {
-      if (t && OPEN.includes(t.state)) await repo.patch<LabelingTask>(TASKS, taskId, {stopRequested: true, stopRequestedAt: now()});
+      if (t && !FINISHED.includes(t.state)) await repo.patch<LabelingTask>(TASKS, taskId, {stopRequested: true, stopRequestedAt: now()});
       return t;
     };
     const held = await locks.run(lockName(taskId), async () => {
       const t = await getTask(taskId);
-      if (!t || !OPEN.includes(t.state)) return {t};
+      if (!t || FINISHED.includes(t.state)) return {t};
+      // A stopped or failed task may be starting again (Resume, Retry failed): its job is live
+      // elsewhere while the record still shows the old state, so it is asked about too.
       const elsewhere = deps.liveElsewhere ? await deps.liveElsewhere(t).catch(() => true) : false;
       // Read again after asking: the runner elsewhere may have ended it meanwhile.
       const latest = await getTask(taskId);
-      if (!latest || !OPEN.includes(latest.state)) return {t: latest};
+      if (!latest || FINISHED.includes(latest.state)) return {t: latest};
+      if (!elsewhere && !OPEN.includes(latest.state)) {
+        // Ended and idle: nothing to stop, and no request may wait for a later run.
+        if (latest.stopRequested) await repo.patch<LabelingTask>(TASKS, taskId, {stopRequested: false});
+        return {t: await getTask(taskId)};
+      }
       if (!elsewhere && (latest.state !== 'running' || !!deps.liveElsewhere)) {
         await repo.patch<LabelingTask>(TASKS, taskId, {state: 'stopped', stopReason: 'user', stopRequested: false, finishedAt: now()});
         return {t: latest};
@@ -210,6 +217,9 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
   }
 
   async function execute(taskId: string, trigger: 'system' | 'user' | undefined, opts: ExecOptions): Promise<LabelingTask | null> {
+    // Taken before the first read: a Stop saved before that read is seen by the check below, one
+    // saved after it is newer than this moment, so the stop timer sees it.
+    const runStartedIso = now();
     // Retry failed clears the failed examples here, under the lock: a second tab asking while
     // this task runs gets null and changes nothing.
     let found = await getTask(taskId);
@@ -232,8 +242,6 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     tm.counter('sprint_labeling_tasks_started_total', {task_purpose: purpose, trigger: how});
     if (task.startedAt) tm.counter('sprint_labeling_resumes_total', {task_purpose: purpose, trigger: how});
     const runStarted = Date.now();
-    // A Stop pressed in another tab after this moment is for this run (older ones are ignored).
-    const runStartedIso = now();
     const [version, setup] = await Promise.all([deps.catalog.get('prompt_versions', task.promptVersionId), deps.catalog.get('setup_versions', task.setupVersionId)]);
     if (!version || !setup?.schema) {
       await repo.patch<LabelingTask>(TASKS, taskId, {state: 'failed', error: 'The prompt version or schema of this task no longer exists.', finishedAt: now()});
@@ -508,7 +516,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       let changed = false;
       for (const t of tasks) {
         // A Stop asked while its runner was starting, whose runner then went away: ended now.
-        if ((t.state === 'queued' || t.state === 'paused') && t.stopRequested && !(await isRunning(t.id))) {
+        if (t.state !== 'running' && !FINISHED.includes(t.state) && t.stopRequested && !(await isRunning(t.id))) {
           const before = t.state;
           Object.assign(t, (await stopIfIdle(t.id)) ?? {});
           const after = await getTask(t.id);

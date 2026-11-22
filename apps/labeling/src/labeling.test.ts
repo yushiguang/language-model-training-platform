@@ -655,3 +655,46 @@ test('a Stop saved while the runner was starting ends the run before any model c
   assert.deepEqual([r?.state, r?.stopReason, r?.stopRequested], ['stopped', 'user', false]);
   assert.equal(stats.calls, 0, 'nothing paid');
 });
+
+test('a Stop while a stopped or failed task is starting again is kept and ends that run; on an idle one it leaves nothing behind (#66)', async () => {
+  const {db, catalog, v, ids} = await setup(4, 'lab-stop-resume');
+  const {DocRepo} = await import('@yushiguang/sprint-platform');
+  const repo = new DocRepo(db);
+  const stats = {inFlight: 0, maxInFlight: 0, calls: 0};
+  let live = true;
+  const locks = memoryLocks();
+  const lab = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": "Vlog"}', stats), locks, liveElsewhere: async () => live});
+  // Resume of a stopped task: its job is claimed, the record still says stopped.
+  const resumed = await lab.createTask(input(ids, v));
+  await repo.patch('labeling_tasks', resumed.id, {state: 'stopped', stopReason: 'user'});
+  await lab.stopTask(resumed.id);
+  assert.equal((await lab.getTask(resumed.id))?.stopRequested, true);
+  const r1 = await lab.runTask(resumed.id);
+  assert.deepEqual([r1?.state, r1?.stopRequested], ['stopped', false]);
+  // Retry failed of a task that needs attention: the same.
+  const retried = await lab.createTask(input(ids, v));
+  await repo.patch('labeling_tasks', retried.id, {state: 'needs_attention', failed: 1, failedExampleIds: [ids[0]]});
+  await lab.stopTask(retried.id);
+  const r2 = await lab.retryFailed(retried.id);
+  assert.deepEqual([r2?.state, r2?.stopReason], ['stopped', 'user']);
+  // Pressed while this process's runner holds the lock and is still preparing: saved, then seen.
+  live = false;
+  const preparing = await lab.createTask(input(ids, v));
+  await locks.run(`labeling:${preparing.id}`, async () => {
+    await lab.stopTask(preparing.id);
+  });
+  assert.equal((await lab.getTask(preparing.id))?.stopRequested, true);
+  const r3 = await lab.runTask(preparing.id);
+  assert.equal(r3?.state, 'stopped');
+  assert.equal(stats.calls, 0, 'nothing paid');
+  // An idle stopped task: nothing changes and no request waits for a later Resume.
+  await repo.patch('labeling_tasks', resumed.id, {stopRequested: true});
+  await lab.stopTask(resumed.id);
+  assert.deepEqual([(await lab.getTask(resumed.id))?.state, (await lab.getTask(resumed.id))?.stopRequested], ['stopped', false]);
+  // A request left on one is cleared at the next read too.
+  await repo.patch('labeling_tasks', retried.id, {stopRequested: true});
+  const listed = (await lab.listTasks('pr_1')).find(x => x.id === retried.id);
+  assert.deepEqual([listed?.state, listed?.stopRequested], ['stopped', false]);
+  const r4 = await lab.runTask(resumed.id);
+  assert.equal(r4?.state, 'done', 'a later Resume runs');
+});
