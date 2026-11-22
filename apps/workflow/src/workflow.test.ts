@@ -298,8 +298,19 @@ test('permissions (#63): the creator gets project write; a member only reads; a 
   await assert.rejects(api.renameProject(inTenant(bob, 't1'), {projectId: p.id, name: 'x'}), {code: 'forbidden'});
   await assert.rejects(api.createDataSource(inTenant(alice, 't1'), {name: 's', fileName: 'a.csv', text: 'id\n1\n'}), {code: 'forbidden'});
   await assert.rejects(api.listProjects(inTenant(eve, 't1')), {code: 'forbidden'}, 'not a member: no read');
-  const tool = (user: CallerUser, name: AgentToolRequest['name']) => wf.toolHost.call({agent: 'front_desk', name, args: {}, projectId: p.id, turnId: null, ctx: inTenant(user, 't1')});
+  const tool = (user: CallerUser, name: AgentToolRequest['name'], agent: AgentToolRequest['agent'] = 'front_desk') => wf.toolHost.call({agent, name, args: {}, projectId: p.id, turnId: null, ctx: inTenant(user, 't1')});
   assert.ok(await tool(bob, 'list_versions'), "a member's helper reads");
+  for (const start of ['try_prompt', 'score_version', 'start_optimiser'] as const) await assert.rejects(tool(bob, start, 'prompt_agent'), {code: 'forbidden'}, `a reader's helper cannot ${start}`);
+  // A caller without the permission learns nothing about ids: another tenant's project and a
+  // missing one are refused alike, before any record is read.
+  await perms.admin.addTenantMember(sys, 't2', eve.id, 'member');
+  const theirs = await api.createProject(inTenant(eve, 't2'), 'Theirs');
+  for (const id of [p.id, 'pr_missing']) {
+    await assert.rejects(api.renameProject(inTenant(eve, 't2'), {projectId: id, name: 'x'}), {code: 'forbidden'});
+    await assert.rejects(api.getProject(inTenant(eve, 't1'), id), {code: 'forbidden'}, 'not a member of t1: no read, whatever the id');
+  }
+  assert.equal(await api.getProject(inTenant(eve, 't2'), p.id), null, 'a member reads another tenant\'s project as missing');
+  assert.ok(await api.getProject(inTenant(eve, 't2'), theirs.id));
   await perms.admin.removeTenantMember(sys, 't1', bob.id);
   await assert.rejects(tool(bob, 'list_versions'), {code: 'forbidden'}, 'removed from the tenant: the read tool is stopped too');
   // Every check names its permission point and project, from the workflow's table.

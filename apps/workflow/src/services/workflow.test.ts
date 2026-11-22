@@ -1923,3 +1923,23 @@ test('Optimiser with permission checks on (#63): a run started by a writer runs 
   await w.jobs.idle();
   assert.equal((await w.state()).reports.some(r => r.promptVersionId === v.id), false, "a job queued by someone without project write does not build the report");
 });
+
+test('Optimiser (#63): a run whose caller lost project write stops at its first step, before any paid helper call', async () => {
+  const agents = ruleAgent();
+  let reflections = 0;
+  const reflect = agents.reflectPrompt;
+  agents.reflectPrompt = async input => (reflections++, reflect(input));
+  const w = await world('t63d', {agents, answer: ruled, macroF1: 0.99, gold: goldOf});
+  await w.newVersion();
+  const {startOptimiser} = await import('./work.ts');
+  // Allowed to start it, then project write is taken away before the job runs.
+  let canWrite = true;
+  Object.assign(w.inst, {authorization: {allowed: async (_ctx: RequestContext, r: {permission: string}) => r.permission === 'read' || canWrite}});
+  const {runId} = await startOptimiser(w.ws, w.projectId, 3);
+  canWrite = false;
+  await w.jobs.idle();
+  const run = (await w.state()).optimisation.find(o => o.id === runId)!;
+  assert.equal(reflections, 0, 'no helper was asked');
+  assert.notEqual(run.state, 'done');
+  assert.equal(run.history.length, 0, 'no round was recorded');
+});

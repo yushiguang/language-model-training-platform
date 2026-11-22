@@ -57,16 +57,15 @@
 
 **校验在哪里做**（`apps/workflow/src/services/access.ts` 的 `authorize`）：
 
-1. 带 `projectId` 的，先读项目记录（包括正在删除的），`project.tenantId` 和调用方的租户（`ctx.tenantId`，没有时是 `default`）不一致就当作项目不存在：`getProject` / `loadProjectState` / `projectStatus` 返回 null，其余报“This project does not exist.”。项目确实不存在时交给方法本身报错。
-2. 调用方是 `SYSTEM_CALLER` 时到此为止（只校验租户）。
-3. 没有接 `AuthorizationPort` 时到此为止（浏览器版本，全放行）。否则调 `allowed(ctx, {action, permission, projectId})`，不通过抛 `AccessDeniedError`。
+1. 先查权限点：调用方不是 `SYSTEM_CALLER` 且接了 `AuthorizationPort` 时，调 `allowed(ctx, {action, permission, projectId})`，不通过抛 `AccessDeniedError`。这一步在读任何记录之前，所以没有权限的人不管传哪个 id（本租户的、别的租户的、不存在的）都得到同样的拒绝，探测不出哪些 id 存在。没接 `AuthorizationPort` 时（浏览器版本）全放行；系统调用方跳过这一步。
+2. 再查租户：带 `projectId` 的，读项目记录（包括正在删除的），`project.tenantId` 和调用方的租户（`ctx.tenantId`，没有时是 `default`）不一致就当作项目不存在：`getProject` / `loadProjectState` / `projectStatus` 返回 null，其余报“This project does not exist.”。项目确实不存在时交给方法本身报错。
 
 用到 `authorize` 的入口：
 
 - `createWorkflow` 的每个 contract 方法，按表校验（`action = workflow.<方法>`）。`listProjects` 另外按调用方租户过滤。
 - AI 工具宿主（`agentToolHost`）每次工具调用，以发起这一轮的用户身份：读工具要读，开始工作的工具（`try_prompt`、`score_version`、`start_optimiser`）要项目写（`action = tool.<工具名>`）。用户在一轮对话中途被移出租户，下一次工具调用就被拦下。
-- 工作流的异步任务执行时，以入队人的 `JobContext` 再查一次（`action = job.<类型>`）：`report.build`、`dataset.sample`、`project.delete` 要项目写，`source.ingest` 要租户写。`labeling.runTask` 在打标模块里执行，不经过工作流，它的入队入口已经查过。
-- `OptimiserHost` 每次调用，以运行的上下文（`action = optimiser.<方法>`）：读状态、特征、评论、半边分数要读；打标、打分、确认、建版本、写动作行要项目写。
+- 工作流的异步任务执行时，以入队人的 `JobContext` 再查一次（`action = job.<类型>`）：`report.build`、`dataset.sample`、`project.delete` 要项目写，`source.ingest` 要租户写。被拒绝的任务直接失败、不重试；被拒绝的导入会把文件标成失败。`labeling.runTask` 在打标模块里执行，不经过工作流，它的入队入口已经查过。
+- `OptimiserHost` 每次调用，以运行的上下文（`action = optimiser.<方法>`），全部要项目写：只有优化器运行会调它，而运行会改项目、会花钱。启动人中途失去项目写时，下一轮第一次调用（读状态）就被拦下，不会再调付费的 AI。
 
 **系统调用方**：`sweep()` 列出所有租户的项目，每个项目用 `systemScope(项目的 tenantId)` 推进。页面的 `tick` 先按表要求调用方有读权限，再以同样的系统身份在项目的租户里推进，所以只读的成员打开页面也能让自动开始的工作排进队列，这些工作执行时只校验租户。
 

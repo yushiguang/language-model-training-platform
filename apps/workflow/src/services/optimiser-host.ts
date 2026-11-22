@@ -21,12 +21,16 @@ export function optimiserHost(inst: Instance): OptimiserHost {
   return guardHost(inst, hostCalls(inst));
 }
 
-/** What each host call needs: reads of the project, or writes to it (labeling spends, versions are saved). */
+/**
+ * What each host call needs: project write for all of them. Only a run calls the host, and a run
+ * edits the project and spends money, so a caller who lost project write is stopped at the first
+ * call of a round, before its paid helper call, not only once it saves a version.
+ */
 const HOST_PERMISSIONS: {[K in keyof OptimiserHost]: PermissionPoint} = {
-  loadState: 'read',
-  exampleFeatures: 'read',
-  labelComments: 'read',
-  halfScore: 'read',
+  loadState: 'project_write',
+  exampleFeatures: 'project_write',
+  labelComments: 'project_write',
+  halfScore: 'project_write',
   label: 'project_write',
   score: 'project_write',
   confirmScore: 'project_write',

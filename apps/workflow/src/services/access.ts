@@ -14,22 +14,23 @@ import {tenantOf} from './sources.ts';
 export const NO_PROJECT = 'This project does not exist.';
 
 /**
- * Checks one action: when it names a project, that the project is the caller's tenant's; then,
- * unless the caller is Sprint itself (`SYSTEM_CALLER`, only the tenant is checked), that the
- * caller holds `permission` (`AuthorizationPort`; none wired: everyone may). A project that does
+ * Checks one action. First, unless the caller is Sprint itself (`SYSTEM_CALLER`), that the caller
+ * holds `permission` (`AuthorizationPort`; none wired: everyone may), before any record is read:
+ * a caller without it gets `AccessDeniedError` for every id alike, so it learns nothing about
+ * which ids exist. Then, when the action names a project, that the project is the caller's
+ * tenant's: another tenant's project fails exactly as a missing one would. A project that does
  * not exist is left to the action, which says so in its own words. Returns the project's record
  * (deleting or not) when there is one.
  */
 export async function authorize(w: Scope, action: string, permission: PermissionPoint | null, projectId?: string): Promise<Project | null> {
-  let project: Project | null = null;
-  if (projectId) {
-    await backfillTenants(w);
-    project = await w.catalog.get('projects', projectId);
-    if (project && project.tenantId !== tenantOf(w)) throw new Error(NO_PROJECT);
+  if (permission && w.ctx.caller !== SYSTEM_CALLER && w.authorization) {
+    const ok = await w.authorization.allowed(w.ctx, {action, permission, ...(projectId ? {projectId} : {})});
+    if (!ok) throw new AccessDeniedError(permission);
   }
-  if (!permission || w.ctx.caller === SYSTEM_CALLER || !w.authorization) return project;
-  const ok = await w.authorization.allowed(w.ctx, {action, permission, ...(projectId ? {projectId} : {})});
-  if (!ok) throw new AccessDeniedError(permission);
+  if (!projectId) return null;
+  await backfillTenants(w);
+  const project = await w.catalog.get('projects', projectId);
+  if (project && project.tenantId !== tenantOf(w)) throw new Error(NO_PROJECT);
   return project;
 }
 
