@@ -171,6 +171,40 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     return out;
   }
 
+  /** States a task has not ended in: a Stop still applies. */
+  const OPEN: readonly LabelingTask['state'][] = ['queued', 'paused', 'running'];
+
+  /**
+   * A Stop for a task no runner in this process is labeling. Under the task's lock, so no
+   * runner that shares the locks starts (or finishes) meanwhile: a task no runner holds anywhere
+   * (waiting in the queue, paused, or left running by a runner `liveElsewhere` says is gone)
+   * ends as stopped by the user, or the next check would start it again. A running record
+   * counts as left behind only when `liveElsewhere` can say so: without it, a runner this
+   * process's locks cannot see may still hold it. Otherwise (the lock is held, or a runner
+   * elsewhere has it, starting or running) the request is saved and its runner sees it. A task
+   * that has ended is left as it is. Returns the task as last read.
+   */
+  async function stopIfIdle(taskId: string): Promise<LabelingTask | null> {
+    const request = async (t: LabelingTask | null) => {
+      if (t && OPEN.includes(t.state)) await repo.patch<LabelingTask>(TASKS, taskId, {stopRequested: true, stopRequestedAt: now()});
+      return t;
+    };
+    const held = await locks.run(lockName(taskId), async () => {
+      const t = await getTask(taskId);
+      if (!t || !OPEN.includes(t.state)) return {t};
+      const elsewhere = deps.liveElsewhere ? await deps.liveElsewhere(t).catch(() => true) : false;
+      // Read again after asking: the runner elsewhere may have ended it meanwhile.
+      const latest = await getTask(taskId);
+      if (!latest || !OPEN.includes(latest.state)) return {t: latest};
+      if (!elsewhere && (latest.state !== 'running' || !!deps.liveElsewhere)) {
+        await repo.patch<LabelingTask>(TASKS, taskId, {state: 'stopped', stopReason: 'user', stopRequested: false, finishedAt: now()});
+        return {t: latest};
+      }
+      return {t: await request(latest)};
+    });
+    return held ? held.t : request(await getTask(taskId));
+  }
+
   async function isRunning(taskId: string) {
     return active.has(taskId) || (await locks.isHeld(lockName(taskId)));
   }
@@ -446,26 +480,10 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     async stopTask(taskId: string) {
       stopPressed.set(taskId, Date.now());
       active.get(taskId)?.abort();
-      if (!active.has(taskId)) {
-        const t = await getTask(taskId);
-        // Only a task that has not ended can be stopped.
-        if (!t || !['queued', 'paused', 'running'].includes(t.state)) return emit();
-        // A task no runner holds anywhere (waiting in the queue, paused, or left running by a
-        // dead runner) ends here, as stopped by the user: otherwise it reads as paused and the
-        // next check would start it again. A runner may hold one whose record does not say
-        // running yet (it is starting), so the locks and `liveElsewhere` are asked in every
-        // state; a running record counts as left behind only when `liveElsewhere` can say so,
-        // since without it a runner this process's locks cannot see may still hold it. A task
-        // that runs anywhere gets the request, which its runner sees.
-        const noRunner = !(await isRunning(taskId)) && !(deps.liveElsewhere && (await deps.liveElsewhere(t).catch(() => true)));
-        const idle = noRunner && (t.state !== 'running' || !!deps.liveElsewhere);
-        if (idle) await repo.patch<LabelingTask>(TASKS, taskId, {state: 'stopped', stopReason: 'user', stopRequested: false, finishedAt: now()});
-        else await repo.patch<LabelingTask>(TASKS, taskId, {stopRequested: true, stopRequestedAt: now()});
-        if (t) emit(t.projectId);
-        else emit();
-        return;
-      }
-      emit();
+      if (active.has(taskId)) return emit();
+      const t = await stopIfIdle(taskId);
+      if (t) emit(t.projectId);
+      else emit();
     },
 
     retryFailed: (taskId: string, trigger?: 'system' | 'user', opts: RunOptions = {}) => run(taskId, trigger, {...opts, retry: true}),
@@ -481,6 +499,15 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       const tasks = await repo.find<LabelingTask>(TASKS, {projectId}, 'createdAt desc');
       let changed = false;
       for (const t of tasks) {
+        // A Stop asked while its runner was starting, whose runner then went away: ended now.
+        if ((t.state === 'queued' || t.state === 'paused') && t.stopRequested && !(await isRunning(t.id))) {
+          const before = t.state;
+          Object.assign(t, (await stopIfIdle(t.id)) ?? {});
+          const after = await getTask(t.id);
+          if (after) Object.assign(t, after);
+          if (t.state !== before) changed = true;
+          continue;
+        }
         if (t.state !== 'running' || (await isRunning(t.id))) continue;
         // The runner may have finished between the read above and the lock check: read again,
         // so a task that just ended is never marked as left behind.
