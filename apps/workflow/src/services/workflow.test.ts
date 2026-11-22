@@ -532,6 +532,36 @@ test('Stop on an Optimiser run whose queued job is cancelled leaves it to a runn
   await w.jobs.idle();
 });
 
+test('Stop on an Optimiser run never writes over a run its runner ended just before (#66)', async () => {
+  const w = await world('b5f', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf, delayMs: 30});
+  const v = await w.newVersion();
+  const s0 = await w.state();
+  const task = await w.labeling.createTask({projectId: w.projectId, purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: s0.examples.map(e => e.id), createdBy: 'Tester'});
+  await new DocRepo(w.db).patch('labeling_tasks', task.id, {state: 'paused', stopReason: 'closed'});
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask'], states: ['running']})).length === 1, 'the labeling job');
+  const {startOptimiser, stopOptimiser} = await import('./work.ts');
+  const {runId} = await startOptimiser(w.ws, w.projectId, 10);
+  await w.catalog.patch('optimisation_runs', runId, {state: 'running'});
+  // The runner saves its last round and ends the run right after Stop's first read.
+  const optimiser = w.ws.optimiser!;
+  const getRun = optimiser.getRun.bind(optimiser);
+  let reads = 0;
+  optimiser.getRun = async id => {
+    const r = await getRun(id);
+    if (id === runId && ++reads === 2) await w.catalog.patch('optimisation_runs', runId, {state: 'done', stopReason: 'passes'});
+    return r;
+  };
+  try {
+    await stopOptimiser(w.ws, w.projectId, runId);
+  } finally {
+    optimiser.getRun = getRun;
+  }
+  const after = (await w.state()).optimisation.find(o => o.id === runId)!;
+  assert.deepEqual([after.state, after.stopReason], ['done', 'passes']);
+  await w.jobs.idle();
+});
+
 test('Auto Optimise: dry run, full labeling, stops when a version passes; versions are minors of the run major', async () => {
   const w = await world('b20', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf});
   await w.newVersion();

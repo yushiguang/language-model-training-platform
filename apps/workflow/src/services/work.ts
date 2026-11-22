@@ -232,13 +232,21 @@ export async function stopOptimiser(w: Scope, projectId: string, runId: string):
   // stop written here, so the run is left to it, as `drive` leaves it.
   const optimiser = optimiserService(w);
   await optimiser.stopRun(w.ctx, runId);
-  const run = await optimiser.getRun(runId);
-  if (!run || !['running', 'paused', 'failed'].includes(run.state)) return;
-  if ((await optimiser.isRunning(runId)) || (await w.locks.isHeld(optimiserLock(projectId, run.endpoint)))) return;
-  const last = run.history.at(-1);
-  const history = last?.outcome === 'running' ? [...run.history.slice(0, -1), {...last, outcome: 'stopped' as const}] : run.history;
-  await w.catalog.patch('optimisation_runs', runId, {state: 'stopped', stopReason: 'user', error: null, finishedAt: now(), step: null, stepStartedAt: null, stepVersionId: null, history});
-  w.emitChange(projectId);
+  const first = await optimiser.getRun(runId);
+  if (!first || !['running', 'paused', 'failed'].includes(first.state)) return;
+  // Under the run's lock, so no runner saves (or starts) meanwhile; a busy lock means a runner
+  // holds the run. Everything is read again inside: the runner may have ended it just before.
+  const stopped = await w.locks.run(optimiserLock(projectId, first.endpoint), async () => {
+    if (await optimiser.isRunning(runId)) return false;
+    if ((await activeJobs(w, projectId, ['optimiser.run'])).some(j => j.args.runId === runId)) return false;
+    const run = await optimiser.getRun(runId);
+    if (!run || !['running', 'paused', 'failed'].includes(run.state)) return false;
+    const last = run.history.at(-1);
+    const history = last?.outcome === 'running' ? [...run.history.slice(0, -1), {...last, outcome: 'stopped' as const}] : run.history;
+    await w.catalog.patch('optimisation_runs', runId, {state: 'stopped', stopReason: 'user', error: null, finishedAt: now(), step: null, stepStartedAt: null, stepVersionId: null, history});
+    return true;
+  });
+  if (stopped) w.emitChange(projectId);
 }
 
 /** Retry on a Failed run, or Resume on a paused one: queues it again; it goes on from the step it stopped at. */
