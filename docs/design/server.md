@@ -86,10 +86,11 @@
 - 每次尝试都是一个 `PromptVersion`，被丢弃只改状态，不删除。
 - 每一轮的打标是一个单独的打标任务，和普通打标任务进同一个队列（第 5 节）。
 - 现在 `optimiser.run` 是一个长驻任务，在进程里直接调用打标（`OptimiserHost.label` → `labeling.runTask`），不经过队列。要改成分轮的链式任务，避免两种问题：父任务占着 endpoint 的唯一名额又等子任务（死锁），或者优化器打标绕过 endpoint 的并发上限。
-  1. `optimiser.run` 只做计算（生成候选、比较分数、决定下一轮），并发键是“租户 + compute”。
-  2. 一轮里每个要打标的候选都入队一个 `labeling.runTask`（“租户 + endpoint”），然后这一轮的 `optimiser.run` 结束，不等待。
-  3. 每个打标任务结束时检查这一轮的打标是否都结束了；都结束就入队下一轮的 `optimiser.run`（幂等键是 `运行 ID + 轮次`，只会入队一次）。
-  4. 停止优化器 = 取消排队中的打标任务并标记这次运行已停止，下一轮不会再入队。
+  1. `optimiser.run` 只做计算（生成候选、比较分数、决定下一步），并发键是常规任务的键。
+  2. 运行按状态机推进，位置是 `(runId, round, step)`；`step` 是一轮里的各个打标阶段（`parent`、`dry_run`、`full`、`confirm`）。每个要打标的阶段入队一个 `labeling.runTask`（模型任务的键），`args` 里带 `optimiserRunId`、`round`、`step`，然后这次 `optimiser.run` 结束，不等待。
+  3. 打标任务结束（完成、失败或取消）时，入队下一次 `optimiser.run`，幂等键是 `runId + round + step`，只会入队一次。`optimiser.run` 读到打标失败，就把运行标为 Failed，用户可以 Retry。
+  4. 巡检不能把等打标的运行误标为“已暂停”：判断孤儿运行时，除了看有没有活跃的 `optimiser.run`，还要看有没有带这个 `optimiserRunId` 的活跃打标任务。两样都没有时，巡检按最后一个打标任务的结果推进运行，或把运行标为 Failed。这也覆盖了 worker 失联 3 次、任务直接被标为失败的情况。
+  5. 停止优化器：取消这次运行下所有排队中和运行中的打标任务和 `optimiser.run`，直接把运行状态存为“已停止”，不依赖进程内存。运行中的打标任务收到取消后停下，不再调用模型。
 
 ## 5. 异步任务
 
@@ -100,6 +101,7 @@
 | 模型任务：要用模型资源 | 打标、优化器每一轮的打标、AI 评估 | 租户 + endpoint | 1（按创建时间先后执行） |
 | 常规任务：只要计算资源 | 数据源读取、抓特征写快照、算分、Rescore、删除项目 | 租户 + `compute` | 10 |
 
+- 并发键带类型前缀：模型任务是 `model:<tenantId>:<endpointId>`，常规任务是 `compute:<tenantId>`。ID 用的是系统生成的租户 ID 和模型配置 ID，不是用户填的 Endpoint 文字，所以不会撞名，也不会被分隔符打乱。
 - 同一个 endpoint 配到多个租户时，各租户的资源量独立，不共享。
 - AI 评估用对话 endpoint，所以有自己的队列，不会排在打标后面。Ask AI 对话是即时请求，不进队列，只受网关限流。
 - 任务内部同时发几个请求，由网关按 QPM / TPM 自动调节，不属于任务并发。
@@ -186,9 +188,11 @@ COMMIT;
 - 分两层读：
   - **进程级默认值**：配置模块在服务端应用里定时刷新（`packages/domain` 是纯逻辑包，不能做 I/O），刷新后通过 `configureSystem` 注入。`systemConfig()` 仍然无参、同步，只返回进程级的值。
   - **租户级覆盖**：key 加租户前缀，例如 `tenant.<tenantId>.jobs.limit.model`。只能显式按租户读：请求的 `Scope` 和任务上下文提供 `config.forTenant(tenantId)`。不在请求里改全局值，避免并发请求之间串租户。
-- 本次支持租户覆盖的只有任务并发上限（`jobs.limit.*`），其余配置项只有进程级的值。以后哪一项要按租户覆盖，再把它的调用方改成从 `Scope` 读。
+- 本次支持租户覆盖的只有任务并发上限，其余配置项只有进程级的值。以后哪一项要按租户覆盖，再把它的调用方改成从 `Scope` 读。
+- 并发上限的 key 和查找顺序（先找到的生效）：
+  - 模型任务：`tenant.<tenantId>.jobs.limit.endpoint.<endpointId>` → `tenant.<tenantId>.jobs.limit.model` → `jobs.limit.model`（默认 1）。
+  - 常规任务：`tenant.<tenantId>.jobs.limit.compute` → `jobs.limit.compute`（默认 10）。
 - `TenantConfigPort` 由 `ConfigPort` 取代。
-- 并发上限的 key：`jobs.limit.model`（默认 1）、`jobs.limit.compute`（默认 10），可按键覆盖：`jobs.limit.<tenantId>.<endpointId>`。
 
 ## 8. 通知
 
@@ -203,7 +207,7 @@ COMMIT;
 - 被项目使用的模型不能删除。
 - **网关要改**：现在 `createGateway` 启动时建一次静态的模型注册表，`LabelCallRequest` 不带租户，限流键只有 endpoint ID。要改成：
   - 模型配置按租户从模型表读取并缓存，租户新加或修改的模型不用重启就能调用。
-  - `LabelCallRequest` 和对话请求带上 `tenantId`，打标和工作流调用网关时传入。
+  - `LabelCallRequest`、对话请求和 `TryTemplateInput` 带上 `tenantId`，打标、试跑（`try_prompt`）和工作流调用网关时传入。
   - `LimiterStorePort` 的限流键改成“租户 + endpoint”，两个租户配同一个 endpoint 时各用各的 QPM / TPM，一个租户触发限流降速不影响另一个。
 
 ## 10. Contract 改动
@@ -217,8 +221,9 @@ COMMIT;
 | `JobRequest.concurrencyKey`、`claimNext` 按键限并发 | 破坏性：部署方的 `JobStorePort` 要改 |
 | `ConfigPort`，移除 `TenantConfigPort` | 破坏性 |
 | `NotificationPort` | 新增 |
-| `OptimiserHost` 每次调用和 `reflectPrompt` 带 `JobContext`；`OptimiserHost.label` 改为入队打标任务 | 破坏性 |
-| `LabelCallRequest` 和对话请求带 `tenantId`；模型按租户读取；限流键改为“租户 + endpoint” | 破坏性：部署方的网关适配和限流存储要改 |
+| `OptimiserContract.startRun` / `execute` / `stopRun`、`OptimiserHost` 每次调用和 `reflectPrompt` 带调用方上下文 | 破坏性（第 2 步） |
+| `OptimiserHost.label` 改为入队打标任务，打标任务 `args` 带 `optimiserRunId` / `round` / `step` | 破坏性（第 5 步） |
+| `LabelCallRequest`、对话请求和 `TryTemplateInput`（Prompt helper 的试跑）带 `tenantId`；模型按租户读取；限流键改为“租户 + endpoint” | 破坏性：部署方的网关适配和限流存储要改 |
 | `LabelingStorePort`、`FeatureStorePort` | 新增（issue #58） |
 | 样本序号和软删除、标注集 | 新增 |
 
@@ -227,10 +232,10 @@ COMMIT;
 #59 是父 issue，下面每一步对应一个子 issue 和一个 PR，一个合并了再开下一个：
 
 1. 配置模块：`ConfigPort` 和替身，进程级刷新、`config.forTenant`。
-2. 权限和租户隔离：`Project.tenantId`、`createWorkflow` 读写都接入 `AuthorizationPort`、按租户过滤和校验、系统调用方规则、接口权限点表、`PermissionAdminPort`。放在任务队列前面，因为并发键要用到项目的租户。
+2. 权限和租户隔离：`Project.tenantId`、`createWorkflow` 读写都接入 `AuthorizationPort`、按租户过滤和校验、系统调用方规则、接口权限点表、`PermissionAdminPort`。同一步把调用方上下文传给优化器（`OptimiserContract.startRun` / `execute` / `stopRun`、`OptimiserHost`、`reflectPrompt`），否则这一步合并后优化器会被权限校验拒绝。放在任务队列前面，因为并发键要用到项目的租户。
 3. 任务队列：`concurrencyKey`、按键限并发的 `claimNext`、排队位置、失败状态统一。
 4. 模型和网关：模型按租户读取、请求带 `tenantId`、限流键改为“租户 + endpoint”。
-5. 优化器改为分轮链式任务：`OptimiserHost` 带 `JobContext`，每轮打标入队。
+5. 优化器改为按 `(runId, round, step)` 推进的链式任务：每个打标阶段入队，巡检识别等打标的运行，Stop 取消排队中和运行中的打标。
 6. 通知端口。
 7. 存储接口：`LabelingStorePort`、`FeatureStorePort`（issue #58）。
 8. 数据集和标注集：样本序号、软删除、标注集、清空受影响的人工标签。
