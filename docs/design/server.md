@@ -39,10 +39,12 @@
 
 - `AuthorizationPort.allowed(ctx, {action, projectId})` 已有，但 `createWorkflow` 还没有接入，现在是全放行的替身。要在 `createWorkflow` 里接入，在每个读和写操作前调用，包括 AI 工具宿主（`agentToolHost`）的读工具。
 - 每个 `service.method` 标注所需的权限点（读 / 项目写 / 租户写），生成一张表给网关用。
+- `AuthorizationRequest` 加 `permission: 'read' | 'project_write' | 'tenant_write'`，由工作流按这张表填好，外部权限平台的适配器不用再维护一份 `service.method → 权限点` 的映射。
 - `Project` 加 `tenantId`（必填）。
 - 新增 `PermissionAdminPort`，给成员页面和“设为标注人”用，替身实现放在 `packages/platform`：
   - 租户：`listTenantMembers(tenantId)`、`addTenantMember(tenantId, userId, role)`、`removeTenantMember(tenantId, userId)`、`setTenantRole(tenantId, userId, role)`，`role` 是 `admin` 或 `member`。
   - 项目：`listProjectWriters(tenantId, projectId)`、`grantProjectWrite(tenantId, projectId, userId)`、`revokeProjectWrite(tenantId, projectId, userId)`。
+  - 每个会改动的方法（`addTenantMember`、`removeTenantMember`、`setTenantRole`、`grantProjectWrite`、`revokeProjectWrite`）第一个参数是 `ctx: RequestContext`，外部平台可以记下是谁操作的，用于审计。
   - 每个方法都是幂等的，重复调用结果一样。
 - **外部授权失败时**：授权调用自动重试 3 次。设标注人时先授权、成功后再保存，授权失败就不保存并提示用户。创建项目时先建项目、再给创建者授权，授权失败就删掉刚建的项目并提示用户，不会留下一个创建者进不去的项目。
 
@@ -158,6 +160,7 @@ COMMIT;
 
 - `JobRequest` 加 `concurrencyKey`，由入队方按第 5.1 节算出。
 - `JobStorePort.claimNext` 改为按键限并发：参数加上限查询函数，MySQL 实现用上面的 SQL；内存替身按同样的规则实现，并补一致性测试。
+- `JobStorePort` 加 `countAhead(concurrencyKey, createdAt): Promise<number>`，用 `jobs(concurrency_key, state, created_at)` 索引直接查排队位置，不用 `find` 扫。
 - 现在的打标状态 `needs_attention` 在页面上统一显示为 Failed。
 - `apps/jobs` 的进程总并发（默认 16）保留，作为单个进程的上限。
 
@@ -178,12 +181,40 @@ COMMIT;
 | 对话和 AI 动作记录 | MySQL，大的工具结果放对象存储 | 按项目查历史 |
 | 锁、限流计数、短期状态 | Redis | |
 
-对应 issue #58 的几个接口：`LabelingStorePort`（打标任务和答案）、`FeatureStorePort`（`putBatch` / `getBatch` / `deleteBatch`）。
+所有放对象存储的数据共用一个通用接口 `ObjectStorePort`（`packages/contracts/src/platform-api.ts`，内存替身 `memoryObjectStore()` 放在 `packages/platform`）：
+
+```ts
+export interface ObjectStorePort {
+  put(key: string, body: Uint8Array | string, opts?: {contentType?: string; contentEncoding?: string}): Promise<{key: string; size: number}>;
+  get(key: string): Promise<Uint8Array | null>;
+  /** 按字节范围读，用于打包的特征段和答案段（HTTP Range GET）。 */
+  getRange(key: string, offset: number, length: number): Promise<Uint8Array | null>;
+  delete(key: string): Promise<void>;
+  deleteBatch(keys: string[]): Promise<number>;
+  /** 可选：按需生成带签名的链接，用于图片或预览。 */
+  signUrl?(key: string, expiresSec?: number): Promise<string>;
+}
+```
+
+数据源的 ID 文件、特征快照段、答案段、大的工具结果和将来的训练集都建在它上面。issue #58 的 `LabelingStorePort`（打标任务和答案）和 `FeatureStorePort`（`putBatch` / `getBatch` / `deleteBatch`）也基于同一个 `ObjectStorePort` 适配器实现。
 
 ## 7. 配置模块
 
 - 新增配置基建模块。配置从文件迁到配置平台，按字符串 key 查字符串 value。
-- 新接口 `ConfigPort.get(key): Promise<string | null>`，带本地缓存（默认 30 秒过期），配置平台不可用时用缓存里的旧值。
+- 新接口 `ConfigPort`，带本地缓存（默认 30 秒过期），配置平台不可用时用缓存里的旧值：
+
+```ts
+export interface ConfigPort {
+  /** 没配置的 key 返回 null，从不抛错。 */
+  get(key: string): Promise<string | null>;
+  /** 可选：一次读多个 key，用于启动和定时刷新。 */
+  getMany?(keys: string[]): Promise<Record<string, string | null>>;
+  /** 可选：配置平台推送变更时回调，不用等缓存过期。返回取消订阅的函数。 */
+  subscribe?(onChange: () => void): () => void;
+}
+```
+
+- 很多配置平台要求事先登记固定的 key，不能按“租户 × endpoint”临时造 key。所以适配器可以把所有逻辑 key 放进配置平台里的一个 JSON 映射 key，Sprint 只认逻辑 key。
 - 现在的 `SystemConfig` 每一项对应一个 key（例如 `labeling.maxFailedShare`），值是字符串，由模块按类型解析；没配置的用 `DEFAULT_SYSTEM_CONFIG`。
 - 分两层读：
   - **进程级默认值**：配置模块在服务端应用里定时刷新（`packages/domain` 是纯逻辑包，不能做 I/O），刷新后通过 `configureSystem` 注入。`systemConfig()` 仍然无参、同步，只返回进程级的值。
@@ -196,7 +227,8 @@ COMMIT;
 
 ## 8. 通知
 
-- 新增 `NotificationPort.send({userIds, kind, projectId, text, link})`。
+- 新增 `NotificationPort.send({userIds, kind, projectId, text, link, title?, msg?})`。`title` 是卡片标题；`msg` 是可翻译的消息（`Msg`），即时通讯卡片可以按收件人的语言显示。
+- 发送是尽力而为：失败只记日志和指标，不影响主操作（比如创建标注集照样成功）。
 - 本次的两个通知：创建标注集时通知标注人；添加标注人时通知被添加的人。
 - 默认替身只写日志；具体即时通讯工具的适配器由部署方提供。
 
@@ -207,6 +239,7 @@ COMMIT;
 - 被项目使用的模型不能删除。
 - **网关要改**：现在 `createGateway` 启动时建一次静态的模型注册表，`LabelCallRequest` 不带租户，限流键只有 endpoint ID。要改成：
   - 模型配置按租户从模型表读取并缓存，租户新加或修改的模型不用重启就能调用。
+  - `LabelingModels.chat` / `chatStream` 和 `AgentModel` 在调用时接受动态的 endpoint 标识（租户管理员填的 Endpoint），适配器不能要求所有 endpoint 在进程启动时登记在 `Platform.endpoints` 里。`Platform.endpoints` 和 `LabelingModels.endpoints()` 只作为平台默认模型保留。
   - `LabelCallRequest`、对话请求和 `TryTemplateInput` 带上 `tenantId`，打标、试跑（`try_prompt`）和工作流调用网关时传入。
   - `LimiterStorePort` 的限流键改成“租户 + endpoint”，两个租户配同一个 endpoint 时各用各的 QPM / TPM，一个租户触发限流降速不影响另一个。
 
@@ -217,14 +250,14 @@ COMMIT;
 | 改动 | 类型 |
 | --- | --- |
 | `Project.tenantId` | 破坏性：现有记录要迁移 |
-| `PermissionAdminPort` | 新增 |
-| `JobRequest.concurrencyKey`、`claimNext` 按键限并发 | 破坏性：部署方的 `JobStorePort` 要改 |
-| `ConfigPort`，移除 `TenantConfigPort` | 破坏性 |
-| `NotificationPort` | 新增 |
+| `PermissionAdminPort`；`AuthorizationRequest.permission` | 新增 |
+| `JobRequest.concurrencyKey`、`claimNext` 按键限并发、`countAhead` | 破坏性：部署方的 `JobStorePort` 要改 |
+| `ConfigPort`（`get`，可选 `getMany` / `subscribe`），移除 `TenantConfigPort` | 破坏性 |
+| `NotificationPort`（尽力而为） | 新增 |
 | `OptimiserContract.startRun` / `execute` / `stopRun`、`OptimiserHost` 每次调用和 `reflectPrompt` 带调用方上下文 | 破坏性（第 2 步） |
 | `OptimiserHost.label` 改为入队打标任务，打标任务 `args` 带 `optimiserRunId` / `round` / `step` | 破坏性（第 5 步） |
-| `LabelCallRequest`、对话请求和 `TryTemplateInput`（Prompt helper 的试跑）带 `tenantId`；模型按租户读取；限流键改为“租户 + endpoint” | 破坏性：部署方的网关适配和限流存储要改 |
-| `LabelingStorePort`、`FeatureStorePort` | 新增（issue #58） |
+| `LabelCallRequest`、对话请求和 `TryTemplateInput`（Prompt helper 的试跑）带 `tenantId`；模型按租户读取；`LabelingModels` / `AgentModel` 接受动态 endpoint；限流键改为“租户 + endpoint” | 破坏性：部署方的网关适配和限流存储要改 |
+| `ObjectStorePort`；基于它的 `LabelingStorePort`、`FeatureStorePort` | 新增（issue #58） |
 | 样本序号和软删除、标注集 | 新增 |
 
 ## 11. 交付计划
@@ -237,7 +270,7 @@ COMMIT;
 4. 模型和网关：模型按租户读取、请求带 `tenantId`、限流键改为“租户 + endpoint”。
 5. 优化器改为按 `(runId, round, step)` 推进的链式任务：每个打标阶段入队，巡检识别等打标的运行，Stop 取消排队中和运行中的打标。
 6. 通知端口。
-7. 存储接口：`LabelingStorePort`、`FeatureStorePort`（issue #58）。
+7. 存储接口：`ObjectStorePort`，以及基于它的 `LabelingStorePort`、`FeatureStorePort`（issue #58）。
 8. 数据集和标注集：样本序号、软删除、标注集、清空受影响的人工标签。
 9. 分数和 Rescore：标注集全部完成才算分、Rescore 横幅所需的“分数是否过期”。
 
