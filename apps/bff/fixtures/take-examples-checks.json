@@ -65,7 +65,8 @@
         "name": "Formats",
         "settingsConfirmed": false,
         "setupVersionId": "$id:2",
-        "snapshotId": null
+        "snapshotId": null,
+        "tenantId": "org_a"
       }
     },
     {

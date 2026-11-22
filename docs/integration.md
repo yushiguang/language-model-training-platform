@@ -137,6 +137,23 @@ pushed changes), and pass `config.reader` as `config` to `createJobs` and `creat
 the in-process root does. Executors then read `ctl.config.forTenant(job.ctx.tenantId)`, workflow
 services `w.config.forTenant(w.ctx.tenantId)`. `stop()` before the process exits.
 
+## Permissions
+
+Sprint keeps no permission table: the three permission points (`read`, `project_write`,
+`tenant_write`, docs/design/server.md, 2) live on the deployment's permission platform.
+A deployment supplies two optional ports in `Platform`:
+
+- `authorization` (`AuthorizationPort`): `allowed(ctx, {action, permission, projectId?})`. The
+  workflow fills `permission` from its own table, so the adapter only asks the platform whether
+  `ctx.user` holds `permission` in `ctx.tenantId` (and, for `project_write`, on `projectId`).
+- `permissionAdmin` (`PermissionAdminPort`): tenant members and roles, and project write grants,
+  for the members pages and labelers. Every method must be idempotent; the ones that change
+  something get the caller's context first, for the platform's audit trail.
+
+Breaking in #63: `Project.tenantId` is required. A deployment with project records saved before
+it gives each one its tenant (the workflow writes `default` on records that have none). Custom
+`OptimiserHost` or `OptimiserContract` wrappers take the caller's context as the first argument.
+
 ## Endpoints and limits
 
 The llm-gateway keeps every call under its endpoint's QPM and TPM, and retries busy, server and

@@ -701,14 +701,69 @@ export interface ConfigReader {
   forTenant(tenantId: string | undefined): TenantConfig;
 }
 
+/**
+ * The tenant of a caller whose context names none (the browser build, single-tenant stand-ins),
+ * and of records saved before tenants existed.
+ */
+export const DEFAULT_TENANT = 'default';
+
+/**
+ * The three permission points (docs/design/server.md, 2.1). `read`: every member of the tenant
+ * sees everything in it. `project_write`: edit (and delete) one project; its creator and its
+ * labelers get it, others ask for it. `tenant_write`: the tenant's admins (settings, members,
+ * models, data sources).
+ */
+export type PermissionPoint = 'read' | 'project_write' | 'tenant_write';
+
+/**
+ * The caller of work Sprint starts itself (the sweep, auto starts). It cannot come from outside:
+ * the bff always sets its own caller. `AuthorizationPort` is not asked for it; only the tenant of
+ * the project is checked.
+ */
+export const SYSTEM_CALLER = 'system';
+
 export interface AuthorizationRequest {
-  /** What is being done, as `service.method` (for example `bff.deleteProject`). */
+  /** What is being done, as `service.method` (for example `workflow.deleteProject`). */
   action: string;
+  /** The permission point the action needs, from the workflow's table: adapters need no map of their own. */
+  permission: PermissionPoint;
+  /** Set for every action on one project; the workflow has already checked its tenant. */
   projectId?: string;
 }
 
+/**
+ * Asks the external permission platform whether the caller holds a permission point in
+ * `ctx.tenantId` (and, for `project_write`, on `projectId`). The workflow asks it before every
+ * read and write, agent tools and jobs included, since those do not pass the gateway.
+ */
 export interface AuthorizationPort {
   allowed(ctx: RequestContext, request: AuthorizationRequest): Promise<boolean>;
+}
+
+/** A member's role in a tenant: `admin` holds `tenant_write`. */
+export type TenantRole = 'admin' | 'member';
+
+export interface TenantMember {
+  userId: string;
+  role: TenantRole;
+}
+
+/**
+ * Writes and lists permissions on the external permission platform (docs/design/server.md, 2.3),
+ * for the members pages and for granting labelers. Requests and approvals happen on that platform,
+ * not here. Every method is idempotent: calling it again gives the same result. Methods that
+ * change something take the caller's context first, so the platform can record who did it.
+ * Throw when the platform cannot be reached; the workflow retries.
+ */
+export interface PermissionAdminPort {
+  listTenantMembers(tenantId: string): Promise<TenantMember[]>;
+  addTenantMember(ctx: RequestContext, tenantId: string, userId: string, role: TenantRole): Promise<void>;
+  removeTenantMember(ctx: RequestContext, tenantId: string, userId: string): Promise<void>;
+  setTenantRole(ctx: RequestContext, tenantId: string, userId: string, role: TenantRole): Promise<void>;
+  /** The users holding `project_write` on the project. */
+  listProjectWriters(tenantId: string, projectId: string): Promise<string[]>;
+  grantProjectWrite(ctx: RequestContext, tenantId: string, projectId: string, userId: string): Promise<void>;
+  revokeProjectWrite(ctx: RequestContext, tenantId: string, projectId: string, userId: string): Promise<void>;
 }
 
 export interface Platform {
@@ -750,6 +805,11 @@ export interface Platform {
   configStore?: ConfigPort;
   /** Permission checks. Optional: without it every signed-in user may do everything. */
   authorization?: AuthorizationPort;
+  /**
+   * Writes permissions on the external permission platform (members pages, labelers). Optional:
+   * without it they are kept in this process (`memoryPermissionAdmin`).
+   */
+  permissionAdmin?: PermissionAdminPort;
   /**
    * Where background jobs are kept (`jobs-api.ts`). Optional: without it the job module keeps them
    * in the memory of its own process (`memoryJobStore`), which is right for the browser build.

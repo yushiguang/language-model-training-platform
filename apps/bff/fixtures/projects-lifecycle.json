@@ -37,7 +37,8 @@
         "name": "Shoe formats",
         "settingsConfirmed": false,
         "setupVersionId": "$id:2",
-        "snapshotId": null
+        "snapshotId": null,
+        "tenantId": "org_a"
       }
     },
     {
@@ -54,7 +55,8 @@
           "name": "Shoe formats",
           "settingsConfirmed": false,
           "setupVersionId": "$id:2",
-          "snapshotId": null
+          "snapshotId": null,
+          "tenantId": "org_a"
         }
       ]
     },
@@ -94,7 +96,8 @@
         "name": "Video formats",
         "settingsConfirmed": false,
         "setupVersionId": "$id:2",
-        "snapshotId": null
+        "snapshotId": null,
+        "tenantId": "org_a"
       }
     },
     {

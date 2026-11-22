@@ -203,8 +203,8 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     changed: projectId => inst.emitChange(projectId ?? null),
     toolHost: agentToolHost(inst),
     agentProgress: agents.agentProgress(inst),
-    // The Optimiser's loop is not a person's call: it runs as the Optimiser.
-    optimiserHost: optimiserHost(inst.scope(systemContext('optimiser'))),
+    // Each call runs as the run's caller (the `optimiser.run` job's context).
+    optimiserHost: optimiserHost(inst),
     connect: c => inst.connect(c),
     turnsIdle: () => inst.turnsIdle(),
     executors: workflowExecutors(inst),

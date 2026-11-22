@@ -91,7 +91,7 @@ async function world(prefix: string, opts: WorldOpts = {}) {
     appVersion: '1.1.0-test',
     sharedState: opts.sharedState ?? memorySharedState(),
   });
-  const optimiser = createOptimiser({catalog, labeling, agents, host: optimiserHost(inst.scope(systemContext('optimiser'))), onChange: inst.emitChange, random: () => optimiserRandom()});
+  const optimiser = createOptimiser({catalog, labeling, agents, host: optimiserHost(inst), onChange: inst.emitChange, random: () => optimiserRandom()});
   inst.connect({agents, optimiser});
   for (const e of [labelingExecutor(labeling), optimiserExecutor(optimiser), ...workflowExecutors(inst)]) jobs.register(e);
   /** The scope the tests act in: one signed-in user. */
@@ -105,7 +105,7 @@ async function world(prefix: string, opts: WorldOpts = {}) {
     for (let i = 0; i < EVAL; i++)
       await catalog.insert('gold_labels', {id: `gl_${prefix}_${i}`, projectId, exampleId: `ex_${prefix}_${i}`, schemaVersion: 1, answer: [gold(String(i))], source: 'labeled', revealed: false, createdAt: '', createdBy: 'Tester'});
   }
-  await catalog.insert('projects', {id: projectId, name: 'p', createdAt: '', createdBy: '', kind: 'prompt_tuning', settingsConfirmed: opts.confirmed ?? true, setupVersionId: `sv_${prefix}`, snapshotId: `ds_${prefix}`, approvedNodes: opts.goldApproved === false ? [] : ['prompt_design', 'dataset', 'gold']});
+  await catalog.insert('projects', {id: projectId, tenantId: 'default', name: 'p', createdAt: '', createdBy: '', kind: 'prompt_tuning', settingsConfirmed: opts.confirmed ?? true, setupVersionId: `sv_${prefix}`, snapshotId: `ds_${prefix}`, approvedNodes: opts.goldApproved === false ? [] : ['prompt_design', 'dataset', 'gold']});
   const newVersion = (rules = '') => {
     const structured = sp(rules);
     return catalog.createPromptVersion({projectId, structured, template: compilePrompt(structured), features: structured.features, images: [], madeBy: 'user', change: '', schemaVersion: 1, parentId: null, kind: 'minor'});
@@ -1858,4 +1858,38 @@ test('feature missingness (#48): buildReport stamps snapshotId and helpers expos
 
   const upload = (await host.call({agent: 'front_desk', name: 'get_upload_result', args: {}, projectId: p.id, turnId: null, ctx: w.ws.ctx})) as {note: string};
   assert.match(upload.note, /noFeatures/);
+});
+
+test('Optimiser (#63): every host call and the helper run as the person who started the run, not a fixed Optimiser identity', async () => {
+  const agents = ruleAgent();
+  const asked: RequestContext[] = [];
+  const reflect = agents.reflectPrompt;
+  agents.reflectPrompt = async input => {
+    asked.push(input.ctx);
+    return reflect(input);
+  };
+  const w = await world('t63a', {agents, answer: ruled, macroF1: 0.99, gold: goldOf});
+  await w.newVersion();
+  const seen: string[] = [];
+  const realHost = optimiserHost(w.inst);
+  const watched = Object.fromEntries(Object.entries(realHost).map(([k, fn]) => [k, (ctx: RequestContext, ...a: unknown[]) => (seen.push(`${k}:${ctx.user.id}`), (fn as (...x: unknown[]) => unknown)(ctx, ...a))])) as unknown as typeof realHost;
+  const labeling = (w.inst as unknown as {labeling: Parameters<typeof createOptimiser>[0]['labeling']}).labeling;
+  const opt = createOptimiser({catalog: w.catalog, labeling, agents, host: watched, onChange: w.inst.emitChange, random: () => optimiserRandom()});
+  const run = await opt.startRun(w.ws.ctx, {projectId: w.projectId, endpoint: 'A', maxRounds: 1});
+  await opt.execute({...w.ws.ctx, requestId: 'rq_job'}, run.id);
+  assert.ok(seen.length > 3);
+  assert.ok(seen.every(s => s.endsWith(':u_1')), `every host call carries the run's caller: ${seen.filter(s => !s.endsWith(':u_1')).join(', ')}`);
+  assert.ok(asked.length >= 1 && asked.every(c => c.user.id === 'u_1'), 'the helper is asked as the run caller');
+});
+
+test('projects saved before tenants (#63) are given the default tenant at the first read', async () => {
+  const w = await world('t63b');
+  const {tenantId: _t, ...old} = (await w.catalog.get('projects', w.projectId))!;
+  await w.catalog.insert('projects', {...old, id: 'pr_t63b_old'} as never);
+  const {listProjects, getProject} = await import('./projects.ts');
+  const fresh = createInstance({...(w.inst as unknown as Parameters<typeof createInstance>[0])});
+  const ws = fresh.scope(w.ws.ctx);
+  assert.equal((await getProject(ws, 'pr_t63b_old'))?.tenantId, 'default');
+  assert.ok((await listProjects(ws)).every(p => p.tenantId === 'default'));
+  assert.equal((await w.catalog.get('projects', 'pr_t63b_old'))?.tenantId, 'default', 'written back, not only filled on read');
 });

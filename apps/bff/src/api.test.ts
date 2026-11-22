@@ -37,7 +37,7 @@ async function world(prefix: string, identity: Identity = {currentUser: async ()
   await catalog.insert('dataset_snapshots', {id: `ds_${prefix}`, projectId, number: 1, source: 'sample', sourceName: 'test', createdAt: '', counts: {rows: 4, valid: 4, invalid: 0, video: 4, photoText: 0}, split: {eval: 4, test: 0, train: 0}});
   await catalog.insertMany('examples', Array.from({length: 4}, (_, i) => ({id: `ex_${prefix}_${i}`, snapshotId: `ds_${prefix}`, externalId: String(i), type: 'video' as const, title: '', features: {}, split: 'eval' as const, optimiserHalf: i % 2 === 0})));
   for (let i = 0; i < 4; i++) await catalog.insert('gold_labels', {id: `gl_${prefix}_${i}`, projectId, exampleId: `ex_${prefix}_${i}`, schemaVersion: 1, answer: ['Vlog'], source: 'labeled', revealed: false, createdAt: '', createdBy: 'Tester'});
-  await catalog.insert('projects', {id: projectId, name: 'p', createdAt: '', createdBy: '', kind: 'prompt_tuning', settingsConfirmed: true, setupVersionId: `sv_${prefix}`, snapshotId: `ds_${prefix}`, approvedNodes: []});
+  await catalog.insert('projects', {id: projectId, tenantId: 'default', name: 'p', createdAt: '', createdBy: '', kind: 'prompt_tuning', settingsConfirmed: true, setupVersionId: `sv_${prefix}`, snapshotId: `ds_${prefix}`, approvedNodes: []});
   return {api: createBffApi({workflow, identity, appVersion: '9.9.9'}), catalog, projectId, contexts, workflow, jobs};
 }
 

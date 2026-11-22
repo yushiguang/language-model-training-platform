@@ -128,8 +128,10 @@ platform fails it keeps what it had. Tenant overrides are read explicitly, never
 global: workflow services call `w.config.forTenant(w.ctx.tenantId)` and job executors
 `ctl.config.forTenant(job.ctx.tenantId)`. Today only the job concurrency limits have tenant
 keys (`TenantConfig.jobLimit`, lookup order in `docs/design/server.md`, 7). `Platform` also has
-an optional permission port (`AuthorizationPort`, stand-in `allowAll`) and a job store
-(`JobStorePort`, stand-in `memoryJobStore`).
+optional permission ports (`AuthorizationPort` asks whether a caller holds a permission point,
+stand-in `allowAll`; `PermissionAdminPort` writes members, roles and project write grants,
+stand-in `memoryPermissionAdmin`) and a job store (`JobStorePort`, stand-in `memoryJobStore`).
+Every project carries its `tenantId`.
 
 ### Background work is jobs (deployment readiness spec, 3)
 

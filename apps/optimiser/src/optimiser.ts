@@ -1,4 +1,4 @@
-import type {AgentRuntimeContract, Answer, CatalogContract, EndpointId, Example, ExampleBrief, ExampleWithFeatures, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@yushiguang/sprint-contracts';
+import type {AgentRuntimeContract, RequestContext, Answer, CatalogContract, EndpointId, Example, ExampleBrief, ExampleWithFeatures, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@yushiguang/sprint-contracts';
 import {NO_TELEMETRY} from '@yushiguang/sprint-contracts';
 import {checkStructured, msg, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withComments, pickWrong, wrongExamples, type PoolEntry} from '@yushiguang/sprint-domain';
 
@@ -36,6 +36,15 @@ async function cancellable<T>(signal: AbortSignal, fn: (requestId: string) => Pr
   } finally {
     signal.removeEventListener('abort', onAbort);
   }
+}
+
+/** The host with one run's context bound: what the loop calls (every call runs as the run's caller). */
+type RunHost = {[K in keyof OptimiserHost]: OptimiserHost[K] extends (ctx: RequestContext, ...a: infer A) => infer R ? (...a: A) => R : never};
+
+function bindHost(host: OptimiserHost, ctx: RequestContext): RunHost {
+  const out = {} as Record<string, unknown>;
+  for (const k of Object.keys(host) as (keyof OptimiserHost)[]) out[k] = (...a: unknown[]) => (host[k] as (...x: unknown[]) => unknown)(ctx, ...a);
+  return out as RunHost;
 }
 
 export interface OptimiserDeps {
@@ -83,7 +92,7 @@ const isAbort = (e: unknown) => (e as Error)?.name === 'AbortError';
  * gets the parent's wrong examples, worst first; a merge gets the examples each version gets right
  * that the other misses, up to 4 each.
  */
-async function briefs(host: OptimiserHost, state: ProjectState, schema: Schema, half: string[], parent: PromptVersion, other: PromptVersion | null, answers: Map<string, Map<string, Prediction>>, entries: PoolEntry[]): Promise<ExampleBrief[]> {
+async function briefs(host: RunHost, state: ProjectState, schema: Schema, half: string[], parent: PromptVersion, other: PromptVersion | null, answers: Map<string, Map<string, Prediction>>, entries: PoolEntry[]): Promise<ExampleBrief[]> {
   const halfSet = new Set(half);
   const exs = state.examples.filter(e => halfSet.has(e.id));
   const gold = new Map(exs.filter(e => !!state.gold[e.id]).map(e => [e.id, state.gold[e.id].answer]));
@@ -137,7 +146,7 @@ function memoryLocks(): LockPort {
 }
 
 export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
-  const {catalog, labeling, agents, host} = deps;
+  const {catalog, labeling, agents} = deps;
   const locks = deps.locks ?? memoryLocks();
   const tm = deps.telemetry ?? NO_TELEMETRY;
   const onChange = deps.onChange ?? ((_projectId: string) => {});
@@ -161,7 +170,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
    * Starts a new run: reserves the next major for its versions. It starts from `startVersionId`
    * (R3-7: the version selected in the list), else from the best scored version, else the newest.
    */
-  async function newRun(projectId: string, endpoint: EndpointId, maxRounds: number, opts: {auto?: boolean; startVersionId?: string} = {}): Promise<OptimisationRun> {
+  async function newRun(host: RunHost, projectId: string, endpoint: EndpointId, maxRounds: number, opts: {auto?: boolean; startVersionId?: string} = {}): Promise<OptimisationRun> {
     const state = (await host.loadState(projectId))!;
     const start = opts.startVersionId ? state.versions.find(v => v.id === opts.startVersionId) : bestScored(state, endpoint);
     if (opts.startVersionId && !start) throw new Error('The selected version was not found.');
@@ -193,7 +202,8 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
   }
 
   /** Runs (or resumes) the loop of a saved run. Resolves when the run ends. */
-  async function runLoop(given: OptimisationRun, opts: {resumed?: boolean} = {}): Promise<OptimisationRun> {
+  async function runLoop(given: OptimisationRun, ctx: RequestContext, opts: {resumed?: boolean} = {}): Promise<OptimisationRun> {
+    const host = bindHost(deps.host, ctx);
     const run: OptimisationRun = {...given, state: 'running', error: null, finishedAt: null, history: [...(given.history ?? [])]};
     const {projectId, endpoint} = run;
     const entry = {ctrl: new AbortController(), projectId};
@@ -363,8 +373,8 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
               agents.reflectPrompt({
                 projectId,
                 requestId,
-                // The Optimiser's own context: its tool calls run as the Optimiser, not as a person.
-                ctx: {requestId: requestId ?? newId('rq'), user: {id: 'optimiser', name: 'Optimiser'}, caller: 'optimiser'},
+                // The run's context: the helper's tool calls run as the person who started the run.
+                ctx: {...ctx, requestId: requestId ?? newId('rq')},
                 mode: other ? 'merge' : 'change',
                 prompt: parent.structured,
                 triedChanges: run.history.filter(h => h.parentId === parent.id && h.change).map(h => h.change),
@@ -503,38 +513,39 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
   }
 
   return {
-    async startRun({projectId, endpoint, maxRounds, startVersionId, auto}) {
+    async startRun(ctx, {projectId, endpoint, maxRounds, startVersionId, auto}) {
+      const host = bindHost(deps.host, ctx);
       const cfg = systemConfig().optimiser;
       const rounds = Math.max(1, Math.min(cfg.maxRoundsCap, Math.round(maxRounds) || cfg.defaultMaxRounds));
       const open = (await catalog.find('optimisation_runs', {projectId}, 'startedAt desc')).find(o => o.state === 'running' || o.state === 'paused');
       if (open) return open;
-      const run = await newRun(projectId, endpoint, rounds, {auto, startVersionId});
+      const run = await newRun(host, projectId, endpoint, rounds, {auto, startVersionId});
       if (!auto) await host.postEvent({projectId, event: 'start', actor: 'user', what: msg('started the Optimiser for up to {rounds} rounds', {rounds}), link: {path: '/prompt'}});
       onChange(projectId);
       return run;
     },
 
-    async execute(runId) {
+    async execute(ctx, runId) {
       const run = await catalog.get('optimisation_runs', runId);
       if (!run || !['failed', 'paused', 'running'].includes(run.state) || active.has(runId)) return null;
       // A new run has no rounds yet; anything else goes on from where it stopped.
       const resumed = run.state !== 'running' || run.round > 0 || run.history.length > 0;
       const out = await once(() =>
         // The lock covers every tab of this browser: a second tab never runs the same work twice.
-        locks.run(optimiserLock(run.projectId, run.endpoint), () => runLoop(run, {resumed})),
+        locks.run(optimiserLock(run.projectId, run.endpoint), () => runLoop(run, ctx, {resumed})),
       );
       return out ?? null;
     },
 
     /** The user's Stop: ends the run (and the labeling it is doing) and saves it in Ask AI. */
-    async stopRun(runId) {
+    async stopRun(ctx, runId) {
       const a = active.get(runId);
       if (!a) return;
       a.ctrl.abort();
       const run = await catalog.get('optimisation_runs', runId);
       if (!run) return;
       for (const t of await labeling.listTasks(run.projectId)) if (t.purpose === 'optimiser' && t.state === 'running') await labeling.stopTask(t.id);
-      await host.postEvent({projectId: run.projectId, event: 'stop', actor: 'user', what: msg('stopped the Optimiser'), link: {path: '/prompt'}});
+      await deps.host.postEvent(ctx, {projectId: run.projectId, event: 'stop', actor: 'user', what: msg('stopped the Optimiser'), link: {path: '/prompt'}});
     },
 
     getRun: runId => catalog.get('optimisation_runs', runId),

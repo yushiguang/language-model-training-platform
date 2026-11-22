@@ -156,6 +156,12 @@ export type ProjectKind = 'prompt_tuning' | 'batch_labeling';
 
 export interface Project {
   id: string;
+  /**
+   * The tenant that owns the project (docs/design/server.md, 2): every read and write by
+   * `projectId` checks it against the caller's `ctx.tenantId`. Records saved before it existed
+   * are given `DEFAULT_TENANT` the first time a workflow instance reads projects.
+   */
+  tenantId: string;
   name: string;
   createdAt: string;
   /** The creator's display name, as the Projects list shows it. */

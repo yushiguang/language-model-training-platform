@@ -1,4 +1,4 @@
-import {DocFieldValue, type AddSourceFileRequest, type CreateDataSourceRequest, type DataSource, type DataSourceDetail, type DataSourceSummary, type DatasetSourceLine, type Example, type Job, type JobControl, type JobOutcome, type SourceChunk, type SourceCut, type SourceFile, type SourcePick, type SourceUploadResult} from '@yushiguang/sprint-contracts';
+import {DEFAULT_TENANT, DocFieldValue, type AddSourceFileRequest, type CreateDataSourceRequest, type DataSource, type DataSourceDetail, type DataSourceSummary, type DatasetSourceLine, type Example, type Job, type JobControl, type JobOutcome, type SourceChunk, type SourceCut, type SourceFile, type SourcePick, type SourceUploadResult} from '@yushiguang/sprint-contracts';
 import {hashString, newId, readItemIdFile, seededShuffle} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 
@@ -19,7 +19,8 @@ import {now, type Scope} from './app.ts';
 const CHUNK = 1000;
 const BUILT_IN_SEED = 'built-in';
 
-export const tenantOf = (w: Scope) => w.ctx.tenantId ?? 'default';
+/** The caller's tenant; `DEFAULT_TENANT` when the context names none (the browser build). */
+export const tenantOf = (w: Scope) => w.ctx.tenantId ?? DEFAULT_TENANT;
 
 /** Runs `fn` holding the lock `name`, waiting while someone else holds it. */
 async function withLock<T>(w: Scope, name: string, fn: () => Promise<T>): Promise<T> {
