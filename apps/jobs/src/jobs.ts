@@ -1,12 +1,13 @@
 import {NO_TELEMETRY, type ConfigReader, type Job, type JobContext, type JobControl, type JobExecutor, type JobKind, type JobOutcome, type JobProgress, type JobRequest, type JobsContract, type JobStorePort, type RequestContext, type TelemetryPort} from '@yushiguang/sprint-contracts';
-import {newId, processConfigReader} from '@yushiguang/sprint-domain';
+import {newId, parseConcurrencyKey, processConfigReader} from '@yushiguang/sprint-domain';
 
 /**
  * The job module (`@yushiguang/sprint-jobs`, deployment readiness spec, 3): one way to run every piece of
  * background work. It owns the queue (through the injected `JobStorePort`), one runner per job
  * (a lease that a heartbeat extends), recovery of jobs whose runner died (`sweep`), retries,
- * cancellation, and the order jobs are taken in (fair across tenants, in the store). It knows no
- * business rule: each kind's work is a `JobExecutor` registered by the app that owns it.
+ * cancellation, and how many jobs of one concurrency key run at once (the key's limit from
+ * configuration, counted in the store across every runner; docs/design/server.md, 5). It knows
+ * no business rule: each kind's work is a `JobExecutor` registered by the app that owns it.
  *
  * In the browser and in tests the store is in memory and a job starts as soon as it is enqueued
  * (`runOnEnqueue`). On a server, a worker process registers the executors and calls `poll`, and a
@@ -22,14 +23,17 @@ export interface JobsDeps {
   heartbeatMs?: number;
   /** A job whose lease ended this many times fails instead of running again (default 3). */
   maxAttempts?: number;
-  /** Jobs this runner runs at once (default 16). */
+  /** Jobs this runner runs at once, whatever their keys (default 16): this process's own cap. */
   concurrency?: number;
   /** The wait before a retry, times the attempt (default 1 s). */
   retryDelayMs?: number;
   /** Start queued jobs in this process as soon as they are enqueued here (default true). */
   runOnEnqueue?: boolean;
   telemetry?: TelemetryPort;
-  /** Configuration for the executors (`JobControl.config`). Default: process-level values only. */
+  /**
+   * Configuration: each concurrency key's limit (`jobLimit` of the key's tenant and target), and
+   * the executors' `JobControl.config`. Default: process-level values only.
+   */
   config?: ConfigReader;
   clock?: () => number;
 }
@@ -83,6 +87,13 @@ export function createJobs(deps: JobsDeps): Jobs {
   const listeners = new Set<() => void>();
   const emit = () => listeners.forEach(fn => fn());
 
+  /**
+   * Job ids that sort by when they were made: a queue takes jobs by `createdAt` and then `id`, so
+   * two jobs enqueued in the same millisecond by this runner still go in the order they came.
+   */
+  let seq = 0;
+  const jobId = () => `job_${clock().toString(36).padStart(9, '0')}${(seq++ % 1296).toString(36).padStart(2, '0')}${newId('').slice(1, 9)}`;
+
   let draining = false;
   let again = false;
 
@@ -96,14 +107,25 @@ export function createJobs(deps: JobsDeps): Jobs {
     return out;
   }
 
+  /** A key's limit, read for its tenant and target. */
+  async function limitOf(key: string): Promise<number> {
+    const parsed = parseConcurrencyKey(key);
+    // enqueue refuses such keys; one written by another program waits rather than runs unlimited.
+    if (!parsed) return 0;
+    return config.forTenant(parsed.tenantId).jobLimit(parsed.target);
+  }
+
   async function enqueue(ctx: RequestContext | JobContext, req: JobRequest): Promise<Job> {
+    if (!parseConcurrencyKey(req.concurrencyKey)) throw new Error(`Not a job concurrency key: "${req.concurrencyKey}".`);
     const job: Job = {
-      id: newId('job'),
+      id: jobId(),
       kind: req.kind,
       projectId: req.projectId,
       args: req.args,
       idempotencyKey: req.idempotencyKey ?? null,
+      concurrencyKey: req.concurrencyKey,
       then: req.then ?? null,
+      finally: req.finally ?? null,
       state: 'queued',
       progress: null,
       error: null,
@@ -167,6 +189,16 @@ export function createJobs(deps: JobsDeps): Jobs {
    */
   const chained = (job: Job): JobRequest => ({...job.then!, idempotencyKey: job.then!.idempotencyKey ?? `then:${job.id}`});
 
+  /**
+   * Queues the `finally` of a job that has ended (in any way), once: its idempotency key names
+   * the job, and only the one place that saw the end (the runner's finish, a cancel of a queued
+   * job, the sweep) calls this.
+   */
+  async function afterEnd(job: Job) {
+    if (!job.finally || !['done', 'failed', 'cancelled'].includes(job.state)) return;
+    await enqueue(job.ctx, {...job.finally, idempotencyKey: job.finally.idempotencyKey ?? `finally:${job.id}`}).catch(() => undefined);
+  }
+
   function start(job: Job) {
     const executor = executors.get(job.kind)!;
     const r: Running = {job, ctrl: new AbortController(), progress: job.progress, writing: Promise.resolve(), cancelled: false, lost: false};
@@ -217,6 +249,9 @@ export function createJobs(deps: JobsDeps): Jobs {
       // last attempt the sweep fails it instead, so the chain is queued here, once (#26).
       const chainNow = ended === 'error' ? outcome.state === 'done' && job.then && job.attempts >= maxAttempts : ended?.state === 'done' && ended.then;
       if (chainNow) await enqueue(job.ctx, chained(job)).catch(() => undefined);
+      // The end that this runner saved (a lost lease or a store that kept failing saved none:
+      // the runner that took over, or the sweep that fails the job, queues it).
+      if (ended && ended !== 'error') await afterEnd(ended);
     })();
     function done() {
       clearInterval(timer);
@@ -247,7 +282,7 @@ export function createJobs(deps: JobsDeps): Jobs {
         do {
           again = false;
           while (running.size < concurrency) {
-            const job = await store.claimNext([...executors.keys()], owner, leaseMs, nowIso());
+            const job = await store.claimNext([...executors.keys()], owner, leaseMs, nowIso(), limitOf);
             if (!job) break;
             start(job);
           }
@@ -266,13 +301,19 @@ export function createJobs(deps: JobsDeps): Jobs {
     get: async (_ctx, jobId) => store.get(jobId),
     list: async (_ctx, filter) => store.find(filter),
     async cancel(_ctx, jobId) {
-      const after = await store.requestCancel(jobId, nowIso());
+      const {job: after, ended} = await store.requestCancel(jobId, nowIso());
       const r = running.get(jobId);
       if (r && !r.ctrl.signal.aborted) {
         r.cancelled = true;
         r.ctrl.abort(new Error('Cancelled.'));
       }
       if (after) emit();
+      if (after && ended) await afterEnd(after);
+    },
+    async ahead(_ctx, jobId) {
+      const job = await store.get(jobId);
+      if (!job || job.state !== 'queued') return null;
+      return store.countAhead(job.concurrencyKey, job.createdAt, job.id);
     },
   };
 
@@ -287,9 +328,10 @@ export function createJobs(deps: JobsDeps): Jobs {
       const out = await store.recoverExpired(nowIso(), maxAttempts);
       if (out.requeued) tm.counter('sprint_jobs_recovered_total', {outcome: 'requeued'}, out.requeued);
       if (out.failed) tm.counter('sprint_jobs_recovered_total', {outcome: 'failed'}, out.failed);
-      if (out.requeued || out.failed) emit();
+      if (out.requeued || out.ended.length) emit();
+      for (const job of out.ended) await afterEnd(job);
       drain();
-      return out;
+      return {requeued: out.requeued, failed: out.failed};
     },
     poll(intervalMs) {
       const t = setInterval(drain, intervalMs);

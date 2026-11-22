@@ -1,6 +1,7 @@
 import {DEFAULT_TENANT, DocFieldValue, type AddSourceFileRequest, type CreateDataSourceRequest, type DataSource, type DataSourceDetail, type DataSourceSummary, type DatasetSourceLine, type Example, type Job, type JobControl, type JobOutcome, type SourceChunk, type SourceCut, type SourceFile, type SourcePick, type SourceUploadResult} from '@yushiguang/sprint-contracts';
 import {hashString, newId, readItemIdFile, seededShuffle} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
+import {computeKey} from './queue.ts';
 
 /**
  * Data sources (#29, #30): a tenant's files of item ids, shared by its projects.
@@ -187,7 +188,7 @@ async function stageFile(w: Scope, src: DataSource, fileName: string, read: Read
 
 /** Queues the file's import (`source.ingest`) once its source is saved. */
 async function queued(w: Scope, src: DataSource, file: SourceFile, read: ReadFile): Promise<SourceUploadResult> {
-  await w.jobs.enqueue(w.ctx, {kind: 'source.ingest', projectId: null, args: {fileId: file.id}, idempotencyKey: `source.ingest:${file.id}`});
+  await w.jobs.enqueue(w.ctx, {kind: 'source.ingest', projectId: null, concurrencyKey: computeKey(w), args: {fileId: file.id}, idempotencyKey: `source.ingest:${file.id}`});
   await w.catalog.audit(null, file.uploadedBy, 'data_source.file_added', {sourceId: src.id, fileId: file.id, rows: read.rows, bad: read.bad, repeats: read.repeats});
   w.tm.event('source_file_uploaded', {rows: read.rows, bad: read.bad, repeats: read.repeats});
   w.emitChange(null);

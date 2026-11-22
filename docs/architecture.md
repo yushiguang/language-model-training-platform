@@ -149,6 +149,17 @@ recovery of a dead runner's jobs, retries and cancel. A job holds ids only; the 
   the file (imported by a `source.ingest` job), and
   `deleteProject` returns once the project is marked `deleting`. Pages read progress back through
   `loadProjectState`, as they did while work ran.
+- **Concurrency keys** (docs/design/server.md, 5). Every job names the resource it waits for:
+  `model:<tenantId>:<endpointId>` (`labeling.runTask`, and `optimiser.run` while the Optimiser
+  labels inside its job) or `compute:<tenantId>` (everything else), worked out by whoever queues
+  it (`apps/workflow/src/services/queue.ts`). At most the key's limit
+  (`config.forTenant(tenant).jobLimit(target)`: 1 per endpoint and 10 for compute by default) run
+  at once across every runner; the store counts them at the claim. Keys take turns, so a long
+  queue on one key never holds up another, and a key's jobs go oldest first. A runner's own cap
+  (`concurrency`, 16) still applies. `jobs.api.ahead(jobId)` is a queued job's place.
+- **`then` and `finally`.** `then` is queued when a job ends done (a labeling task's report);
+  `finally` when it ends in any way, done, failed or cancelled, also when the sweep fails it or a
+  cancel ends it before it started.
 - **Keys.** While a job with the same idempotency key is queued or running, queueing it again
   returns it (`label:<task>`, `report:<version>:<model>`, `optimiser:<project>`,
   `delete:<project>`), so the page tick, a click and a helper's start tool never start work twice.

@@ -13,7 +13,14 @@ The job module (deployment readiness spec, 3): one way to run background work. C
     executor's progress with it. A lost lease or a cancel aborts the executor's `signal`.
   - An executor that throws is tried again `retries` times (default 0), after
     `retryDelayMs` x attempt; then the job fails with the error's message.
-  - A job that ends `done` enqueues its `then` with the same context (a chain).
+  - Every job has a `concurrencyKey` (`model:<tenantId>:<endpointId>` or `compute:<tenantId>`,
+    built with `jobConcurrencyKey` from `@yushiguang/sprint-domain`; enqueue refuses anything
+    else). The store claims a job only while its key runs fewer than its limit, which this
+    module reads as `config.forTenant(tenant).jobLimit(target)`. `concurrency` is still this
+    runner's own cap. `api.ahead(ctx, jobId)` is a queued job's place in its key's queue.
+  - A job that ends `done` enqueues its `then` with the same context (a chain). A job that ends
+    in any way (done, failed, cancelled; also by the sweep or a cancel before it started)
+    enqueues its `finally`, once (idempotency key `finally:<jobId>`).
   - `sweep()` (a cron job on a server) puts running jobs whose lease ended back in the queue, or
     fails them after `maxAttempts`. `poll(ms)` is a server worker's loop. `idle()` waits until
     nothing runs or can start (tests).
@@ -23,4 +30,6 @@ The job module (deployment readiness spec, 3): one way to run background work. C
 
 Rules: imports contracts and domain only. Tests (`jobs.test.ts`) cover the lifecycle: enqueue once
 per key, progress, cancel (queued, running, from another runner), lease expiry and takeover, a
-lost lease, retries, chains, fairness across tenants.
+lost lease, retries, chains, `finally` on every end, per-key limits from configuration across
+runners, keys taking turns across tenants. The store's own rules are tested in
+`packages/platform/src/standins/job-store.test.ts`.

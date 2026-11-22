@@ -178,6 +178,25 @@ test('two paused tasks of one version and model both resume in one check, each a
   assert.equal((await w.state()).runs.length, 2, 'no new task was made');
 });
 
+test('labeling waits for its endpoint: one labeling job per tenant and endpoint at a time; reports only compute (#66)', async () => {
+  const w = await world('b5c', {delayMs: 5});
+  const v = await w.newVersion();
+  const s0 = await w.state();
+  const make = (ids: string[]) => w.labeling.createTask({projectId: w.projectId, purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: ids, createdBy: 'Tester'});
+  const repo = new DocRepo(w.db);
+  for (const t of [await make(s0.examples.map(e => e.id)), await make(s0.examples.map(e => e.id).slice(0, 3))]) await repo.patch('labeling_tasks', t.id, {state: 'paused', stopReason: 'closed'});
+  await tick(w.ws, await w.state());
+  const labelJobs = () => w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask']});
+  await until(async () => (await labelJobs()).some(j => j.state === 'running'), 'the first task starts');
+  const jobs = await labelJobs();
+  assert.deepEqual(jobs.map(j => j.concurrencyKey), ['model:default:A', 'model:default:A'], "the project's tenant and the task's model");
+  assert.deepEqual(jobs.map(j => j.state).sort(), ['queued', 'running'], 'the second waits for the endpoint');
+  assert.equal(await w.jobs.api.ahead(w.ws.ctx, jobs.find(j => j.state === 'queued')!.id), 0);
+  await until(async () => (await w.state()).runs.every(r => r.state === 'done'), 'both tasks, one after the other');
+  const reports = await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['report.build']});
+  assert.ok(reports.length && reports.every(j => j.concurrencyKey === 'compute:default'));
+});
+
 test('agent start tools start at once, with no card, and leave an action line', async () => {
   const w = await world('b6', {delayMs: 20});
   await w.catalog.audit(w.projectId, 'system', 'auto_spend', {what: 'try_prompt', costUsd: 50});

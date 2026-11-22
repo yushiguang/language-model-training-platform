@@ -4,6 +4,7 @@ import {latestGold} from './evaluation.ts';
 import {now, type Scope} from './app.ts';
 import {appendExamples, frozenFacts, insertExamplesSettled, type NewExample} from './governance.ts';
 import {allocate, checkPicks, retireCuts} from './sources.ts';
+import {computeKey} from './queue.ts';
 
 /**
  * Taking examples from data sources (#29) runs as a `dataset.sample` job (deployment readiness
@@ -123,7 +124,7 @@ export async function takeExamples(w: Scope, projectId: string, picks: SourcePic
     if (i >= 100) throw new Error('The last take is still stopping. Try again in a moment.');
     await new Promise(res => setTimeout(res, 100));
   }
-  const job = await w.jobs.enqueue(w.ctx, {kind: 'dataset.sample', projectId, args: {picks: JSON.stringify(picks.map(p => ({sourceId: p.sourceId, count: p.count})))}, idempotencyKey: `sample:${projectId}`});
+  const job = await w.jobs.enqueue(w.ctx, {kind: 'dataset.sample', projectId, concurrencyKey: computeKey(w), args: {picks: JSON.stringify(picks.map(p => ({sourceId: p.sourceId, count: p.count})))}, idempotencyKey: `sample:${projectId}`});
   w.emitChange(projectId);
   return samplingView(job);
 }

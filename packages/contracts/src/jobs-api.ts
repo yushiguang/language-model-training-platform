@@ -29,6 +29,16 @@ export const ACTIVE_JOB_STATES: readonly JobStatus[] = ['queued', 'running'];
 /** Plain JSON arguments: ids, counts and flags, never records. */
 export type JobArgs = Record<string, string | number | boolean | null>;
 
+/**
+ * Which resource a job waits for (docs/design/server.md, 5.1): `model:<tenantId>:<endpointId>`
+ * for work that calls a model, `compute:<tenantId>` for work that only computes. Ids are the
+ * system's own (a tenant id never holds `:`), so two keys never collide. At most the key's limit
+ * (`TenantConfig.jobLimit` of its tenant and target) of jobs with one key run at once, across
+ * every runner. Built and read by `jobConcurrencyKey` / `parseConcurrencyKey` in
+ * `@yushiguang/sprint-domain`.
+ */
+export type ConcurrencyKey = string;
+
 export interface JobRequest {
   kind: JobKind;
   /** The project the work is for; null for work that belongs to no project. */
@@ -40,8 +50,16 @@ export interface JobRequest {
    * resume from saved records, so finished work is not done again).
    */
   idempotencyKey?: string;
+  /** The resource this job waits for (`ConcurrencyKey`), worked out by whoever enqueues it. */
+  concurrencyKey: ConcurrencyKey;
   /** Enqueued with the same context when this job ends `done`: the next step of a chain. */
   then?: JobRequest;
+  /**
+   * Enqueued with the same context when this job ends in any way: `done`, `failed` or
+   * `cancelled` (also when the sweep fails it, or a cancel ends it before it started). Not on
+   * `paused`, which is not an end. Its idempotency key defaults to `finally:<jobId>`.
+   */
+  finally?: JobRequest;
 }
 
 /** How far a job is, as the executor last reported it. */
@@ -61,7 +79,9 @@ export interface Job {
   projectId: string | null;
   args: JobArgs;
   idempotencyKey: string | null;
+  concurrencyKey: ConcurrencyKey;
   then: JobRequest | null;
+  finally: JobRequest | null;
   state: JobStatus;
   progress: JobProgress | null;
   /** Why it failed or was cancelled, in words a person can read. */
@@ -126,6 +146,11 @@ export interface JobsContract {
   list(ctx: RequestContext, filter: JobFilter): Promise<Job[]>;
   /** A queued job is cancelled at once; a running one when its runner next looks. */
   cancel(ctx: RequestContext, jobId: string): Promise<void>;
+  /**
+   * How many jobs with the same concurrency key go before this queued one ("Queued · 2 ahead");
+   * null when it is not queued (or does not exist).
+   */
+  ahead(ctx: RequestContext, jobId: string): Promise<number | null>;
 }
 
 /**
@@ -141,11 +166,24 @@ export interface JobStorePort {
   get(jobId: string): Promise<Job | null>;
   find(filter: JobFilter): Promise<Job[]>;
   /**
-   * Takes the next queued job of these kinds whose `notBefore` has passed: marks it running with
-   * a lease for `owner` until `now + leaseMs`, and counts the attempt. Fair across tenants: the
-   * oldest job of the tenant with the fewest running jobs goes first.
+   * Takes the next queued job of these kinds whose `notBefore` has passed, from a concurrency key
+   * with fewer running jobs than `limitOf(key)`: marks it running with a lease for `owner` until
+   * `now + leaseMs`, and counts the attempt (docs/design/server.md, 5.2).
+   * - Keys take turns: the key claimed longest ago (or never) is tried first, so a long queue on
+   *   one key never starves another. A full key is skipped, never waited on.
+   * - Within a key, the oldest job goes first (`createdAt`, then `id`).
+   * - The running count is worked out at the claim, under a lock on the key (SQL: a `job_keys`
+   *   row per key, `SELECT ... FOR UPDATE SKIP LOCKED`, READ COMMITTED), so two runners never
+   *   fill a key past its limit. `enqueueOnce` creates the key's row (`INSERT IGNORE`).
+   * - `limitOf` reads configuration and may be slow: ask it before taking any lock.
    */
-  claimNext(kinds: JobKind[], owner: string, leaseMs: number, now: string): Promise<Job | null>;
+  claimNext(kinds: JobKind[], owner: string, leaseMs: number, now: string, limitOf: (key: ConcurrencyKey) => Promise<number>): Promise<Job | null>;
+  /**
+   * Queued jobs with this key that go before a job created at `createdAt` with this `id` (earlier
+   * `createdAt`, or the same and a smaller `id`). SQL: one count on `jobs(concurrency_key, state,
+   * created_at)`.
+   */
+  countAhead(concurrencyKey: ConcurrencyKey, createdAt: string, id: string): Promise<number>;
   /**
    * Extends the lease and saves progress, if `owner` still holds it. Says whether it does, and
    * whether a cancel was asked for.
@@ -155,11 +193,16 @@ export interface JobStorePort {
   finish(jobId: string, owner: string, outcome: JobOutcome, now: string): Promise<Job | null>;
   /** Back to the queue (a retry), if `owner` holds it, not before `notBefore`. */
   requeue(jobId: string, owner: string, notBefore: string, error: string): Promise<void>;
-  /** Cancels a queued job at once, or flags a running one. Returns the job after. */
-  requestCancel(jobId: string, now: string): Promise<Job | null>;
+  /**
+   * Cancels a queued job at once, or flags a running one. Returns the job after, and whether
+   * this call ended it (a queued job; the module then enqueues its `finally`).
+   */
+  requestCancel(jobId: string, now: string): Promise<{job: Job | null; ended: boolean}>;
   /**
    * The sweep: every running job whose lease ended before `now` goes back to the queue, or fails
-   * once it has had `maxAttempts`. Returns how many were recovered and failed.
+   * once it has had `maxAttempts` (or ends cancelled when a cancel was asked). Returns how many
+   * were requeued and failed, and the jobs it ended (failed or cancelled), whose `finally` the
+   * module then enqueues.
    */
-  recoverExpired(now: string, maxAttempts: number): Promise<{requeued: number; failed: number}>;
+  recoverExpired(now: string, maxAttempts: number): Promise<{requeued: number; failed: number; ended: Job[]}>;
 }

@@ -12,6 +12,8 @@ import {createJobs} from './jobs.ts';
  */
 
 const ctx = (tenantId?: string): RequestContext => ({requestId: 'rq_1', user: {id: 'u_1', name: 'Ann'}, caller: 'test', ...(tenantId ? {tenantId} : {})});
+/** A compute key with the default limit (10), for tests about something else. */
+const KEY = 'compute:default';
 const tick = (ms = 5) => new Promise(r => setTimeout(r, ms));
 
 /** An executor whose runs the test ends by hand. */
@@ -41,8 +43,8 @@ test('a job runs as soon as it is enqueued, reports progress, and ends done; the
   const jobs = createJobs({store});
   const m = manual();
   jobs.register(m.executor);
-  const a = await jobs.api.enqueue(ctx(), {kind: 'report.build', projectId: 'pr_1', args: {v: 'pv_1'}, idempotencyKey: 'report:pv_1'});
-  const again = await jobs.api.enqueue(ctx(), {kind: 'report.build', projectId: 'pr_1', args: {v: 'pv_1'}, idempotencyKey: 'report:pv_1'});
+  const a = await jobs.api.enqueue(ctx(), {kind: 'report.build', concurrencyKey: KEY, projectId: 'pr_1', args: {v: 'pv_1'}, idempotencyKey: 'report:pv_1'});
+  const again = await jobs.api.enqueue(ctx(), {kind: 'report.build', concurrencyKey: KEY, projectId: 'pr_1', args: {v: 'pv_1'}, idempotencyKey: 'report:pv_1'});
   assert.equal(again.id, a.id, 'a repeat of a queued or running key is the same job');
   await until(() => m.runs.length === 1, 'the run');
   assert.deepEqual(m.runs[0].job.ctx, {requestId: 'rq_1', user: {id: 'u_1', name: 'Ann'}, caller: 'test'}, 'the job runs as its caller');
@@ -54,7 +56,7 @@ test('a job runs as soon as it is enqueued, reports progress, and ends done; the
   const ended = (await jobs.api.get(ctx(), a.id))!;
   assert.deepEqual([ended.state, ended.attempts, ended.lease], ['done', 1, null]);
   // Once it ended, the key starts new work.
-  const b = await jobs.api.enqueue(ctx(), {kind: 'report.build', projectId: 'pr_1', args: {v: 'pv_1'}, idempotencyKey: 'report:pv_1'});
+  const b = await jobs.api.enqueue(ctx(), {kind: 'report.build', concurrencyKey: KEY, projectId: 'pr_1', args: {v: 'pv_1'}, idempotencyKey: 'report:pv_1'});
   assert.notEqual(b.id, a.id);
   await until(() => m.runs.length === 2, 'the second run');
   m.runs[1].end({state: 'done'});
@@ -66,8 +68,8 @@ test('cancel: a queued job is cancelled at once; a running one stops through its
   const jobs = createJobs({store, concurrency: 1});
   const m = manual();
   jobs.register(m.executor);
-  const first = await jobs.api.enqueue(ctx(), {kind: 'report.build', projectId: 'pr_1', args: {}});
-  const second = await jobs.api.enqueue(ctx(), {kind: 'report.build', projectId: 'pr_1', args: {}});
+  const first = await jobs.api.enqueue(ctx(), {kind: 'report.build', concurrencyKey: KEY, projectId: 'pr_1', args: {}});
+  const second = await jobs.api.enqueue(ctx(), {kind: 'report.build', concurrencyKey: KEY, projectId: 'pr_1', args: {}});
   await until(() => m.runs.length === 1, 'the first run');
   await jobs.api.cancel(ctx(), second.id);
   assert.equal((await jobs.api.get(ctx(), second.id))?.state, 'cancelled', 'never started');
@@ -85,7 +87,7 @@ test('a cancel asked of another runner reaches its job on the next heartbeat', a
   const front = createJobs({store, owner: 'front'}); // registers nothing: it only enqueues and cancels
   const m = manual();
   worker.register(m.executor);
-  const job = await front.api.enqueue(ctx(), {kind: 'report.build', projectId: 'pr_1', args: {}});
+  const job = await front.api.enqueue(ctx(), {kind: 'report.build', concurrencyKey: KEY, projectId: 'pr_1', args: {}});
   worker.drain();
   await until(() => m.runs.length === 1, 'the worker runs it');
   await front.api.cancel(ctx(), job.id);
@@ -100,7 +102,7 @@ test("a runner that died: its lease ends, the sweep puts the job back, and anoth
   const dead = createJobs({store, owner: 'dead', leaseMs: 1000, heartbeatMs: 60_000, clock: () => now});
   const m1 = manual();
   dead.register(m1.executor);
-  const job = await dead.api.enqueue(ctx(), {kind: 'report.build', projectId: 'pr_1', args: {}});
+  const job = await dead.api.enqueue(ctx(), {kind: 'report.build', concurrencyKey: KEY, projectId: 'pr_1', args: {}});
   await until(() => m1.runs.length === 1, 'the first runner');
   // The first runner stops answering (no heartbeat comes); the lease runs out.
   now += 1500;
@@ -129,12 +131,12 @@ test('a lost lease aborts the work: the runner sees on its heartbeat that anothe
   const slow = createJobs({store, owner: 'slow', leaseMs: 1000, heartbeatMs: 15, clock: () => now});
   const m = manual();
   slow.register(m.executor);
-  const job = await slow.api.enqueue(ctx(), {kind: 'report.build', projectId: 'pr_1', args: {}});
+  const job = await slow.api.enqueue(ctx(), {kind: 'report.build', concurrencyKey: KEY, projectId: 'pr_1', args: {}});
   await until(() => m.runs.length === 1, 'the run');
   // The clock jumps past the lease before the next heartbeat; a sweep elsewhere hands it on.
   now += 5000;
   await store.recoverExpired(new Date(now).toISOString(), 3);
-  await store.claimNext(['report.build'], 'other', 1000, new Date(now).toISOString());
+  await store.claimNext(['report.build'], 'other', 1000, new Date(now).toISOString(), async () => 1);
   await until(() => m.runs[0].ctl.signal.aborted, 'the slow runner stops');
   assert.equal(m.runs[0].ctl.cancelled(), false, 'a lost lease is not a cancel: the work is not stopped for good');
   await slow.idle();
@@ -153,7 +155,7 @@ test('an executor that throws is tried again as many times as it allows, then fa
       throw new Error('The example source did not answer.');
     },
   });
-  const job = await jobs.api.enqueue(ctx(), {kind: 'dataset.sample', projectId: 'pr_1', args: {n: 5}});
+  const job = await jobs.api.enqueue(ctx(), {kind: 'dataset.sample', concurrencyKey: KEY, projectId: 'pr_1', args: {n: 5}});
   await until(async () => (await store.get(job.id))?.state === 'failed', 'the failure');
   assert.equal(tries, 2, 'one try and one retry');
   assert.equal((await store.get(job.id))?.error, 'The example source did not answer.');
@@ -165,8 +167,8 @@ test('a chain: the next step is enqueued with the same context only when the job
   const ran: string[] = [];
   jobs.register({kind: 'labeling.runTask', run: async job => (ran.push(`label:${job.args.taskId}`), job.args.taskId === 'lt_ok' ? {state: 'done'} : {state: 'failed', error: 'needs attention'})});
   jobs.register({kind: 'report.build', run: async job => (ran.push(`report:${job.args.v}:${job.ctx.user.name}`), {state: 'done'})});
-  await jobs.api.enqueue(ctx(), {kind: 'labeling.runTask', projectId: 'pr_1', args: {taskId: 'lt_ok'}, then: {kind: 'report.build', projectId: 'pr_1', args: {v: 'pv_1'}}});
-  await jobs.api.enqueue(ctx(), {kind: 'labeling.runTask', projectId: 'pr_1', args: {taskId: 'lt_bad'}, then: {kind: 'report.build', projectId: 'pr_1', args: {v: 'pv_2'}}});
+  await jobs.api.enqueue(ctx(), {kind: 'labeling.runTask', concurrencyKey: KEY, projectId: 'pr_1', args: {taskId: 'lt_ok'}, then: {kind: 'report.build', concurrencyKey: KEY, projectId: 'pr_1', args: {v: 'pv_1'}}});
+  await jobs.api.enqueue(ctx(), {kind: 'labeling.runTask', concurrencyKey: KEY, projectId: 'pr_1', args: {taskId: 'lt_bad'}, then: {kind: 'report.build', concurrencyKey: KEY, projectId: 'pr_1', args: {v: 'pv_2'}}});
   await jobs.idle();
   assert.deepEqual(ran.sort(), ['label:lt_bad', 'label:lt_ok', 'report:pv_1:Ann']);
 });
@@ -180,7 +182,7 @@ test('finishing fails: the runner tries again, and the chain is queued exactly o
   const ran: string[] = [];
   jobs.register({kind: 'labeling.runTask', run: async () => (ran.push('label'), {state: 'done'})});
   jobs.register({kind: 'report.build', run: async () => (ran.push('report'), {state: 'done'})});
-  const parent = await jobs.api.enqueue(ctx(), {kind: 'labeling.runTask', projectId: 'pr_1', args: {}, then: {kind: 'report.build', projectId: 'pr_1', args: {}}});
+  const parent = await jobs.api.enqueue(ctx(), {kind: 'labeling.runTask', concurrencyKey: KEY, projectId: 'pr_1', args: {}, then: {kind: 'report.build', concurrencyKey: KEY, projectId: 'pr_1', args: {}}});
   await jobs.idle();
   assert.equal((await jobs.api.get(ctx(), parent.id))?.state, 'done');
   assert.deepEqual(ran, ['label', 'report']);
@@ -195,7 +197,7 @@ test('finishing keeps failing: the sweep runs the job again and that run chains;
   const ran: string[] = [];
   jobs.register({kind: 'labeling.runTask', run: async () => (ran.push('label'), {state: 'done'})});
   jobs.register({kind: 'report.build', run: async () => (ran.push('report'), {state: 'done'})});
-  const parent = await jobs.api.enqueue(ctx(), {kind: 'labeling.runTask', projectId: 'pr_1', args: {}, then: {kind: 'report.build', projectId: 'pr_1', args: {}}});
+  const parent = await jobs.api.enqueue(ctx(), {kind: 'labeling.runTask', concurrencyKey: KEY, projectId: 'pr_1', args: {}, then: {kind: 'report.build', concurrencyKey: KEY, projectId: 'pr_1', args: {}}});
   await until(() => ran.length === 1, 'the first run');
   await tick(30);
   // First attempt: the end was not saved and nothing is chained yet; the job keeps its lease.
@@ -217,14 +219,14 @@ test('finishing keeps failing: the sweep runs the job again and that run chains;
   assert.equal((await jobs.api.list(ctx(), {kinds: ['report.build']})).length, 1);
 });
 
-test('fair across tenants: a free runner takes the tenant with the fewest running jobs first', async () => {
+test('fair across tenants: keys take turns, so a small tenant does not wait behind a big one', async () => {
   const store = memoryJobStore();
   // A worker that polls: the queue fills before it looks.
   const jobs = createJobs({store, concurrency: 2, runOnEnqueue: false});
   const m = manual();
   jobs.register(m.executor);
-  for (let i = 0; i < 3; i++) await jobs.api.enqueue(ctx('big'), {kind: 'report.build', projectId: `pr_big_${i}`, args: {}});
-  await jobs.api.enqueue(ctx('small'), {kind: 'report.build', projectId: 'pr_small', args: {}});
+  for (let i = 0; i < 3; i++) await jobs.api.enqueue(ctx('big'), {kind: 'report.build', concurrencyKey: 'compute:big', projectId: `pr_big_${i}`, args: {}});
+  await jobs.api.enqueue(ctx('small'), {kind: 'report.build', concurrencyKey: 'compute:small', projectId: 'pr_small', args: {}});
   jobs.drain();
   await until(() => m.runs.length === 2, 'two runs');
   const tenants = m.runs.map(r => r.job.ctx.tenantId);
@@ -238,9 +240,9 @@ test('fair across tenants: a free runner takes the tenant with the fewest runnin
 test('list and get read through the store: by project, kind and state, newest first', async () => {
   const store = memoryJobStore();
   const jobs = createJobs({store, runOnEnqueue: false});
-  await jobs.api.enqueue(ctx(), {kind: 'dataset.sample', projectId: 'pr_1', args: {n: 1}});
-  await jobs.api.enqueue(ctx(), {kind: 'report.build', projectId: 'pr_1', args: {}});
-  await jobs.api.enqueue(ctx(), {kind: 'report.build', projectId: 'pr_2', args: {}});
+  await jobs.api.enqueue(ctx(), {kind: 'dataset.sample', concurrencyKey: KEY, projectId: 'pr_1', args: {n: 1}});
+  await jobs.api.enqueue(ctx(), {kind: 'report.build', concurrencyKey: KEY, projectId: 'pr_1', args: {}});
+  await jobs.api.enqueue(ctx(), {kind: 'report.build', concurrencyKey: KEY, projectId: 'pr_2', args: {}});
   assert.deepEqual((await jobs.api.list(ctx(), {projectId: 'pr_1'})).map(j => j.kind).sort(), ['dataset.sample', 'report.build']);
   assert.equal((await jobs.api.list(ctx(), {kinds: ['report.build'], states: ['queued']})).length, 2);
   // Values cross as JSON, as through a real store: a caller never holds the stored object.
@@ -254,8 +256,82 @@ test('an executor reads configuration for the job tenant through its control', a
   const config = {forTenant: (tenantId: string | undefined) => ({get: async () => null, jobLimit: async () => (tenantId === 't1' ? 7 : 1)})};
   const jobs = createJobs({store: memoryJobStore(), config});
   jobs.register({kind: 'report.build', run: async (job, ctl) => (seen.push(await ctl.config.forTenant(job.ctx.tenantId).jobLimit({kind: 'compute'})), {state: 'done'})});
-  await jobs.api.enqueue(ctx('t1'), {kind: 'report.build', projectId: null, args: {}});
-  await jobs.api.enqueue(ctx(), {kind: 'report.build', projectId: null, args: {}, idempotencyKey: 'b'});
+  await jobs.api.enqueue(ctx('t1'), {kind: 'report.build', concurrencyKey: 'compute:t1', projectId: null, args: {}});
+  await jobs.api.enqueue(ctx(), {kind: 'report.build', concurrencyKey: KEY, projectId: null, args: {}, idempotencyKey: 'b'});
   await jobs.idle();
   assert.deepEqual(seen.sort(), [1, 7]);
+});
+
+test("a key's limit comes from the configuration of its tenant and target, across runners", async () => {
+  const store = memoryJobStore();
+  const asked: string[] = [];
+  const config = {
+    forTenant: (tenantId: string | undefined) => ({
+      get: async () => null,
+      jobLimit: async (t: {kind: 'model'; endpointId: string} | {kind: 'compute'}) => (asked.push(`${tenantId}:${t.kind === 'model' ? t.endpointId : 'compute'}`), t.kind === 'model' ? 1 : 10),
+    }),
+  };
+  const a = createJobs({store, owner: 'a', config});
+  const b = createJobs({store, owner: 'b', config});
+  const ma = manual('labeling.runTask');
+  const mb = manual('labeling.runTask');
+  a.register(ma.executor);
+  b.register(mb.executor);
+  const first = await a.api.enqueue(ctx('t1'), {kind: 'labeling.runTask', concurrencyKey: 'model:t1:gpt-5.x', projectId: 'pr_1', args: {n: 1}});
+  const second = await a.api.enqueue(ctx('t1'), {kind: 'labeling.runTask', concurrencyKey: 'model:t1:gpt-5.x', projectId: 'pr_1', args: {n: 2}});
+  const other = await a.api.enqueue(ctx('t2'), {kind: 'labeling.runTask', concurrencyKey: 'model:t2:gpt-5.x', projectId: 'pr_2', args: {n: 3}});
+  b.drain();
+  await until(() => ma.runs.length + mb.runs.length === 2, 'one job per key');
+  await tick(20);
+  const started = [...ma.runs, ...mb.runs].map(r => r.job.id).sort();
+  assert.deepEqual(started, [first.id, other.id].sort(), 'the second job of t1 waits for the endpoint, in both runners');
+  assert.ok(asked.includes('t1:gpt-5.x') && asked.includes('t2:gpt-5.x'));
+  assert.equal(await a.api.ahead(ctx('t1'), second.id), 0);
+  assert.equal(await a.api.ahead(ctx('t1'), first.id), null, 'a running job has no place in the queue');
+  [...ma.runs, ...mb.runs].find(r => r.job.id === first.id)!.end({state: 'done'});
+  await until(() => ma.runs.length + mb.runs.length === 3, 'the second job once the first ended');
+  for (const r of [...ma.runs, ...mb.runs]) if (r.job.id !== first.id) r.end({state: 'done'});
+  await a.idle();
+  await b.idle();
+});
+
+test('a job whose key is not a concurrency key is refused at enqueue', async () => {
+  const jobs = createJobs({store: memoryJobStore()});
+  await assert.rejects(jobs.api.enqueue(ctx(), {kind: 'report.build', concurrencyKey: 'gpt-5.x', projectId: null, args: {}}), /Not a job concurrency key/);
+});
+
+test('finally follows every end: done, failed, cancelled while running, cancelled while queued, failed by the sweep; then only done', async () => {
+  let now = Date.parse('2026-11-22T10:00:00Z');
+  const store = memoryJobStore();
+  const jobs = createJobs({store, concurrency: 1, leaseMs: 1000, heartbeatMs: 60_000, maxAttempts: 1, clock: () => now});
+  const m = manual('labeling.runTask');
+  jobs.register(m.executor);
+  const after: string[] = [];
+  jobs.register({kind: 'report.build', run: async job => (after.push(`${job.args.of}:${job.ctx.user.name}`), {state: 'done'})});
+  const req = (of: string) => ({kind: 'labeling.runTask' as const, concurrencyKey: KEY, projectId: 'pr_1', args: {of}, then: {kind: 'report.build' as const, concurrencyKey: KEY, projectId: 'pr_1', args: {of: `then:${of}`}}, finally: {kind: 'report.build' as const, concurrencyKey: KEY, projectId: 'pr_1', args: {of}}});
+  const ends: [string, (r: (typeof m.runs)[number]) => void | Promise<void>][] = [
+    ['done', r => r.end({state: 'done'})],
+    ['failed', r => r.end({state: 'failed', error: 'too many failed'})],
+    ['paused', r => r.end({state: 'paused'})],
+    ['cancelled', async r => jobs.api.cancel(ctx(), r.job.id)],
+  ];
+  for (const [of, end] of ends) {
+    await jobs.api.enqueue(ctx(), req(of));
+    await until(() => m.runs.length > 0 && m.runs[m.runs.length - 1].job.args.of === of, of);
+    await end(m.runs[m.runs.length - 1]);
+    await jobs.idle();
+  }
+  // Cancelled before it started: a job waits behind a running one (concurrency 1).
+  await jobs.api.enqueue(ctx(), req('lost'));
+  await until(() => m.runs[m.runs.length - 1].job.args.of === 'lost', 'the blocker');
+  const queued = await jobs.api.enqueue(ctx(), req('queued'));
+  await jobs.api.cancel(ctx(), queued.id);
+  // The running one's runner stops answering: the sweep fails it on its last attempt. The late
+  // end of its work is refused and queues nothing more.
+  now += 5000;
+  await jobs.sweep();
+  assert.equal((await store.find({kinds: ['report.build'], states: ['queued']})).length, 2, 'the finally of both is queued');
+  m.runs[m.runs.length - 1].end({state: 'done'});
+  await jobs.idle();
+  assert.deepEqual(after.sort(), ['cancelled:Ann', 'done:Ann', 'failed:Ann', 'lost:Ann', 'queued:Ann', 'then:done:Ann'].sort(), 'paused is not an end; then follows done only');
 });

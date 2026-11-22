@@ -10,7 +10,8 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
   per-endpoint limits, bulk storage, a config module and notifications, delivered as the
   numbered pull requests in the issue. The design doc is merged (#60); step 1, the config
   module, is merged (#61); step 2, permissions and tenant isolation, is merged (#63). Step 3,
-  the job queue with per-key limits, is next.
+  the job queue with per-key limits (#66), is in progress: the contract and the limits first,
+  then the queue position on pages.
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
   tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are merged (see Done);
   step 3, action tools, is next, with their cards drawn on the UI design first.

@@ -6,6 +6,7 @@ import {buildReport, findTask, settingsFor} from './evaluation.ts';
 import {modelName} from './page-views.ts';
 import {loadProjectState} from './projects.ts';
 import {lockHoldout} from './governance.ts';
+import {computeKey, modelKey} from './queue.ts';
 
 /**
  * Background work (deployment readiness spec, 3). The workflow decides what should run (system
@@ -19,9 +20,10 @@ import {lockHoldout} from './governance.ts';
 export const activeJobs = (w: Scope, projectId: string, kinds?: Job['kind'][]) => w.jobs.list(w.ctx, {projectId, states: ['queued', 'running'], ...(kinds ? {kinds} : {})});
 
 /** Builds the report of a version on a model from its saved answers: the `report.build` job. */
-const reportJob = (projectId: string, version: PromptVersion, endpoint: EndpointId, extra: {auto?: boolean; taskId?: string} = {}): JobRequest => ({
+const reportJob = (w: Scope, projectId: string, version: PromptVersion, endpoint: EndpointId, extra: {auto?: boolean; taskId?: string} = {}): JobRequest => ({
   kind: 'report.build',
   projectId,
+  concurrencyKey: computeKey(w),
   args: {promptVersionId: version.id, endpoint, auto: !!extra.auto, taskId: extra.taskId ?? null},
   idempotencyKey: `report:${version.id}:${endpoint}`,
 });
@@ -88,12 +90,13 @@ export async function runReport(w: Scope, job: Job): Promise<JobOutcome> {
  * done). One job per task at a time (its idempotency key).
  */
 async function queueTask(w: Scope, projectId: string, version: PromptVersion, task: LabelingTask, opts: {auto?: boolean} = {}) {
-  const report = reportJob(projectId, version, task.endpoint, {auto: opts.auto, taskId: task.id});
+  const report = reportJob(w, projectId, version, task.endpoint, {auto: opts.auto, taskId: task.id});
   if (task.state === 'done') await w.jobs.enqueue(w.ctx, report);
   else
     await w.jobs.enqueue(w.ctx, {
       kind: 'labeling.runTask',
       projectId,
+      concurrencyKey: modelKey(w, task.endpoint),
       args: {taskId: task.id, promptVersionId: version.id, endpoint: task.endpoint, trigger: opts.auto ? 'system' : 'user', auto: !!opts.auto, retry: task.state === 'needs_attention'},
       idempotencyKey: `label:${task.id}`,
       then: report,
@@ -160,7 +163,7 @@ export async function drive(w: Scope, state: ProjectState) {
       // Only a first report: one a gold edit archived is rebuilt by the next reader of scores (lazy).
       if (state.reports.some(x => x.promptVersionId === r.promptVersionId && x.endpoint === r.endpoint)) continue;
       const v = state.versions.find(v => v.id === r.promptVersionId);
-      if (v) await w.jobs.enqueue(w.ctx, reportJob(projectId, v, r.endpoint));
+      if (v) await w.jobs.enqueue(w.ctx, reportJob(w, projectId, v, r.endpoint));
     }
   }
 
@@ -192,12 +195,16 @@ export async function startOptimiser(w: Scope, projectId: string, maxRounds = sy
   // The Optimiser reads examples: the halves are fixed from here on (spec 1.0.0, 4.2).
   await lockHoldout(w, projectId);
   const run = await optimiserService(w).startRun(w.ctx, {projectId, endpoint, maxRounds, startVersionId, auto: opts.auto});
-  await queueRun(w, projectId, run.id);
+  await queueRun(w, projectId, run.id, endpoint);
   return {runId: run.id};
 }
 
-const queueRun = async (w: Scope, projectId: string, runId: string) => {
-  await w.jobs.enqueue(w.ctx, {kind: 'optimiser.run', projectId, args: {runId}, idempotencyKey: `optimiser:${projectId}`});
+/**
+ * Until the Optimiser's labeling is queued as jobs of its own (#59 step 5), the run labels inside
+ * its job, so the job waits for the run's endpoint.
+ */
+const queueRun = async (w: Scope, projectId: string, runId: string, endpoint: EndpointId) => {
+  await w.jobs.enqueue(w.ctx, {kind: 'optimiser.run', projectId, concurrencyKey: modelKey(w, endpoint), args: {runId}, idempotencyKey: `optimiser:${projectId}`});
   w.emitChange(projectId);
 };
 
@@ -220,7 +227,7 @@ export async function stopOptimiser(w: Scope, projectId: string, runId: string):
 export async function retryOptimiser(w: Scope, projectId: string, runId: string): Promise<{runId: string}> {
   const run = await runOf(w, projectId, runId);
   if (!['failed', 'paused', 'running'].includes(run.state)) throw new Error('This run has ended.');
-  await queueRun(w, projectId, runId);
+  await queueRun(w, projectId, runId, run.endpoint);
   return {runId};
 }
 
