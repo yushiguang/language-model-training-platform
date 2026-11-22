@@ -58,7 +58,7 @@
 **校验在哪里做**（`apps/workflow/src/services/access.ts` 的 `authorize`）：
 
 1. 先查权限点：调用方不是 `SYSTEM_CALLER` 且接了 `AuthorizationPort` 时，调 `allowed(ctx, {action, permission, projectId})`，不通过抛 `AccessDeniedError`。这一步在读任何记录之前，所以没有权限的人不管传哪个 id（本租户的、别的租户的、不存在的）都得到同样的拒绝，探测不出哪些 id 存在。没接 `AuthorizationPort` 时（浏览器版本）全放行；系统调用方跳过这一步。
-2. 再查租户：带 `projectId` 的，读项目记录（包括正在删除的），`project.tenantId` 和调用方的租户（`ctx.tenantId`，没有时是 `default`）不一致就当作项目不存在：`getProject` / `loadProjectState` / `projectStatus` 返回 null，其余报“This project does not exist.”。项目确实不存在时交给方法本身报错。
+2. 再查租户：带 `projectId` 的，读项目记录（包括正在删除的），`project.tenantId` 和调用方的租户（`ctx.tenantId`，没有时是 `default`）不一致就当作项目不存在：`getProject` / `loadProjectState` / `projectStatus` 返回 null，其余报“This project does not exist.”。项目不存在或正在删除时，contract 方法的回答和别的租户的项目完全一样（读返回 null，`tick` 什么都不做，其余报“不存在”），所以本租户的成员也探测不出别的租户有哪些 id；任务执行器和工具宿主遇到不存在的项目时交给自己的逻辑处理。
 
 用到 `authorize` 的入口：
 

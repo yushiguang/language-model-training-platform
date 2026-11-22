@@ -1943,3 +1943,16 @@ test('Optimiser (#63): a run whose caller lost project write stops at its first 
   assert.notEqual(run.state, 'done');
   assert.equal(run.history.length, 0, 'no round was recorded');
 });
+
+test('a data source import whose caller lost tenant write (#63) fails at once, without retries, and its file shows failed', async () => {
+  const w = await world('t63e');
+  Object.assign(w.inst, {authorization: {allowed: async (_ctx: RequestContext, r: {permission: string}) => r.permission !== 'tenant_write'}});
+  const {createDataSource} = await import('./sources.ts');
+  const res = await createDataSource(w.ws, {name: 'Feed', fileName: 'feed.txt', text: 'a1\na2\n'});
+  await w.jobs.idle();
+  const jobs = await w.jobs.api.list(w.ws.ctx, {kinds: ['source.ingest']});
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].state, 'failed');
+  assert.equal(jobs[0].attempts, 1, 'not tried again');
+  assert.equal((await w.catalog.get('source_files', res.file!.id))?.state, 'failed');
+});

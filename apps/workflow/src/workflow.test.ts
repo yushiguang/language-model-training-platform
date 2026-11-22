@@ -283,6 +283,19 @@ test('tenant isolation (#63): another tenant cannot list, read, change or point 
   await assert.rejects(api.chatHistory(evil, mine.id), /does not exist/);
   await assert.rejects(wf.toolHost.call({agent: 'front_desk', name: 'list_versions', args: {}, projectId: mine.id, turnId: null, ctx: evil}), /not found/);
   assert.equal((await api.getProject(inTenant(alice, 't1'), mine.id))?.name, 'Mine', 'untouched');
+  // Another tenant's project and a missing one answer alike, read or write: ids cannot be probed.
+  const answer = (p: Promise<unknown>) => p.then(v => ({ok: v}), (e: Error) => ({error: e.message}));
+  const calls: [string, (id: string) => Promise<unknown>][] = [
+    ['chatHistory', id => api.chatHistory(evil, id)],
+    ['getAgentLive', id => api.getAgentLive(evil, id)],
+    ['openProposals', id => api.openProposals(evil, id)],
+    ['mismatches', id => api.mismatches(evil, id)],
+    ['exampleMedia', id => api.exampleMedia(evil, id, 'ex_1')],
+    ['tick', id => api.tick(evil, {projectId: id})],
+    ['sendUserMessage', id => api.sendUserMessage(evil, {projectId: id, text: 'hi', page: page()})],
+    ['projectStatus', id => api.projectStatus(evil, id)],
+  ];
+  for (const [name, call] of calls) assert.deepEqual(await answer(call(mine.id)), await answer(call('pr_missing')), name);
 });
 
 test('permissions (#63): the creator gets project write; a member only reads; a removed member is stopped, helper reads included', async () => {

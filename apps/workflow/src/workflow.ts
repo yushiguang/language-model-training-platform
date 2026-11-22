@@ -235,10 +235,15 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
       const rule = WORKFLOW_PERMISSIONS[name];
       const fn = raw[name] as (ctx: RequestContext, ...args: unknown[]) => Promise<unknown>;
       out[name] = async (ctx: RequestContext, ...args: unknown[]) => {
+        const projectId = projectIdOf(rule, args);
         try {
-          await authorize(at(ctx), `workflow.${name}`, rule.permission, projectIdOf(rule, args));
+          const project = await authorize(at(ctx), `workflow.${name}`, rule.permission, projectId);
+          // A missing (or deleted) project answers exactly as another tenant's does, so no call
+          // tells the two apart.
+          if (rule.project && (!project || project.deleting)) throw new Error(NO_PROJECT);
         } catch (e) {
-          if (NULL_WHEN_MISSING.has(name) && (e as Error).message === NO_PROJECT) return null;
+          if ((e as Error).message === NO_PROJECT && NULL_WHEN_MISSING.has(name)) return null;
+          if ((e as Error).message === NO_PROJECT && name === 'tick') return undefined;
           throw e;
         }
         return fn(ctx, ...args);
