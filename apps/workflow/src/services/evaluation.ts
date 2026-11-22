@@ -104,10 +104,12 @@ export async function stopRun(w: Scope, projectId: string, runId: string): Promi
   const t = await labeling.getTask(runId);
   if (!t || t.projectId !== projectId) throw new Error('This run does not exist.');
   for (const job of await w.jobs.list(w.ctx, {projectId, kinds: ['labeling.runTask'], states: ['queued']})) if (job.args.taskId === runId) await w.jobs.cancel(w.ctx, job.id);
-  void labeling.stopTask(runId).then(async () => {
+  // Awaited: a task that was only waiting is stopped before the page's next check reads it.
+  await labeling.stopTask(runId);
+  void (async () => {
     const v = await catalog.get('prompt_versions', t.promptVersionId);
     if (t.purpose === 'eval') await postEvent(w, t.projectId, 'stop', 'user', v ? msg('stopped scoring {version}', {version: versionLabel(v)}) : msg('stopped scoring a version'), {path: '/prompt'});
-  });
+  })();
 }
 
 export async function predictionsFor(w: Scope, versionId: string, endpoint: EndpointId, settings: ModelSettings): Promise<Map<string, Prediction>> {

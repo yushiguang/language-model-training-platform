@@ -446,7 +446,21 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     async stopTask(taskId: string) {
       stopPressed.set(taskId, Date.now());
       active.get(taskId)?.abort();
-      if (!active.has(taskId)) await repo.patch<LabelingTask>(TASKS, taskId, {stopRequested: true, stopRequestedAt: now()});
+      if (!active.has(taskId)) {
+        const t = await getTask(taskId);
+        // A task no runner holds anywhere (waiting in the queue, paused, or left running by a
+        // dead runner) ends here, as stopped by the user: otherwise it reads as paused and the
+        // next check would start it again. One that runs elsewhere sees the request.
+        // A running one counts as left behind only when `liveElsewhere` can say so: without it,
+        // a runner this process's locks cannot see may still hold it.
+        const leftBehind = async (x: LabelingTask) => !!deps.liveElsewhere && !(await isRunning(taskId)) && !(await deps.liveElsewhere(x).catch(() => true));
+        const idle = !!t && (t.state === 'queued' || t.state === 'paused' || (t.state === 'running' && (await leftBehind(t))));
+        if (t && idle) await repo.patch<LabelingTask>(TASKS, taskId, {state: 'stopped', stopReason: 'user', stopRequested: false, finishedAt: now()});
+        else await repo.patch<LabelingTask>(TASKS, taskId, {stopRequested: true, stopRequestedAt: now()});
+        if (t) emit(t.projectId);
+        else emit();
+        return;
+      }
       emit();
     },
 
@@ -487,9 +501,10 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
             continue;
           }
         }
-        t.state = 'paused';
-        t.stopReason = 'closed';
-        await repo.patch<LabelingTask>(TASKS, t.id, {state: 'paused', stopReason: 'closed'});
+        // A Stop asked while no runner held it ends it; otherwise it shows as paused.
+        const end = t.stopRequested ? {state: 'stopped' as const, stopReason: 'user' as const, stopRequested: false, finishedAt: now()} : {state: 'paused' as const, stopReason: 'closed' as const};
+        Object.assign(t, end);
+        await repo.patch<LabelingTask>(TASKS, t.id, end);
         changed = true;
       }
       if (changed) emit(projectId);

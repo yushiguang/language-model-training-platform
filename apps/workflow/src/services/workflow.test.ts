@@ -201,7 +201,15 @@ test('labeling waits for its endpoint: one labeling job per tenant and endpoint 
   assert.deepEqual(waiting.map(j => view.runs.find(r => r.id === j.args.taskId)?.queue), [{ahead: 0}, {ahead: 1}]);
   assert.equal(view.runs.filter(r => r.queue).length, 2, 'the running task has no place in the queue');
   assert.ok((await w.state()).runs.every(r => !r.queue));
-  await until(async () => (await w.state()).runs.every(r => r.state === 'done'), 'both tasks, one after the other');
+  // Stop on a waiting task ends it for good: the next check does not start it again.
+  const stopped = String(waiting[1].args.taskId);
+  const {stopRun} = await import('./evaluation.ts');
+  await stopRun(w.ws, w.projectId, stopped);
+  await tick(w.ws, await w.state());
+  assert.equal((await w.state()).runs.find(r => r.id === stopped)?.state, 'stopped');
+  assert.equal((await labelJobs()).filter(j => j.args.taskId === stopped && j.state !== 'cancelled').length, 0, 'not queued again');
+  await until(async () => (await w.state()).runs.every(r => r.state === 'done' || r.id === stopped), 'the others, one after the other');
+  assert.equal((await w.state()).runs.find(r => r.id === stopped)?.done, 0, 'the stopped task never labeled');
   const reports = await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['report.build']});
   assert.ok(reports.length && reports.every(j => j.concurrencyKey === 'compute:default'));
 });
@@ -494,9 +502,12 @@ test('an Optimiser run waiting for its model shows its place, and Stop ends it a
   const {runId} = await startOptimiser(w.ws, w.projectId, 10);
   const view = (await withQueue(w.ws, w.projectId, await w.state()))!;
   assert.deepEqual(view.optimisation.find(o => o.id === runId)?.queue, {ahead: 0});
+  // As if a round was under way when its earlier runner went away.
+  await w.catalog.patch('optimisation_runs', runId, {history: [{round: 1, versionId: v.id, outcome: 'running'}] as never});
   await stopOptimiser(w.ws, w.projectId, runId);
   const after = (await w.state()).optimisation.find(o => o.id === runId)!;
   assert.deepEqual([after.state, after.stopReason], ['stopped', 'user'], 'it never started, and does not wait as running');
+  assert.equal(after.history.at(-1)?.outcome, 'stopped', 'its round in progress ends too');
   await w.jobs.idle();
   assert.equal((await w.state()).optimisation.find(o => o.id === runId)?.state, 'stopped');
 });

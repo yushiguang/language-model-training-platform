@@ -220,16 +220,18 @@ export async function stopOptimiser(w: Scope, projectId: string, runId: string):
   await runOf(w, projectId, runId);
   const jobs = (await activeJobs(w, projectId, ['optimiser.run'])).filter(j => j.args.runId === runId);
   for (const j of jobs) await w.jobs.cancel(w.ctx, j.id);
-  if (!jobs.length) await optimiserService(w).stopRun(w.ctx, runId);
-  // A run whose job was still waiting never started its loop, so nothing else ends it: it is
-  // stopped here, as a Stop on a running one ends.
-  else if (jobs.every(j => j.state === 'queued')) {
-    const run = await optimiserService(w).getRun(runId);
-    if (run && ['running', 'paused', 'failed'].includes(run.state)) {
-      await w.catalog.patch('optimisation_runs', runId, {state: 'stopped', stopReason: 'user', error: null, finishedAt: now(), step: null, stepStartedAt: null, stepVersionId: null});
-      w.emitChange(projectId);
-    }
-  }
+  if (!jobs.length) return optimiserService(w).stopRun(w.ctx, runId);
+  // A run whose job the cancel ended before it started never ran its loop, so nothing else
+  // ends it: it is stopped here, as a Stop on a running one ends (its round in progress too).
+  // Read again after the cancel: a job another runner took meanwhile stops through its loop.
+  const after = await Promise.all(jobs.map(j => w.jobs.get(w.ctx, j.id)));
+  if (!after.every(j => j?.state === 'cancelled')) return;
+  const run = await optimiserService(w).getRun(runId);
+  if (!run || !['running', 'paused', 'failed'].includes(run.state)) return;
+  const last = run.history.at(-1);
+  const history = last?.outcome === 'running' ? [...run.history.slice(0, -1), {...last, outcome: 'stopped' as const}] : run.history;
+  await w.catalog.patch('optimisation_runs', runId, {state: 'stopped', stopReason: 'user', error: null, finishedAt: now(), step: null, stepStartedAt: null, stepVersionId: null, history});
+  w.emitChange(projectId);
 }
 
 /** Retry on a Failed run, or Resume on a paused one: queues it again; it goes on from the step it stopped at. */
