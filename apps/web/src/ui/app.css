@@ -202,3 +202,18 @@ textarea.input.grow-box:not(.sm) { min-height: 36px; padding: 7px 12px; }
 .set-sec:first-child { padding-top: 4px; border-top: 0; }
 .set-sec:last-child { padding-bottom: 0; }
 .set-sec-h { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; }
+
+/*
+ * Astryx (2026-11-20): the Neutral theme gives h1-h6, p, small, code, pre and hr a font and a
+ * colour inside its scope. Inside the old kit (.k) those elements keep what they had before: the
+ * browser default, or what they inherit (the ID tag on Gold Labels' media, the Chinese font
+ * stack). Zero specificity, so every kit rule still wins. Goes away with the old kit.
+ */
+:where(.k) :where(h1, h2, h3, h4, h5, h6, p, small, code, pre, hr) {
+  font-family: revert;
+  font-size: revert;
+  font-weight: revert;
+  line-height: revert;
+  color: revert;
+  border: revert;
+}

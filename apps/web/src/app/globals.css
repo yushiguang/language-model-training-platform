@@ -1,2 +1,8 @@
-@import '../ui/kit.css';
-@import '../ui/app.css';
+/*
+ * Astryx component styles (the Neutral theme's CSS comes in through ../astryx-themes.ts).
+ * Astryx's reset.css is not loaded yet: it restyles plain elements (links, buttons, images),
+ * which would change today's pages. It comes in with the pages' move to Astryx.
+ */
+@import '@astryxdesign/core/astryx.css';
+@import '../ui/kit.css' layer(legacy);
+@import '../ui/app.css' layer(legacy);
