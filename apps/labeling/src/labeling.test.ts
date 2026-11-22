@@ -698,3 +698,42 @@ test('a Stop while a stopped or failed task is starting again is kept and ends t
   const r4 = await lab.runTask(resumed.id);
   assert.equal(r4?.state, 'done', 'a later Resume runs');
 });
+
+test('a Stop pressed while this process prepares the run is seen before any model call; a read never saves a request (#66)', async () => {
+  const {db, catalog, v, ids} = await setup(4, 'lab-stop-preparing');
+  const {DocRepo} = await import('@yushiguang/sprint-platform');
+  const repo = new DocRepo(db);
+  const stats = {inFlight: 0, maxInFlight: 0, calls: 0};
+  let onPrepare: (() => Promise<void>) | null = null;
+  // The run reads its prompt version while preparing: the Stop comes then (the lock is held,
+  // nothing in `active` yet).
+  const slow = {
+    ...catalog,
+    get: (async (collection: string, id: string) => {
+      if (collection === 'prompt_versions' && onPrepare) await onPrepare();
+      return (catalog.get as (c: string, i: string) => Promise<unknown>)(collection, id);
+    }) as typeof catalog.get,
+  };
+  let live = false;
+  const lab = createLabeling({db, catalog: slow, gateway: fakeGateway(async () => '{"format": "Vlog"}', stats), locks: memoryLocks(), liveElsewhere: async () => live});
+  const t = await lab.createTask(input(ids, v));
+  onPrepare = async () => {
+    onPrepare = null;
+    await lab.stopTask(t.id);
+  };
+  const r = await lab.runTask(t.id);
+  assert.deepEqual([r?.state, r?.stopReason], ['stopped', 'user']);
+  assert.equal(stats.calls, 0, 'nothing paid');
+  // A read finds a request while the task's job is live: it saves nothing (the runner ends it).
+  live = true;
+  const q = await lab.createTask(input(ids, v));
+  await lab.stopTask(q.id);
+  const saved = (await lab.getTask(q.id))?.stopRequestedAt;
+  await new Promise(r => setTimeout(r, 5));
+  await lab.listTasks('pr_1');
+  assert.deepEqual([(await lab.getTask(q.id))?.state, (await lab.getTask(q.id))?.stopRequestedAt], ['queued', saved]);
+  // The request was cleared meanwhile and a new run's job is live: the read adds none.
+  await repo.patch('labeling_tasks', q.id, {stopRequested: false});
+  await lab.listTasks('pr_1');
+  assert.equal((await lab.getTask(q.id))?.stopRequested, false);
+});
