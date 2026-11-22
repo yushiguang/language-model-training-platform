@@ -218,6 +218,14 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       found = await getTask(taskId);
     }
     if (!found || FINISHED.includes(found.state)) return found;
+    // A Stop saved while this run was starting (no runner held the task yet): ended here, before
+    // any model call. Every end clears the request, so one still set is never an old one.
+    if (found.stopRequested) {
+      await repo.patch<LabelingTask>(TASKS, taskId, {state: 'stopped', stopReason: 'user', stopRequested: false, finishedAt: now()});
+      stopPressed.delete(taskId);
+      emit(found.projectId);
+      return getTask(taskId);
+    }
     const task = found;
     const purpose = task.purpose;
     const how = trigger ?? defaultTrigger(task);

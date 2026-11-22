@@ -642,3 +642,16 @@ test('a Stop never writes over a task that ends while liveElsewhere is asked; a 
   const listed = (await lab.listTasks('pr_1')).find(x => x.id === s.id);
   assert.deepEqual([listed?.state, listed?.stopReason], ['stopped', 'user']);
 });
+
+test('a Stop saved while the runner was starting ends the run before any model call (#66)', async () => {
+  const {db, catalog, v, ids} = await setup(4, 'lab-stop-starting');
+  const stats = {inFlight: 0, maxInFlight: 0, calls: 0};
+  // Its job has been claimed (live elsewhere) but the runner has not taken the task yet.
+  const lab = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": "Vlog"}', stats), locks: memoryLocks(), liveElsewhere: async () => true});
+  const t = await lab.createTask(input(ids, v));
+  await lab.stopTask(t.id);
+  assert.equal((await lab.getTask(t.id))?.stopRequested, true);
+  const r = await lab.runTask(t.id);
+  assert.deepEqual([r?.state, r?.stopReason, r?.stopRequested], ['stopped', 'user', false]);
+  assert.equal(stats.calls, 0, 'nothing paid');
+});
