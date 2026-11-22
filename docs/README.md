@@ -10,6 +10,7 @@ is built, and why. Each fact has one home; other docs link to it.
 | What Sprint is for and where it is going | [product/overview.md](product/overview.md) |
 | The principles every design is checked against | [product/design-principles.md](product/design-principles.md) |
 | How the system is built today (1.2) | [architecture.md](architecture.md) |
+| The planned server design for the reworked Prompt Tuning project | [design/server.md](design/server.md) |
 | Why a rule is the way it is | [decisions.md](decisions.md) |
 | Specifications of past releases (history) | [specs/](specs/) |
 | How to run Sprint on your own platform | [integration.md](integration.md) |
@@ -27,6 +28,7 @@ docs/
 │   ├── ui.md                  the Unified UI: shell, look, words, components, Ask AI
 │   ├── optimiser.md           Auto Optimise (GEPA) and Improve with AI
 │   ├── helpers.md             the helpers in Ask AI: presets, page views, tools, limits
+│   ├── server.md              server design: permissions, jobs, storage, config, notifications (in Chinese)
 │   └── telemetry.md           metric and event conventions
 ├── architecture.md            apps and packages, model calls, labeling, scores, storage
 ├── decisions.md               decision log, newest first
@@ -64,7 +66,8 @@ Sprint follows [Semantic Versioning 2.0.0](https://semver.org/) (`MAJOR.MINOR.PA
 ## Sanitisation and boundary rules for public docs (`docs/**`)
 
 1. **English only**: every file in this repository is written in
-   English. The translation catalogs in `packages/domain/src/locales/` are the one exception.
+   English. Two exceptions: the translation catalogs in `packages/domain/src/locales/`, and design
+   docs written for people to review (such as `design/server.md`), which may be in Chinese.
 2. **Interface-level boundary**: public docs may reference contracts in `@yushiguang/sprint-contracts`
    (`Platform`, `BffContract`, service contracts, and extension ports) and public model slugs
    (`gpt-5.x`), never a company's service names, frameworks, package scopes or URLs.
