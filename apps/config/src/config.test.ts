@@ -125,3 +125,45 @@ test('reads of one key share one call; an older refresh that lands last is dropp
   assert.equal(systemConfig().jobs.limit.compute, 7, 'the newer answer stays in force');
   configureSystem();
 });
+
+test('an adapter that throws at once recovers; a read from before a push neither writes back nor holds the old value', async () => {
+  let fail = true;
+  const sync = createConfig({port: {get: (() => {
+    if (fail) throw new Error('down');
+    return Promise.resolve('6');
+  }) as (k: string) => Promise<string | null>}});
+  await assert.rejects(sync.reader.forTenant('t1').get('x'));
+  fail = false;
+  assert.equal(await sync.reader.forTenant('t1').get('x'), '6', 'the failed read did not stay in flight');
+
+  let now = 0;
+  let release: (v: string | null) => void = () => {};
+  let reject: (e: Error) => void = () => {};
+  let slow = false;
+  const inner = memoryConfig({'tenant.t1.k': '2'});
+  // `slow` holds the next call only, whenever the module makes it.
+  const port = {...inner, get: (k: string) => (slow ? ((slow = false), new Promise<string | null>((res, rej) => ((release = res), (reject = rej)))) : inner.get(k))};
+  const config = createConfig({port, ttlMs: 1000, retryMs: 5000, clock: () => now});
+  const t1 = config.reader.forTenant('t1');
+  await config.start();
+  assert.equal(await t1.get('k'), '2');
+  now = 2000;
+  slow = true;
+  const old = t1.get('k');
+  await new Promise(r => setTimeout(r, 1));
+  inner.set('tenant.t1.k', '5');
+  release('2');
+  assert.equal(await old, '2');
+  assert.equal(await t1.get('k'), '5', 'the older answer was not written back');
+
+  now = 4000;
+  slow = true;
+  const failing = t1.get('k');
+  await new Promise(r => setTimeout(r, 1));
+  inner.set('tenant.t1.k', '7');
+  reject(new Error('timeout'));
+  assert.equal(await failing, '5');
+  assert.equal(await t1.get('k'), '7', 'a failure from before the push does not hold the old value');
+  config.stop();
+  configureSystem();
+});

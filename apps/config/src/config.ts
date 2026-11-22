@@ -71,8 +71,11 @@ export function createConfig(opts: ConfigOptions): ConfigModule {
     const pending = inFlight.get(key);
     if (pending) return pending;
     const gen = generation;
-    const p = (async () => {
+    let p: Promise<string | null> | null = null;
+    p = (async () => {
       try {
+        // After a tick, so `inFlight` holds `p` before an adapter that throws at once gets here.
+        await Promise.resolve();
         const value = await port.get(key);
         if (gen === generation) cache.set(key, {value, freshUntil: clock() + ttlMs});
         return value;
@@ -80,11 +83,12 @@ export function createConfig(opts: ConfigOptions): ConfigModule {
         problem({kind: 'unavailable', error});
         const old = cache.get(key);
         if (!old) throw error;
-        // Use the old value for a while instead of waiting on a failing platform every call.
-        old.freshUntil = Math.max(old.freshUntil, clock() + retryMs);
+        // Use the old value for a while instead of waiting on a failing platform every call,
+        // unless a push came since this read started: then the next call reads again at once.
+        if (gen === generation) old.freshUntil = Math.max(old.freshUntil, clock() + retryMs);
         return old.value;
       } finally {
-        inFlight.delete(key);
+        if (inFlight.get(key) === p) inFlight.delete(key);
       }
     })();
     inFlight.set(key, p);
