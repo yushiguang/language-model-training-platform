@@ -9,9 +9,8 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 - **Server design for the reworked Prompt Tuning project** (#59). Permissions, a job queue with
   per-endpoint limits, bulk storage, a config module and notifications, delivered as the
   numbered pull requests in the issue. The design doc is merged (#60); step 1, the config
-  module, is merged (#61). Step 2, permissions and tenant isolation (#63), is in progress: its
-  contract change (project tenant, permission ports, the Optimiser's caller) first, then the
-  checks.
+  module, is merged (#61); step 2, permissions and tenant isolation, is merged (#63). Step 3,
+  the job queue with per-key limits, is next.
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
   tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are merged (see Done);
   step 3, action tools, is next, with their cards drawn on the UI design first.
@@ -30,6 +29,10 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Done
 
+- 2026-11-22: permissions and tenant isolation (#59 step 2): every project has a tenant; the
+  workflow checks the tenant and permission point of every call, agent tool, job and Optimiser
+  step; the Optimiser runs as the person who started it (#63, #64, #65).
+- 2026-11-22: the config module (#59 step 1, #61).
 - 2026-11-19: Agent abilities steps 1 and 2: read tools, the ability cases, and skills (Improve
   with AI is now the Prompt helper's skill `improve_from_mistakes`) (#39, #40).
 - 2026-11-19: collaboration rules: five kinds of issue with their own templates, no code before

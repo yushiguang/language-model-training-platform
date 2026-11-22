@@ -139,7 +139,8 @@
           "approvedNodes": [
             "prompt_design",
             "dataset"
-          ]
+          ],
+          "tenantId": "org_a"
         }
       ]
     }

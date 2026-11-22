@@ -1893,3 +1893,66 @@ test('projects saved before tenants (#63) are given the default tenant at the fi
   assert.ok((await listProjects(ws)).every(p => p.tenantId === 'default'));
   assert.equal((await w.catalog.get('projects', 'pr_t63b_old'))?.tenantId, 'default', 'written back, not only filled on read');
 });
+
+test('Optimiser with permission checks on (#63): a run started by a writer runs to the end, every step checked as that writer', async () => {
+  const w = await world('t63c', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf});
+  const asked: string[] = [];
+  Object.assign(w.inst, {
+    authorization: {
+      async allowed(ctx: RequestContext, r: {action: string; permission: string}) {
+        asked.push(`${ctx.user.id}:${r.action}:${r.permission}`);
+        return ctx.user.id === 'u_1';
+      },
+    },
+  });
+  await w.newVersion();
+  const {startOptimiser} = await import('./work.ts');
+  await startOptimiser(w.ws, w.projectId, 10);
+  await w.jobs.idle();
+  const run = (await w.state()).optimisation[0];
+  assert.equal(run.state, 'done', run.error ?? '');
+  assert.ok(asked.includes('u_1:optimiser.label:project_write') && asked.includes('u_1:optimiser.createVersion:project_write'));
+  assert.ok(asked.every(a => a.startsWith('u_1:')));
+  // A job runs later, so it is checked again as the person who queued it.
+  await scoreVersion(w.ws, w.projectId, (await w.state()).versions.at(-1)!);
+  await w.jobs.idle();
+  assert.ok(asked.includes('u_1:job.report.build:project_write'));
+  const bob = w.inst.scope({requestId: 'rq_bob', user: {id: 'u_2', name: 'Bob'}, caller: 'test'});
+  const v = await w.newVersion();
+  await scoreVersion(bob, w.projectId, v);
+  await w.jobs.idle();
+  assert.equal((await w.state()).reports.some(r => r.promptVersionId === v.id), false, "a job queued by someone without project write does not build the report");
+});
+
+test('Optimiser (#63): a run whose caller lost project write stops at its first step, before any paid helper call', async () => {
+  const agents = ruleAgent();
+  let reflections = 0;
+  const reflect = agents.reflectPrompt;
+  agents.reflectPrompt = async input => (reflections++, reflect(input));
+  const w = await world('t63d', {agents, answer: ruled, macroF1: 0.99, gold: goldOf});
+  await w.newVersion();
+  const {startOptimiser} = await import('./work.ts');
+  // Allowed to start it, then project write is taken away before the job runs.
+  let canWrite = true;
+  Object.assign(w.inst, {authorization: {allowed: async (_ctx: RequestContext, r: {permission: string}) => r.permission === 'read' || canWrite}});
+  const {runId} = await startOptimiser(w.ws, w.projectId, 3);
+  canWrite = false;
+  await w.jobs.idle();
+  const run = (await w.state()).optimisation.find(o => o.id === runId)!;
+  assert.equal(reflections, 0, 'no helper was asked');
+  assert.notEqual(run.state, 'done');
+  assert.equal(run.history.length, 0, 'no round was recorded');
+});
+
+test('a data source import whose caller lost tenant write (#63) fails at once, without retries, and its file shows failed', async () => {
+  const w = await world('t63e');
+  Object.assign(w.inst, {authorization: {allowed: async (_ctx: RequestContext, r: {permission: string}) => r.permission !== 'tenant_write'}});
+  const {createDataSource} = await import('./sources.ts');
+  const res = await createDataSource(w.ws, {name: 'Feed', fileName: 'feed.txt', text: 'a1\na2\n'});
+  await w.jobs.idle();
+  const jobs = await w.jobs.api.list(w.ws.ctx, {kinds: ['source.ingest']});
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].state, 'failed');
+  assert.equal(jobs[0].attempts, 1, 'not tried again');
+  assert.equal((await w.catalog.get('source_files', res.file!.id))?.state, 'failed');
+});

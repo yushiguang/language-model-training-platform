@@ -4,6 +4,7 @@ import {reportProblem} from './problems.ts';
 import {aiSuggestion, featureItems, featureText, labelBalance, checkStructured, compilePrompt, dryRunSize, optimiserVersions, pageFromPath, isImageKey, judge, MADE_BY, readStructured, normalizeStructured, matchRuleGroup, settingsHash, stepLine, summarizeMissingness, versionLabel, visibleToAgents, HIDDEN_NOTE, systemConfig, toMap, sameAnswer, newId, mayCallTool, agentName} from '@yushiguang/sprint-domain';
 import type {Instance, Scope} from './app.ts';
 import {turnOf} from './turns.ts';
+import {authorize, NO_PROJECT} from './access.ts';
 import {lockHoldout} from './governance.ts';
 import {mismatches} from './mismatches.ts';
 import {getProject, loadProjectState} from './projects.ts';
@@ -394,6 +395,11 @@ export function agentToolHost(inst: Instance): AgentToolHost {
       if (turnId && !turn) throw new Error('This turn has ended. Answer with what you have.');
       // The tool runs as the user whose turn asked for it; with no turn, as the caller it carried.
       const w = inst.scope({...(turn?.ctx ?? ctx), requestId: newId('rq'), caller: `agent:${agent}`});
+      // Checked as that user on every call (docs/design/server.md, 2.2): one who left the tenant or
+      // lost the permission since the turn began is stopped here. Tools that start work edit the project.
+      await authorize(w, `tool.${String(name)}`, isStartTool(name) ? 'project_write' : 'read', projectId).catch((e: Error) => {
+        throw e.message === NO_PROJECT ? new Error('The project was not found.') : e;
+      });
       if (!(await getProject(w, projectId))) throw new Error('The project was not found.');
       const {catalog, labeling} = w;
       await catalog.audit(projectId, `agent:${agent}`, 'agent.tool', {name, args});

@@ -267,6 +267,9 @@ export async function runIngest(w: Scope, job: Job, ctl: JobControl): Promise<Jo
  * Marks an import failed. The items it wrote stay in the source and can be taken; the rest of its
  * positions are skipped by cuts (`allocate`), and uploading the file again adds the rest.
  */
+/** An import that will not run (its caller was refused): its file is failed and its reservation freed. */
+export const failImport = (w: Scope, fileId: string, error: string) => markFailed(w, fileId, error);
+
 async function markFailed(w: Scope, fileId: string, error: string): Promise<void> {
   const file = await w.catalog.get('source_files', fileId);
   if (!file) return;
