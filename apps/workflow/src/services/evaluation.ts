@@ -6,45 +6,40 @@ import {postEvent} from './chat-events.ts';
 
 /** How long the record of versions Rescore cannot score stays (keyed by the basis, so it only matters while that basis lasts). */
 const CANNOT_BUILD_TTL_MS = 30 * 24 * 3600_000;
-const cannotBuildKey = (projectId: string, contextId: string) => `cannot-build:${projectId}:${contextId}`;
+const cannotBuildKey = (projectId: string, contextId: string, key: string) => `cannot-build:${projectId}:${contextId}:${key}`;
 
 /**
- * The versions and models ("versionId|endpoint") whose saved answers do not cover the samples of
- * this basis, so a Rescore skipped them. In shared state, so the page reading it need not be the
- * process that ran the Rescore.
+ * Of these "versionId|endpoint", the ones whose saved answers do not cover the samples of this
+ * basis, so a build skipped them. One shared-state key each, so two builds never overwrite each
+ * other's record, and the page reading it need not be the process that built.
  */
-export async function cannotBuildOn(w: Scope, projectId: string, contextId: string): Promise<Set<string>> {
-  try {
-    return new Set((await w.shared.get<string[]>(cannotBuildKey(projectId, contextId))) ?? []);
-  } catch {
-    return new Set();
-  }
+export async function cannotBuildOn(w: Scope, projectId: string, contextId: string, keys: Iterable<string>): Promise<Set<string>> {
+  const out = new Set<string>();
+  for (const key of new Set(keys)) if (await w.shared.get<boolean>(cannotBuildKey(projectId, contextId, key)).catch(() => null)) out.add(key);
+  return out;
 }
 
-async function markCannotBuild(w: Scope, projectId: string, contextId: string, key: string): Promise<void> {
-  const had = await cannotBuildOn(w, projectId, contextId);
-  if (had.has(key)) return;
-  await w.shared.set(cannotBuildKey(projectId, contextId), [...had, key], CANNOT_BUILD_TTL_MS).catch(() => undefined);
-}
+const markCannotBuild = (w: Scope, projectId: string, contextId: string, key: string) => w.shared.set(cannotBuildKey(projectId, contextId, key), true, CANNOT_BUILD_TTL_MS).catch(() => undefined);
 
-const endedKey = (jobId: string) => `rescore-ended:${jobId}`;
+const endedKey = (job: {id: string; attempts: number}) => `rescore-ended:${job.id}:${job.attempts}`;
 /** Long enough for the job store to show the job as ended. */
 const ENDED_TTL_MS = 10 * 60_000;
 
 /**
- * Of a project's waiting or running `report.rescore` jobs, those not finished yet. A job marks
- * itself finished (in shared state, then a change event) just before it ends, so a page that read
- * it while the job was still ending reads again and sees it gone. A failed read counts as not
+ * Of a project's waiting or running `report.rescore` jobs, how many have not finished. A run marks
+ * itself finished (in shared state, per attempt, then a change event) just before it ends, so a
+ * page that read it while the job was still ending reads again and sees it gone; a run that lost
+ * its lease marks nothing, and the next attempt counts on its own. A failed read counts as not
  * finished.
  */
-export async function rescoresLeft(w: Scope, jobIds: string[]): Promise<number> {
+export async function rescoresLeft(w: Scope, jobs: {id: string; attempts: number}[]): Promise<number> {
   let left = 0;
-  for (const id of jobIds) if (!(await w.shared.get<boolean>(endedKey(id)).catch(() => null))) left++;
+  for (const j of jobs) if (!(await w.shared.get<boolean>(endedKey(j)).catch(() => null))) left++;
   return left;
 }
 
-export async function markRescoreEnded(w: Scope, jobId: string): Promise<void> {
-  await w.shared.set(endedKey(jobId), true, ENDED_TTL_MS).catch(() => undefined);
+export async function markRescoreEnded(w: Scope, job: {id: string; attempts: number}): Promise<void> {
+  await w.shared.set(endedKey(job), true, ENDED_TTL_MS).catch(() => undefined);
 }
 
 /** Latest gold label per example for the current schema; older-schema labels are kept as hints. */

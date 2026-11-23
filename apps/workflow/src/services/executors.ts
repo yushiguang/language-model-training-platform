@@ -38,7 +38,7 @@ export function workflowExecutors(inst: Instance): JobExecutor[] {
     };
   return [
     {kind: 'report.build', run: checked('project_write', (w, job) => runReport(w, job))},
-    {kind: 'report.rescore', run: checked('project_write', (w, job) => runRescore(w, job))},
+    {kind: 'report.rescore', run: checked('project_write', runRescore)},
     {kind: 'dataset.sample', run: checked('project_write', runSample)},
     // An import goes on from what it wrote, so a failed try is tried again. A refused one marks
     // its file failed at once, so it does not wait as importing.

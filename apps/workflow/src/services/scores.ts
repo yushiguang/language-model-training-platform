@@ -1,4 +1,4 @@
-import type {Job, JobOutcome} from '@yushiguang/sprint-contracts';
+import type {Job, JobControl, JobOutcome} from '@yushiguang/sprint-contracts';
 import type {Scope} from './app.ts';
 import {markRescoreEnded, scoreFromState} from './evaluation.ts';
 import {loadProjectState} from './projects.ts';
@@ -59,15 +59,20 @@ export async function rescore(w: Scope, projectId: string): Promise<void> {
   w.emitChange(projectId);
 }
 
-/** The `report.rescore` executor: works the scores out again on the basis of the moment it runs. */
-export async function runRescore(w: Scope, job: Job): Promise<JobOutcome> {
+/**
+ * The `report.rescore` executor: works the scores out again on the basis of the moment it runs. A
+ * run that lost its lease leaves the job to the runner that took it over.
+ */
+export async function runRescore(w: Scope, job: Job, ctl: JobControl): Promise<JobOutcome> {
   const projectId = job.projectId!;
   try {
     await rebuildReports(w, projectId);
   } finally {
-    // Ended, either way: pages stop counting this job as running.
-    await markRescoreEnded(w, job.id);
-    w.emitChange(projectId);
+    // Ended, either way: pages stop counting this attempt as running.
+    if (!ctl.signal.aborted || ctl.cancelled()) {
+      await markRescoreEnded(w, job);
+      w.emitChange(projectId);
+    }
   }
   return {state: 'done'};
 }

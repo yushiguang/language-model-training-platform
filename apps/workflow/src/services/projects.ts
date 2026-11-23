@@ -201,7 +201,8 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
   };
   // A score needs 2 gold-labeled samples in each half: below that a Rescore could build nothing.
   const scorable = progress.ready && facts.goldHalves.optimiser >= 2 && facts.goldHalves.heldOut >= 2;
-  const stale = staleScores({...out, ready: scorable, basis}, scorable ? await cannotBuildOn(w, projectId, contextId) : new Set());
+  const older = reports.filter(r => r.contextId !== contextId).map(r => `${r.promptVersionId}|${r.endpoint}`);
+  const stale = staleScores({...out, ready: scorable, basis}, scorable ? await cannotBuildOn(w, projectId, contextId, older) : new Set());
   const scoring: ScoringState = {
     ready: progress.ready,
     ranges: progress.ranges,
@@ -211,7 +212,7 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
     labeled: progress.labeled,
     basis,
     ...stale,
-    rescoring: (await rescoresLeft(w, rescoreJobs.map(j => j.id))) > 0,
+    rescoring: (await rescoresLeft(w, rescoreJobs)) > 0,
   };
   return {...out, scoring, scoresUpdating: stale.staleVersionIds.length > 0};
 }
