@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {Thresholds} from '@yushiguang/sprint-contracts';
-import {basisChanges, labelSetProgress, scoreBasis} from './scoring.ts';
+import {basisChanges, labelSetProgress, scoreBasis, staleScores} from './scoring.ts';
 
 const ex = (n: number) => ({id: `ex_${n}`, number: n, optimiserHalf: n % 2 === 0});
 
@@ -32,4 +32,21 @@ test('the score basis names what changed: samples, else gold labels, and thresho
   assert.deepEqual(basisChanges(a.basis, scoreBasis(1, [ex(1), ex(2)], {...gold, ex_2: {id: 'g9'}}, t).basis), ['gold']);
   assert.deepEqual(basisChanges(a.basis, scoreBasis(1, [ex(1), ex(2), ex(3)], gold, {...t, macroF1: 0.7}).basis), ['samples', 'thresholds']);
   assert.deepEqual(basisChanges(undefined, a.basis), [], 'a report made before the basis was kept says nothing');
+});
+
+test('a version written for an older label is never out of date on today\'s label', () => {
+  const t: Thresholds = {mode: 'custom', macroF1: 0.8, valueF1: null, invalidRate: null, accuracy: null, minEval: 10};
+  const gold = {ex_1: {id: 'g1'}, ex_2: {id: 'g2'}};
+  const was = scoreBasis(2, [ex(1), ex(2)], gold, t);
+  const now = scoreBasis(2, [ex(1), ex(2)], {...gold, ex_2: {id: 'g9'}}, t);
+  const report = (v: string) => ({promptVersionId: v, endpoint: 'ep', contextId: was.contextId, schemaVersion: 2, createdAt: '2026-11-23T00:00:00Z', basis: was.basis});
+  const s = {
+    setup: {schema: {}, schemaVersion: 2, models: [{endpoint: 'ep'}]},
+    versions: [{id: 'v_old', schemaVersion: 1}, {id: 'v_new', schemaVersion: 2}],
+    reports: [report('v_old'), report('v_new')],
+    contextId: now.contextId,
+    ready: true,
+    basis: now.basis,
+  } as unknown as Parameters<typeof staleScores>[0];
+  assert.deepEqual(staleScores(s), {staleVersionIds: ['v_new'], changed: ['gold']});
 });

@@ -84,7 +84,7 @@ export function staleScores(s: StaleInput, cannotBuild: ReadonlySet<string> = ne
   for (const r of s.reports) {
     const key = `${r.promptVersionId}|${r.endpoint}`;
     if (r.contextId === s.contextId || current.has(key) || r.schemaVersion !== setup.schemaVersion || !models.has(r.endpoint)) continue;
-    if (!s.versions.some(v => v.id === r.promptVersionId) || cannotBuild.has(key)) continue;
+    if (!s.versions.some(v => v.id === r.promptVersionId && v.schemaVersion === setup.schemaVersion) || cannotBuild.has(key)) continue;
     const had = newest.get(key);
     if (!had || r.createdAt > had.createdAt || (r.createdAt === had.createdAt && distance(r) < distance(had))) newest.set(key, r);
   }

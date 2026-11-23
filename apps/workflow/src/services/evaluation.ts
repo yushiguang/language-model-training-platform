@@ -29,12 +29,13 @@ const ENDED_TTL_MS = 10 * 60_000;
  * Of a project's waiting or running `report.rescore` jobs, how many have not finished. A run marks
  * itself finished (in shared state, per attempt, then a change event) just before it ends, so a
  * page that read it while the job was still ending reads again and sees it gone; a run that lost
- * its lease marks nothing, and the next attempt counts on its own. A failed read counts as not
- * finished.
+ * its lease marks nothing, and the next attempt counts on its own. A waiting job always counts (a
+ * job put back after a lost lease keeps its attempt number until claimed). A failed read counts
+ * as not finished.
  */
-export async function rescoresLeft(w: Scope, jobs: {id: string; attempts: number}[]): Promise<number> {
+export async function rescoresLeft(w: Scope, jobs: {id: string; attempts: number; state: string}[]): Promise<number> {
   let left = 0;
-  for (const j of jobs) if (!(await w.shared.get<boolean>(endedKey(j)).catch(() => null))) left++;
+  for (const j of jobs) if (j.state !== 'running' || !(await w.shared.get<boolean>(endedKey(j)).catch(() => null))) left++;
   return left;
 }
 
@@ -185,6 +186,8 @@ export async function buildReport(w: Scope,
   // Scored on the held-out examples that have a gold label (spec 1.0.0, 2.5 and 4.4). It needs 2
   // gold labels in each half.
   const labeled = evalExamples.filter(e => !!gold[e.id]);
+  // A version written for an older label scores nothing on today's labels.
+  if (version.schemaVersion !== setup.schemaVersion) return null;
   if (!setup.schema || labeled.filter(e => !e.optimiserHalf).length < 2 || labeled.filter(e => e.optimiserHalf).length < 2) return null;
   const scoredOn = labeled.filter(e => !e.optimiserHalf);
   // One build at a time per version and model in every process: two builds on one basis never
