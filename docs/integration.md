@@ -65,7 +65,7 @@ Your module exports `createPlatform()` returning the `Platform` object from
 | Field | What it must do | Stand-in |
 |---|---|---|
 | `db: DocRuntime` | Document collections: add, get, set, partial update with `DocFieldValue` (increment, arrayUnion, arrayRemove, delete), delete, find, query with filters and offset paging, polling subscribe, batch writes. `createdAt` is server time | `localDocRuntime('sprint-doc')` (`localStorage`) |
-| `models: LabelingModels` | One labeling call per example (`chat`, `chatStream`) on a labeling endpoint (`endpoints()` lists them; ids are opaque strings, the stand-ins use `A` and `B`); returns text and token usage. Throw `LlmCallError` (or an error with an HTTP `status`) so the gateway can tell busy from rejected; throw `LlmCallError('filtered', …)` when the endpoint's safety filter stops the answer (Prompt versions shows it as Filtered) | `simulatedModels` |
+| `models: LabelingModels` | One labeling call per example (`chat`, `chatStream`). `endpoints()` lists the platform's default labeling models (ids are opaque strings, the stand-ins use `A` and `B`); `ChatRequest.endpoint` is decided per call and may also be the Endpoint a tenant admin entered for a tenant model, so the adapter must call any endpoint it is given, not only ones it knew at start (`tenantId` comes along for logs); returns text and token usage. Throw `LlmCallError` (or an error with an HTTP `status`) so the gateway can tell busy from rejected; throw `LlmCallError('filtered', …)` when the endpoint's safety filter stops the answer (Prompt versions shows it as Filtered) | `simulatedModels` |
 | `agent: AgentModel` | Agent chat (`chat`, `complete` with usage and thinking, `chatStream`), and `models()`: the model registry (opaque ids, capabilities, prices, active flag; spec 5) | `scriptedAgent`, `STAND_IN_MODELS` |
 | `identity: Identity` | The signed-in user (id, name, email, organization); `currentUser()` rejects when nobody is signed in, and the site then shows a sign-in error with Retry. Optional `signOut()` ends the single sign-on session: when it is there, the avatar menu shows Sign out and the page reloads after it (2026-11-16) | `localIdentity` (no sign-out) |
 | `files: FileStore` | Uploads for prompt images and chat attachments; returns a URL the model can fetch. When stored URLs must be signed per call, the composition root passes labeling a `resolveUrl` that returns a Promise (next section) | `browserFiles` (data URLs) |
@@ -74,8 +74,9 @@ Your module exports `createPlatform()` returning the `Platform` object from
 | `endpoints?: EndpointConfig[]` | Registered endpoints with real limits (next section) | not set: assumed limits |
 | `telemetry?: TelemetrySink` | Takes product events (`pushEvents`, batches of `TelemetryEvent`) and metrics as Prometheus text (`pushMetrics`) and forwards them to your telemetry system. Must not throw; slow is fine (the app buffers) | `localTelemetrySink` (`localStorage`); not set: kept in memory only |
 | `tickets?: TicketPort` | Files a problem report and returns its ticket id (see "Problem reports") | `localTickets` (`localStorage`, `sprint-tickets`); not set: helpers say reports cannot be sent |
+| `notifications?: NotificationPort` | Sends a notification (`send(n)`) to the people in `n.userIds`, for example as an instant-message card (see "Notifications"). Throws when it could not send; callers treat every send as best effort | `logNotifications` (the console, last 100 in memory); not set: nothing is sent |
 | `sharedState?: SharedStatePort` | Short-lived keys every server instance must see, with a TTL (`get`, `set(key, value, ttlMs)`, `delete`; values are plain JSON): the live Ask AI turn, the helper that keeps answering on a page, the running turn's caller and page, problem-report drafts. A shared store such as Redis in a server deployment | `memorySharedState` (a map in the page); not set: the composition root uses the same |
-| `limiterStore?: LimiterStorePort` | The gateway's rate-limit counts for every endpoint (`platform-api.ts`, spec 5), as whole atomic operations per endpoint: try to acquire (sliding QPM/TPM window, calls in flight, one FIFO queue of expiring tickets, hold after a busy reply), release, renew a permit's lease, leave the queue, penalize, stats. A Redis script per operation on one key per endpoint; prefer the store's own clock over the caller's `now` | `memoryLimiterStore` (memory of one process); not set: the composition root uses the same |
+| `limiterStore?: LimiterStorePort` | The gateway's rate-limit counts (`platform-api.ts`, spec 5), as whole atomic operations per key. A key is `<tenantId>:<endpointId>`, so two tenants on one endpoint never share a budget or a slowdown; treat it as opaque: try to acquire (sliding QPM/TPM window, calls in flight, one FIFO queue of expiring tickets, hold after a busy reply), release, renew a permit's lease, leave the queue, penalize, stats. A Redis script per operation on one key; prefer the store's own clock over the caller's `now` | `memoryLimiterStore` (memory of one process); not set: the composition root uses the same |
 | `jobStore?: JobStorePort` | Where background jobs are kept (`packages/contracts/src/jobs-api.ts`), as whole atomic operations so several runners never take the same job: enqueue once per idempotency key among queued and running jobs, claim the next job with a lease under each concurrency key's limit (`claimNext(kinds, owner, leaseMs, now, limitOf)`: keys take turns by when each was last claimed, a full key is skipped, oldest job first within a key, running count worked out under a lock on the key), `countAhead` for a queued job's place, heartbeat, finish, requeue, cancel (saying whether it ended the job) and recover expired leases (returning the jobs it ended). MySQL with a `jobs` table and a `job_keys` lock row per key, as the SQL in `docs/design/server.md` 5.2; the cases in `packages/platform/src/standins/job-store.test.ts` (`jobStoreCases`) run against any store | `memoryJobStore` (memory of one process); not set: the composition root uses the same |
 | `lockStore?: LockStorePort` | Where named locks are kept (`platform-api.ts`), as whole atomic operations per lock name so one labeling task, one prediction and one Optimiser run have one runner in every process: acquire for an owner until its lease ends, renew and release only for that owner, `isHeld` only while a lease lasts. Redis (acquire as `SET NX PX`, the rest as a script per operation) or SQL with conditional updates; prefer the store's own clock over the caller's `now`. **Required for any deployment with more than one process** (BFF replicas plus a worker unit, a second worker unit): without it each process locks only for itself, a BFF replica reads a worker's running task as abandoned, and two runners can pay for the same example (issue #46). A server composition root turns it into the apps' locks with `leaseLocks` (below) | `memoryLockStore` (memory of one process); not set: a composition root locks in one process (`browserLocks` / `memoryLocks`), right for the browser build and one server process |
 | `configStore?: ConfigPort` | The configuration platform (`platform-api.ts`; `docs/design/server.md`, 7): `get(key)` gives the string value of a logical key such as `labeling.maxFailedShare` or `tenant.<tenantId>.jobs.limit.model`, **null when it is not set**, and **throws** when the platform is down, times out or fails, so the cache keeps the value it had. Optional `getMany(keys)` (one read for the periodic refresh) and `subscribe(onChange)` (pushed changes). A platform that wants keys registered up front can keep every logical key in one JSON map key and read it inside the adapter | `memoryConfig` (a map in the page); not set: only `config` applies |
@@ -187,7 +188,17 @@ timeout errors. It needs one `EndpointConfig` per registered endpoint:
 - `assumed: false`.
 
 Anything not supplied falls back to the assumed defaults in `apps/llm-gateway/src/registry.ts`
-(shown as assumed). Still to confirm on the platform: the real QPM/TPM per endpoint, whether busy
+(shown as assumed).
+
+These are the platform's default models, open to every tenant. Each tenant also has its own
+models (`TenantModel`: name, Endpoint, QPM, TPM), which tenant admins enter in tenant settings.
+The gateway reads them through `createGateway`'s `tenantModels` (`TenantModelSource.list`; the
+composition root reads the catalog's `tenant_models`), keeps them for `gateway.tenantModelsTtlMs`
+(30 s) and reads again at once when asked for a model id it does not hold. Agent calls carry
+`AgentChatOptions.tenantId`; when one names a tenant model, the adapter receives its Endpoint in
+`AgentChatOptions.endpoint` and must call that instead of the registry model's own. Every limit
+is counted per tenant: the registered QPM/TPM of a platform default apply to each tenant
+separately. Still to confirm on the platform: the real QPM/TPM per endpoint, whether busy
 replies carry `Retry-After`, and that uploaded image URLs are reachable by the labeling models.
 
 ## Examples
@@ -301,6 +312,23 @@ has written again, so a report never goes without a yes. The workflow then build
 3. Once the bff runs behind HTTP, send each call's id (`callId()` in
    `apps/web/src/backend-api/diagnostics.ts`) as the `X-Request-Id` header and log it on the
    server, so a ticket's failed calls lead straight to the server logs.
+
+## Notifications
+
+Sprint tells people about work that ended through `Platform.notifications` (`docs/design/server.md`,
+8). A `Notification` (`packages/contracts/src/platform-api.ts`) carries the user ids, a `kind`
+(`scoring_finished`, `scoring_failed`, `optimiser_finished`, `optimiser_failed`,
+`label_set_created`, `labeler_added`), the project id, the message in English (`text`), the same
+message as a translatable `msg` (render it with the site's catalog for each person's language), an
+optional `title`, and `link`: a path inside the site such as `/prompt/?p=pr_1`. Ids and site words
+(project name, version number, model name) only: never prompt text, examples or labels.
+
+1. Implement `send(n)` in your platform module: look each user id up in your instant-message tool,
+   put the site's address in front of `link`, and send one card per person. Throw when it fails.
+2. Set `notifications` on the `Platform` object and drop `'notifications'` from `standIns`.
+
+A failed send is logged and counted (`sprint_notifications_total{outcome="error"}`); it never
+fails the work that sent it, and it is not tried again.
 
 ## Languages
 

@@ -20,6 +20,11 @@ export type TaskStopReason = 'user' | 'failures' | 'closed' | null;
 export interface LabelingTask {
   id: string;
   projectId: string;
+  /**
+   * The project's tenant: whose model and rate limits the calls use (docs/design/server.md, 9).
+   * Missing on records saved before it existed: read as `default`.
+   */
+  tenantId?: string;
   purpose: TaskPurpose;
   promptVersionId: string;
   /** Setup version whose schema the answers are checked against. */
@@ -71,6 +76,8 @@ export interface LabelingTask {
 
 export interface CreateTaskInput {
   projectId: string;
+  /** The project's tenant. */
+  tenantId: string;
   purpose: TaskPurpose;
   promptVersionId: string;
   setupVersionId: string;
@@ -123,6 +130,8 @@ export interface LabelingContract {
 }
 
 export interface TryTemplateInput {
+  /** The project's tenant: whose model and rate limits the calls use. */
+  tenantId: string;
   template: string;
   features: FeatureSelection;
   images: PromptImage[];

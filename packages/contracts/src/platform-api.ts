@@ -1,5 +1,5 @@
 import type {TelemetrySink} from './telemetry.ts';
-import type {ClientDiagnostics, EndpointId, EndpointInfo, ExampleType, FeatureValue, ItemProblem, Locale, NodeId, PageId} from './types.ts';
+import type {ClientDiagnostics, EndpointId, EndpointInfo, ExampleType, FeatureValue, ItemProblem, Locale, Msg, NodeId, PageId} from './types.ts';
 import type {EndpointConfig} from './gateway-api.ts';
 import type {DeepPartial, SystemConfig} from './config.ts';
 import type {JobStorePort} from './jobs-api.ts';
@@ -283,8 +283,14 @@ export interface ToolCall {
 export type ResponseFormat = {type: 'text'} | {type: 'json_object'} | {type: 'json_schema'; name: string; schema: Record<string, unknown>};
 
 export interface ChatRequest {
-  /** The labeling endpoint's id, as `LabelingModels.endpoints()` lists it. */
+  /**
+   * What to call, decided at call time (docs/design/server.md, 9): a platform default's id, as
+   * `LabelingModels.endpoints()` lists it, or the Endpoint a tenant admin entered for a tenant
+   * model. An adapter must take any endpoint here, not only ones known when the process started.
+   */
   endpoint: EndpointId;
+  /** The tenant the call is for, when the gateway knows it (for the adapter's logs and quotas). */
+  tenantId?: string;
   messages: ModelMessage[];
   maxOutputTokens: number;
   temperature: number | null;
@@ -313,6 +319,7 @@ export interface ChatResult {
 }
 
 export interface LabelingModels {
+  /** The platform's default labeling models, offered to every tenant beside its own. */
   endpoints(): EndpointInfo[];
   /** One online call (eval runs, optimiser runs, training set runs). Throw on failure; the caller retries. */
   chat(req: ChatRequest): Promise<ChatResult>;
@@ -326,6 +333,17 @@ export interface AgentChatOptions {
    * none, falls back to an active reasoning model, then to any active model (the gateway decides).
    */
   model?: string;
+  /**
+   * The tenant the call is for: the gateway counts its rate limits under tenant + endpoint, so one
+   * tenant's calls never use up another's (docs/design/server.md, 9). Left out: `default`.
+   */
+  tenantId?: string;
+  /**
+   * Set by the gateway when it calls a tenant model: the Endpoint the tenant admin entered. An
+   * adapter that receives it calls that endpoint instead of the registry model's own, and must
+   * take one it has never seen. Callers of the gateway leave it out.
+   */
+  endpoint?: string;
   /** When true, instructs the model to respond with a single valid JSON object (`responseFormat` json_object). */
   json?: boolean;
   /** What shape the answer must take; wins over `json`. */
@@ -658,9 +676,11 @@ export interface ObjectStorePort {
 
 /**
  * The gateway's rate-limiter state for every endpoint, shared by every replica of every caller
- * (deployment readiness spec, 5), so one endpoint has one budget. Each method is one atomic step
- * on one endpoint's state (`key`): a Redis implementation runs each as a script; SQL as one
- * transaction. `@yushiguang/sprint-platform` has the in-memory one (`memoryLimiterStore`).
+ * (deployment readiness spec, 5), so one endpoint has one budget per tenant. Each method is one
+ * atomic step on one key's state: a Redis implementation runs each as a script; SQL as one
+ * transaction. A key is `<tenantId>:<endpointId>` (docs/design/server.md, 9): two tenants on the
+ * same endpoint have separate QPM/TPM, and a busy reply slows down only the tenant that got it.
+ * Treat the key as opaque. `@yushiguang/sprint-platform` has the in-memory one (`memoryLimiterStore`).
  *
  * Semantics, the same as one process's limiter: a sliding window of requests and tokens (QPM,
  * TPM), a cap on calls in flight, one FIFO queue of waiters, and after a busy reply half the
@@ -821,8 +841,9 @@ export interface Platform {
   /** Document links in Ask AI. Optional: without it the helpers say they cannot open links. */
   documents?: DocumentSource;
   /**
-   * Registered endpoints with their QPM/TPM. Optional: the gateway fills anything missing from its
-   * assumed defaults (`apps/llm-gateway/src/registry.ts`).
+   * Registered platform default endpoints with their QPM/TPM. Optional: the gateway fills anything
+   * missing from its assumed defaults (`apps/llm-gateway/src/registry.ts`). Tenant models are not
+   * listed here: the gateway reads them per tenant (`TenantModelSource`).
    */
   endpoints?: EndpointConfig[];
   /**
@@ -884,6 +905,12 @@ export interface Platform {
    * `memoryObjectStore`).
    */
   objectStore?: ObjectStorePort;
+  /**
+   * Sends notifications to people, for example as instant-message cards (docs/design/server.md,
+   * 8). Best effort: a failed send is logged and counted, never fails the work that sent it.
+   * Optional: without it nothing is sent (stand-in: `logNotifications`).
+   */
+  notifications?: NotificationPort;
   /** Shown in the header so nobody mistakes a stand-in for the real service. */
   standIns: string[];
 }
@@ -927,4 +954,40 @@ export interface TicketSubmission {
 export interface TicketPort {
   /** Files the ticket and returns the id the user can quote. Throw when it cannot be filed. */
   submit(ticket: TicketSubmission): Promise<{ticketId: string}>;
+}
+
+/**
+ * What a notification is about (docs/design/server.md, 8). Scoring and Optimiser notifications go
+ * to the person who started the work when it ends; `label_set_created` and `labeler_added` are
+ * for the label sets (#59 step 8).
+ */
+export type NotificationKind = 'scoring_finished' | 'scoring_failed' | 'optimiser_finished' | 'optimiser_failed' | 'label_set_created' | 'labeler_added';
+
+/**
+ * One notification, to one or more people. Ids and site words (the project's name, a version
+ * number, a model's name) only: never prompt text, examples or labels.
+ */
+export interface Notification {
+  /** Who gets it: user ids, as in `CallerUser.id`. Never empty. */
+  userIds: string[];
+  kind: NotificationKind;
+  /** The project it is about, or null for none. */
+  projectId: string | null;
+  /** The message in English, plain text: for a tool that cannot translate `msg`. */
+  text: string;
+  /**
+   * The page it points to, as a path and query inside the site (`/prompt/?p=pr_1`). The adapter
+   * puts the site's address in front.
+   */
+  link: string;
+  /** A short title for a card, in English. */
+  title?: string;
+  /** `text` as a translatable message, so a card can be shown in each person's language. */
+  msg?: Msg;
+}
+
+/** Sends notifications (an instant-message tool, email). The callers treat every send as best effort. */
+export interface NotificationPort {
+  /** Sends one notification to everyone in `userIds`. Throw when it could not be sent. */
+  send(notification: Notification): Promise<void>;
 }

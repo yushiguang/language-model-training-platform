@@ -38,9 +38,13 @@ const telemetry = createTelemetry({
   appVersion: APP_VERSION,
   env: process.env.NEXT_PUBLIC_SPRINT_ENV ?? 'dev',
 });
-// One process: the limits are counted here unless the platform shares a store (spec 5).
-const gateway = createGateway(platform, {telemetry, limiterStore: platform.limiterStore ?? memoryLimiterStore()});
 const catalog = createCatalog(platform.db, {telemetry});
+/**
+ * One process: the limits are counted here unless the platform shares a store (spec 5). Each
+ * tenant's own models come from the catalog (docs/design/server.md, 9), read per tenant and kept
+ * briefly, so a model added in tenant settings is callable without a restart.
+ */
+const gateway = createGateway(platform, {telemetry, limiterStore: platform.limiterStore ?? memoryLimiterStore(), tenantModels: {list: tenantId => catalog.find('tenant_models', {tenantId})}});
 /**
  * Background work (scoring, reports, sampling, Optimiser runs, deleting a project) runs as jobs.
  * In the browser this page is the runner: jobs start as soon as they are queued, kept in the

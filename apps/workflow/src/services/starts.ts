@@ -1,6 +1,7 @@
 import type {AgentPreset, ChatLink, EndpointId, Msg, ProjectState} from '@yushiguang/sprint-contracts';
 import {autoSpendUsd, canScore, compilePrompt, readStructured, evalEstimate, optimiserEstimate, versionLabel, visibleToAgents, systemConfig, msg} from '@yushiguang/sprint-domain';
 import type {Scope} from './app.ts';
+import {tenantOf} from './sources.ts';
 import {postEvent} from './chat-events.ts';
 import {asModel, findVersion, modelName} from './page-views.ts';
 import {loadProjectState} from './projects.ts';
@@ -60,7 +61,7 @@ function plan(w: Scope, state: ProjectState, tool: StartTool, args: Record<strin
           // Frozen features (#32): read for the tried examples only; one whose features are missing is skipped.
           const tried = await withFeatures(w, examples);
           if (!tried.length) throw new Error('The features of these examples could not be found.');
-          const rows = await w.labeling.tryTemplate({...draft, schema: state.setup!.schema!, settings, examples: tried});
+          const rows = await w.labeling.tryTemplate({tenantId: tenantOf(w), ...draft, schema: state.setup!.schema!, settings, examples: tried});
           const byId = new Map(examples.map(e => [e.id, e]));
           const costUsd = rows.reduce((a, r) => a + r.costUsd, 0);
           // No task is saved, so the try's spend is recorded here as automatic spend.

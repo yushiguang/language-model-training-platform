@@ -218,18 +218,20 @@ prompt saved with several fields reads its first field as the label.
 
 ## Model calls: llm-gateway
 
-- **Registry.** Endpoints are registered by a tenant manager with their QPM and TPM; an endpoint is
-  registered once across all tenants. Chat (agents) and labeling use separate endpoints, so they
-  never share a quota. Until the platform supplies registered endpoints (`Platform.endpoints`),
-  the gateway assumes conservative limits per model (`apps/llm-gateway/src/registry.ts`) and marks
-  them `assumed`.
-- **Limiter.** Per endpoint: a 60-second sliding window for requests (QPM) and tokens (TPM), a cap
+- **Registry.** The platform's default models are registered once (`Platform.endpoints`) and open
+  to every tenant. Each tenant adds its own models (name, Endpoint, QPM, TPM) in tenant settings;
+  the gateway reads them per tenant from the catalog's `tenant_models`, keeps them 30 s, and reads
+  again at once for a model id it does not hold, so a new model works without a restart
+  (docs/design/server.md, 9). Chat (agents) and labeling use separate endpoints, so they never
+  share a quota. Until the platform supplies registered endpoints, the gateway assumes
+  conservative limits per model (`apps/llm-gateway/src/registry.ts`) and marks them `assumed`.
+- **Limiter.** Per tenant and endpoint (key `<tenantId>:<endpointId>`): a 60-second sliding window for requests (QPM) and tokens (TPM), a cap
   on calls in flight, and a first-in first-out queue. A call waits until it fits; it is never sent
   over the limit. Tokens are estimated before the call (text / 4, 800 per image, plus the output
   cap) and corrected with the real usage after. Reasoning tokens count toward TPM. After a 429 the
   limiter halves its rate and recovers after a quiet window. The counts live in a
   `LimiterStorePort` (spec 5): with a shared store every replica of every caller shares one budget
-  per endpoint. A call's slot is leased and renewed while it runs, so a process that dies frees
+  per tenant and endpoint; a busy reply slows down only the tenant that got it. A call's slot is leased and renewed while it runs, so a process that dies frees
   its slots when the lease ends; a waiter's place in the queue expires when it stops asking.
 - **Models.** Chat models come from the registry the platform supplies (`AgentModel.models()`):
   opaque ids, capabilities, prices, an active flag. Requests may set a reasoning effort (dropped
