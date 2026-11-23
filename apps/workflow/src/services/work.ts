@@ -347,6 +347,13 @@ export async function stopOptimiser(w: Scope, projectId: string, runId: string):
   for (const j of jobs) await w.jobs.cancel(w.ctx, j.id);
   await optimiser.stopRun(w.ctx, runId);
   for (const j of jobs.filter(j => j.kind === 'labeling.runTask')) await w.labeling.stopTask(String(j.args.taskId));
+  // Asked while a Retry was queued for a run that is not running: that Retry is cancelled now, so
+  // no runner will read the request. The run is stopped here.
+  if (how === 'asked') {
+    const left = await optimiser.getRun(runId);
+    const retried = (await activeJobs(w, projectId, ['optimiser.run'])).some(j => j.args.runId === runId);
+    if (left && (left.state === 'failed' || left.state === 'paused') && !retried && !(await optimiser.isRunning(runId))) await endStopped(w, left);
+  }
   if (!how) return;
   // The action line is best effort: the run has stopped either way, even if it cannot be written.
   await postEvent(w, projectId, 'stop', 'user', msg('stopped the Optimiser'), {path: '/prompt'}).catch(() => undefined);

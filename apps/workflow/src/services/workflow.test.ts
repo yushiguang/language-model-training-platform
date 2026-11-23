@@ -2736,3 +2736,19 @@ test('a label change after a save that failed half way never reuses its schema v
   assert.equal(v.schemaVersion, 3);
   assert.equal(Object.keys((await w.state()).gold).length, 0, 'no Vlog label answers the new label');
 });
+
+test('Stop on a Failed run whose Retry is queued while another run holds the lock cancels the Retry and stops the run (#79)', async () => {
+  const w = await world('b79i', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf});
+  await w.newVersion();
+  const {stopOptimiser, retryOptimiser} = await import('./work.ts');
+  const {id: runId} = await w.ws.optimiser!.startRun(w.ws.ctx, {projectId: w.projectId, endpoint: 'A', maxRounds: 10});
+  await w.catalog.patch('optimisation_runs', runId, {state: 'failed', error: 'the model went away'});
+  await w.ws.locks.run(`optimiser:${w.projectId}:A`, async () => {
+    await retryOptimiser(w.ws, w.projectId, runId);
+    await stopOptimiser(w.ws, w.projectId, runId);
+  });
+  await w.jobs.idle();
+  const run = (await w.state()).optimisation.find(o => o.id === runId)!;
+  assert.deepEqual([run.state, run.stopReason], ['stopped', 'user']);
+  assert.equal(w.calls.n, 0, 'nothing was labeled for it');
+});
