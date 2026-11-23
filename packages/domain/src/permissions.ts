@@ -52,6 +52,12 @@ export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: Acti
   stopSampleDataset: write('arg'),
   removeExamples: write('request'),
   listSamples: read('request'),
+  listLabelSets: read('arg'),
+  // Labelers are picked by whoever edits the project; each gets project write when added.
+  createLabelSet: write('request'),
+  createLabelSets: write('request'),
+  updateLabelSet: write('request'),
+  goldLabelsCleared: read('request'),
   restoreExamples: write('request'),
   pruneDataset: write('request'),
   addComment: write('request'),

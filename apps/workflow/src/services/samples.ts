@@ -48,6 +48,11 @@ export async function listSamples(w: Scope, req: ListSamplesRequest): Promise<Sa
   if (!project || !snap) return {items: [], total: 0};
   await ensureNumbered(w, snap);
   const filters: DocFilterExpression[] = [field('snapshotId', '==', snap.id), field('removed', '==', req.filter === 'removed')];
+  if (req.labelSetId) {
+    const set = await catalog.get('label_sets', req.labelSetId);
+    if (!set || set.projectId !== req.projectId) throw new Error('This label set does not exist.');
+    filters.push(field('number', '>=', set.first), field('number', '<=', set.last));
+  }
   const query = req.query?.trim();
   if (query) {
     // A number only when it can be one (a long numeric sample ID is looked up as an ID only).

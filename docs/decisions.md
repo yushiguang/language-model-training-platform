@@ -3,6 +3,13 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-23 (Sample numbers and label sets, #82)
+
+- **Samples have numbers that never change**: from 1 in the order taken; a save that failed leaves a gap; removing a sample shifts nothing. Older datasets are numbered once, in saved order, on first read.
+- **A label set is a fixed range of sample numbers** that starts after the last set and takes the next samples not removed. Removed samples inside a range are hidden and come back on restore; samples added later wait for a new set. Sets are never deleted or resized; only the name and labeler change.
+- **One labeler per set for now**, a tenant member, granted project write before anything is saved; a labeler taken off keeps project write (it may have been given for other work). The person making the change is not notified about their own change.
+- **A label change clears only the gold labels it makes wrong**: labels whose answer still answers the new label carry over to the new schema version; the rest stay as hidden hints. The count is shown before saving.
+
 ## 2026-11-23 (Tenant models, #69)
 
 - **A tenant calls its own models and the platform's defaults.** Projects store the model's generated id, never the Endpoint text, so job keys and limits never collide or break on odd characters. The gateway reads a tenant's models per tenant and keeps them 30 s, and reads again at once for an id it does not hold, so an added model works without a restart.

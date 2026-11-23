@@ -56,6 +56,10 @@ reads and writes through the catalog, starts labeling tasks, and asks the agent 
   `models:<tenantId>` (`withModelsLock`), so a used model is never removed; each change calls
   `gateway.forgetTenant`. `settings.ts` gives a new project the tenant's default model, else the
   platform's first; `loadProjectState` lists the tenant's models before the platform's.
+- `services/samples.ts`: sample numbers (docs/design/server.md, 4.2): `ensureNumbered` numbers a
+  dataset made before numbers once, under `samples:<snapshotId>`; `listSamples` pages samples in
+  the store. `services/label-sets.ts`: label sets, cut under `label-sets:<projectId>`; adding a
+  labeler grants project write first and notifies them.
 - `services/evaluation.ts`: `labelEvalSet` finds or creates the eval task for version + model +
   settings and runs it; `buildReport` scores the held-out half of the eval set.
 - `services/work.ts`: `drive` queues missing reports, then the paid work `dueStarts` lists, all of
