@@ -571,7 +571,10 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
           await putRound(round);
           confirm = await step('confirm', cand, async () => {
             const fresh = (await host.loadState(projectId))!;
-            await label(cand, scoredExamples(fresh).filter(e => !e.optimiserHalf).map(e => e.id), 'confirm', 2);
+            // A label set added since leaves nothing to confirm on: stop rather than label nothing.
+            const held = scoredExamples(fresh).filter(e => !e.optimiserHalf && !!fresh.gold[e.id]).map(e => e.id);
+            if (held.length < 2) throw new StepFailed('confirm', 'Scores are made once every label set is finished.');
+            await label(cand, held, 'confirm', 2);
             return host.confirmScore({projectId, promptVersionId: cand.id, endpoint});
           });
         }

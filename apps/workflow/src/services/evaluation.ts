@@ -188,6 +188,8 @@ export async function confirmScore(w: Scope, setup: SetupVersion, version: Promp
   const byExample = await predictionsFor(w, version.id, endpoint, {...settingsFor(setup, endpoint), pass: 2});
   const evalExamples = examples.filter(e => e.split === 'eval');
   const held = evalExamples.filter(e => !e.optimiserHalf && !!gold[e.id]);
+  // Nothing to confirm on (a label set unfinished): never a silent 0.
+  if (held.length < 2) throw new Error('Scores are made once every label set is finished.');
   if (held.some(e => !byExample.has(e.id))) throw new Error('the second labeling is missing answers');
   const m = computeMetrics(setup.schema!, held.map(e => ({exampleId: e.id, gold: gold[e.id].answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd})));
   return {score: m.macroF1, passed: !!setup.thresholds && judge(m, setup.thresholds, evalExamples.filter(e => !!gold[e.id]).length).passed};
