@@ -4,22 +4,30 @@ import {now, type Scope} from './app.ts';
 import {tenantOf, withLock} from './sources.ts';
 import {postEvent} from './chat-events.ts';
 
-/** How long the record of versions Rescore cannot score stays (keyed by the basis, so it only matters while that basis lasts). */
+/** How long a record of a version that cannot be scored stays (it only matters while its samples and settings last). */
 const CANNOT_BUILD_TTL_MS = 30 * 24 * 3600_000;
-const cannotBuildKey = (projectId: string, contextId: string, key: string) => `cannot-build:${projectId}:${contextId}:${key}`;
+/**
+ * Whether saved answers cover the samples scored on depends only on the samples, the version, the
+ * model and its settings, so that is the key: thresholds or gold labels changing back and forth
+ * never hide a version that can be scored.
+ */
+const cannotBuildKey = (projectId: string, samples: string, key: string, hash: string) => `cannot-build:${projectId}:${samples}:${key}:${hash}`;
 
 /**
- * Of these "versionId|endpoint", the ones whose saved answers do not cover the samples of this
- * basis, so a build skipped them. One shared-state key each, so two builds never overwrite each
- * other's record, and the page reading it need not be the process that built.
+ * Of these "versionId|endpoint", the ones whose saved answers (with the model's settings today) do
+ * not cover these samples (`ScoreBasis.samples`), so a build skipped them. One shared-state key
+ * each, so two builds never overwrite each other's record, and the page reading it need not be the
+ * process that built. A model the project no longer uses is left out.
  */
-export async function cannotBuildOn(w: Scope, projectId: string, contextId: string, keys: Iterable<string>): Promise<Set<string>> {
+export async function cannotBuildOn(w: Scope, projectId: string, setup: SetupVersion, samples: string, keys: Iterable<string>): Promise<Set<string>> {
   const out = new Set<string>();
-  for (const key of new Set(keys)) if (await w.shared.get<boolean>(cannotBuildKey(projectId, contextId, key)).catch(() => null)) out.add(key);
+  for (const key of new Set(keys)) {
+    const endpoint = key.slice(key.indexOf('|') + 1);
+    if (!setup.models.some(m => m.endpoint === endpoint)) continue;
+    if (await w.shared.get<boolean>(cannotBuildKey(projectId, samples, key, settingsHash(settingsFor(setup, endpoint)))).catch(() => null)) out.add(key);
+  }
   return out;
 }
-
-const markCannotBuild = (w: Scope, projectId: string, contextId: string, key: string) => w.shared.set(cannotBuildKey(projectId, contextId, key), true, CANNOT_BUILD_TTL_MS).catch(() => undefined);
 
 const endedKey = (job: {id: string; attempts: number}) => `rescore-ended:${job.id}:${job.attempts}`;
 /** Long enough for the job store to show the job as ended. */
@@ -138,10 +146,13 @@ export async function buildReport(w: Scope,
     if (existing.length && !opts.replace) return existing[0];
     const settings = settingsFor(setup, endpoint);
     const byExample = await predictionsFor(w, version.id, endpoint, settings);
+    const skipKey = cannotBuildKey(projectId, basis.samples, `${version.id}|${endpoint}`, settingsHash(settings));
     if (scoredOn.some(e => !byExample.has(e.id))) {
-      await markCannotBuild(w, projectId, contextId, `${version.id}|${endpoint}`);
+      await w.shared.set(skipKey, true, CANNOT_BUILD_TTL_MS).catch(() => undefined);
       return null;
     }
+    // Answers saved since cover the samples now: drop a record an earlier build left.
+    await w.shared.delete(skipKey).catch(() => undefined);
     const items: Scored[] = scoredOn.map(e => ({exampleId: e.id, gold: gold[e.id].answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd}));
     const snapshotId = scoredOn[0]?.snapshotId;
     const made: EvalReport = {

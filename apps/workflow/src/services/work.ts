@@ -199,7 +199,7 @@ export async function drive(w: Scope, state: ProjectState) {
   const {goldHalves} = state.facts;
   if (state.setup?.schema && state.scoring.ready && goldHalves.optimiser >= 2 && goldHalves.heldOut >= 2) {
     const models = new Set(state.setup.models.map(m => m.endpoint));
-    const skipped = await cannotBuildOn(w, projectId, state.contextId, state.runs.map(r => `${r.promptVersionId}|${r.endpoint}`));
+    const skipped = await cannotBuildOn(w, projectId, state.setup, state.scoring.basis.samples, state.runs.map(r => `${r.promptVersionId}|${r.endpoint}`));
     for (const r of state.runs.filter(r => r.state === 'done' && models.has(r.endpoint) && !skipped.has(`${r.promptVersionId}|${r.endpoint}`))) {
       // Only a first report: one on an older basis is worked out again by Rescore only.
       if (state.reports.some(x => x.promptVersionId === r.promptVersionId && x.endpoint === r.endpoint)) continue;

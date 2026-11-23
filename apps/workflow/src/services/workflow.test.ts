@@ -1222,11 +1222,19 @@ test('scores wait for every label set; a new basis leaves old scores out of date
   await until(async () => !(await w.state()).scoring.rescoring, 'Rescore ended');
   assert.equal((await w.state()).reports.filter(r => !r.archivedNow).length, 0, 'no score without answers for every sample');
   assert.deepEqual((await w.state()).scoring.staleVersionIds, [], 'skipped: kept in shared state, so any process reading the page knows');
+  // Scored again under other thresholds, then the thresholds go back: the answers cover the
+  // samples now, so the skip no longer hides v1.
+  s = await w.state();
+  const before = s.setup!.thresholds!;
+  await w.catalog.patch('setup_versions', s.setup!.id, {thresholds: {...before, macroF1: 0.3}});
   await scoreVersion(w.ws, w.projectId, v1);
   await until(async () => (await w.state()).reports.some(r => !r.archivedNow), 'v1 scored on the new basis');
   s = await w.state();
   assert.equal(s.scoresUpdating, false);
   assert.equal(s.facts.goldEvalDone, 11);
+  await w.catalog.patch('setup_versions', s.setup!.id, {thresholds: before});
+  s = await w.state();
+  assert.deepEqual({stale: s.scoring.staleVersionIds, changed: s.scoring.changed}, {stale: [v1.id], changed: ['thresholds']});
 });
 
 test('Rescore after a removal: out of date for its samples, worked out again without labeling; a model no longer used is left alone', async () => {
