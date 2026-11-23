@@ -800,38 +800,42 @@ let current = null;
     return {events: ev.length, names, leaks, undeclared, metricNames: series.length, sample: series.filter(s => /sprint_(llm_requests|labeling_examples|agent_turns|bff_calls|web_page_views|auto_starts)/.test(s))};
   });
   log('telemetry:', JSON.stringify(tel));
-  // Data Source (#29), after the telemetry read (a page load clears the in-memory metrics): a tenant page next to Projects. A source is a name and its files, with no
-  // versions; bad rows and repeats are counted, and a second file adds only new items.
-  // #91: the tenant page links to them.
+  // Data sources (#29, #95), after the telemetry read (a page load clears the in-memory metrics): one
+  // uploaded file is one data source. Upload goes through a dialog (name from the file name); the
+  // source page counts sample IDs, repeats kept once and rows without an ID. #91: the tenant page links here.
   await page.goto(BASE + '/tenant/');
   await page.locator('main').getByRole('link', {name: 'Data sources'}).click();
   await page.waitForURL(/\/sources\//, {timeout: 10000});
-  await page.getByRole('heading', {name: 'Data Source', level: 1}).waitFor({timeout: 10000});
-  const sampleRow = page.locator('tr', {hasText: 'Sample data'});
-  await sampleRow.getByText('Built in', {exact: true}).waitFor({timeout: 10000});
-  const pickFile = (name, text) => page.locator('main input[type=file]').setInputFiles({name, mimeType: 'text/csv', buffer: Buffer.from(text)});
-  const fileCells = async name => (await page.locator('tr', {hasText: name}).locator('td').allInnerTexts()).map(x => x.trim());
-  const imported = name => page.waitForFunction(n => [...document.querySelectorAll('main tr')].some(r => r.textContent.includes(n) && !r.querySelector('.progress')), name, {timeout: 20000});
-  await page.getByPlaceholder('Weekly feed sample').fill('Creator safety review');
-  await pickFile('safety.csv', 'item_id,creator\nc1,a\nc2,b\nc1,c\nbad id,d\nc3,e\n');
-  await page.locator('.drop-file', {hasText: 'safety.csv'}).waitFor();
-  await shot(page, '6a-data-source-new');
-  await button(page, 'Create data source').click();
-  await page.waitForURL(/\/source\//, {timeout: 10000});
-  await page.getByRole('heading', {name: 'Creator safety review'}).waitFor({timeout: 10000});
-  await imported('safety.csv');
-  if ((await fileCells('safety.csv')).slice(1, 4).join('|') !== '3|1|1') throw new Error(`the first file says ${(await fileCells('safety.csv')).join(' | ')}`);
-  await pickFile('more.txt', 'c3\nc4\n');
-  await button(page, 'Add file').click();
-  await page.locator('tr', {hasText: 'more.txt'}).waitFor({timeout: 10000});
-  await imported('more.txt');
-  if ((await fileCells('more.txt')).slice(1, 4).join('|') !== '1|0|1') throw new Error(`the second file says ${(await fileCells('more.txt')).join(' | ')}`);
-  await shot(page, '6b-data-source-files');
-  await page.goto(BASE + '/sources/');
-  await page.locator('tr', {hasText: 'Creator safety review'}).waitFor({timeout: 10000});
-  if ((await fileCells('Creator safety review')).slice(1, 4).join('|') !== '2|4|4') throw new Error(`the list says ${(await fileCells('Creator safety review')).join(' | ')}`);
-  if ((await fileCells('Sample data'))[3] === (await fileCells('Sample data'))[2]) throw new Error('the sample data shows no items taken');
+  await page.getByRole('heading', {name: 'Data sources', level: 1}).waitFor({timeout: 10000});
+  await page.locator('tr', {hasText: 'Sample data'}).waitFor({timeout: 10000});
+  const cells = async name => (await page.locator('tr', {hasText: name}).locator('td').allInnerTexts()).map(x => x.trim());
+  await page.getByRole('button', {name: 'Upload file'}).click();
+  const dlg = page.locator('dialog[open]');
+  await dlg.locator('input[type=file]').setInputFiles({name: 'safety.csv', mimeType: 'text/csv', buffer: Buffer.from('id,creator\nc1,a\nc2,b\nc1,c\nbad id,d\nc3,e\n')});
+  if ((await dlg.getByRole('textbox', {name: 'Name'}).inputValue()) !== 'safety') throw new Error('the name does not come from the file name');
+  await dlg.getByRole('textbox', {name: 'Name'}).fill('Creator safety review');
+  await shot(page, '6a-data-source-upload');
+  await dlg.getByRole('button', {name: 'Upload', exact: true}).click();
+  await dlg.waitFor({state: 'detached', timeout: 10000});
+  await page
+    .waitForFunction(() => [...document.querySelectorAll('main tr')].some(r => r.textContent.includes('Creator safety review') && [...r.querySelectorAll('td')].some(c => c.textContent.trim() === '3')), null, {timeout: 20000})
+    .catch(async e => {
+      throw new Error(`the new source was not read: ${(await page.locator('main').innerText()).replace(/\s+/g, ' ')} (${e.message})`);
+    });
+  if ((await cells('Sample data'))[2] !== '1 project') throw new Error(`the sample data says it is used by ${(await cells('Sample data'))[2]}`);
   await shot(page, '6c-data-sources');
+  await page.getByRole('link', {name: 'Creator safety review'}).click();
+  await page.waitForURL(/\/source\//, {timeout: 10000});
+  await page.getByText('Rows without an ID').waitFor({timeout: 10000});
+  const counts = (await page.locator('main').innerText()).replace(/\s+/g, ' ');
+  if (!/Sample IDs 3 Repeated, kept once 1 Rows without an ID 1/.test(counts)) throw new Error(`the source page says ${counts}`);
+  await page.getByRole('button', {name: 'Rename'}).click();
+  await page.locator('dialog[open]').getByRole('textbox', {name: 'Name'}).fill('Creator safety');
+  await page.locator('dialog[open]').getByRole('button', {name: 'Save'}).click();
+  await page.getByRole('heading', {name: 'Creator safety', level: 1}).waitFor({timeout: 10000});
+  await shot(page, '6b-data-source');
+  await page.goto(BASE + '/sources/');
+  await page.locator('tr', {hasText: 'Creator safety'}).waitFor({timeout: 10000});
   log('data sources:', (await page.locator('main tbody').innerText()).replace(/\s+/g, ' '));
 
   log('console errors:', errors.length ? errors : 'none');

@@ -1,113 +1,174 @@
 'use client';
 
-import Link from 'next/link';
 import {useState} from 'react';
+import {ArrowUpTrayIcon, CircleStackIcon} from '@heroicons/react/24/outline';
 import {TenantPage} from '@/components/Shell';
+import {useRuntime} from '@/components/session';
 import {useGo} from '@/components/nav';
-import {createDataSourceFile, type DataSourceSummary} from '@/backend-api';
-import {SOURCE_ACCEPT, sourceHint, sourceName, useDataSources} from '@/components/sources';
-import {Badge, Banner, Button, Card, dateTime, Field, FileInput, Icon, num, One, PageHead, Progress, Table} from '@/ui';
+import {DeleteDialog, RenameDialog, UploadDialog} from '@/components/sources/dialogs';
+import {addedWhen, refuseSourceChange, sourceName, usedByText, useDataSources} from '@/components/sources';
+import {getDataSource, type DataSourceSummary} from '@/backend-api';
+import {Avatar, Button, Card, EmptyState, HStack, Icon, InfoTip, Link, MoreMenu, pixel, proportional, Spinner, Table, Text, VStack, type TableColumn} from '@/ui/astryx';
+import {PageTitle} from '@/ui';
 import {t} from '@/i18n';
 
 /**
- * Data Source (#29; design: V-Sources): the tenant's files of item ids, shared by its projects.
- * The list on the left, a new data source (a name and its first file) on the right. A source
- * being imported shows its progress in the Items column.
+ * Data sources (wireframes v346: W-Sources, -Empty, -Reading, W-NoAccess-Source): the tenant's
+ * data sources, one per uploaded file of sample IDs. Everyone reads them; only admins upload,
+ * rename and delete (anyone else gets the access dialog). A new source shows "Reading…" while its
+ * file is read, or "Can't read" with the reason on hover.
  */
 export default function SourcesPage() {
+  return <Sources />;
+}
+
+type Row = DataSourceSummary & Record<string, unknown>;
+type Open = {kind: 'upload'} | {kind: 'rename'; source: DataSourceSummary} | {kind: 'delete'; source: DataSourceSummary; usedBy: string[]} | null;
+
+function Sources() {
+  const go = useGo();
+  const {info} = useRuntime();
+  const admin = info?.tenant?.role === 'admin';
+  const [list, failed, load] = useDataSources();
+  const [open, setOpen] = useState<Open>(null);
+  const tenant = info?.tenant?.name ?? '';
+
+  const upload = () => (admin ? setOpen({kind: 'upload'}) : refuseSourceChange('add'));
+  const rename = (s: DataSourceSummary) => (admin ? setOpen({kind: 'rename', source: s}) : refuseSourceChange('change'));
+  const remove = async (s: DataSourceSummary) => {
+    if (!admin) return refuseSourceChange('change');
+    const d = await getDataSource(s.id).catch(() => null);
+    setOpen({kind: 'delete', source: s, usedBy: d?.usedByProjects.map(p => p.name) ?? []});
+  };
+  const uploadButton = <Button label={t('Upload file')} variant="primary" icon={<Icon icon={ArrowUpTrayIcon} size="sm" />} onClick={upload} />;
+  const href = (s: DataSourceSummary) => `/source/?id=${encodeURIComponent(s.id)}`;
+
+  const columns: TableColumn<Row>[] = [
+    {
+      key: 'name',
+      header: t('Name'),
+      width: proportional(3, {minWidth: 220}),
+      renderCell: s => (
+        <Link href={href(s)} className="sp-row-link">
+          <Text type="body" weight="semibold" maxLines={1} color="inherit">
+            {sourceName(s)}
+          </Text>
+        </Link>
+      ),
+    },
+    {key: 'items', header: t('Sample IDs'), width: proportional(1.2, {minWidth: 110}), renderCell: s => <Items s={s} />},
+    {
+      key: 'usedBy',
+      header: t('Used by'),
+      width: proportional(1.2, {minWidth: 100}),
+      renderCell: s => (usedByText(s.usedBy) ? <Text type="body">{usedByText(s.usedBy)}</Text> : <Text color="secondary">—</Text>),
+    },
+    {
+      key: 'createdBy',
+      header: t('Added by'),
+      width: proportional(1.6, {minWidth: 140}),
+      renderCell: s => (
+        <HStack gap={2} vAlign="center">
+          <Avatar name={s.builtIn ? 'Sprint' : s.createdBy} size="xsm" />
+          <Text type="body" maxLines={1}>
+            {s.builtIn ? 'Sprint' : s.createdBy}
+          </Text>
+        </HStack>
+      ),
+    },
+    {
+      key: 'createdAt',
+      header: t('Added on'),
+      width: proportional(1.4, {minWidth: 120}),
+      renderCell: s => (
+        <Text type="body" color="secondary">
+          {addedWhen(s.createdAt)}
+        </Text>
+      ),
+    },
+    {
+      key: 'actions',
+      header: '',
+      width: pixel(56),
+      renderCell: s => (
+        <span className="sp-row-actions">
+          <MoreMenu
+            label={t('Data source actions')}
+            size="sm"
+            alignment="end"
+            items={[
+              {label: t('Open'), onClick: () => void go(href(s))},
+              ...(s.builtIn ? [] : [{label: t('Rename'), onClick: () => rename(s)}, {label: t('Delete'), onClick: () => void remove(s)}]),
+            ]}
+          />
+        </span>
+      ),
+    },
+  ];
+
   return (
-    <TenantPage head={<PageHead title={t('Data Source')} back={{label: t('Projects'), href: '/tenant/'}} />}>
-      <Sources />
+    <TenantPage
+      head={
+        <PageTitle
+          title={t('Data sources')}
+          subtitle={t('Each file you upload is one data source: a list of sample IDs. Everyone can read them.')}
+          back={{label: tenant || t('Projects'), href: '/tenant/'}}
+          actions={list && list.length > 0 ? uploadButton : undefined}
+        />
+      }
+    >
+      {failed ? (
+        <Card padding={6}>
+          <VStack gap={3}>
+            <Text type="body" className="sp-error">
+              {failed}
+            </Text>
+            <HStack>
+              <Button label={t('Retry')} variant="secondary" onClick={() => void load()} />
+            </HStack>
+          </VStack>
+        </Card>
+      ) : !list ? (
+        <HStack hAlign="center" paddingBlock={10}>
+          <Spinner label={t('Loading data sources')} />
+        </HStack>
+      ) : list.length === 0 ? (
+        <Card padding={10}>
+          <EmptyState title={t('No data sources yet')} description={t('Upload a CSV or JSONL file with one sample ID per row.')} icon={<Icon icon={CircleStackIcon} size="lg" color="secondary" />} actions={uploadButton} />
+        </Card>
+      ) : (
+        <div className="sp-rows">
+          <Table<Row> data={list as Row[]} columns={columns} idKey="id" hasHover />
+        </div>
+      )}
+      {open?.kind === 'upload' && <UploadDialog onClose={() => setOpen(null)} />}
+      {open?.kind === 'rename' && <RenameDialog source={open.source} onClose={() => setOpen(null)} />}
+      {open?.kind === 'delete' && <DeleteDialog source={open.source} usedBy={open.usedBy} onClose={() => setOpen(null)} />}
     </TenantPage>
   );
 }
 
-/** Data source, Files, Items, Not used, Created by, Updated (the card is 706 wide). */
-const WIDTHS: (number | 'auto')[] = ['auto', 64, 120, 96, 110, 140];
-
-function Sources() {
-  const [list, failed, load] = useDataSources();
-  return (
-    <div className="row" style={{gap: 32, alignItems: 'flex-start'}}>
-      <Card title={t('Data sources')} style={{width: 706, flex: 'none'}}>
-        {failed ? <Banner tone="err" text={failed} style={{margin: 0}} action={<Button label={t('Retry')} size="sm" onClick={load} />} /> : <SourceTable list={list} />}
-      </Card>
-      <NewSource />
-    </div>
-  );
-}
-
-function SourceTable({list}: {list: DataSourceSummary[] | null}) {
-  const cols = [{label: t('Data source')}, {label: t('Files')}, {label: t('Items')}, {label: t('Not used')}, {label: t('Created by')}, {label: t('Updated')}];
-  if (!list)
+/** The Sample IDs cell: the count, "Reading…" while the file is read, or "Can't read" with why on hover. */
+function Items({s}: {s: DataSourceSummary}) {
+  if (s.state === 'reading')
     return (
-      <Table
-        cols={cols}
-        widths={WIDTHS}
-        rows={[160, 120, 180].map((w, i) => ({
-          key: String(i),
-          cells: [<span key="a" className="skel" style={{width: w}} />, null, <span key="c" className="skel" style={{width: 60}} />, null, null, null],
-        }))}
-      />
+      <HStack gap={2} vAlign="center">
+        <Spinner size="sm" />
+        <Text type="body">{t('Reading…')}</Text>
+      </HStack>
+    );
+  if (s.state === 'failed')
+    return (
+      <HStack gap={1} vAlign="center">
+        <Text type="body" color="inherit" className="sp-error">
+          {t("Can't read")}
+        </Text>
+        <InfoTip content={s.error ? t(s.error) : t('The file could not be read. Fix it and upload it again.')} />
+      </HStack>
     );
   return (
-    <Table
-      cols={cols}
-      widths={WIDTHS}
-      rows={list.map(s => ({
-        key: s.id,
-        cells: [
-          <span key="n" className="row" style={{gap: 8, minWidth: 0}}>
-            <Link className="one" href={`/source/?id=${encodeURIComponent(s.id)}`} title={sourceName(s)}>
-              {sourceName(s)}
-            </Link>
-            {s.builtIn && <Badge text={t('Built in')} icon={false} />}
-          </span>,
-          num(s.files),
-          s.importing ? <Progress key="p" done={s.importing.done} total={s.importing.total} /> : num(s.items),
-          s.importing ? '—' : num(s.notUsed),
-          <One key="b" text={s.builtIn ? 'Sprint' : s.createdBy} />,
-          <span key="u" className="t-3">
-            {dateTime(s.updatedAt)}
-          </span>,
-        ],
-      }))}
-    />
-  );
-}
-
-/** A new data source: its name and its first file. It opens on its own page once created. */
-function NewSource() {
-  const go = useGo();
-  const [name, setName] = useState('');
-  const [file, setFile] = useState<File | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const create = async () => {
-    if (!file) return;
-    setErr(null);
-    try {
-      const res = await createDataSourceFile(name, file);
-      if (res.error || !res.source) return setErr(res.error ?? 'Something went wrong. Try again.');
-      await go(`/source/?id=${encodeURIComponent(res.source.id)}`);
-    } catch (e) {
-      // A refused call (the service is down, the data source is busy) shows here too.
-      setErr((e as Error).message || 'Something went wrong. Try again.');
-    }
-  };
-  return (
-    <Card title={t('New data source')} className="form" style={{flex: '1 1 0', minWidth: 320, maxWidth: 542}}>
-      <Field label={t('Name')}>
-        <input className="input" value={name} placeholder={t('Weekly feed sample')} onChange={e => setName(e.target.value)} />
-      </Field>
-      <FileInput label={t('File')} hint={sourceHint()} accept={SOURCE_ACCEPT} file={file} onFile={f => (setErr(null), setFile(f))} />
-      {err && (
-        <p className="t-err" style={{margin: 0}} role="alert">
-          <Icon name="alert" /> {t(err)}
-        </p>
-      )}
-      <div className="row" style={{justifyContent: 'flex-end'}}>
-        <Button label={t('Create data source')} kind="primary" disabled={!name.trim() || !file} onClick={create} />
-      </div>
-    </Card>
+    <Text type="body" hasTabularNumbers>
+      {s.items.toLocaleString('en-US')}
+    </Text>
   );
 }
