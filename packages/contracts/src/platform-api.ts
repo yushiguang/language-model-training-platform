@@ -1,5 +1,5 @@
 import type {TelemetrySink} from './telemetry.ts';
-import type {ClientDiagnostics, EndpointId, EndpointInfo, ExampleType, FeatureValue, ItemProblem, Locale, NodeId, PageId} from './types.ts';
+import type {ClientDiagnostics, EndpointId, EndpointInfo, ExampleType, FeatureValue, ItemProblem, Locale, Msg, NodeId, PageId} from './types.ts';
 import type {EndpointConfig} from './gateway-api.ts';
 import type {DeepPartial, SystemConfig} from './config.ts';
 import type {JobStorePort} from './jobs-api.ts';
@@ -863,6 +863,12 @@ export interface Platform {
    * cannot be sent here. See docs/integration.md, "Problem reports".
    */
   tickets?: TicketPort;
+  /**
+   * Sends notifications to people, for example as instant-message cards (docs/design/server.md,
+   * 8). Best effort: a failed send is logged and counted, never fails the work that sent it.
+   * Optional: without it nothing is sent (stand-in: `logNotifications`).
+   */
+  notifications?: NotificationPort;
   /** Shown in the header so nobody mistakes a stand-in for the real service. */
   standIns: string[];
 }
@@ -906,4 +912,40 @@ export interface TicketSubmission {
 export interface TicketPort {
   /** Files the ticket and returns the id the user can quote. Throw when it cannot be filed. */
   submit(ticket: TicketSubmission): Promise<{ticketId: string}>;
+}
+
+/**
+ * What a notification is about (docs/design/server.md, 8). Scoring and Optimiser notifications go
+ * to the person who started the work when it ends; `label_set_created` and `labeler_added` are
+ * for the label sets (#59 step 8).
+ */
+export type NotificationKind = 'scoring_finished' | 'scoring_failed' | 'optimiser_finished' | 'optimiser_failed' | 'label_set_created' | 'labeler_added';
+
+/**
+ * One notification, to one or more people. Ids and site words (the project's name, a version
+ * number, a model's name) only: never prompt text, examples or labels.
+ */
+export interface Notification {
+  /** Who gets it: user ids, as in `CallerUser.id`. Never empty. */
+  userIds: string[];
+  kind: NotificationKind;
+  /** The project it is about, or null for none. */
+  projectId: string | null;
+  /** The message in English, plain text: for a tool that cannot translate `msg`. */
+  text: string;
+  /**
+   * The page it points to, as a path and query inside the site (`/prompt/?p=pr_1`). The adapter
+   * puts the site's address in front.
+   */
+  link: string;
+  /** A short title for a card, in English. */
+  title?: string;
+  /** `text` as a translatable message, so a card can be shown in each person's language. */
+  msg?: Msg;
+}
+
+/** Sends notifications (an instant-message tool, email). The callers treat every send as best effort. */
+export interface NotificationPort {
+  /** Sends one notification to everyone in `userIds`. Throw when it could not be sent. */
+  send(notification: Notification): Promise<void>;
 }

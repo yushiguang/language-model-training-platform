@@ -83,6 +83,7 @@ export const METRICS = {
   sprint_jobs_enqueued_total: {type: 'counter', help: 'Jobs enqueued (a repeat of a queued or running key is not counted)', labels: ['job_kind']},
   sprint_jobs_ended_total: {type: 'counter', help: 'Job runs ended, by outcome (lost: another runner took the job over)', labels: ['job_kind', 'outcome']},
   sprint_job_duration_seconds: {type: 'histogram', help: 'Running time of one job run', labels: ['job_kind'], buckets: BUCKETS.LONG},
+  sprint_notifications_total: {type: 'counter', help: 'Notifications by kind and outcome (error: the send failed; nothing else failed with it)', labels: ['notification', 'outcome']},
   sprint_jobs_recovered_total: {type: 'counter', help: 'Running jobs whose lease ended, put back in the queue or failed by the sweep', labels: ['outcome']},
   // web
   sprint_web_page_views_total: {type: 'counter', help: 'Page views', labels: ['page']},
@@ -105,7 +106,7 @@ export type MetricName = keyof typeof METRICS;
 export const LABEL_VALUES: Record<string, readonly string[]> = {
   purpose: ['labeling', 'chat'],
   outcome: ['ok', 'error', 'rate_limited', 'server', 'timeout', 'rejected', 'filtered', 'aborted', 'gave_up', 'shown', 'accepted', 'cancelled', 'approved', 'discarded', 'joined', 'passes', 'no_new_ideas', 'budget', 'max_rounds', 'stopped', 'failed', 'done', 'paused', 'lost', 'retried', 'requeued'],
-  job_kind: ['labeling.runTask', 'report.build', 'dataset.sample', 'source.ingest', 'optimiser.run', 'project.delete', 'batch_labeling.run', 'export.run'],
+  job_kind: ['labeling.runTask', 'report.build', 'dataset.sample', 'source.ingest', 'optimiser.run', 'project.delete', 'batch_labeling.run', 'export.run', 'notify.send'],
   reason: ['rate_limited', 'server', 'timeout', 'user', 'failures', 'closed', 'none'],
   kind: ['input', 'output', 'reasoning', 'qpm', 'tpm', 'concurrency', 'script', 'asset', 'backend', 'image', 'schema', 'prompt', 'other'],
   assumed: ['true', 'false'],
@@ -122,6 +123,7 @@ export const LABEL_VALUES: Record<string, readonly string[]> = {
   page: ['projects', 'sources', 'source', 'prompt_design', 'dataset', 'gold', 'prompt', 'prompt_edit', 'other'],
   what: ['score', 'resume', 'optimiser', 'try_prompt', 'score_version', 'start_optimiser'],
   decision: ['started'],
+  notification: ['scoring_finished', 'scoring_failed', 'optimiser_finished', 'optimiser_failed', 'label_set_created', 'labeler_added'],
   node: ['prompt_design', 'dataset', 'gold', 'prompt'],
   action: ['approve', 'refused', 'skip'],
   collection: ['projects', 'setup_versions', 'dataset_snapshots', 'examples', 'example_features', 'gold_labels', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'audit_log', 'dataset_removals', 'label_comments', 'data_sources', 'source_files', 'source_chunks', 'source_cuts', 'tenant_models'],

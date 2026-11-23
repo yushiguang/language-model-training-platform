@@ -74,6 +74,7 @@ Your module exports `createPlatform()` returning the `Platform` object from
 | `endpoints?: EndpointConfig[]` | Registered endpoints with real limits (next section) | not set: assumed limits |
 | `telemetry?: TelemetrySink` | Takes product events (`pushEvents`, batches of `TelemetryEvent`) and metrics as Prometheus text (`pushMetrics`) and forwards them to your telemetry system. Must not throw; slow is fine (the app buffers) | `localTelemetrySink` (`localStorage`); not set: kept in memory only |
 | `tickets?: TicketPort` | Files a problem report and returns its ticket id (see "Problem reports") | `localTickets` (`localStorage`, `sprint-tickets`); not set: helpers say reports cannot be sent |
+| `notifications?: NotificationPort` | Sends a notification (`send(n)`) to the people in `n.userIds`, for example as an instant-message card (see "Notifications"). Throws when it could not send; callers treat every send as best effort | `logNotifications` (the console, last 100 in memory); not set: nothing is sent |
 | `sharedState?: SharedStatePort` | Short-lived keys every server instance must see, with a TTL (`get`, `set(key, value, ttlMs)`, `delete`; values are plain JSON): the live Ask AI turn, the helper that keeps answering on a page, the running turn's caller and page, problem-report drafts. A shared store such as Redis in a server deployment | `memorySharedState` (a map in the page); not set: the composition root uses the same |
 | `limiterStore?: LimiterStorePort` | The gateway's rate-limit counts (`platform-api.ts`, spec 5), as whole atomic operations per key. A key is `<tenantId>:<endpointId>`, so two tenants on one endpoint never share a budget or a slowdown; treat it as opaque: try to acquire (sliding QPM/TPM window, calls in flight, one FIFO queue of expiring tickets, hold after a busy reply), release, renew a permit's lease, leave the queue, penalize, stats. A Redis script per operation on one key; prefer the store's own clock over the caller's `now` | `memoryLimiterStore` (memory of one process); not set: the composition root uses the same |
 | `jobStore?: JobStorePort` | Where background jobs are kept (`packages/contracts/src/jobs-api.ts`), as whole atomic operations so several runners never take the same job: enqueue once per idempotency key among queued and running jobs, claim the next job with a lease under each concurrency key's limit (`claimNext(kinds, owner, leaseMs, now, limitOf)`: keys take turns by when each was last claimed, a full key is skipped, oldest job first within a key, running count worked out under a lock on the key), `countAhead` for a queued job's place, heartbeat, finish, requeue, cancel (saying whether it ended the job) and recover expired leases (returning the jobs it ended). MySQL with a `jobs` table and a `job_keys` lock row per key, as the SQL in `docs/design/server.md` 5.2; the cases in `packages/platform/src/standins/job-store.test.ts` (`jobStoreCases`) run against any store | `memoryJobStore` (memory of one process); not set: the composition root uses the same |
@@ -310,6 +311,23 @@ has written again, so a report never goes without a yes. The workflow then build
 3. Once the bff runs behind HTTP, send each call's id (`callId()` in
    `apps/web/src/backend-api/diagnostics.ts`) as the `X-Request-Id` header and log it on the
    server, so a ticket's failed calls lead straight to the server logs.
+
+## Notifications
+
+Sprint tells people about work that ended through `Platform.notifications` (`docs/design/server.md`,
+8). A `Notification` (`packages/contracts/src/platform-api.ts`) carries the user ids, a `kind`
+(`scoring_finished`, `scoring_failed`, `optimiser_finished`, `optimiser_failed`,
+`label_set_created`, `labeler_added`), the project id, the message in English (`text`), the same
+message as a translatable `msg` (render it with the site's catalog for each person's language), an
+optional `title`, and `link`: a path inside the site such as `/prompt/?p=pr_1`. Ids and site words
+(project name, version number, model name) only: never prompt text, examples or labels.
+
+1. Implement `send(n)` in your platform module: look each user id up in your instant-message tool,
+   put the site's address in front of `link`, and send one card per person. Throw when it fails.
+2. Set `notifications` on the `Platform` object and drop `'notifications'` from `standIns`.
+
+A failed send is logged and counted (`sprint_notifications_total{outcome="error"}`); it never
+fails the work that sent it, and it is not tried again.
 
 ## Languages
 
