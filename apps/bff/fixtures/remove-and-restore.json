@@ -233,6 +233,7 @@
             ],
             "half": "held_out",
             "id": "$id:1",
+            "note": null,
             "projectId": "pr_w",
             "reason": "broken",
             "removedAt": "$time",

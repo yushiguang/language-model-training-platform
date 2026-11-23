@@ -142,18 +142,30 @@ let current = null;
   await button(page, 'Create project').click();
   await page.waitForURL(/prompt-design/);
   const pid = new URL(page.url()).searchParams.get('p');
-  // 2026-11-16 refinements: a new project ticks no feature, and the parts come in authoring order.
-  await page.locator('section[aria-label="Input Features"]').waitFor({timeout: 10000});
-  const ticked = await page.locator('section[aria-label="Input Features"] [role="checkbox"][aria-checked="true"]').count();
-  if (ticked) throw new Error(`a new project starts with ${ticked} features ticked`);
-  const order = await page.locator('main section[aria-label]').evaluateAll(els => els.map(e => e.getAttribute('aria-label')).filter(l => ['Persona & Task', 'Input Features', 'Output Labels & Definitions', 'Rule Groups'].includes(l)));
-  if (order.join(' > ') !== 'Persona & Task > Input Features > Output Labels & Definitions > Rule Groups') throw new Error(`the prompt parts are in the wrong order: ${order.join(' > ')}`);
+  // Prompt Design (wireframes v346): a new project shows the empty prompt card and three starters in Ask AI; Save is off.
+  await page.getByText('The prompt appears here', {exact: true}).waitFor({timeout: 10000});
+  const saveBtn = page.locator('main').getByRole('button', {name: 'Save', exact: true});
+  if ((await saveBtn.getAttribute('aria-disabled')) !== 'true') throw new Error('Save is on for an empty prompt');
+  if ((await page.locator('aside.chat .chip').count()) !== 3) throw new Error('Ask AI does not offer the three starters');
   await shot(page, '1a-prompt-design-start');
   const url = p => `${BASE}${p}?p=${pid}`;
-  const approveBtn = page.locator('main').getByRole('button', {name: 'Approve', exact: true});
+  const card = page.locator('main');
+  const partEdit = async name => {
+    await card.locator('h3', {hasText: name}).locator('xpath=ancestor::*[.//button][1]').getByRole('button', {name: 'Edit', exact: true}).click();
+    const d = page.getByRole('dialog');
+    await d.waitFor();
+    return d;
+  };
+  const viewTab = name => card.getByRole('radio', {name, exact: true});
+  const fullPrompt = async () => {
+    await viewTab('Full prompt').click();
+    // The code block's text, without its language label and the blank lines' zero-width spaces.
+    const text = (await card.locator('pre').first().innerText()).replace(/\u200b/g, '').replace(/^xml\n/, '');
+    await viewTab('Sections').click();
+    return text;
+  };
 
-  // Prompt Design: an existing prompt pasted into Ask AI is sorted into the structured parts,
-  // and what has no place is listed word for word (spec 3.2).
+  // An existing prompt pasted into Ask AI is sorted into the parts, and what has no place is listed word for word (spec 3.2).
   const pasted = [
     'You label customer messages for a support team.',
     '',
@@ -175,69 +187,63 @@ let current = null;
   const lost = page.locator('section[aria-label="Not carried over"]');
   await lost.waitFor({timeout: 20000});
   const lostText = await lost.innerText();
-  if (!/2 passages/.test(lostText) || !lostText.includes('my order is late') || !lostText.includes('Return JSON only.')) throw new Error(`the Not carried over list is wrong: ${lostText}`);
-  if ((await page.getByLabel('Label name').inputValue()) !== 'intent') throw new Error('the imported label is missing');
-  // 2026-11-16: the chat panel has no page tag and no helper lines.
-  if (await page.locator('aside.chat .ctx').count()) throw new Error('the chat still shows the page tag');
-  if (await page.locator('aside.chat').getByText(/Prompt helper answers|Helpers read your recent messages/).count()) throw new Error('the chat still shows the helper lines');
-  // Approval is the page's button, with its attention halo; the chat never shows an Approve card.
+  if (!lostText.includes('my order is late') || !lostText.includes('Return JSON only.')) throw new Error(`the Not carried over list is wrong: ${lostText}`);
+  await card.getByText('intent · Single selection', {exact: true}).waitFor();
+  await card.getByText('AI draft · not saved', {exact: true}).waitFor();
+  // The chat never shows an Approve card: the page's Save keeps the prompt.
   if (await page.locator('aside.chat').getByRole('button', {name: 'Approve', exact: true}).count()) throw new Error('the chat shows an Approve card');
-  if (!(await approveBtn.evaluate(el => el.classList.contains('btn-cue')))) throw new Error('Approve has no attention halo while a draft waits');
+  if (await page.locator('aside.chat .ctx').count()) throw new Error('the chat still shows the page tag');
   log('import:', (await page.locator('aside.chat .msg-a').last().innerText()).replace(/\n/g, ' ').slice(0, 200));
   await shot(page, '1-import-not-carried-over');
-  await button(page, 'Discard').click();
+  await button(card, 'Discard').click();
   await lost.waitFor({state: 'detached', timeout: 10000});
 
-  // The prompt for this project: drafted from a description, checked as full text, approved as v1
+  // The prompt for this project: drafted from a description, each part edited in its own dialog, saved as v1.
   await ask(page, 'Tag short videos by what the viewer gets from them: primary value, format and topics.');
-  await page.getByText('AI draft', {exact: true}).waitFor({timeout: 20000});
-  await page.waitForFunction(() => [...document.querySelectorAll('section[aria-label="Output Labels & Definitions"] input.mono')].some(i => i.value === 'primary_value'), null, {timeout: 10000});
-  // Stacked value cards (2026-11-16, 2.1): one card per value; move, add and remove work.
-  const valueNames = () => page.locator('.sp-value input.sp-group-t').evaluateAll(els => els.map(e => e.value));
+  await card.getByText('primary_value · Single selection', {exact: true}).waitFor({timeout: 20000});
+  // Output Labels: the label and single or multiple selection, then one card per value; add and remove work.
+  let partDlg = await partEdit('Output Labels');
+  const valueNames = () => partDlg.getByLabel('Value name', {exact: true}).evaluateAll(els => els.map(e => e.value));
   const names0 = await valueNames();
-  if (names0.length !== 4 || (await page.locator('.sp-fields, select').count())) throw new Error(`the values are not stacked cards: ${names0.join(', ')}`);
-  await page.locator('.sp-value').first().getByRole('button', {name: 'Move down'}).click();
-  const names1 = await valueNames();
-  if (names1[0] !== names0[1] || names1[1] !== names0[0]) throw new Error('Move down did not reorder the values');
-  await page.locator('.sp-value').nth(1).getByRole('button', {name: 'Move up'}).click();
-  await button(page.locator('section[aria-label="Output Labels & Definitions"]'), 'Add value').click();
-  if ((await page.locator('.sp-value').count()) !== 5) throw new Error('Add value did not add a card');
-  await page.locator('.sp-value').last().getByRole('button', {name: 'Remove value'}).click();
+  if (names0.length !== 4) throw new Error(`the values are not one card each: ${names0.join(', ')}`);
+  await button(partDlg, 'Add value').click();
+  if ((await valueNames()).length !== 5) throw new Error('Add value did not add a card');
+  await partDlg.getByRole('button', {name: 'Remove Value name', exact: true}).click();
   if ((await valueNames()).join() !== names0.join()) throw new Error('the values did not come back to the draft');
-  // Resilience spec, 1: the one label is single or multi select; multi asks how many, and a value
-  // can be marked to stand on its own (a catch-all such as None).
-  const selection = page.getByRole('group', {name: 'Selection'});
-  await selection.getByRole('button', {name: 'Multi-select', exact: true}).click();
-  await page.getByLabel('At most', {exact: true}).waitFor({timeout: 5000});
-  if ((await page.getByRole('checkbox', {name: 'Only on its own'}).count()) !== 4) throw new Error('multi-select has no "Only on its own" per value');
-  await page.getByRole('checkbox', {name: 'Only on its own'}).last().click();
-  await button(page, 'View full prompt').click();
-  const multiText = await page.getByRole('dialog').locator('pre').innerText();
-  if (!/<output_labels name="primary_value" selection="multi" min="1" max="3">/.test(multiText) || !multiText.includes('exclusive="true"')) throw new Error('the full prompt does not ask for a multi-select answer');
-  await button(page.getByRole('dialog'), 'Close').click();
+  // Resilience spec, 1: multiple selection asks how many, and a value can stand on its own (a catch-all such as None).
+  await partDlg.getByRole('radio', {name: 'Multiple selection', exact: true}).click();
+  await partDlg.getByLabel('At most', {exact: true}).waitFor({timeout: 5000});
+  if ((await partDlg.getByRole('checkbox', {name: /Only on its own/}).count()) !== 4) throw new Error('multiple selection has no "Only on its own" per value');
+  await partDlg.getByRole('checkbox', {name: /Only on its own/}).last().click();
   await shot(page, '1b2-multi-select');
-  await selection.getByRole('button', {name: 'Single-select', exact: true}).click();
-  if (await page.getByRole('checkbox', {name: 'Only on its own'}).count()) throw new Error('single-select still shows "Only on its own"');
-  // Long definitions are multi-line boxes, never clipped (spec 3.3)
-  const clipped = await page.locator('textarea[aria-label="Definition"]').evaluateAll(els => els.filter(el => el.scrollHeight > el.clientHeight + 2).length);
-  if (clipped) throw new Error(`${clipped} definitions are clipped`);
+  await button(partDlg, 'Save').click();
+  await partDlg.waitFor({state: 'detached'});
+  const multiText = await fullPrompt();
+  if (!/<output_labels name="primary_value" selection="multi" min="1" max="3">/.test(multiText) || !multiText.includes('exclusive="true"')) throw new Error('the full prompt does not ask for a multi-select answer');
+  partDlg = await partEdit('Output Labels');
+  await partDlg.getByRole('radio', {name: 'Single selection', exact: true}).click();
+  if (await partDlg.getByRole('checkbox', {name: /Only on its own/}).count()) throw new Error('single selection still shows "Only on its own"');
+  await button(partDlg, 'Save').click();
+  await partDlg.waitFor({state: 'detached'});
+  // Input Features: the fixed catalogue as checkboxes, per example type.
+  partDlg = await partEdit('Input Features');
+  if ((await partDlg.getByRole('checkbox').count()) < 20) throw new Error('the features dialog does not list the catalogue');
+  await shot(page, '1b3-features');
+  await button(partDlg, 'Cancel').click();
   await shot(page, '1b-prompt-design-draft');
-  await button(page, 'View full prompt').click();
-  const full = page.getByRole('dialog');
-  const fullText = await full.locator('pre').innerText();
+  const fullText = await fullPrompt();
   if (!fullText.includes('{{Description}}') || !fullText.includes('Return one JSON object only') || !fullText.includes('<output_labels name="primary_value" selection="single">')) throw new Error('the full prompt is not compiled from the parts');
-  if (!/^<persona_and_task>[\s\S]*<\/persona_and_task>\n\n<input_features>[\s\S]*<output_labels [\s\S]*<output_format>[\s\S]*<\/output_format>$/.test(fullText)) throw new Error('the full prompt is not in XML sections');
+  if (!/^<persona_and_task>[\s\S]*<\/persona_and_task>\n\n<input_features>[\s\S]*<output_labels [\s\S]*<output_format>[\s\S]*<\/output_format>$/.test(fullText.trim())) throw new Error('the full prompt is not in XML sections');
+  await viewTab('Full prompt').click();
   await shot(page, '1c-full-prompt');
-  await button(full, 'Copy prompt').click();
-  await button(full, 'Close').click();
-  await approveBtn.click();
-  await page.getByText('Approved as v1', {exact: true}).waitFor({timeout: 10000});
-  // Resilience spec, 2: an approved prompt is edited on Prompt Tuning, not here.
-  if (await page.locator('main').getByRole('link', {name: 'Edit prompt', exact: true}).count()) throw new Error('the approved Prompt Design still has Edit prompt');
+  await viewTab('Sections').click();
+  await saveBtn.click();
+  await card.getByText('Prompt v1', {exact: true}).waitFor({timeout: 10000});
+  await card.getByText('Saved', {exact: true}).waitFor({timeout: 10000});
   // The helper says what comes next (spec 6.2)
-  await page.locator('aside.chat').getByText(/v1 is saved\. Next, click "Next: Dataset" at the top right/).waitFor({timeout: 10000});
-  await shot(page, '1d-prompt-approved');
-  await button(page, 'Next: Dataset').click();
+  await page.locator('aside.chat').getByText(/v1 is saved\. Next, open Dataset in the step bar/).waitFor({timeout: 10000});
+  await shot(page, '1d-prompt-saved');
+  await page.goto(url('/dataset/'));
   log('prompt design done');
 
   // Dataset (#29): examples come from the team's data sources. The built-in sample data is
@@ -454,36 +460,35 @@ let current = null;
     // Discard first (#39, T8): the draft closes as discarded and does not come back on reload.
     await button(page, 'Improve with AI').first().click();
     await page.waitForURL(/prompt-design\/?\?.*v=/);
-    await page.getByText('Draft from Prompt helper', {exact: true}).waitFor({timeout: 20000});
-    await button(page, 'Discard').click();
-    await page.getByText('Draft from Prompt helper', {exact: true}).waitFor({state: 'detached'});
+    await page.getByText('AI draft · not saved', {exact: true}).waitFor({timeout: 20000});
+    await button(page.locator('main'), 'Discard').click();
+    await page.getByText('AI draft · not saved', {exact: true}).waitFor({state: 'detached'});
     await page.waitForTimeout(500);
     await page.reload();
-    await page.locator('textarea.grow-box').first().waitFor();
+    await page.locator('main h3', {hasText: 'Persona & Task'}).waitFor();
     await page.waitForTimeout(1500);
-    if (await page.getByText('Draft from Prompt helper', {exact: true}).count()) throw new Error('a discarded draft came back on reload');
+    if (await page.getByText('AI draft · not saved', {exact: true}).count()) throw new Error('a discarded draft came back on reload');
     log('improve with AI: discarded draft stays discarded');
     await page.goto(url('/prompt/'));
     for (let i = 0; i < 30 && !(await button(page, 'Improve with AI').count()); i++) await page.waitForTimeout(1000);
     await button(page, 'Improve with AI').first().click();
     await page.waitForURL(/prompt-design\/?\?.*v=/);
-    await page.getByText('Draft from Prompt helper', {exact: true}).waitFor({timeout: 20000});
-    await page.locator('.sp-marks ins').first().waitFor({timeout: 10000});
-    log('improve with AI:', await page.locator('.sp-marks ins').count(), 'changes marked');
-    await page.waitForTimeout(400);
-    const cut = await page.locator('textarea.grow-box').evaluateAll(els => els.filter(el => el.scrollHeight > el.clientHeight + 2).length);
-    if (cut) throw new Error(`${cut} text boxes are clipped in the helper's draft`);
-    // Each change carries its reason
-    const why = page.locator('.sp-marks ins.why').first();
+    await page.getByText('AI draft · not saved', {exact: true}).waitFor({timeout: 20000});
+    // The helper's draft opens on its marks against the saved version, each change with its reason.
+    await page.locator('main .sp-pd-ins').first().waitFor({timeout: 10000});
+    log('improve with AI:', await page.locator('main .sp-pd-ins').count(), 'changes marked');
+    const why = page.locator('main .sp-pd-ins.why').first();
     if (!(await why.count())) throw new Error('the helper draft has no change with a reason');
     log('change reason:', await why.getAttribute('title'));
-    // Improve with AI changes wording only: no warning about the label fields
-    if (await page.getByText(/This changes the label or its values/).count()) throw new Error('Improve with AI changed the label fields');
-    if (!(await button(page, 'Save').evaluate(el => el.classList.contains('btn-cue')))) throw new Error('Save has no attention halo for a helper draft');
     await shot(page, '5a-improve-draft');
-    if (!(await page.getByRole('button', {name: /^Save as v\d+$/}).count())) throw new Error('Save as vN (next major) is missing');
-    await page.getByRole('button', {name: 'Save', exact: true}).click();
-    await page.waitForURL(/\/prompt\/?\?/);
+    await saveBtn.click();
+    // Saving over a version that is still labeling asks first; wording changes clear no gold labels.
+    const stop = page.getByRole('dialog').getByRole('button', {name: 'Stop and save', exact: true});
+    await page.waitForTimeout(400);
+    if (await stop.count()) await stop.click();
+    if (await page.getByRole('dialog').getByText(/gold labels?\?$/).count()) throw new Error('Improve with AI changed the label fields');
+    await page.getByText('AI draft · not saved', {exact: true}).waitFor({state: 'detached', timeout: 10000});
+    await page.goto(url('/prompt/'));
   }
 
   // Auto Optimise until a version passes: the card then says to use it as the final prompt (T6)
@@ -566,29 +571,37 @@ let current = null;
   await page.locator('.card.ai').getByText('Finished', {exact: true}).waitFor({timeout: 10000});
   await shot(page, '5h-finished');
 
-  // The prompt editor for a version: the same three parts, with word marks against the saved text
+  // A version opens on Prompt Design: each part edited in its dialog, word marks against the saved text.
   await page.locator('main').getByRole('link', {name: 'Edit prompt', exact: true}).click();
   await page.waitForURL(/prompt-design\/?\?.*v=/);
-  await page.getByLabel('Persona and task').waitFor();
-  log('opened version marks:', await page.locator('.sp-marks').count(), (await page.locator('.ph-actions .badge').allInnerTexts()).join(', ') || '(no badge)');
+  await page.locator('main h3', {hasText: 'Persona & Task'}).waitFor();
   await shot(page, '6-prompt-edit');
-  // Your own edits: new wording is marked, and it does not touch gold labels
-  const def = page.locator('textarea[aria-label="Definition"]').first();
-  const before = await def.inputValue();
-  await def.fill(`${before}, such as jokes`);
-  await page.getByText('Unsaved changes', {exact: true}).waitFor();
-  await page.locator('.sp-marks ins', {hasText: 'jokes'}).waitFor({timeout: 5000});
-  if (await page.getByText(/This changes the label or its values/).count()) throw new Error('new wording was treated as a change to the labels');
-  // A renamed value changes the labels: the page says what that costs before the save
-  const value = page.locator('input[aria-label="Value name"]').first();
-  const name = await value.inputValue();
-  await value.fill(`${name} content`);
-  const warn = page.getByText(/This changes the label or its values\. After you save, \d+ gold labels need a re-check/);
-  await warn.waitFor({timeout: 5000});
-  log('label change warning:', await warn.innerText());
+  // Your own edits: new wording is marked, and it clears no gold labels.
+  let edit = await partEdit('Output Labels');
+  const def = edit.getByLabel(/^Definition of /).first();
+  await def.fill(`${await def.inputValue()}, such as jokes`);
+  await button(edit, 'Save').click();
+  await page.getByText('Edited · not saved', {exact: true}).waitFor();
+  await viewTab('Changes').click();
+  await page.locator('main .sp-pd-ins', {hasText: 'jokes'}).waitFor({timeout: 5000});
+  await viewTab('Sections').click();
+  // A renamed value changes the labels: Save says how many gold labels it clears before anything is saved.
+  edit = await partEdit('Output Labels');
+  const value = edit.getByLabel('Value name', {exact: true}).first();
+  await value.fill(`${await value.inputValue()} content`);
+  await button(edit, 'Save').click();
+  await saveBtn.click();
+  await page.waitForTimeout(400);
+  const stopFirst = page.getByRole('dialog').getByRole('button', {name: 'Stop and save', exact: true});
+  if (await stopFirst.count()) throw new Error('a finished version asks to stop its run');
+  const clear = page.getByRole('dialog');
+  const clearTitle = clear.getByText(/^Clear [\d,]+ gold labels?\?$/);
+  await clearTitle.waitFor({timeout: 5000});
+  log('label change confirm:', await clearTitle.innerText());
   await shot(page, '6b-prompt-edit-label-change');
-  await button(page, 'Discard').click();
-  await page.getByText('Unsaved changes', {exact: true}).waitFor({state: 'detached'});
+  await button(clear, 'Keep editing').click();
+  await button(page.locator('main'), 'Discard').click();
+  await page.getByText('Edited · not saved', {exact: true}).waitFor({state: 'detached'});
 
   // Eval dataset governance (spec 4.3, 4.4): the removed example is named next to the score; added
   // examples wait for gold labels without making scores stale; removals are listed and restorable.

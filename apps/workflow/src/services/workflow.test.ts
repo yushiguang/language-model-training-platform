@@ -298,7 +298,7 @@ test('a new project starts with default settings, unconfirmed; v1 sets the label
   // The text the model reads is compiled from the parts: features, the label's values, the output key.
   assert.match(v1.template, /<feature name="Description">\{\{Description\}\}<\/feature>[\s\S]*<output_labels name="format"[\s\S]*Vlog[\s\S]*Return one JSON object only/);
   const chat = await w.catalog.find('chat_messages', {projectId: p.id}, 'createdAt');
-  assert.match(chat.at(-1)!.text, /v1 is saved\. Next, click "Next: Dataset" at the top right/);
+  assert.match(chat.at(-1)!.text, /v1 is saved\. Next, open Dataset in the step bar/);
   assert.equal(chat.at(-1)!.agent, 'prompt_agent');
 
   // New wording: a new version, the same labels, gold labels stand.
@@ -2090,7 +2090,7 @@ test('agent abilities (#39): get_gates names what each step waits for, with the 
   assert.deepEqual([gold.approved, gold.canApprove], [false, false]);
   assert.match(gold.waitsFor ?? '', /Label at least 4 examples/);
   assert.deepEqual([g.numbers.goldLabeled, g.numbers.goldLabeledPerHalf], [0, {optimiser: 0, heldOut: 0}]);
-  assert.match(g.steps.find(s => s.step === 'Prompt Design')!.waitsFor ?? '', /Approve the first prompt/);
+  assert.match(g.steps.find(s => s.step === 'Prompt Design')!.waitsFor ?? '', /Save the first prompt/);
 });
 
 test('agent abilities (#39): get_running_work shows scoring while it runs, then nothing', async () => {
@@ -2811,6 +2811,53 @@ test('sample numbers: an older dataset is numbered once in saved order; added sa
   assert.deepEqual((await listSamples(w.ws, {projectId: w.projectId, query: '#11'})).items.map(x => x.externalId), ['new-a']);
   assert.deepEqual((await listSamples(w.ws, {projectId: w.projectId, query: 'new-b'})).items.map(x => x.number), [12]);
   assert.deepEqual((await listSamples(w.ws, {projectId: w.projectId, query: '4'})).items.map(x => x.externalId), ['3', '4'], 'number 4, and the sample whose ID is 4');
+});
+
+test('Dataset tabs (#100): no label, mismatch against the best version, removed; counts, column filters, sort; a removal keeps its reason and note', async () => {
+  // v1 answers Vlog everywhere; v2 (one RULE) is right on 0-4. Gold: Tutorial on 0-7, Vlog on 8-9.
+  const w = await world('ds98', {answer: ruled, macroF1: 0.99, gold: goldOf});
+  const {listSamples} = await import('./samples.ts');
+  const {appendExamples, removeExamples} = await import('./governance.ts');
+  const before = await listSamples(w.ws, {projectId: w.projectId});
+  assert.equal(before.model, null, 'no version has answers yet');
+  assert.deepEqual(before.counts, {live: 10, no_label: 0, mismatch: 0, removed: 0});
+  assert.ok(before.items.every(x => x.model === null && !x.mismatch));
+  assert.deepEqual(before.items[0].gold, ['Tutorial']);
+  await w.newVersion();
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
+  await w.newVersion('RULE 1');
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.state()).reports.length === 2, 'v2 scored');
+  await appendExamples(w.ws, w.projectId, [{externalId: 'new-a', type: 'video', title: '', features: {}}], 'upload');
+  const s = await w.state();
+  const id = (k: number) => `ex_ds98_${k}`;
+
+  let page = await listSamples(w.ws, {projectId: w.projectId});
+  assert.deepEqual(page.model, {versionId: s.versions[0].id, label: 'v2'}, 'the best scored version');
+  assert.deepEqual(page.counts, {live: 11, no_label: 1, mismatch: 3, removed: 0});
+  assert.deepEqual([page.items[0].gold, page.items[0].model, page.items[0].mismatch], [['Tutorial'], ['Tutorial'], false]);
+  assert.deepEqual([page.items[5].model, page.items[5].mismatch], [['Vlog'], true], 'v2 is wrong on 5');
+  assert.deepEqual([page.items[10].gold, page.items[10].model, page.items[10].mismatch], [null, null, false], 'a sample added later has neither');
+  assert.deepEqual((await listSamples(w.ws, {projectId: w.projectId, filter: 'mismatch'})).items.map(x => x.exampleId), [5, 6, 7].map(id));
+  assert.deepEqual((await listSamples(w.ws, {projectId: w.projectId, filter: 'no_label'})).items.map(x => x.externalId), ['new-a']);
+
+  // Column filters and sort narrow the page; the tab counts stay those of the dataset.
+  page = await listSamples(w.ws, {projectId: w.projectId, gold: 'Vlog'});
+  assert.deepEqual([page.total, page.items.map(x => x.externalId), page.counts.live], [2, ['8', '9'], 11]);
+  assert.equal((await listSamples(w.ws, {projectId: w.projectId, sourceId: 'src_none'})).total, 0);
+  assert.deepEqual((await listSamples(w.ws, {projectId: w.projectId, sort: '-number', limit: 2})).items.map(x => x.number), [11, 10]);
+  assert.deepEqual((await listSamples(w.ws, {projectId: w.projectId, sort: '-externalId', limit: 2})).items.map(x => x.externalId), ['new-a', '9']);
+
+  // Removing a mismatch with a note: it leaves the Mismatch count, and the Removed tab says why.
+  await removeExamples(w.ws, w.projectId, [id(5)], 'other', `  ${'Cut from a TV show. '.repeat(200)}`);
+  page = await listSamples(w.ws, {projectId: w.projectId, filter: 'removed'});
+  assert.deepEqual(page.counts, {live: 10, no_label: 1, mismatch: 2, removed: 1});
+  const r = page.items[0].removal!;
+  assert.equal(r.reason, 'other');
+  assert.ok(r.note!.startsWith('Cut from a TV show.') && r.note!.length === 500, 'trimmed and cut to the comment length');
+  await removeExamples(w.ws, w.projectId, [id(6)], 'broken', '   ');
+  assert.equal((await listSamples(w.ws, {projectId: w.projectId, filter: 'removed', query: '7'})).items[0].removal!.note, null, 'a blank note is none');
 });
 
 test('a run labeling examples a done task already has uses it, even when a newer task over them did not finish (#79)', async () => {

@@ -271,8 +271,9 @@ async function adjustSnapshotMissingness(w: Scope, snapshotId: string, examples:
  * Removes examples from the eval dataset (spec 1.0.0, 4.4): soft delete, each with a
  * `DatasetRemoval` that keeps its half and gold label at the time. No other example changes half.
  */
-export async function removeExamples(w: Scope, projectId: string, exampleIds: string[], reason: RemovalReason): Promise<number> {
+export async function removeExamples(w: Scope, projectId: string, exampleIds: string[], reason: RemovalReason, note?: string): Promise<number> {
   const {catalog, user} = w;
+  const why = note?.trim().slice(0, systemConfig().labeling.commentMaxChars) || null;
   const state = await loadProjectState(w, projectId);
   if (!state) throw new Error('This project does not exist.');
   const byId = new Map(state.examples.map(e => [e.id, e]));
@@ -288,6 +289,7 @@ export async function removeExamples(w: Scope, projectId: string, exampleIds: st
     half: e.optimiserHalf ? 'optimiser' : 'held_out',
     gold: state.gold[e.id]?.answer ?? null,
     reason,
+    note: why,
     removedBy: who,
     removedAt: at,
     restoredAt: null,
@@ -296,8 +298,8 @@ export async function removeExamples(w: Scope, projectId: string, exampleIds: st
   await catalog.insertMany('dataset_removals', records);
   await catalog.patchMany('examples', targets.map(e => ({id: e.id, patch: {removed: true}})));
   if (state.snapshot) await adjustSnapshotMissingness(w, state.snapshot.id, targets, 'remove');
-  await catalog.audit(projectId, who, 'dataset.remove', {reason, count: records.length, withGold: records.filter(r => r.gold).length});
-  w.tm.event('dataset_examples_removed', {reason, count: records.length, with_gold: records.filter(r => r.gold).length});
+  await catalog.audit(projectId, who, 'dataset.remove', {reason, count: records.length, withGold: records.filter(r => r.gold).length, ...(why ? {note: why} : {})});
+  w.tm.event('dataset_examples_removed', {reason, count: records.length, with_gold: records.filter(r => r.gold).length, with_note: !!why});
   w.emitChange(projectId);
   return records.length;
 }

@@ -23,7 +23,7 @@ export function productGuide(): Record<string, GuideTopic> {
     prompt_design: {
       title: 'Prompt Design',
       aliases: ['prompt', 'label', 'values', 'definitions', 'rule groups', 'features'],
-      text: `Prompt Design holds the labeling prompt: a task summary, the ticked input features, one label (its key, single or multi select, and its values, each with a definition) and rule groups the user names. The site writes the input and output sections itself. Approve the first prompt to continue. Changing the label's values or its single or multi select changes the labels themselves: gold labels given before need checking again.`,
+      text: `Prompt Design holds the labeling prompt: a task summary, the ticked input features, one label (its key, single or multi select, and its values, each with a definition) and rule groups the user names. The site writes the input and output sections itself. Save the first prompt to continue. Changing the label's values or its single or multi select changes the labels themselves: gold labels given before need checking again.`,
     },
     data_source: {
       title: 'Data Source',

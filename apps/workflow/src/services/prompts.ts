@@ -43,9 +43,9 @@ export async function createVersion(w: Scope, projectId: string, v: NewVersion):
   await catalog.audit(projectId, v.madeBy === 'optimiser' ? v.madeBy : (await user()).name, 'prompt.create', {version: versionLabel(version)});
   if (fromDraft) await postEvent(w, projectId, 'approved', 'user', msg('saved it as {version}', {version: versionLabel(version)}), {path: '/prompt-design', params: {v: version.id}});
   if (!existing.length) {
-    // The first version, approved on Prompt Design: the helper says what comes next (spec 6.2).
-    await postEvent(w, projectId, 'approved', 'user', msg('approved the prompt as {version}', {version: versionLabel(version)}), {path: '/prompt-design'});
-    const next = msg('{version} is saved. Next, click "Next: Dataset" at the top right to add the examples it will be scored on.', {version: versionLabel(version)});
+    // The first version, saved on Prompt Design: the helper says what comes next (spec 6.2).
+    await postEvent(w, projectId, 'approved', 'user', msg('saved the prompt as {version}', {version: versionLabel(version)}), {path: '/prompt-design'});
+    const next = msg('{version} is saved. Next, open Dataset in the step bar to add the examples it will be scored on.', {version: versionLabel(version)});
     const line: ChatMessage = {id: newId('cm'), projectId, createdAt: now(), role: 'agent', agent: 'prompt_agent', text: msgText(next), msg: next, page: 'Prompt Design'};
     await catalog.insert('chat_messages', line);
   }
