@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, ClientDiagnostics, RequestContext, SharedStatePort, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ObjectStorePort, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission, NotificationPort, TelemetryPort, AuthorizationPort} from '@yushiguang/sprint-contracts';
+import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, ClientDiagnostics, RequestContext, SharedStatePort, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ObjectStorePort, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission, Notification, NotificationPort, TelemetryPort, AuthorizationPort} from '@yushiguang/sprint-contracts';
 import {createCatalog, docFeatureStore, objectFeatureStore} from '@yushiguang/sprint-catalog';
 import {createLabeling, labelingExecutor, memoryLocks} from '@yushiguang/sprint-labeling';
 import {createOptimiser, optimiserExecutor} from '@yushiguang/sprint-optimiser';
-import {DocRepo, localDocRuntime, logNotifications, memoryJobStore, memoryObjectStore, memorySharedState} from '@yushiguang/sprint-platform';
+import {DocRepo, localDocRuntime, logNotifications, memoryJobStore, memoryObjectStore, memoryPermissionAdmin, memorySharedState} from '@yushiguang/sprint-platform';
 import {createJobs} from '@yushiguang/sprint-jobs';
 import {createInstance, systemContext} from './app.ts';
 import {optimiserHost} from './optimiser-host.ts';
@@ -2384,4 +2384,89 @@ test('sample numbers: an older dataset is numbered once in saved order; added sa
   assert.deepEqual((await listSamples(w.ws, {projectId: w.projectId, query: '#11'})).items.map(x => x.externalId), ['new-a']);
   assert.deepEqual((await listSamples(w.ws, {projectId: w.projectId, query: 'new-b'})).items.map(x => x.number), [12]);
   assert.deepEqual((await listSamples(w.ws, {projectId: w.projectId, query: '4'})).items.map(x => x.externalId), ['3', '4'], 'number 4, and the sample whose ID is 4');
+});
+
+/** A world with a permission platform (members u_1 the tester, u_2, u_3) and notifications kept in `sent`. */
+async function setsWorld(prefix: string) {
+  const sent: Notification[] = [];
+  const w = await world(prefix, {notifications: {send: async n => void sent.push(n)}});
+  const admin = memoryPermissionAdmin();
+  for (const id of ['u_1', 'u_2', 'u_3']) await admin.addTenantMember(w.ws.ctx, 'default', id, 'member');
+  Object.assign(w.inst, {permissionAdmin: admin, grantRetryMs: 0});
+  const sets = await import('./label-sets.ts');
+  return {...w, admin, sent, sets};
+}
+
+test('label sets are contiguous, never overlap, skip removed samples, and split the rest by count or size', async () => {
+  const w = await setsWorld('ls1');
+  const {removeExamples, restoreExamples} = await import('./governance.ts');
+  const {listSamples} = await import('./samples.ts');
+  const s0 = await w.state();
+  const byNumber = (n: number) => s0.examples.find(e => e.externalId === String(n - 1))!;
+  // Sample 3 is removed: the first set of 3 runs from 1 to 4.
+  await removeExamples(w.ws, w.projectId, [byNumber(3).id], 'broken');
+  const a = await w.sets.createLabelSet(w.ws, {projectId: w.projectId, count: 3, name: '  First  batch '});
+  assert.deepEqual([a.number, a.name, a.first, a.last], [1, 'First batch', 1, 4]);
+  let list = await w.sets.listLabelSets(w.ws, w.projectId);
+  assert.deepEqual([list.sets[0].samples, list.sets[0].labeled, list.unassigned], [3, 3, 6], 'the removed sample counts nowhere');
+  await assert.rejects(w.sets.createLabelSet(w.ws, {projectId: w.projectId, count: 7}), /Only 6 samples are left without a label set/);
+  // The rest (5..10) in 4 sets: 2, 2, 1, 1.
+  const four = await w.sets.createLabelSets(w.ws, {projectId: w.projectId, sets: 4});
+  assert.deepEqual(four.map(s => [s.number, s.first, s.last]), [[2, 5, 6], [3, 7, 8], [4, 9, 9], [5, 10, 10]]);
+  await assert.rejects(w.sets.createLabelSets(w.ws, {projectId: w.projectId, perSet: 2}), /Every sample is already in a label set/);
+  await assert.rejects(w.sets.createLabelSets(w.ws, {projectId: w.projectId, sets: 1, perSet: 2}), /number of sets or the samples per set/);
+  // Restored, sample 3 is back in the first set; samples added later wait for a new set.
+  const removed = await listSamples(w.ws, {projectId: w.projectId, filter: 'removed'});
+  await restoreExamples(w.ws, w.projectId, [removed.items[0].removal!.id]);
+  const {appendExamples} = await import('./governance.ts');
+  await appendExamples(w.ws, w.projectId, Array.from({length: 5}, (_, i) => ({externalId: `n${i}`, type: 'video' as const, title: '', features: {}})), 'upload');
+  list = await w.sets.listLabelSets(w.ws, w.projectId);
+  assert.deepEqual([list.sets[0].samples, list.unassigned], [4, 5]);
+  const bySize = await w.sets.createLabelSets(w.ws, {projectId: w.projectId, perSet: 2});
+  assert.deepEqual(bySize.map(s => [s.first, s.last]), [[11, 12], [13, 14], [15, 15]]);
+  const inFirst = await listSamples(w.ws, {projectId: w.projectId, labelSetId: a.id});
+  assert.deepEqual(inFirst.items.map(x => x.number), [1, 2, 3, 4]);
+  // The range never changes: an update takes the name and labelers only.
+  const renamed = await w.sets.updateLabelSet(w.ws, {projectId: w.projectId, labelSetId: a.id, name: 'Renamed', first: 2} as never);
+  assert.deepEqual([renamed.name, renamed.first, renamed.last], ['Renamed', 1, 4]);
+});
+
+test('label set labelers: one per set, tenant members only, granted project write, told by notification', async () => {
+  const w = await setsWorld('ls2');
+  await assert.rejects(w.sets.createLabelSet(w.ws, {projectId: w.projectId, count: 2, labelerIds: ['u_2', 'u_3']}), /one labeler/);
+  await assert.rejects(w.sets.createLabelSet(w.ws, {projectId: w.projectId, count: 2, labelerIds: ['stranger']}), /member of this tenant/);
+  assert.equal((await w.sets.listLabelSets(w.ws, w.projectId)).sets.length, 0, 'nothing saved');
+  const a = await w.sets.createLabelSet(w.ws, {projectId: w.projectId, count: 2, labelerIds: ['u_2']});
+  assert.ok(w.admin.canWrite('default', w.projectId, 'u_2'), 'the labeler can edit the project');
+  assert.deepEqual(w.sent.map(n => [n.kind, n.userIds, n.link]), [['label_set_created', ['u_2'], `/gold/?p=${w.projectId}&set=${a.id}`]]);
+  assert.match(w.sent[0].text, /label set #1 \(samples 1 to 2\) in p/);
+  // Changing the labeler tells the new one only; the creator setting themselves hears nothing.
+  await w.sets.updateLabelSet(w.ws, {projectId: w.projectId, labelSetId: a.id, labelerIds: ['u_3']});
+  await w.sets.updateLabelSet(w.ws, {projectId: w.projectId, labelSetId: a.id, labelerIds: ['u_3']});
+  await w.sets.updateLabelSet(w.ws, {projectId: w.projectId, labelSetId: a.id, labelerIds: ['u_1']});
+  assert.deepEqual(w.sent.map(n => [n.kind, n.userIds]), [['label_set_created', ['u_2']], ['labeler_added', ['u_3']]]);
+  assert.deepEqual((await w.catalog.get('label_sets', a.id))?.labelerIds, ['u_1']);
+  // A grant that keeps failing saves nothing.
+  Object.assign(w.admin, {grantProjectWrite: async () => { throw new Error('down'); }});
+  await assert.rejects(w.sets.updateLabelSet(w.ws, {projectId: w.projectId, labelSetId: a.id, labelerIds: ['u_2']}), /Edit access for the labeler could not be saved/);
+  await assert.rejects(w.sets.createLabelSet(w.ws, {projectId: w.projectId, count: 2, labelerIds: ['u_2']}), /Edit access/);
+  assert.deepEqual((await w.catalog.get('label_sets', a.id))?.labelerIds, ['u_1']);
+  assert.equal((await w.sets.listLabelSets(w.ws, w.projectId)).sets.length, 1);
+});
+
+test('a label change clears only the gold labels it makes wrong; the rest carry over, and the count is known before saving', async () => {
+  const w = await world('ls3', {macroF1: 0.5, gold: x => (Number(x) < 4 ? 'Tutorial' : 'Vlog')});
+  const {createVersion} = await import('./prompts.ts');
+  const {goldLabelsCleared} = await import('./settings.ts');
+  await createVersion(w.ws, w.projectId, {structured: sp(), parent: null, madeBy: 'user', change: '', kind: 'minor'});
+  // Tutorial renamed to Guide: the 4 Tutorial labels no longer answer the label.
+  const next = sp();
+  next.label.values = [{name: 'Vlog', definition: ''}, {name: 'Guide', definition: ''}];
+  assert.equal(await goldLabelsCleared(w.ws, w.projectId, next), 4);
+  assert.equal(await goldLabelsCleared(w.ws, w.projectId, sp()), 0, 'the same label clears nothing');
+  await createVersion(w.ws, w.projectId, {structured: next, parent: null, madeBy: 'user', change: '', kind: 'minor'});
+  const s = await w.state();
+  assert.equal(Object.keys(s.gold).length, 6, 'the Vlog labels carry over');
+  assert.ok(Object.values(s.gold).every(g => g.answer[0] === 'Vlog'));
+  assert.equal(Object.keys(s.staleGold).length, 4, 'the Tutorial labels stay as hidden hints');
 });

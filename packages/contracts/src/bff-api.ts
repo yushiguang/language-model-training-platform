@@ -17,6 +17,7 @@ import type {
   Features,
   GoldLabel,
   LabelComment,
+  LabelSet,
   ModelSettings,
   NodeId,
   PageContext,
@@ -240,6 +241,8 @@ export interface RemoveExamplesRequest {
 export interface ListSamplesRequest {
   projectId: string;
   filter?: 'live' | 'removed';
+  /** Only the samples of this label set. */
+  labelSetId?: string;
   query?: string;
   offset?: number;
   limit?: number;
@@ -264,6 +267,48 @@ export interface SamplePage {
   items: SampleRow[];
   /** How many samples match the filter and query in all. */
   total: number;
+}
+
+/** A label set with its counts: samples in its range that are not removed, and how many of them have a gold label. */
+export type LabelSetView = LabelSet & {samples: number; labeled: number};
+
+export interface LabelSetList {
+  /** By number. */
+  sets: LabelSetView[];
+  /** Samples not removed and in no label set yet: what the next sets take from. */
+  unassigned: number;
+}
+
+/**
+ * Creates one label set from the next `count` samples not in a set (removed ones are skipped and
+ * not counted). `labelerIds`: at most one for now, a member of the tenant; they get project write.
+ */
+export interface CreateLabelSetRequest {
+  projectId: string;
+  count: number;
+  name?: string;
+  labelerIds?: string[];
+}
+
+/** Splits every sample not in a set into label sets: `sets` of them (sizes as even as can be), or `perSet` samples each (the last may be smaller). Give one of the two. */
+export interface CreateLabelSetsRequest {
+  projectId: string;
+  sets?: number;
+  perSet?: number;
+}
+
+/** Changes a label set's name or labelers; its range never changes. A field left out stays as it is. */
+export interface UpdateLabelSetRequest {
+  projectId: string;
+  labelSetId: string;
+  name?: string;
+  labelerIds?: string[];
+}
+
+/** For the confirm dialog before saving a prompt: how many gold labels this label would clear. */
+export interface GoldClearedRequest {
+  projectId: string;
+  structured: StructuredPrompt;
 }
 
 export interface RestoreExamplesRequest {
@@ -420,6 +465,17 @@ export interface BffContract {
   removeExamples(req: RemoveExamplesRequest): Promise<void>;
   /** One page of the dataset's samples, by number (no features). Empty without a dataset. */
   listSamples(req: ListSamplesRequest): Promise<SamplePage>;
+  /** The project's label sets with their counts. */
+  listLabelSets(projectId: string): Promise<LabelSetList>;
+  createLabelSet(req: CreateLabelSetRequest): Promise<LabelSet>;
+  createLabelSets(req: CreateLabelSetsRequest): Promise<LabelSet[]>;
+  updateLabelSet(req: UpdateLabelSetRequest): Promise<LabelSet>;
+  /**
+   * How many gold labels saving this prompt would clear: those whose answer is no longer an
+   * answer to its label (a value removed or renamed, single choice where there were two). 0 when
+   * the label signature does not change. Cleared labels stay as hidden hints.
+   */
+  goldLabelsCleared(req: GoldClearedRequest): Promise<number>;
   /** Puts removed examples back, in their old half. */
   restoreExamples(req: RestoreExamplesRequest): Promise<void>;
   /** Batch pruning; returns how many examples it removed. */

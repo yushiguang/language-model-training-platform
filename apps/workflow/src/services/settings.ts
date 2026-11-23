@@ -1,5 +1,6 @@
-import type {ModelSettings, ProjectSettings, Schema, SetupVersion, Thresholds} from '@yushiguang/sprint-contracts';
-import {DEFAULT_THRESHOLDS, sameSignature, signatureOf} from '@yushiguang/sprint-domain';
+import type {GoldLabel, ModelSettings, ProjectSettings, Schema, SetupVersion, StructuredPrompt, Thresholds} from '@yushiguang/sprint-contracts';
+import {DEFAULT_THRESHOLDS, newId, readGoldAnswer, sameSignature, schemaOf, signatureOf} from '@yushiguang/sprint-domain';
+import {latestGold} from './evaluation.ts';
 import type {Scope} from './app.ts';
 import {getProject} from './projects.ts';
 import {defaultModel, withModelsLock} from './models.ts';
@@ -101,8 +102,38 @@ async function syncLabelsLocked(w: Scope, projectId: string, labels: Schema, opt
   const changed = !before || !sameSignature(signatureOf({label: before}), signatureOf({label: labels}));
   if (prev && !changed && (!opts.wording || JSON.stringify(before) === JSON.stringify(labels))) return prev;
   const schemaVersion = (prev?.schemaVersion ?? 0) + (changed ? 1 : 0);
-  const stale = changed && before ? (await catalog.find('gold_labels', {projectId})).filter(g => g.schemaVersion === prev!.schemaVersion).length : 0;
+  let stale = 0;
+  if (changed && before) {
+    // Gold labels whose answer still answers the new label carry over (docs/design/server.md 4.3);
+    // the others stay under the old schema version as hidden hints. Copied before the setup
+    // switches, so no read sees the new version without them.
+    const {keep, clear} = await sortGold(w, projectId, prev!.schemaVersion, labels);
+    stale = clear;
+    if (keep.length) await catalog.insertMany('gold_labels', keep.map(g => ({...g, id: newId('gl'), schemaVersion})));
+  }
   const next = await writeSetup(w, projectId, prev, {schema: labels, schemaVersion, thresholds: prev?.thresholds ?? d!.thresholds, models: prev?.models.length ? prev.models : [d!.model]});
   if (changed) w.tm.event('signature_changed', {fields: 1, values: labels.values.length, schema_version: schemaVersion, gold_labels_needing_recheck: stale});
   return next;
+}
+
+/** The current gold labels of live samples, split by whether their answer still answers `labels`. */
+async function sortGold(w: Scope, projectId: string, schemaVersion: number, labels: Schema): Promise<{keep: GoldLabel[]; clear: number}> {
+  const {current} = await latestGold(w, projectId, schemaVersion);
+  const removed = new Set((await w.catalog.findByIds('examples', Object.keys(current))).filter(e => e.removed).map(e => e.id));
+  const keep: GoldLabel[] = [];
+  let clear = 0;
+  for (const g of Object.values(current)) {
+    const answer = readGoldAnswer(g.answer, labels);
+    if (answer) keep.push({...g, answer});
+    else if (!removed.has(g.exampleId)) clear++;
+  }
+  return {keep, clear};
+}
+
+/** For the confirm dialog: how many gold labels saving `structured` would clear (0 when the signature stays). */
+export async function goldLabelsCleared(w: Scope, projectId: string, structured: StructuredPrompt): Promise<number> {
+  const {prev} = await currentSetup(w, projectId);
+  const labels = schemaOf(structured);
+  if (!prev?.schema || sameSignature(signatureOf({label: prev.schema}), signatureOf({label: labels}))) return 0;
+  return (await sortGold(w, projectId, prev.schemaVersion, labels)).clear;
 }

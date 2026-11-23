@@ -13,6 +13,7 @@ import * as settings from './services/settings.ts';
 import * as sources from './services/sources.ts';
 import * as models from './services/models.ts';
 import * as samples from './services/samples.ts';
+import * as labelSets from './services/label-sets.ts';
 import * as work from './services/work.ts';
 import {answerProblem, projectIdOf, WORKFLOW_PERMISSIONS} from '@yushiguang/sprint-domain';
 import {agentToolHost} from './services/page-views.ts';
@@ -150,6 +151,11 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
       await governance.removeExamples(at(ctx), projectId, exampleIds, reason);
     },
     listSamples: (ctx, r) => samples.listSamples(at(ctx), r),
+    listLabelSets: (ctx, projectId) => labelSets.listLabelSets(at(ctx), projectId),
+    createLabelSet: (ctx, r) => labelSets.createLabelSet(at(ctx), r),
+    createLabelSets: (ctx, r) => labelSets.createLabelSets(at(ctx), r),
+    updateLabelSet: (ctx, r) => labelSets.updateLabelSet(at(ctx), r),
+    goldLabelsCleared: (ctx, r) => settings.goldLabelsCleared(at(ctx), r.projectId, r.structured),
     restoreExamples: (ctx, r) => governance.restoreExamples(at(ctx), r.projectId, r.removalIds),
     pruneDataset: (ctx, r) => governance.pruneDataset(at(ctx), r.projectId, r.mode, r.keep, r.value),
     addComment: (ctx, r) => governance.addComment(at(ctx), r.projectId, r.exampleId, r.text, r.promptVersionId ?? null),
