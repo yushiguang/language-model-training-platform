@@ -3,6 +3,12 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-23 (Dataset tabs, #100)
+
+- **The Dataset page lists samples in four tabs**: all, no gold label, mismatch, removed, each with its count for the whole dataset (or label set). Rows show the gold label and the model's answer, and can be narrowed to one data source or one gold value, and sorted by number or sample ID.
+- **"Mismatch" means the same everywhere**: the gold label against the best-scored version of the current label that has an answer on every gold-labeled sample, as the mismatch review compares them. An answer the safety filter stopped is not a mismatch.
+- **A removal can be for another reason, with a note**: Broken, Out of scope or Other, and an optional note in the person's words (cut to the comment length). The Removed tab shows them with who removed it and when.
+
 ## 2026-11-23 (Tenants, #94)
 
 - **Tenants are records**: anyone signed in creates one and becomes its first admin. A tenant name is unique across Sprint (compared without case, spaces tidied); a blank or taken name is shown under the name field, as for every named object. Who is in a tenant stays on the permission platform, which now also lists the tenants a person is in.
