@@ -51,6 +51,11 @@ reads and writes through the catalog, starts labeling tasks, and asks the agent 
 - `services/projects.ts`: `loadProjectState` (one read for a page), `projectStatus` (the light
   read, review G9), gates, approvals. `emitChange(projectId)` also gives the project a new
   revision (`app.ts`, `projectRevisions`): pass the project whenever there is one.
+- `services/models.ts`: tenant models (docs/design/server.md, 9): list, add, change, remove, set
+  default; tenant admins only. Every change and every settings write that picks a model holds
+  `models:<tenantId>` (`withModelsLock`), so a used model is never removed; each change calls
+  `gateway.forgetTenant`. `settings.ts` gives a new project the tenant's default model, else the
+  platform's first; `loadProjectState` lists the tenant's models before the platform's.
 - `services/evaluation.ts`: `labelEvalSet` finds or creates the eval task for version + model +
   settings and runs it; `buildReport` scores the held-out half of the eval set.
 - `services/work.ts`: `drive` queues missing reports, then the paid work `dueStarts` lists, all of

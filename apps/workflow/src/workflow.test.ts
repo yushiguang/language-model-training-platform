@@ -27,9 +27,12 @@ const page = (agent: PageContext['agent'] = 'front_desk'): PageContext => ({labe
 function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) => AgentRuntimeContract, documents?: DocumentSource, access: Pick<WorkflowDeps, 'authorization' | 'permissionAdmin'> = {}) {
   const db = localDocRuntime(prefix);
   const catalog = createCatalog(db);
+  const forgotten: string[] = [];
   const gateway = {
     endpoints: () => [endpoint],
     labelingEndpoints: () => [endpoint],
+    labelingEndpointsFor: async (tenantId: string) => [...(await catalog.find('tenant_models', {tenantId})).map(m => ({...endpoint, id: m.id, name: m.name, supportsTemperature: false})), endpoint],
+    forgetTenant: (tenantId: string) => void forgotten.push(tenantId),
     agentModel: () => ({}),
     cancel: async () => {},
     label: async (): Promise<LabelCallResult> => ({text: '{"format": "Vlog"}', inputTokens: 0, outputTokens: 150, costUsd: 0.03, endpointId: 'labeling-A', attempts: 1}),
@@ -53,7 +56,7 @@ function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) =
     ...access,
   });
   wf.connect({agents: agents(wf)});
-  return {wf, api: loopback(wf.api) as WorkflowContract, catalog, tickets, jobs, labeling};
+  return {wf, api: loopback(wf.api) as WorkflowContract, catalog, tickets, jobs, labeling, forgotten, gateway};
 }
 
 /** The tools as the runtime binds them for one turn: every call carries the turn's project, id and context. */
@@ -383,4 +386,110 @@ test('page views carry the place of waiting work in its queue (#66)', async () =
     assert.deepEqual([a.id, b.id].map(id => view!.runs.find(r => r.id === id)?.queue), [{ahead: 0}, {ahead: 1}]);
     assert.deepEqual(view!.optimisation.find(o => o.id === 'or_1')?.queue, {ahead: 2});
   }
+});
+
+test('tenant models (#69): admins manage them; the first is the default; new projects use the default; a used model cannot be removed', async () => {
+  const perms = checking();
+  const sys = {requestId: 'rq_setup', user: {id: 'u_admin', name: 'Admin'}};
+  await perms.admin.addTenantMember(sys, 't1', alice.id, 'admin');
+  await perms.admin.addTenantMember(sys, 't1', bob.id, 'member');
+  await perms.admin.addTenantMember(sys, 't2', eve.id, 'admin');
+  const {api, forgotten} = world('wf-models', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
+  const a = inTenant(alice, 't1');
+  assert.deepEqual(await api.listModels(inTenant(bob, 't1')), [], 'a member sees the models');
+  for (const call of [api.addModel(inTenant(bob, 't1'), {name: 'x', endpoint: 'e', qpm: 1, tpm: 1}), api.setDefaultModel(inTenant(bob, 't1'), {modelId: 'x'})]) await assert.rejects(call, {code: 'forbidden'}, 'a member does not change models');
+
+  assert.equal((await api.addModel(a, {name: ' ', endpoint: 'e', qpm: 1, tpm: 1})).error, 'Give the model a name.');
+  assert.equal((await api.addModel(a, {name: 'Team', endpoint: 'e', qpm: 0, tpm: 1})).error, 'QPM must be a whole number above 0.');
+  const team = (await api.addModel(a, {name: 'Team', endpoint: ' https://models.example/team ', qpm: 60, tpm: 100_000})).model!;
+  assert.deepEqual([team.endpoint, team.default, team.tenantId, team.usedBy], ['https://models.example/team', true, 't1', 0]);
+  const second = (await api.addModel(a, {name: 'Second', endpoint: 'https://models.example/2', qpm: 10, tpm: 10_000})).model!;
+  assert.equal(second.default, false, 'only the first model becomes the default');
+  assert.equal((await api.addModel(a, {name: 'team', endpoint: 'e', qpm: 1, tpm: 1})).error, 'A model with this name already exists.');
+  assert.ok(forgotten.filter(t => t === 't1').length >= 2, 'the gateway is told to read the models again');
+
+  // Another tenant neither sees nor changes them.
+  const e = inTenant(eve, 't2');
+  assert.deepEqual(await api.listModels(e), []);
+  assert.equal((await api.updateModel(e, {modelId: team.id, qpm: 1})).error, 'This model does not exist.');
+  assert.equal((await api.removeModel(e, {modelId: team.id})).error, 'This model does not exist.');
+
+  // A new project uses the tenant's default model; its page lists the tenant's models.
+  const p1 = await api.createProject(a, 'One');
+  const s1 = (await api.loadProjectState(a, p1.id))!;
+  assert.equal(s1.setup!.models[0].endpoint, team.id);
+  assert.deepEqual(s1.endpoints.map(x => x.id), [team.id, second.id, 'A']);
+  assert.equal((await api.listModels(a)).find(m => m.id === team.id)!.usedBy, 1);
+  assert.match((await api.removeModel(a, {modelId: team.id})).error!, /A project uses this model/);
+
+  // Another default; the next project takes it. Settings accept the tenant's models and the platform's, not another tenant's.
+  assert.equal((await api.setDefaultModel(a, {modelId: second.id})).model!.default, true);
+  assert.deepEqual((await api.listModels(a)).map(m => [m.name, m.default]), [['Second', true], ['Team', false]]);
+  const p2 = await api.createProject(a, 'Two');
+  assert.equal((await api.loadProjectState(a, p2.id))!.setup!.models[0].endpoint, second.id);
+  const theirs = (await api.addModel(e, {name: 'Theirs', endpoint: 'x', qpm: 1, tpm: 1})).model!;
+  const settings = (endpointId: string) => ({projectId: p1.id, thresholds: s1.setup!.thresholds!, model: {endpoint: endpointId, maxOutputTokens: 100, temperature: 0.5}});
+  await assert.rejects(api.saveSettings(a, settings(theirs.id)), /This model is not available/);
+  await assert.rejects(api.saveSettings(a, settings('missing')), /This model is not available/);
+  await api.saveSettings(a, settings('A'));
+  assert.equal((await api.loadProjectState(a, p1.id))!.setup!.models[0].temperature, 0.5);
+  await api.saveSettings(a, settings(second.id));
+  assert.equal((await api.loadProjectState(a, p1.id))!.setup!.models[0].temperature, null, 'tenant models take no temperature');
+
+  // No project uses Team any more: it can be removed. A change keeps the fields not given.
+  assert.deepEqual(await api.removeModel(a, {modelId: team.id}), {});
+  const changed = (await api.updateModel(a, {modelId: second.id, qpm: 120})).model!;
+  assert.deepEqual([changed.name, changed.qpm, changed.tpm, changed.usedBy], ['Second', 120, 10_000, 2]);
+  assert.deepEqual((await api.listModels(a)).map(m => m.name), ['Second']);
+});
+
+test('tenant models (#69): no default means the platform default; removing the default picks none; a deleted project frees its model', async () => {
+  const {api} = world('wf-models-default', noHelpers);
+  const a = inTenant(alice, 't1');
+  const before = await api.createProject(a, 'Before');
+  assert.equal((await api.loadProjectState(a, before.id))!.setup!.models[0].endpoint, 'A', 'no tenant model: the platform default');
+  const m1 = (await api.addModel(a, {name: 'One', endpoint: 'e1', qpm: 1, tpm: 1})).model!;
+  const m2 = (await api.addModel(a, {name: 'Two', endpoint: 'e2', qpm: 1, tpm: 1})).model!;
+  assert.deepEqual([m1.default, m2.default], [true, false]);
+  // The default removed: no other model becomes the default, and new projects use the platform's.
+  assert.deepEqual(await api.removeModel(a, {modelId: m1.id}), {});
+  assert.deepEqual((await api.listModels(a)).map(m => [m.name, m.default]), [['Two', false]]);
+  const p = await api.createProject(a, 'After');
+  assert.equal((await api.loadProjectState(a, p.id))!.setup!.models[0].endpoint, 'A');
+  // With no default, the next model added becomes it.
+  const m3 = (await api.addModel(a, {name: 'Three', endpoint: 'e3', qpm: 1, tpm: 1})).model!;
+  assert.equal(m3.default, true);
+  const uses = await api.createProject(a, 'Uses three');
+  assert.match((await api.removeModel(a, {modelId: m3.id})).error!, /A project uses this model/);
+  await api.deleteProject(a, {projectId: uses.id});
+  assert.equal((await api.listModels(a)).find(m => m.id === m3.id)!.usedBy, 0, 'a project being deleted no longer holds its model');
+  assert.deepEqual(await api.removeModel(a, {modelId: m3.id}), {});
+});
+
+test('tenant models (#69): a project page reads the models again when the gateway\'s cache lacks the one its settings use', async () => {
+  const {api, gateway, forgotten, catalog} = world('wf-models-stale', noHelpers);
+  const a = inTenant(alice, 't1');
+  const m = (await api.addModel(a, {name: 'New', endpoint: 'e', qpm: 1, tpm: 1})).model!;
+  const p = await api.createProject(a, 'Uses new');
+  // Another process's gateway: its cache was read before the model was added, until it is told to forget.
+  const fresh = gateway.labelingEndpointsFor.bind(gateway);
+  let stale = true;
+  Object.assign(gateway, {
+    labelingEndpointsFor: async (tenantId: string) => (stale ? gateway.labelingEndpoints() : fresh(tenantId)),
+    forgetTenant: (tenantId: string) => ((stale = false), void forgotten.push(tenantId)),
+  });
+  forgotten.length = 0;
+  const s = (await api.loadProjectState(a, p.id))!;
+  assert.equal(s.setup!.models[0].endpoint, m.id);
+  assert.deepEqual(s.endpoints.map(x => x.id), [m.id, 'A'], 'the page lists the model the project uses');
+  assert.deepEqual(forgotten, ['t1']);
+  // Nothing missing: no second read.
+  await api.loadProjectState(a, p.id);
+  assert.deepEqual(forgotten, ['t1']);
+  // A missing model that is not the tenant's (a platform model taken away) or a failing store: the cache is kept.
+  await catalog.patch('setup_versions', s.setup!.id, {models: [{...s.setup!.models[0], endpoint: 'gone'}]});
+  assert.deepEqual((await api.loadProjectState(a, p.id))!.endpoints.map(x => x.id), [m.id, 'A']);
+  Object.assign(gateway, {labelingEndpointsFor: async () => { throw new Error('store down'); }});
+  assert.deepEqual((await api.loadProjectState(a, p.id))!.endpoints.map(x => x.id), ['A']);
+  assert.deepEqual(forgotten, ['t1'], 'the gateway is not told to forget');
 });

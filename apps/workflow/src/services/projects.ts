@@ -93,6 +93,29 @@ export async function getProject(w: Scope, id: string): Promise<Project | null> 
   return p && !p.deleting ? p : null;
 }
 
+/**
+ * The models a project's pages list: the tenant's own, then the platform's defaults
+ * (docs/design/server.md, 9); only the defaults if the tenant's models cannot be read, so the page
+ * still opens. A model the settings use that the gateway's cache lacks (added in another process
+ * within its cache time) makes it read again once, so the page always knows the project's model.
+ */
+async function modelsFor(w: Scope, tenantId: string, used: string[]) {
+  const {gateway, catalog} = w;
+  let eps;
+  try {
+    eps = await gateway.labelingEndpointsFor(tenantId);
+  } catch {
+    // The store is failing: keep the gateway's cache as it is for the tenant's other work.
+    return gateway.labelingEndpoints();
+  }
+  const missing = used.filter(id => !eps.some(e => e.id === id));
+  // Only a model the tenant really has (not a platform model taken away) makes it read again.
+  const found = await Promise.all(missing.map(id => catalog.get('tenant_models', id).catch(() => null)));
+  if (!found.some(m => m?.tenantId === tenantId)) return eps;
+  gateway.forgetTenant(tenantId);
+  return gateway.labelingEndpointsFor(tenantId).catch(() => eps);
+}
+
 export async function loadProjectState(w: Scope, projectId: string): Promise<ProjectState | null> {
   const {catalog, labeling, gateway} = w;
   // First: a write during this read gives a newer revision, so the client reads again.
@@ -158,7 +181,7 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
     optimisation,
     facts,
     contextId,
-    endpoints: gateway.labelingEndpoints(),
+    endpoints: await modelsFor(w, project.tenantId, setup?.models.map(m => m.endpoint) ?? []),
     samplingTask: await getSamplingTask(w, projectId),
     datasetSources: await datasetSources(w, projectId, examples),
     removals,

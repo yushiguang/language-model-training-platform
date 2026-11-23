@@ -72,6 +72,8 @@ async function world(prefix: string, opts: WorldOpts = {}) {
   const gateway = {
     endpoints: () => [endpoint],
     labelingEndpoints: () => [endpoint],
+    labelingEndpointsFor: async () => [endpoint],
+    forgetTenant: () => {},
     agentModel: () => ({}),
     cancel: async () => {},
     async label(req: {traceId?: string; messages?: unknown}): Promise<LabelCallResult> {

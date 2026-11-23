@@ -51,9 +51,9 @@
 | 权限点 | 方法 |
 | --- | --- |
 | 只要登录 | `runtimeInfo` |
-| 读 | 列表和读取（`listProjects`、`getProject`、`loadProjectState`、`projectStatus`、数据源列表和详情、样本、特征、不一致、预测、聊天记录、提议列表）；`createProject`（任何成员都能建）；`tick`；`sendUserMessage`（问 AI 是读，AI 要开始工作时它的工具再查项目写） |
+| 读 | 列表和读取（`listProjects`、`getProject`、`loadProjectState`、`projectStatus`、数据源列表和详情、模型列表（`listModels`）、样本、特征、不一致、预测、聊天记录、提议列表）；`createProject`（任何成员都能建）；`tick`；`sendUserMessage`（问 AI 是读，AI 要开始工作时它的工具再查项目写） |
 | 项目写 | 其余改项目的方法：下一步、改名、删除、设置、取样本和增删、人工标签、复核、重建分数、建版本、打分、停止、优化器开始 / 停止 / 重试、Improve with AI、写评论、处理提议 |
-| 租户写 | `createDataSource`、`addSourceFile` |
+| 租户写 | `createDataSource`、`addSourceFile`、`addModel`、`updateModel`、`removeModel`、`setDefaultModel` |
 
 **校验在哪里做**（`apps/workflow/src/services/access.ts` 的 `authorize`）：
 
@@ -319,11 +319,17 @@ export interface ConfigReader {
 - 模型在租户设置里手动填：名称、Endpoint、QPM、TPM。
 - 租户有默认模型：第一个添加的模型自动成为默认，可以“设为默认”。新项目用租户默认模型。
 - 被项目使用的模型不能删除。
-- **网关要改**：现在 `createGateway` 启动时建一次静态的模型注册表，`LabelCallRequest` 不带租户，限流键只有 endpoint ID。要改成：
-  - 模型配置按租户从模型表读取并缓存，租户新加或修改的模型不用重启就能调用。
-  - `LabelingModels.chat` / `chatStream` 和 `AgentModel` 在调用时接受动态的 endpoint 标识（租户管理员填的 Endpoint），适配器不能要求所有 endpoint 在进程启动时登记在 `Platform.endpoints` 里。`Platform.endpoints` 和 `LabelingModels.endpoints()` 只作为平台默认模型保留。
-  - `LabelCallRequest`、对话请求和 `TryTemplateInput` 带上 `tenantId`，打标、试跑（`try_prompt`）和工作流调用网关时传入。
-  - `LimiterStorePort` 的限流键改成“租户 + endpoint”，两个租户配同一个 endpoint 时各用各的 QPM / TPM，一个租户触发限流降速不影响另一个。
+
+### 9.1 实现（#69 已完成）
+
+- **记录**：`TenantModel`（`packages/contracts/src/types.ts`）：系统生成的 `id`、`tenantId`、`name`、`endpoint`（管理员填的 Endpoint）、`qpm`、`tpm`、`default`、创建和修改时间。存在 catalog 的 `tenant_models` 集合。项目设置的 `ModelSettings.endpoint` 存模型的 `id`，不存 Endpoint 文字，所以任务并发键 `model:<tenantId>:<endpointId>` 和限流键都用它。
+- **管理接口**（`apps/workflow/src/services/models.ts`）：`listModels`（`read`，租户成员都能看；默认在前，每个带 `usedBy`：当前设置用它的项目数）、`addModel`、`updateModel`（没给的字段不变）、`removeModel`、`setDefaultModel`（这四个要 `tenant_write`）。租户还没有默认模型时，新加的模型成为默认（也就是第一个）；删掉默认模型后不自动换。名称在租户内不能重复（不分大小写），QPM / TPM 必须是正整数。被项目使用的模型删除时返回原因，不删。别的租户的模型 ID 和不存在的 ID 回答一样。表单错误通过返回值的 `error` 给出，页面直接显示。
+- **加锁**：每次增删改、新项目取默认模型、保存项目设置选模型、保存版本时同步标签写新的设置版本，都持有 `models:<tenantId>` 锁（`withModelsLock`），所以不会出现“刚检查没人用就删掉、同时有项目选了它”。保存设置时直接从 catalog 读模型校验，不用网关缓存。
+- **新项目和设置页**：新项目用租户默认模型，没有就用平台第一个默认模型。`loadProjectState` 的 `endpoints` 先列租户自己的模型，再列平台默认模型（租户模型读不出来时只列平台默认，页面照常打开）。租户模型没有价格（费用按 0 算），不支持温度（`temperature` 为 null）。
+- **网关**（`apps/llm-gateway/src/gateway.ts`）：`createGateway` 的 `tenantModels`（`TenantModelSource.list(tenantId)`，组合根用 catalog 实现）按租户读取并缓存 `gateway.tenantModelsTtlMs`（默认 30 秒）；请求缓存里没有的模型 ID 时立刻重读（同一租户最多每秒一次），所以新加的模型马上能用；读失败时继续用上次读到的。工作流每次增删改后调 `forgetTenant`，本进程立刻重读；别的进程最迟一个缓存周期生效，不用重启。一个租户能调用自己的模型和平台默认模型（`Platform.endpoints` / `LabelingModels.endpoints()`，只作为平台默认保留），别的租户的模型被拒绝。`labelingEndpointsFor(tenantId)` 给出这个列表。
+- **动态 Endpoint**：`ChatRequest.endpoint` 是调用时决定的目标：租户模型是管理员填的 Endpoint，平台默认是它的 ID；同时带上 `tenantId`。`AgentChatOptions.model` 是租户模型 ID 时，网关把它的 Endpoint 放在 `AgentChatOptions.endpoint` 交给适配器（调用方传的会被丢掉）。适配器不能要求 Endpoint 在启动时登记过。
+- **请求带租户**：`LabelCallRequest.tenantId`（必填）、`TryTemplateInput.tenantId`、`CreateTaskInput.tenantId` / `LabelingTask.tenantId`（旧任务没有时按 `default`）、`AgentChatOptions.tenantId`。工作流创建打标任务和试跑时传调用方的租户（`authorize` 已经校验过它就是项目的租户）；agents 运行时按每次请求的 `ctx.tenantId` 包一层模型（`modelForTenant`），助手和优化器反思的每次调用都带租户。
+- **限流键**：`<tenantId>:<endpointId>`，`LimiterStorePort` 接口不变。两个租户用同一个 endpoint（包括平台默认）时各用各的 QPM / TPM，429 降速只影响触发它的租户。租户模型改了 QPM / TPM 后，同一个键换用新的上限。租户模型 ID 不作为指标标签，统一记为 `tenant_model`。
 
 ## 10. Contract 改动
 
@@ -338,7 +344,8 @@ export interface ConfigReader {
 | `NotificationPort`（尽力而为）、任务类型 `notify.send` | 新增（第 6 步，#71 已完成） |
 | `OptimiserContract.startRun` / `execute` / `stopRun`、`OptimiserHost` 每次调用和 `reflectPrompt` 带调用方上下文 | 破坏性（第 2 步，#63 已完成） |
 | `OptimiserHost.label` 改为入队打标任务，打标任务 `args` 带 `optimiserRunId` / `round` / `step` | 破坏性（第 5 步） |
-| `LabelCallRequest`、对话请求和 `TryTemplateInput`（Prompt helper 的试跑）带 `tenantId`；模型按租户读取；`LabelingModels` / `AgentModel` 接受动态 endpoint；限流键改为“租户 + endpoint” | 破坏性：部署方的网关适配和限流存储要改 |
+| `LabelCallRequest`、对话请求和 `TryTemplateInput`（Prompt helper 的试跑）带 `tenantId`；模型按租户读取；`LabelingModels` / `AgentModel` 接受动态 endpoint；限流键改为“租户 + endpoint” | 破坏性：部署方的网关适配和限流存储要改（第 4 步，#69 已完成） |
+| 模型管理接口 `listModels` / `addModel` / `updateModel` / `removeModel` / `setDefaultModel`；`CatalogContract.remove('tenant_models', id)` | 新增（第 4 步，#69 已完成） |
 | `ObjectStorePort`（`Platform.objectStore` 可选）；基于它的 `LabelingStorePort`、`FeatureStorePort`；`Example.featureRef` 可选 | 新增（第 7 步，#72） |
 | 样本序号和软删除、标注集 | 新增 |
 
@@ -349,7 +356,7 @@ export interface ConfigReader {
 1. 配置模块：`ConfigPort` 和替身，进程级刷新、`config.forTenant`。
 2. 权限和租户隔离：`Project.tenantId`、`createWorkflow` 读写都接入 `AuthorizationPort`、按租户过滤和校验、系统调用方规则、接口权限点表、`PermissionAdminPort`。同一步把调用方上下文传给优化器（`OptimiserContract.startRun` / `execute` / `stopRun`、`OptimiserHost`、`reflectPrompt`），否则这一步合并后优化器会被权限校验拒绝。放在任务队列前面，因为并发键要用到项目的租户。
 3. 任务队列：`concurrencyKey`、`finally`（任何终态都续链）、按键限并发的 `claimNext`、排队位置、失败状态统一。（#66 已完成）
-4. 模型和网关：模型按租户读取、请求带 `tenantId`、限流键改为“租户 + endpoint”。
+4. 模型和网关：模型按租户读取、请求带 `tenantId`、限流键改为“租户 + endpoint”。（#69 已完成）
 5. 优化器改为按 `(runId, round, step)` 推进的链式任务：每个打标阶段入队，巡检识别等打标的运行，Stop 取消排队中和运行中的打标。
 6. 通知端口：评分和自动优化结束时通知发起人。（#71 已完成）
 7. 存储接口：`ObjectStorePort`，以及基于它的 `LabelingStorePort`、`FeatureStorePort`（issue #58）。（#72 已完成）

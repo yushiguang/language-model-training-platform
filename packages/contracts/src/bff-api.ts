@@ -31,6 +31,7 @@ import type {
   ProjectSettings,
   SamplingTask,
   StructuredPrompt,
+  TenantModel,
 } from './types.ts';
 import type {ExampleMedia, FeatureInfo} from './platform-api.ts';
 
@@ -164,6 +165,40 @@ export interface CreateDataSourceRequest {
   name: string;
   fileName: string;
   text: string;
+}
+
+/** A tenant model as tenant settings show it (docs/design/server.md, 9). */
+export interface TenantModelView extends TenantModel {
+  /** Projects of the tenant whose settings use it: it cannot be removed while this is above 0. */
+  usedBy: number;
+}
+
+/** Add a model to the caller's tenant. It becomes the default when the tenant has none. */
+export interface AddModelRequest {
+  name: string;
+  /** The endpoint to call, as the model service names it. */
+  endpoint: string;
+  qpm: number;
+  tpm: number;
+}
+
+/** Change a model's fields; left-out fields stay. Projects using it call the new values. */
+export interface UpdateModelRequest {
+  modelId: string;
+  name?: string;
+  endpoint?: string;
+  qpm?: number;
+  tpm?: number;
+}
+
+export interface ModelRequest {
+  modelId: string;
+}
+
+/** A saved model, or why nothing was saved (shown on the form). */
+export interface ModelSaveResult {
+  model?: TenantModelView;
+  error?: string;
 }
 
 /** Add a file to a data source; its items join the ones there (#29). */
@@ -306,6 +341,18 @@ export interface BffContract {
   createDataSource(req: CreateDataSourceRequest): Promise<SourceUploadResult>;
   /** Adds a file to a data source; items already in it are counted as repeats and left out. */
   addSourceFile(req: AddSourceFileRequest): Promise<SourceUploadResult>;
+
+  // Tenant models (docs/design/server.md, 9): every member lists them; tenant admins change them.
+  /** The caller's tenant's models, the default first. */
+  listModels(): Promise<TenantModelView[]>;
+  /** Adds a model; it becomes the default when the tenant has none (its first model). */
+  addModel(req: AddModelRequest): Promise<ModelSaveResult>;
+  /** Changes a model; calls use the new values within the gateway's cache time (30 s). */
+  updateModel(req: UpdateModelRequest): Promise<ModelSaveResult>;
+  /** Removes a model; refused (`error`) while a project uses it. Removing the default leaves none. */
+  removeModel(req: ModelRequest): Promise<{error?: string}>;
+  /** Makes a model the default that new projects use. */
+  setDefaultModel(req: ModelRequest): Promise<ModelSaveResult>;
 
   // Dataset & Gold labels
   /** The media of one example, or null (no media source, or none for this example). */
