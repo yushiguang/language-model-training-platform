@@ -1,19 +1,33 @@
 import type {AgentModel, ModelCapabilities, ModelMessage, ModelTier, ReasoningEffort, ResponseFormat} from './platform-api.ts';
-import type {EndpointId, EndpointInfo} from './types.ts';
+import type {EndpointId, EndpointInfo, TenantModel} from './types.ts';
 
 /**
  * Contract: llm-gateway (`apps/llm-gateway`).
  *
  * Every model call goes through the gateway. It owns the endpoint registry (with each endpoint's
- * QPM/TPM), one rate limiter per endpoint, and the retries for a single call. It keeps no state
- * except limiter counters. Chat and labeling use separate endpoints.
+ * QPM/TPM), the rate limits, and the retries for a single call. It keeps no state except limiter
+ * counters and a short cache of each tenant's models. Chat and labeling use separate endpoints.
+ *
+ * A tenant may call its own models (`TenantModel`, read through `TenantModelSource`) and the
+ * platform's defaults (the registry). Limits are counted per tenant + endpoint
+ * (docs/design/server.md, 9).
  */
+
+/** Where the gateway reads a tenant's models; the composition root backs it with the catalog. */
+export interface TenantModelSource {
+  /** The tenant's models; empty when it has none. Throw when they cannot be read. */
+  list(tenantId: string): Promise<TenantModel[]>;
+}
 
 export type EndpointPurpose = 'chat' | 'labeling';
 
 export interface EndpointConfig {
-  /** Registry id of the endpoint (one registration per endpoint across all tenants). */
+  /** Registry id of a platform default, or the tenant model's id. */
   id: string;
+  /** Set on a tenant model: the tenant it belongs to. */
+  tenantId?: string;
+  /** Set on a tenant model: the Endpoint the admin entered, handed to the model service per call. */
+  endpoint?: string;
   purpose: EndpointPurpose;
   /** Model served by the endpoint, for example `gpt-5.4`. */
   model: string;
@@ -47,6 +61,9 @@ export interface CallUsage {
 }
 
 export interface LabelCallRequest {
+  /** The tenant the call is for: its models may be called, and its limits are used. */
+  tenantId: string;
+  /** The model: one of the tenant's models (`TenantModel.id`) or a platform default (`EndpointInfo.id`). */
   slot: EndpointId;
   messages: ModelMessage[];
   maxOutputTokens: number;
@@ -76,12 +93,22 @@ export interface LabelCallResult extends CallUsage {
 export interface LlmGatewayContract {
   /** The registry, optionally filtered by purpose. */
   endpoints(purpose?: EndpointPurpose): EndpointConfig[];
-  /** Product view of the labeling slots (Model A / Model B) for pages and estimates. */
+  /** Product view of the platform's default labeling models (Model A / Model B). */
   labelingEndpoints(): EndpointInfo[];
+  /**
+   * The labeling models a tenant may use: its own (default first), then the platform's defaults.
+   * Rejects when the tenant's models cannot be read.
+   */
+  labelingEndpointsFor(tenantId: string): Promise<EndpointInfo[]>;
+  /** Drops this process's cache of the tenant's models (after they changed), so the next call reads them. */
+  forgetTenant(tenantId: string): void;
   /** One labeling call: waits for a QPM/TPM slot, retries busy or broken replies, returns usage. */
   label(req: LabelCallRequest): Promise<LabelCallResult>;
   /** Stops the labeling calls running (or about to start) under this id; they reject as stopped. */
   cancel(requestId: string): Promise<void>;
-  /** An `AgentModel` whose calls go through the chat endpoints and their limiters. */
+  /**
+   * An `AgentModel` whose calls go through the chat endpoints and their limiters. Calls count
+   * under `AgentChatOptions.tenantId`; a `model` naming one of that tenant's models calls it.
+   */
   agentModel(): AgentModel;
 }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {LlmCallError, NO_TELEMETRY, type ChatRequest, type ChatResult, type EndpointInfo, type Platform} from '@yushiguang/sprint-contracts';
+import {LlmCallError, NO_TELEMETRY, type ChatRequest, type ChatResult, type EndpointInfo, type Platform, type TenantModel} from '@yushiguang/sprint-contracts';
 import {memoryLimiterStore, STAND_IN_MODELS} from '@yushiguang/sprint-platform';
 import {createGateway} from './gateway.ts';
 import {EndpointLimiter} from './limiter.ts';
@@ -57,7 +57,7 @@ test('label retries busy and broken replies, then succeeds', async () => {
     }),
     {sleep: noWait},
   );
-  const r = await gw.label({slot: 'B', messages: msg, maxOutputTokens: 100, temperature: null});
+  const r = await gw.label({tenantId: 't1', slot: 'B', messages: msg, maxOutputTokens: 100, temperature: null});
   assert.equal(r.attempts, 3);
   assert.equal(r.text, '{"a":1}');
   assert.ok(Math.abs(r.costUsd - (1000 * 0.5 + 100 * 2) / 1e6) < 1e-12);
@@ -72,7 +72,7 @@ test('label does not retry a rejected request and gives up after 5 tries', async
     }),
     {sleep: noWait},
   );
-  await assert.rejects(rejected.label({slot: 'A', messages: msg, maxOutputTokens: 10, temperature: null}), (e: LlmCallError) => e.kind === 'rejected');
+  await assert.rejects(rejected.label({tenantId: 't1', slot: 'A', messages: msg, maxOutputTokens: 10, temperature: null}), (e: LlmCallError) => e.kind === 'rejected');
   assert.equal(calls, 1);
 
   calls = 0;
@@ -83,7 +83,7 @@ test('label does not retry a rejected request and gives up after 5 tries', async
     }),
     {sleep: noWait},
   );
-  await assert.rejects(broken.label({slot: 'A', messages: msg, maxOutputTokens: 10, temperature: null}), /after 5 tries/);
+  await assert.rejects(broken.label({tenantId: 't1', slot: 'A', messages: msg, maxOutputTokens: 10, temperature: null}), /after 5 tries/);
   assert.equal(calls, 5);
 });
 
@@ -149,7 +149,7 @@ test('after a 429 no queued call goes out during the hold, and a 429 on the last
     ),
     {retryDelaysMs: [0]},
   );
-  const req = {slot: 'A' as const, messages: msg, maxOutputTokens: 10, temperature: null};
+  const req = {tenantId: 't1', slot: 'A' as const, messages: msg, maxOutputTokens: 10, temperature: null};
   await Promise.all([gw.label(req), gw.label(req)]);
   // Call 1 (the 429) went out at once; nothing else before its 80 ms hold ended.
   assert.ok(sent.slice(1).every(t => t >= 80), `sent at ${sent.join(', ')} ms`);
@@ -242,7 +242,7 @@ test('chatStream frees its slot when the consumer throws on an error chunk', asy
     /stream failed/,
   );
   await tick();
-  const st = await store.stats('chat-one', chatOneLimits, Date.now());
+  const st = await store.stats('default:chat-one', chatOneLimits, Date.now());
   assert.equal(st.inFlight, 0, 'the slot was given back');
   // Input 'hello' is 2 tokens (5 chars / 4); the yielded 'abcd' adds 1, not the 2000 reserved.
   assert.equal(st.tokensInWindow, 3, 'the reservation was corrected to what was yielded');
@@ -272,7 +272,7 @@ test('chatStream frees its slot when the consumer stops reading early', async ()
   }
   assert.deepEqual(seen, ['abcdefgh']);
   await tick();
-  const st = await store.stats('chat-one', chatOneLimits, Date.now());
+  const st = await store.stats('default:chat-one', chatOneLimits, Date.now());
   assert.equal(st.inFlight, 0, 'the slot was given back');
   // Only the chunk actually yielded counts: 2 input tokens + 8 chars / 4.
   assert.equal(st.tokensInWindow, 4, 'the reservation was corrected to what was yielded');
@@ -293,7 +293,7 @@ test('cancel(requestId) stops every call under that id, before or after it start
     ),
     {sleep: noWait},
   );
-  const req = {slot: 'B' as const, messages: msg, maxOutputTokens: 10, temperature: null, requestId: 'run_1'};
+  const req = {tenantId: 't1', slot: 'B' as const, messages: msg, maxOutputTokens: 10, temperature: null, requestId: 'run_1'};
   const a = gw.label(req);
   const b = gw.label(req);
   const other = gw.label({...req, requestId: 'run_2', traceId: 'other'});
@@ -324,7 +324,7 @@ test('model registry (spec 5): opaque ids; no model, an unknown or an inactive o
   assert.equal((await agent.complete(msg)).text, 'answered by m-think-07');
   assert.equal((await agent.complete(msg, {model: 'm-off'})).text, 'answered by m-think-07');
   assert.equal((await agent.complete(msg, {model: 'no-such-model'})).text, 'answered by m-think-07');
-  assert.equal((await gw.label({slot: 'labeling-main', messages: msg, maxOutputTokens: 10, temperature: null})).text, 'labeled on labeling-main');
+  assert.equal((await gw.label({tenantId: 't1', slot: 'labeling-main', messages: msg, maxOutputTokens: 10, temperature: null})).text, 'labeled on labeling-main');
   assert.deepEqual(allowed.slot, ['labeling-main']);
   assert.ok(allowed.model.includes('m-think-07'));
 });
@@ -342,7 +342,7 @@ test('request fields (spec 5): reasoning tokens count toward cost and TPM; a try
     }),
     {sleep: noWait},
   );
-  const r = await gw.label({slot: 'B', messages: msg, maxOutputTokens: 10, temperature: null, reasoningEffort: 'low', responseFormat: {type: 'json_object'}, timeoutMs: 20});
+  const r = await gw.label({tenantId: 't1', slot: 'B', messages: msg, maxOutputTokens: 10, temperature: null, reasoningEffort: 'low', responseFormat: {type: 'json_object'}, timeoutMs: 20});
   assert.equal(r.attempts, 2);
   assert.equal(r.reasoningTokens, 200);
   // Endpoint B: $0.5 in, $2 out per million; reasoning at the output price.
@@ -471,4 +471,94 @@ test('shared store: waiters from different instances go first in, first out', as
   held.release();
   await Promise.all([first, second]);
   assert.deepEqual(order, ['b', 'c']);
+});
+
+// Tenant models and per-tenant limits (docs/design/server.md, 9).
+
+const tenantModel = (over: Partial<TenantModel> = {}): TenantModel => ({id: 'model_1', tenantId: 't1', name: 'Team model', endpoint: 'https://models.example/v1/team', qpm: 100, tpm: 1_000_000, default: true, createdAt: '2026-11-23T00:00:00Z', createdBy: 'Ann', updatedAt: '2026-11-23T00:00:00Z', ...over});
+const call = (tenantId: string, slot: string) => ({tenantId, slot, messages: msg, maxOutputTokens: 10, temperature: null});
+
+test('tenants: two tenants on the same endpoint have separate QPM budgets', async () => {
+  const p = fakePlatform(async () => ({text: '{}', inputTokens: 1, outputTokens: 1}), [{id: 'ep-a', purpose: 'labeling', slot: 'A', model: 'gpt-5.4', tier: 'fast', qpm: 1, tpm: 1_000_000, maxConcurrency: 4, priceIn: 1, priceOut: 4, supportsTemperature: false, active: true, assumed: false}]);
+  const gw = createGateway(p, {sleep: noWait, windowMs: 200, limiterPollMs: 5});
+  await gw.label(call('t1', 'A'));
+  const t0 = Date.now();
+  await gw.label(call('t2', 'A'));
+  assert.ok(Date.now() - t0 < 100, 't2 did not wait for t1\'s window');
+  await gw.label(call('t1', 'A'));
+  assert.ok(Date.now() - t0 >= 150, 't1\'s second call waited for its own window');
+});
+
+test('tenants: a busy reply slows down only the tenant that got it', async () => {
+  let calls = 0;
+  const p = fakePlatform(async req => {
+    calls++;
+    if (req.tenantId === 't1' && calls === 1) throw new LlmCallError('rate_limited', 'slow down', {status: 429, retryAfterMs: 150});
+    return {text: '{}', inputTokens: 1, outputTokens: 1};
+  });
+  const gw = createGateway(p, {retryDelaysMs: [], sleep: noWait, limiterPollMs: 5});
+  await assert.rejects(gw.label(call('t1', 'B')));
+  const t0 = Date.now();
+  await gw.label(call('t2', 'B'));
+  assert.ok(Date.now() - t0 < 100, 't2 is not held');
+  await gw.label(call('t1', 'B'));
+  assert.ok(Date.now() - t0 >= 120, 't1 waited for its hold');
+  assert.equal((await p.limiterStore!.stats('t1:labeling-B', {qpm: 240, tpm: 800_000, maxConcurrency: 24, windowMs: 60_000}, Date.now())).concurrency, 12);
+  assert.equal((await p.limiterStore!.stats('t2:labeling-B', {qpm: 240, tpm: 800_000, maxConcurrency: 24, windowMs: 60_000}, Date.now())).concurrency, 24);
+});
+
+test('tenants: a model added after start is called at once, on the endpoint the admin entered; another tenant cannot call it', async () => {
+  const seen: {endpoint: string; tenantId?: string}[] = [];
+  const p = fakePlatform(async req => (seen.push({endpoint: req.endpoint, tenantId: req.tenantId}), {text: 'ok', inputTokens: 1, outputTokens: 1}));
+  let models: TenantModel[] = [];
+  let reads = 0;
+  const gw = createGateway(p, {sleep: noWait, tenantModels: {list: async t => (reads++, models.filter(m => m.tenantId === t))}});
+  await assert.rejects(gw.label(call('t1', 'model_1')), (e: LlmCallError) => e.kind === 'rejected');
+  // Added after the gateway was built and after it read the tenant: no restart, no wait for the cache.
+  models = [tenantModel()];
+  await new Promise(r => setTimeout(r, 1010));
+  const r = await gw.label(call('t1', 'model_1'));
+  assert.equal(r.endpointId, 'model_1');
+  assert.deepEqual(seen.at(-1), {endpoint: 'https://models.example/v1/team', tenantId: 't1'});
+  await assert.rejects(gw.label(call('t2', 'model_1')), (e: LlmCallError) => e.kind === 'rejected');
+  // The platform's defaults stay open to every tenant.
+  await gw.label(call('t2', 'A'));
+  assert.deepEqual(seen.at(-1), {endpoint: 'A', tenantId: 't2'});
+  assert.deepEqual((await gw.labelingEndpointsFor('t1')).map(e => e.id), ['model_1', 'A', 'B']);
+  assert.deepEqual((await gw.labelingEndpointsFor('t2')).map(e => e.id), ['A', 'B']);
+  const before = reads;
+  await gw.label(call('t1', 'model_1'));
+  assert.equal(reads, before, 'a known model is served from the cache');
+});
+
+test('tenants: changed limits apply once the cache is dropped; a failed read keeps the models read before', async () => {
+  const p = fakePlatform(async () => ({text: 'ok', inputTokens: 1, outputTokens: 1}));
+  let models = [tenantModel({qpm: 1})];
+  let down = false;
+  const gw = createGateway(p, {sleep: noWait, windowMs: 300, limiterPollMs: 5, tenantModels: {list: async () => (down ? Promise.reject(new Error('down')) : models)}});
+  await gw.label(call('t1', 'model_1'));
+  models = [tenantModel({qpm: 100})];
+  gw.forgetTenant('t1');
+  const t0 = Date.now();
+  await gw.label(call('t1', 'model_1'));
+  assert.ok(Date.now() - t0 < 200, 'the raised QPM applies without a restart');
+  down = true;
+  gw.forgetTenant('t1');
+  await assert.rejects(gw.label(call('t1', 'model_1')), /could not be read/);
+});
+
+test('tenants: chat counts under the caller\'s tenant; a tenant model named as the model is called on its endpoint', async () => {
+  const p = fakePlatform(async () => ({text: '', inputTokens: 0, outputTokens: 0}));
+  const opts: {model?: string; endpoint?: string}[] = [];
+  p.agent.complete = async (_m, o) => (opts.push({model: o?.model, endpoint: o?.endpoint}), {text: 'ok', model: String(o?.model), usage: {inputTokens: 1, outputTokens: 1}});
+  const gw = createGateway(p, {sleep: noWait, tenantModels: {list: async t => (t === 't1' ? [tenantModel()] : [])}});
+  const agent = gw.agentModel();
+  await agent.complete(msg, {model: 'gpt-5.4', tenantId: 't1', endpoint: 'ignored'});
+  assert.deepEqual(opts.at(-1), {model: 'gpt-5.4', endpoint: undefined}, 'a caller cannot pick the endpoint');
+  assert.equal((await p.limiterStore!.stats('t1:chat-gpt-5.4', {qpm: 240, tpm: 800_000, maxConcurrency: 24, windowMs: 60_000}, Date.now())).requestsInWindow, 1);
+  await agent.complete(msg, {model: 'model_1', tenantId: 't1'});
+  assert.deepEqual(opts.at(-1), {model: 'Team model', endpoint: 'https://models.example/v1/team'});
+  // Another tenant naming it gets the fallback model, not t1's endpoint.
+  await agent.complete(msg, {model: 'model_1', tenantId: 't2'});
+  assert.equal(opts.at(-1)?.endpoint, undefined);
 });

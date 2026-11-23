@@ -30,6 +30,7 @@ export const DEFAULT_SYSTEM_CONFIG: SystemConfig = {
     imageTokensEstimate: 800,
     charsPerTokenEstimate: 4,
     evalOutputTokensEstimate: 150,
+    tenantModelsTtlMs: 30_000,
   },
   agent: {maxToolCalls: 4, maxToolResultChars: 12_000, recentHistoryCount: 8, maxDocChars: 20_000, maxAttachmentChars: 8_000, tryTemplateMaxExamples: 5},
   ui: {activePollMs: 5000, sweepMs: 60_000, changeDebounceMs: 120, minActionPendingMs: 220},

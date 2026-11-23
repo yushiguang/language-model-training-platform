@@ -32,6 +32,8 @@ function fakeGateway(answer: (req: LabelCallRequest) => Promise<string>, stats =
   return {
     endpoints: () => [],
     labelingEndpoints: () => [],
+    labelingEndpointsFor: async () => [],
+    forgetTenant: () => {},
     agentModel: () => {
       throw new Error('not used');
     },
@@ -59,6 +61,7 @@ function deferred() {
 
 const input = (ids: string[], v: {id: string}, extra = {}) => ({
   projectId: 'pr_1',
+  tenantId: 'default',
   purpose: 'training' as const,
   promptVersionId: v.id,
   setupVersionId: 'sv_1',
@@ -153,11 +156,30 @@ test('one runner per task: a second run returns null; Stop stops it; a closed ru
   assert.equal(listed?.stopReason, 'closed');
 });
 
+test('calls carry the project\'s tenant: a task\'s, an older task\'s (default) and a try\'s (docs/design/server.md, 9)', async () => {
+  const {db, catalog, v, ids} = await setup(2, 'tenant-');
+  const tenants: string[] = [];
+  const lab = createLabeling({db, catalog, gateway: fakeGateway(async req => (tenants.push(req.tenantId), '{"format": "Vlog"}')), locks: memoryLocks()});
+  const t = await lab.createTask(input(ids, v, {tenantId: 't9'}));
+  assert.equal(t.tenantId, 't9');
+  await lab.runTask(t.id);
+  assert.deepEqual(tenants, ['t9', 't9']);
+  const {DocRepo} = await import('@yushiguang/sprint-platform');
+  const old = await lab.createTask(input(ids, v, {settings: {endpoint: 'A' as const, maxOutputTokens: 99, temperature: null}}));
+  await new DocRepo(db).patch('labeling_tasks', old.id, {tenantId: undefined});
+  tenants.length = 0;
+  await lab.runTask(old.id);
+  assert.deepEqual(tenants, ['default', 'default']);
+  tenants.length = 0;
+  await lab.tryTemplate({tenantId: 't9', template: 'Draft {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], schema, settings: {endpoint: 'A', maxOutputTokens: 100, temperature: 0}, examples: await withFeatures(catalog, ids)});
+  assert.deepEqual(tenants, ['t9', 't9']);
+});
+
 test('tryTemplate labels a few examples with an unsaved template and saves nothing', async () => {
   const {db, catalog, v, ids} = await setup(3, 'try-');
   const labeling = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": ["Vlog"]}'), locks: memoryLocks()});
   const examples = await withFeatures(catalog, ids);
-  const rows = await labeling.tryTemplate({template: 'Draft {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], schema, settings: {endpoint: 'A', maxOutputTokens: 100, temperature: 0}, examples});
+  const rows = await labeling.tryTemplate({tenantId: 'default', template: 'Draft {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], schema, settings: {endpoint: 'A', maxOutputTokens: 100, temperature: 0}, examples});
   assert.deepEqual(rows.map(r => r.exampleId), ids);
   assert.ok(rows.every(r => r.answer?.join() === 'Vlog' && r.costUsd === 0.01));
   assert.equal((await labeling.listTasks('pr_1')).length, 0);
@@ -175,7 +197,7 @@ test('a try is stopped by its request id: the calls carry the id, and cancel rea
   };
   const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks()});
   const examples = await withFeatures(catalog, ids);
-  await labeling.tryTemplate({template: 'Draft {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], schema, settings: {endpoint: 'A', maxOutputTokens: 100, temperature: 0}, examples, requestId: 'rq_try'});
+  await labeling.tryTemplate({tenantId: 'default', template: 'Draft {{Description}}', features: {video: ['Description'], photo_text: [], metadata: []}, images: [], schema, settings: {endpoint: 'A', maxOutputTokens: 100, temperature: 0}, examples, requestId: 'rq_try'});
   assert.deepEqual(withId, ['rq_try', 'rq_try']);
   await labeling.cancel('rq_try');
   assert.deepEqual(cancelled, ['rq_try']);
@@ -196,7 +218,7 @@ test('image URLs may be resolved asynchronously (a signed URL per call), and eve
   const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks(), resolveUrl});
   const images = [{url: 'logo.png', name: 'logo.png', size: 1}];
   const examples = await withFeatures(catalog, ids);
-  const rows = await labeling.tryTemplate({template: 'Draft {{Description}} [Image 1]', features: {video: ['Description'], photo_text: [], metadata: []}, images, schema, settings: {endpoint: 'A', maxOutputTokens: 100, temperature: 0}, examples});
+  const rows = await labeling.tryTemplate({tenantId: 'default', template: 'Draft {{Description}} [Image 1]', features: {video: ['Description'], photo_text: [], metadata: []}, images, schema, settings: {endpoint: 'A', maxOutputTokens: 100, temperature: 0}, examples});
   assert.ok(rows.every(r => r.error === null && r.answer?.join() === 'Vlog'));
   assert.equal(seen.length, 2);
   assert.ok(seen.every(u => /^https:\/\/files\.example\/logo\.png\?sig=\d$/.test(u)));

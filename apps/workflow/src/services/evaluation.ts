@@ -1,6 +1,7 @@
 import type {EndpointId, EvalReport, Example, GoldLabel, LabelingTask, ModelSettings, Prediction, PromptVersion, SetupVersion, TaskPurpose} from '@yushiguang/sprint-contracts';
 import {asAnswer, toMap, computeMetrics, judge, newId, settingsHash, versionLabel, type Scored, msg} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
+import {tenantOf} from './sources.ts';
 import {postEvent} from './chat-events.ts';
 
 /** Latest gold label per example for the current schema; older-schema labels are kept as hints. */
@@ -79,6 +80,7 @@ export async function labelExamples(w: Scope,
   if (task?.state === 'done') return task;
   task ??= await labeling.createTask({
     projectId,
+    tenantId: tenantOf(w),
     purpose,
     promptVersionId: version.id,
     setupVersionId: setup.id,

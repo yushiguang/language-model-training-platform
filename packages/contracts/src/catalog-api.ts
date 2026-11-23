@@ -20,6 +20,7 @@ import type {
   SourceCut,
   SourceFile,
   StartRequest,
+  TenantModel,
 } from './types.ts';
 
 /**
@@ -60,6 +61,8 @@ export interface CatalogRecords {
   audit_log: AuditEntry;
   /** Tenant records (#29): data sources belong to a tenant, never to a project. */
   data_sources: DataSource;
+  /** Each tenant's labeling models (docs/design/server.md, 9). */
+  tenant_models: TenantModel;
   source_files: SourceFile;
   source_chunks: SourceChunk;
   /** A project's segments of a source (#30); kept, retired, when the project is deleted. */
