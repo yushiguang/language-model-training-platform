@@ -85,7 +85,7 @@ export async function runningWork(w: Scope, state: ProjectState) {
   return {
     ...work,
     ...(nothing ? {note: 'Nothing is running for this project.'} : {}),
-    howToStop: 'Scoring stops with Stop on its row on Prompt versions; the Optimiser with Stop on its progress panel; taking examples with Stop on Eval Dataset. Stopping keeps what is already done.',
+    howToStop: 'Scoring stops with Stop on its row on Prompt versions; the Optimiser with Stop on its progress panel; taking examples with Stop on Dataset. Stopping keeps what is already done.',
   };
 }
 

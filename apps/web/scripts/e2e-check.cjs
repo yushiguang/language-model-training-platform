@@ -2,7 +2,7 @@
  * End-to-end check of the static build on the stand-ins, on the 1.0.0 four-step flow: the Projects
  * list (create, and Delete with the exact-name confirmation), Prompt Design (an existing prompt
  * pasted into Ask AI is imported with its "Not carried over" list; a prompt drafted from a
- * description is approved as v1 with the page's Approve button, never in the chat), Eval Dataset
+ * description is approved as v1 with the page's Approve button, never in the chat), Dataset
  * (auto sampling, no split), Gold Labels (labeled on the page with the answers bundled with the
  * sample file), the Project Settings confirmation before the first paid run, then Prompt Tuning:
  * scoring, the fixed AI Suggestion cards, Mismatches, Improve with AI with word marks, Auto
@@ -70,7 +70,7 @@ let current = null;
   const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
   const button = (p, name) => p.getByRole('button', {name, exact: true});
   const ask = async (p, text) => {
-    await p.locator('aside.chat, button.ask').first().waitFor();
+    await p.locator('aside.chat, button.sp-ask').first().waitFor();
     if (!(await p.locator('aside.chat').count())) await button(p, 'Ask AI').click();
     // 2026-11-16: Enter adds a line and Shift+Enter sends; a Shift+Enter that ends an input
     // method's composition never sends.
@@ -93,11 +93,15 @@ let current = null;
   };
 
   // Projects: one light list; Delete asks for the exact project name
+  // Home (#91): the user's tenant opens its projects.
   await page.goto(BASE + '/');
+  await page.getByRole('heading', {name: 'Your tenants'}).waitFor();
+  await shot(page, '0a-home');
+  await page.goto(BASE + '/tenant/');
   await page.getByPlaceholder('Short-video tagging').fill('Scratch project');
   await button(page, 'Create project').click();
   await page.waitForURL(/prompt-design/);
-  await page.goto(BASE + '/');
+  await page.goto(BASE + '/tenant/');
   await page.getByRole('link', {name: 'Scratch project'}).waitFor();
   if (await page.getByText('Current step', {exact: true}).count()) throw new Error('the Projects list still has a Current step column');
   // 1.1.0: the list says who created each project.
@@ -214,12 +218,12 @@ let current = null;
   // Resilience spec, 2: an approved prompt is edited on Prompt Tuning, not here.
   if (await page.locator('main').getByRole('link', {name: 'Edit prompt', exact: true}).count()) throw new Error('the approved Prompt Design still has Edit prompt');
   // The helper says what comes next (spec 6.2)
-  await page.locator('aside.chat').getByText(/v1 is saved\. Next, click "Next: Eval Dataset" at the top right/).waitFor({timeout: 10000});
+  await page.locator('aside.chat').getByText(/v1 is saved\. Next, click "Next: Dataset" at the top right/).waitFor({timeout: 10000});
   await shot(page, '1d-prompt-approved');
-  await button(page, 'Next: Eval Dataset').click();
+  await button(page, 'Next: Dataset').click();
   log('prompt design done');
 
-  // Eval Dataset (#29): examples come from the team's data sources. The built-in sample data is
+  // Dataset (#29): examples come from the team's data sources. The built-in sample data is
   // ticked with its count in the box; a count over what is left is refused before anything starts.
   await page.waitForURL(/dataset/);
   await page.waitForFunction(() => +document.querySelector('[aria-label="Examples from Sample data"]')?.value > 0, null, {timeout: 10000});
@@ -233,8 +237,8 @@ let current = null;
   const next = button(page, 'Next: Gold Labels');
   await next.waitFor({timeout: 60000});
   await page.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent === 'Next: Gold Labels' && !b.disabled), null, {timeout: 10000});
-  if (await page.getByText('Split', {exact: true}).count()) throw new Error('the Eval Dataset page still has a split');
-  if (await button(page, 'Check labels').count()) throw new Error('the Eval Dataset page still has the Check labels card');
+  if (await page.getByText('Split', {exact: true}).count()) throw new Error('the Dataset page still has a split');
+  if (await button(page, 'Check labels').count()) throw new Error('the Dataset page still has the Check labels card');
   log('dataset:', (await page.locator('main .metrics').innerText()).replace(/\s+/g, ' '));
   await shot(page, '2-dataset');
   await next.click();
@@ -288,7 +292,7 @@ let current = null;
   await button(page, 'Dismiss').click();
   if (await page.getByText(/already had this label/).count()) throw new Error('Dismiss left the upload result');
   if ((await page.locator('.media small').innerText()).trim() !== firstId) throw new Error('uploading labels moved to another example');
-  // Remove example: out of scope; it leaves the eval set and shows under Removed on Eval Dataset.
+  // Remove example: out of scope; it leaves the eval set and shows under Removed on Dataset.
   await button(page, 'Next').click();
   await button(page, 'Remove example').click();
   const rm = page.getByRole('dialog');
@@ -432,7 +436,7 @@ let current = null;
   if (await button(page, 'Improve with AI').count()) {
     // Discard first (#39, T8): the draft closes as discarded and does not come back on reload.
     await button(page, 'Improve with AI').first().click();
-    await page.waitForURL(/prompt\/edit/);
+    await page.waitForURL(/prompt-design\/?\?.*v=/);
     await page.getByText('Draft from Prompt helper', {exact: true}).waitFor({timeout: 20000});
     await button(page, 'Discard').click();
     await page.getByText('Draft from Prompt helper', {exact: true}).waitFor({state: 'detached'});
@@ -445,7 +449,7 @@ let current = null;
     await page.goto(url('/prompt/'));
     for (let i = 0; i < 30 && !(await button(page, 'Improve with AI').count()); i++) await page.waitForTimeout(1000);
     await button(page, 'Improve with AI').first().click();
-    await page.waitForURL(/prompt\/edit/);
+    await page.waitForURL(/prompt-design\/?\?.*v=/);
     await page.getByText('Draft from Prompt helper', {exact: true}).waitFor({timeout: 20000});
     await page.locator('.sp-marks ins').first().waitFor({timeout: 10000});
     log('improve with AI:', await page.locator('.sp-marks ins').count(), 'changes marked');
@@ -547,7 +551,7 @@ let current = null;
 
   // The prompt editor for a version: the same three parts, with word marks against the saved text
   await page.locator('main').getByRole('link', {name: 'Edit prompt', exact: true}).click();
-  await page.waitForURL(/prompt\/edit/);
+  await page.waitForURL(/prompt-design\/?\?.*v=/);
   await page.getByLabel('Persona and task').waitFor();
   log('opened version marks:', await page.locator('.sp-marks').count(), (await page.locator('.ph-actions .badge').allInnerTexts()).join(', ') || '(no badge)');
   await shot(page, '6-prompt-edit');
@@ -606,24 +610,31 @@ let current = null;
   await shot(page, '2c-dataset-removed');
   log('dataset after pruning and one restore:', (await page.locator('main .metrics').innerText()).replace(/\s+/g, ' '));
 
-  // Settings at the top opens Project Settings at any time
-  await button(page, 'Settings').click();
+  // #91: Project settings opens from the project overview, and the project name in the top bar follows a rename.
+  await page.goto(url('/overview/'));
+  await button(page, 'Project settings').click();
   const again = page.getByRole('dialog');
   await again.getByText('Project Settings', {exact: true}).waitFor();
   if (!(await button(again, 'Save').count())) throw new Error('Project Settings has no Save');
-  // 1.1.0: the project is renamed here, and the top island follows.
   const nameBox = again.getByLabel('Name', {exact: true});
   if ((await nameBox.inputValue()) !== 'Short-video tagging') throw new Error('the Name field is not prefilled with the project name');
   await nameBox.fill('  Short-video tags  ');
   await shot(page, '2d-settings-name');
   await button(again, 'Save').click();
   await again.waitFor({state: 'detached', timeout: 10000});
-  await page.locator('.topnav .proj b', {hasText: /^Short-video tags$/}).waitFor({timeout: 10000});
-  await button(page, 'Settings').click();
+  const crumb = page.locator('.sp-crumb-project .sp-crumb-name');
+  await crumb.filter({hasText: /^Short-video tags$/}).waitFor({timeout: 10000});
+  await shot(page, '2e-overview');
+  await button(page, 'Project settings').click();
   await page.getByRole('dialog').getByLabel('Name', {exact: true}).fill('Short-video tagging');
   await button(page.getByRole('dialog'), 'Save').click();
-  await page.locator('.topnav .proj b', {hasText: /^Short-video tagging$/}).waitFor({timeout: 10000});
-  log('renamed from Project Settings and back; the top island follows');
+  await crumb.filter({hasText: /^Short-video tagging$/}).waitFor({timeout: 10000});
+  // The project name opens the switch menu: recent projects and All projects.
+  await page.locator('.sp-crumb-project').click();
+  await page.getByRole('menu').getByText('All projects', {exact: true}).waitFor();
+  await shot(page, '2f-project-switch');
+  await page.keyboard.press('Escape');
+  log('renamed from Project settings and back; the top bar follows');
 
   // An agent question: the evaluation agent reads the report with a tool
   await page.goto(url('/prompt/'));
@@ -669,46 +680,74 @@ let current = null;
   const zp = await ctx.newPage();
   watch(zp);
   await zp.goto(url('/prompt/'));
-  await zp.locator('.topnav .stepper').waitFor();
-  const avatar = zp.locator('button.avatar-btn');
+  await zp.locator('.sp-steps').waitFor();
+  const avatar = zp.locator('button.sp-avatar');
   await avatar.click();
   await zp.getByRole('menu').waitFor();
-  // The avatar shows the user's initial at once (the identity is read once and kept), in bold.
-  const initial = await avatar.innerText();
-  const weight = await avatar.evaluate(el => getComputedStyle(el).fontWeight);
-  if (!initial.trim() || +weight < 700) throw new Error(`the avatar is "${initial}" at weight ${weight}`);
+  // The avatar names the user at once (the identity is read once and kept).
+  const who = (await avatar.getAttribute('aria-label')) || '';
+  if (!/\S: account$/.test(who)) throw new Error(`the avatar is labeled "${who}"`);
   // The stand-in identity cannot end a session, so there is no Sign out.
   if (await zp.getByRole('menuitem', {name: 'Sign out'}).count()) throw new Error('Sign out shows although the platform cannot sign out');
   await shot(zp, '9-avatar-menu');
-  await zp.getByRole('menuitemradio').nth(1).click();
+  await zp.keyboard.press('Escape');
+  // The language button switches the site to Chinese.
+  const language = async name => {
+    await zp.locator('button.sp-lang').click();
+    await zp.getByRole('menuitem', {name}).click();
+  };
+  await language('中文');
   await zp.waitForFunction(() => document.documentElement.lang === 'zh-CN');
   const english = [];
   const visit = async (path, name) => {
     await zp.goto(url(path));
-    await zp.locator('.topnav .stepper').waitFor();
+    await zp.locator('.sp-steps').waitFor();
     await zp.waitForTimeout(600);
     await shot(zp, name);
     // Text still in English (data such as field names and versions aside), for the log.
     english.push(...(await zp.evaluate(() => [...document.querySelectorAll('main *')].filter(el => el.children.length === 0 && /[A-Za-z]{3,} [A-Za-z]{3,} [A-Za-z]{3,}/.test(el.textContent || '')).map(el => el.textContent.trim().slice(0, 60)))));
   };
   await visit('/prompt/', '9b-zh-prompt-tuning');
-  if (await zp.locator('.topnav .stepper').getByText('Prompt Design', {exact: true}).count()) throw new Error('the step names are still in English after switching to Chinese');
+  if (await zp.locator('.sp-steps').getByText('Prompt Design', {exact: true}).count()) throw new Error('the step names are still in English after switching to Chinese');
   await visit('/gold/', '9c-zh-gold');
   await visit('/dataset/', '9d-zh-dataset');
   await visit('/prompt-design/', '9e-zh-prompt-design');
-  await button(zp, await zp.locator('.topbar-end .btn').first().innerText()).click();
+  await visit('/overview/', '9g-zh-overview');
+  await button(zp, '项目设置').click();
   await zp.getByRole('dialog').waitFor();
   await shot(zp, '9f-zh-settings');
   await zp.keyboard.press('Escape');
   const missed = await zp.evaluate(() => globalThis.__sprintI18nMissing || []);
   if (missed.length) throw new Error(`texts missing from the Chinese catalog: ${missed.join(' | ')}`);
   log('Chinese: no catalog misses; English left on the pages:', [...new Set(english)].slice(0, 12).join(' | ') || 'none');
-  await zp.locator('button.avatar-btn').click();
-  await zp.getByRole('menuitemradio').first().click();
+  await language('English');
   await zp.waitForFunction(() => document.documentElement.lang === 'en');
-  await zp.locator('.topnav .stepper').getByText('Prompt Design', {exact: true}).waitFor();
+  await zp.locator('.sp-steps').getByText('Prompt Design', {exact: true}).waitFor();
   log('switched back to English');
   await zp.close();
+
+  // #91: a refused change opens the "insufficient access" dialog, and Request access sends the
+  // request on. The stand-in permission check refuses every change while this browser is a viewer.
+  const vp = await ctx.newPage();
+  watch(vp);
+  await vp.goto(url('/overview/'));
+  await vp.evaluate(() => localStorage.setItem('sprint-standin-access', 'viewer'));
+  await vp.reload();
+  await button(vp, 'Project settings').click();
+  const vs = vp.getByRole('dialog');
+  await vs.getByLabel('Name', {exact: true}).fill('Viewer rename');
+  await button(vs, 'Save').click();
+  const denied = vp.getByRole('dialog', {name: /You can't edit this project/});
+  await denied.waitFor({timeout: 10000});
+  await denied.getByLabel(/Why you need it/).fill('I label the Food examples this week');
+  await shot(vp, '9h-no-access');
+  await button(denied, 'Request access').click();
+  await vp.getByRole('dialog', {name: /Request sent/}).waitFor({timeout: 10000});
+  await shot(vp, '9i-no-access-sent');
+  await button(vp.getByRole('dialog', {name: /Request sent/}), 'Done').click();
+  await vp.evaluate(() => localStorage.removeItem('sprint-standin-access'));
+  await vp.close();
+  log('a refused change opened the access dialog; the request was sent');
 
   const facts = await page.evaluate(() => {
     const docs = k => JSON.parse(localStorage.getItem('sprint-doc:' + k) || '[]').map(d => d.data);
@@ -763,8 +802,11 @@ let current = null;
   log('telemetry:', JSON.stringify(tel));
   // Data Source (#29), after the telemetry read (a page load clears the in-memory metrics): a tenant page next to Projects. A source is a name and its files, with no
   // versions; bad rows and repeats are counted, and a second file adds only new items.
-  await page.goto(BASE + '/sources/');
-  await page.getByRole('navigation', {name: 'Sprint'}).getByRole('link', {name: 'Data Source'}).waitFor({timeout: 10000});
+  // #91: the tenant page links to them.
+  await page.goto(BASE + '/tenant/');
+  await page.locator('main').getByRole('link', {name: 'Data sources'}).click();
+  await page.waitForURL(/\/sources\//, {timeout: 10000});
+  await page.getByRole('heading', {name: 'Data Source', level: 1}).waitFor({timeout: 10000});
   const sampleRow = page.locator('tr', {hasText: 'Sample data'});
   await sampleRow.getByText('Built in', {exact: true}).waitFor({timeout: 10000});
   const pickFile = (name, text) => page.locator('main input[type=file]').setInputFiles({name, mimeType: 'text/csv', buffer: Buffer.from(text)});

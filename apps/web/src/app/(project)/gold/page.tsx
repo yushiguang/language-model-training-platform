@@ -287,7 +287,7 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
   if (!state.snapshot || !state.setup?.schema)
     return (
       <Frame head={<PageHead title={t('Gold Labels')} />}>
-        <Empty title={t('No examples to label yet')} text={state.setup?.schema ? t('Add examples on Eval Dataset first, then label them here.') : t('Approve the prompt on Prompt Design first: its values are what you label with.')} />
+        <Empty title={t('No examples to label yet')} text={state.setup?.schema ? t('Add examples on Dataset first, then label them here.') : t('Approve the prompt on Prompt Design first: its values are what you label with.')} />
       </Frame>
     );
 
@@ -397,13 +397,13 @@ function Gold({state, tabParam}: {state: ProjectState; tabParam: string | null})
           </div>
         </div>
       ) : !onMismatch && evalSub === 'open' && evalAll.length > 0 ? (
-        <Empty title={t('Every example is labeled')} text={t('Labels you saved are under Labeled. Add examples on Eval Dataset to label more.')} />
+        <Empty title={t('Every example is labeled')} text={t('Labels you saved are under Labeled. Add examples on Dataset to label more.')} />
       ) : onMismatch && sub === 'done' ? (
         mm && <Empty title={t('Nothing reviewed yet')} text={picked ? t('Labels you keep or change for {version} show here.', {version: picked.label}) : t('Labels you keep or change for this version show here.')} />
       ) : onMismatch ? (
         mm && <Empty title={t('No mismatches left')} text={picked ? t('Every label {version} disagrees with has been checked.', {version: picked.label}) : t('Every label the model disagrees with has been checked.')} />
       ) : (
-        <Empty title={t('No examples yet')} text={t('Add examples on the Eval Dataset page.')} />
+        <Empty title={t('No examples yet')} text={t('Add examples on the Dataset page.')} />
       )}
     </Frame>
   );
@@ -506,7 +506,7 @@ function ExampleCard({ex, n, extra, onRemove}: {ex: Example; n: number; extra?: 
       {removing && (
         <Dialog
           title={t('Remove this example?')}
-          text={t('It leaves the eval dataset and every score worked out from now on. You can put it back from the Removed list on Eval Dataset.')}
+          text={t('It leaves the eval dataset and every score worked out from now on. You can put it back from the Removed list on Dataset.')}
           onClose={() => setRemoving(null)}
           actions={
             <>

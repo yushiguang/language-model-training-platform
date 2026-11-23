@@ -89,7 +89,7 @@ export interface LabelBalance {
   values: ValueBalance[];
 }
 
-/** The label balance and coverage card on Eval Dataset (spec 1.0.0, 4.3). */
+/** The label balance and coverage card on Dataset (spec 1.0.0, 4.3). */
 export function labelBalance(schema: Schema, examples: Pick<Example, 'id' | 'optimiserHalf'>[], gold: Record<string, {answer: Answer} | undefined>): LabelBalance {
   const c = systemConfig().dataset;
   const labeled = examples.filter(e => !!gold[e.id]);

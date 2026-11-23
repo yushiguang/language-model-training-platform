@@ -2,7 +2,7 @@
 
 A platform where PMs and operations staff produce task models (teacher-to-student distillation).
 Version 1.0.0 covers prompt tuning: a fixed-workflow website with helpers built into each step
-(Prompt Design, Eval Dataset, Gold Labels, Prompt Tuning). The result is a labeling prompt that
+(Prompt Design, Dataset, Gold Labels, Prompt Tuning). The result is a labeling prompt that
 passes the project's checks.
 
 ```bash

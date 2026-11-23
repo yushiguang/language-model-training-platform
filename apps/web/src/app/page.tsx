@@ -1,149 +1,91 @@
 'use client';
 
-import Link from 'next/link';
-import {useGo} from '@/components/nav';
 import {useEffect, useState} from 'react';
-import type {Project} from '@yushiguang/sprint-contracts';
-import {hrefFor} from '@/components/ProjectContext';
+import {Badge, Card, ClickableCard, Grid, Heading, HStack, Text, VStack} from '@/ui/astryx';
 import {NODES} from '@yushiguang/sprint-domain';
-import {TenantIsland} from '@/components/Shell';
-import {SignedIn} from '@/components/session';
-import {createProject, deleteProject, listProjects} from '@/backend-api';
-import {Banner, Button, Card, dateTime, Dialog, Field, Icon, One, PageHead, Table} from '@/ui';
+import {listProjects} from '@/backend-api';
+import {HomeFrame} from '@/components/Shell';
+import {useRuntime} from '@/components/session';
 import {t} from '@/i18n';
 
 /**
- * All projects (design: U-C-Projects, U-F-Projects-Loading, U-F-Projects-Error). One light call
- * lists them (spec 1.0.0, 2.4): a project opens on the step its own page works out. Delete asks
- * for the project's exact name first. The list shows who created each project (spec 1.1.0, 1.1).
- * Nothing renders until the signed-in user is known (2026-11-16 refinements, 1.1).
+ * Home (wireframe W-Home): what Sprint does, the tenants the user belongs to, and the four steps
+ * of a project. One tenant for now: switching and creating tenants come with the tenant pages.
  */
-/** Project, Created by, Created, Delete (the card is 706 wide). */
-const WIDTHS: (number | 'auto')[] = ['auto', 150, 150, 104];
-const cols = () => [{label: t('Project')}, {label: t('Created by')}, {label: t('Created')}, {label: '', kind: 'act' as const}];
-
 export default function Home() {
   return (
-    <SignedIn>
-      <Projects />
-    </SignedIn>
+    <HomeFrame>
+      <div className="sp-page sp-home">
+        <VStack gap={10}>
+          <VStack gap={3} hAlign="center" className="sp-hero">
+            <Heading level={1}>{t('Turn a labeling guide into a passing prompt')}</Heading>
+            <Text type="body" color="secondary">
+              {t('You bring what each label means and a few hundred labels from people. Sprint writes, scores and improves the prompt.')}
+            </Text>
+          </VStack>
+          <Tenants />
+          <VStack gap={4}>
+            <Heading level={2}>{t('How a project goes')}</Heading>
+            <Grid columns={{minWidth: 220, max: 4}} gap={3}>
+              {NODES.map((n, i) => (
+                <Card key={n.id} padding={5}>
+                  <VStack gap={1}>
+                    <Text type="supporting" color="secondary">
+                      {t('Step {n}', {n: i + 1})}
+                    </Text>
+                    <Text type="label">{t(n.label)}</Text>
+                    <Text type="body" color="secondary">
+                      {t(STEP_LINES[n.id])}
+                    </Text>
+                  </VStack>
+                </Card>
+              ))}
+            </Grid>
+          </VStack>
+        </VStack>
+      </div>
+    </HomeFrame>
   );
 }
 
-function Projects() {
-  const go = useGo();
-  const [projects, setProjects] = useState<Project[] | null>(null);
-  const [doomed, setDoomed] = useState<Project | null>(null);
-  const [typed, setTyped] = useState('');
-  const [failed, setFailed] = useState<string | null>(null);
-  const [name, setName] = useState('');
+const STEP_LINES: Record<(typeof NODES)[number]['id'], string> = {
+  prompt_design: 'Tell the AI helper what to label. It drafts the prompt.',
+  dataset: 'Take a batch of examples from your data.',
+  gold: 'People label the examples. These are the right answers.',
+  prompt: 'See the score. Let the Optimiser improve the prompt until it passes.',
+};
 
-  const load = async () => {
-    setFailed(null);
-    setProjects(null);
-    try {
-      setProjects(await listProjects());
-    } catch (e) {
-      setFailed(t('Projects could not load: {why}', {why: t((e as Error).message || 'the service did not answer')}));
-    }
-  };
+function Tenants() {
+  const {info} = useRuntime();
+  const tenant = info?.tenant;
+  const [count, setCount] = useState<number | null>(null);
   useEffect(() => {
-    void load();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const create = async () => {
-    const p = await createProject(name.trim() || t('Untitled project'));
-    await go(hrefFor(p.id, '/prompt-design'));
-  };
-
-  const remove = async () => {
-    if (!doomed || typed !== doomed.name) return;
-    await deleteProject({projectId: doomed.id});
-    setDoomed(null);
-    setTyped('');
-    await load();
-  };
-
+    let live = true;
+    listProjects().then(
+      list => live && setCount(list.length),
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (!tenant) return null;
   return (
-    <div className="k app b">
-      <div className="b-body">
-        <main className="b-main">
-          <TenantIsland current="projects" />
-          <div className="b-head">
-            <div className="container">
-              <PageHead title={t('Projects')} />
-            </div>
-          </div>
-          <div className="container">
-            <Card title={t('New project')} style={{width: 706}} className="form" actions={<Button label={t('Create project')} kind="primary" icon="plus" onClick={create} />}>
-              <Field label={t('Project name')}>
-                <input className="input" value={name} placeholder={t('Short-video tagging')} onChange={e => setName(e.target.value)} />
-              </Field>
-            </Card>
-            {failed ? (
-              <Card title={t('Projects')} style={{width: 706}}>
-                <Banner tone="err" text={failed} style={{margin: 0}} action={<Button label={t('Retry')} size="sm" onClick={load} />} />
-              </Card>
-            ) : !projects ? (
-              <Card
-                title={t('Projects')}
-                style={{width: 706}}
-                titleExtra={
-                  <span className="t-3 load-note" role="status">
-                    <Icon name="ring" />
-                    {t('Loading projects')}
-                  </span>
-                }
-              >
-                <Table
-                  cols={cols()}
-                  widths={WIDTHS}
-                  rows={[180, 140, 200].map((w, i) => ({key: String(i), cells: [<span key="a" className="skel" style={{width: w}} />, <span key="b" className="skel" style={{width: 80}} />, <span key="c" className="skel" style={{width: 120}} />, null]}))}
-                />
-              </Card>
-            ) : (
-              projects.length > 0 && (
-                <Card title={t('Projects')} style={{width: 706}}>
-                  <Table
-                    cols={cols()}
-                    widths={WIDTHS}
-                    rows={projects.map(p => ({
-                      key: p.id,
-                      cells: [
-                        <Link key="n" className="one" href={hrefFor(p.id, (NODES.find(n => !p.approvedNodes.includes(n.id)) ?? NODES[NODES.length - 1]).path)} title={p.name}>
-                          {p.name}
-                        </Link>,
-                        <One key="b" text={p.createdBy} />,
-                        <span key="d" className="t-3">
-                          {dateTime(p.createdAt)}
-                        </span>,
-                        <Button key="x" label={t('Delete')} kind="ghost" size="sm" className="danger" ariaLabel={t('Delete {name}', {name: p.name})} onClick={() => (setTyped(''), setDoomed(p))} />,
-                      ],
-                    }))}
-                  />
-                </Card>
-              )
-            )}
-          </div>
-          {doomed && (
-            <Dialog
-              title={t('Delete {name}?', {name: doomed.name})}
-              text={t("This permanently removes the project's dataset, gold labels, comments, prompt versions, scores, Optimiser history and chat messages. It cannot be undone.")}
-              onClose={() => setDoomed(null)}
-              actions={
-                <>
-                  <Button label={t('Delete project')} kind="primary" className="danger" disabled={typed !== doomed.name} onClick={remove} />
-                  <Button label={t('Cancel')} onClick={() => setDoomed(null)} />
-                </>
-              }
-            >
-              <Field label={t('Type the project name to confirm: {name}', {name: doomed.name})}>
-                <input className="input" value={typed} aria-label={t('Project name')} autoComplete="off" onChange={e => setTyped(e.target.value)} />
-              </Field>
-            </Dialog>
-          )}
-        </main>
-      </div>
-    </div>
+    <VStack gap={4}>
+      <Heading level={2}>{t('Your tenants')}</Heading>
+      <Grid columns={{minWidth: 280, max: 3}} gap={3}>
+        <ClickableCard label={tenant.name} href="/tenant/" padding={5}>
+          <VStack gap={2}>
+            <HStack gap={2} vAlign="center" hAlign="between">
+              <Heading level={3}>{tenant.name}</Heading>
+              <Badge label={tenant.role === 'admin' ? t('Admin') : t('Member')} />
+            </HStack>
+            <Text type="body" color="secondary">
+              {count == null ? ' ' : count === 1 ? t('1 project') : t('{n} projects', {n: count})}
+            </Text>
+          </VStack>
+        </ClickableCard>
+      </Grid>
+    </VStack>
   );
 }

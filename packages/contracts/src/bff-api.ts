@@ -344,7 +344,7 @@ export interface RestoreExamplesRequest {
 }
 
 /**
- * Batch pruning on Eval Dataset (spec 1.0.0, 4.3): 'unlabeled' removes examples with no gold label
+ * Batch pruning on Dataset (spec 1.0.0, 4.3): 'unlabeled' removes examples with no gold label
  * down to `keep` of them; 'downsample' removes examples whose gold label has `value` in `field`,
  * at random, down to `keep`. Halves stay balanced; no other example changes half.
  */

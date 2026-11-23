@@ -1,7 +1,10 @@
 # Sprint: Web App (`apps/web`)
 
-Next.js 16 (static export), styled with a copy of the UI canvas styles (`src/ui/kit.css`; what
-differs from the canvas is in [docs/ui-gaps.md](../../docs/ui-gaps.md)). Pages talk to the backend only through
+Next.js 16 (static export) on Astryx with the Sprint theme (Neutral, black accent, indigo only for
+AI). The app shell (top bar, steps, Ask AI panel, page, dialogs, the access dialog) is in
+`src/components/Shell.tsx` and `src/components/shell/`. Pages not yet moved to Astryx still use the
+old kit (`src/ui/kit.css`, in the `legacy` CSS layer; what differs from the canvas is in
+[docs/ui-gaps.md](../../docs/ui-gaps.md)). Pages talk to the backend only through
 `src/backend-api/`, which also wires all apps together; everything runs in the browser during the
 MVP (see [docs/integration.md](../../docs/integration.md)).
 

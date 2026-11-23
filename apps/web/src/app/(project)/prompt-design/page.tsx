@@ -1,6 +1,7 @@
 'use client';
 
-import {useEffect, useState} from 'react';
+import {useSearchParams} from 'next/navigation';
+import {Suspense, useEffect, useState} from 'react';
 import type {AgentProposal, PageContext, StructuredPrompt} from '@yushiguang/sprint-contracts';
 import {ALL_KEYS, checkStructured, emptyStructuredPrompt, structuredEquals, versionLabel} from '@yushiguang/sprint-domain';
 import {useGo} from '@/components/nav';
@@ -8,6 +9,7 @@ import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
 import {FullPromptButton, StructuredEditor} from '@/components/prompt/StructuredEditor';
 import {useOpenDraft} from '@/components/prompt/useAgentDrafts';
+import {VersionEditor} from '@/components/prompt/VersionEditor';
 import {approveNode, closeProposal, createVersion, featureInfo, track, type ProjectState} from '@/backend-api';
 import {Badge, Button, Card, PageHead} from '@/ui';
 import {t, tm} from '@/i18n';
@@ -18,13 +20,29 @@ const FIRST = 'Tell me what you want to label, or paste the prompt you use today
  * Step 1, Prompt Design (spec 1.0.0, 2.1 and 3.2): the user's idea becomes the first prompt. The
  * Prompt helper drafts it from a description or from a prompt the user already has; the draft
  * shows here, the user edits it and approves it as v1 with the button at the top right. After
- * that the page shows the newest version, and changes are made in the prompt editor.
+ * that the page shows the newest version. A version is viewed (`?v=…&view=1`) or edited
+ * (`?v=…`) here too: the separate prompt editor page is gone (wireframes v346).
  */
 export default function PromptDesignPage() {
+  return (
+    <Suspense fallback={null}>
+      <PromptDesignRouter />
+    </Suspense>
+  );
+}
+
+function PromptDesignRouter() {
+  const q = useSearchParams();
+  const vId = q.get('v');
+  const view = q.get('view') === '1';
   const [page, setPage] = useState<PageContext>({label: 'Prompt Design', agent: 'prompt_agent', intent: 'draft_prompt', hint: FIRST, context: {}});
   return (
     <ProjectPage node="prompt_design" page={page} chatOpen>
-      {({state}) => (state.versions.length ? <Approved state={state} setPage={setPage} /> : <Design state={state} setPage={setPage} />)}
+      {({state}) => {
+        const v = vId ? state.versions.find(x => x.id === vId) : undefined;
+        if (v) return <VersionEditor key={`${v.id}${view}`} state={state} version={v} readOnly={view} setPage={setPage} />;
+        return state.versions.length ? <Approved state={state} setPage={setPage} /> : <Design state={state} setPage={setPage} />;
+      }}
     </ProjectPage>
   );
 }
@@ -129,7 +147,7 @@ function Approved({state, setPage}: {state: ProjectState; setPage: (p: PageConte
                 <Badge text={t('Approved as {version}', {version: versionLabel(v)})} tone="ok" />
               </span>
               <FullPromptButton prompt={v.structured} onOpen={() => track('full_prompt_opened', {})} onCopy={() => track('prompt_copied', {from: 'dialog'})} />
-              <Button label={t('Next: Eval Dataset')} kind="primary" className={state.project.approvedNodes.includes('prompt_design') ? undefined : 'btn-cue'} onClick={next} />
+              <Button label={t('Next: Dataset')} kind="primary" className={state.project.approvedNodes.includes('prompt_design') ? undefined : 'btn-cue'} onClick={next} />
             </>
           }
         />

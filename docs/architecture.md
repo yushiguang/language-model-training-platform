@@ -1,6 +1,6 @@
 # Architecture
 
-Since 1.0.0 a prompt tuning project has four steps: Prompt Design → Eval Dataset → Gold Labels →
+Since 1.0.0 a prompt tuning project has four steps: Prompt Design → Dataset → Gold Labels →
 Prompt Tuning. Its output is a prompt that passes the project's checks, copied from the last step.
 The pass rule and the labeling model are Project Settings, not steps. A batch labeling project
 (which produces labeled data with a finished prompt) has its contracts designed and no screens yet.
@@ -214,7 +214,7 @@ prompt saved with several fields reads its first field as the label.
   place (few-shot examples, an output format) are returned word for word as `unmapped` and listed
   on the page under "Not carried over", so nothing is dropped silently.
 - **Project Settings.** A new project starts from defaults (`DEFAULT_THRESHOLDS`, the first
-  labeling endpoint). The Settings button opens the dialog at any time, and it opens once by itself
+  labeling endpoint). Project settings on the overview opens the dialog at any time, and it opens once by itself
   before the first paid run (`settingsConfirmed`). `dueStarts` starts nothing until the settings
   are confirmed and the dataset can be scored (`canScore`: enough examples and gold labels in both
   halves).
@@ -410,9 +410,9 @@ side is right.
   #48); `featureMissingness` merges across appends (while legacy snapshots without it stay
   `undefined`). The evaluation context counts gold-labeled examples
   only, so an unlabeled example is *pending*: it is left out of scores, does not make them stale,
-  and is counted on Eval Dataset and next to the score. Its gold label does make scores stale
+  and is counted on Dataset and next to the score. Its gold label does make scores stale
   (Rebuild scores).
-- *Removing.* Remove example on Gold Labels, Remove unlabeled and Downsample on Eval Dataset
+- *Removing.* Remove example on Gold Labels, Remove unlabeled and Downsample on Dataset
   (`pickToPrune`: evenly from both halves) soft-delete examples (`Example.removed`). Each removal
   writes a `DatasetRemoval` with the half and gold label at the time, why, who and when; Restore
   puts the example back in its half. Removals and restores live-adjust `DatasetSnapshot.featureMissingness.byType`

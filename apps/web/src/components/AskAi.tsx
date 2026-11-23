@@ -30,7 +30,8 @@ export function AskAi({
   leaving,
 }: {
   page: PageContext;
-  onClose: () => void;
+  /** Closes the panel. None on Prompt Design, where the chat is part of the page. */
+  onClose?: () => void;
   /** Just opened: the panel slides in (motion M5). */
   entering?: boolean;
   /** Closing: the panel slides out before it unmounts (motion M5). */
@@ -70,7 +71,9 @@ export function AskAi({
     try {
       // The agent sees the page through the backend's page view; the page only says where it is.
       const params = Object.fromEntries([...new URLSearchParams(location.search)].filter(([k]) => k !== 'p'));
-      await sendUserMessage({projectId, text, page: {...page, where: {page: pageFromPath(location.pathname), params}}, locale: currentLocale()});
+      // A version opened on Prompt Design (`?v=`) is the prompt editor the helpers know.
+      const at = pageFromPath(location.pathname);
+      await sendUserMessage({projectId, text, page: {...page, where: {page: at === 'prompt_design' && params.v ? 'prompt_edit' : at, params}}, locale: currentLocale()});
     } finally {
       setBusy(isAgentBusy(projectId));
     }
@@ -101,9 +104,11 @@ export function AskAi({
         <div className="chat-h-row">
           <Icon name="spark" />
           <b>{t('Ask AI')}</b>
-          <button type="button" className="icon-btn" aria-label={t('Close')} onClick={onClose}>
-            <Icon name="x" />
-          </button>
+          {onClose && (
+            <button type="button" className="icon-btn" aria-label={t('Close')} onClick={onClose}>
+              <Icon name="x" />
+            </button>
+          )}
         </div>
       </div>
       <div className="chat-m" ref={bodyRef} aria-live="polite">
@@ -162,7 +167,10 @@ function AgentText({who, text, streaming}: {who: AgentPreset | null; text: strin
 
 const EVENT_ICON: Record<ChatEvent, string> = {join: 'next', page: 'next', draft: 'spark', approved: 'check', discarded: 'x', start: 'play', auto: 'ring', stop: 'x', report: 'alert'};
 
-/** A saved action line: who did what, and when; with a place to go, the whole line is the link. */
+/**
+ * A saved action line: who did what, and when; with a place to go, the whole line is the link.
+ * Lines saved before the prompt editor moved to Prompt Design still name `/prompt/edit`.
+ */
 function EventLine({m, active}: {m: ChatMessage; active?: boolean}) {
   const {href} = useProject();
   const text = tm(m.msg, m.text);
@@ -176,7 +184,7 @@ function EventLine({m, active}: {m: ChatMessage; active?: boolean}) {
     </>
   );
   return m.link ? (
-    <Link className={active ? 'evt run' : 'evt'} href={href(m.link.path, m.link.params)}>
+    <Link className={active ? 'evt run' : 'evt'} href={href(m.link.path === '/prompt/edit' ? '/prompt-design' : m.link.path, m.link.params)}>
       {inner}
     </Link>
   ) : (

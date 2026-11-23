@@ -46,11 +46,11 @@ const RULES = [
 ];
 
 /**
- * npm packages only one folder may import (Astryx is wrapped in our own components). `files` are
- * single files outside that folder that may import it too: the theme module `astryx theme add`
- * generates at a fixed path.
+ * npm packages only some folders may import (Astryx: pages and components take it through
+ * `@/ui/astryx`). `dirs` past the first hold what `astryx theme add` generates (the theme's
+ * source and its built copy); `files` are single generated files: the theme module.
  */
-const ONLY_IN = [{prefix: '@astryxdesign/', dir: 'apps/web/src/ui', files: ['apps/web/src/astryx-themes.ts']}];
+const ONLY_IN = [{prefix: '@astryxdesign/', dirs: ['apps/web/src/ui', 'apps/web/src/themes', 'apps/web/themes'], files: ['apps/web/src/astryx-themes.ts']}];
 
 /** Where each alias must point (relative to the repo root). Any other alias is refused. */
 const ALIASES = {
@@ -116,7 +116,7 @@ for (const top of ['apps', 'packages']) {
       for (const m of src.matchAll(UNCHECKABLE)) problems.push(`${rel}: an import() or require() of a computed name can't be checked ("${src.slice(m.index, m.index + 40).split('\n')[0]}")`);
       const specs = new Set(PATTERNS.flatMap(re => [...src.matchAll(re)].map(m => m[1])));
       for (const spec of specs) {
-        for (const o of ONLY_IN) if (spec.startsWith(o.prefix) && !rel.startsWith(o.dir + '/') && !(o.files ?? []).includes(rel)) problems.push(`${rel}: "${spec}" may only be imported in ${o.dir}`);
+        for (const o of ONLY_IN) if (spec.startsWith(o.prefix) && !o.dirs.some(d => rel.startsWith(d + '/')) && !(o.files ?? []).includes(rel)) problems.push(`${rel}: "${spec}" may only be imported in ${o.dirs[0]}`);
         if (rule.allow === '*') continue;
         if (spec.startsWith('.')) {
           // Relative imports must stay inside the same package or app.

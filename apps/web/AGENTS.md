@@ -14,9 +14,19 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - Pages and components (`src/app/`, `src/components/`) may import only `@yushiguang/sprint-contracts` (types),
   `@yushiguang/sprint-domain` (pure rules), `@/backend-api`, `@/components` and `@/ui`. The boundary check
   enforces this, and also checks the aliases in `tsconfig.json` and `next.config.mjs`.
-- The look comes from `src/ui/kit.css`, a copy of the Unified UI canvas styles: keep it identical
-  to the canvas and put app-only rules in `src/ui/app.css`. Pages build from the parts in `@/ui`.
-  Anything that can't match the canvas goes in `docs/ui-gaps.md`.
+- New and reworked pages are built on Astryx from the approved wireframes (canvas v346). Pages and
+  components take Astryx components only from `@/ui/astryx` (add a re-export there when you need
+  another one); the boundary check enforces it. Theme: `themes/sprint` (edit it with
+  `npx astryx experimental theme editor`), built into `src/themes/sprint`.
+- Every page sits in the shell: `ProjectPage` + `Frame` for a project page, `TenantPage` for a
+  tenant page, `HomeFrame` for the home page. Use `PageTitle` (from `@/ui`) for the title row,
+  `FormDialog` / `SettingsDialog` (`components/shell/dialogs.tsx`) for dialogs, and `WithSide` /
+  `SectionTitle` (`components/shell/Page.tsx`) for the page body. A refused action
+  (`AccessDeniedError`) opens the access dialog by itself when it goes through `Button` from `@/ui`;
+  elsewhere call `reportAccessDenied(e.permission)`.
+- Pages not yet moved keep the old kit (`src/ui/kit.css`, a copy of the Unified UI canvas styles,
+  in the `legacy` CSS layer; app-only rules in `src/ui/app.css`). Shell rules are in
+  `src/components/shell/shell.css`.
 - `src/backend-api/in-process.ts` is the composition root (`client.ts` is the `BffClient`
   interface): the only file that builds the apps and imports `@yushiguang/sprint-platform-impl`. It is the
   default module behind `@yushiguang/sprint-client-impl`; `index.ts` takes the client through that alias and

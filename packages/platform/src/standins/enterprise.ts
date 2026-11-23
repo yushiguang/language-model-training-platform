@@ -7,6 +7,22 @@ import type {AccessRequest, AccessRequestPort, AuthorizationPort, PermissionAdmi
 export const allowAll = (): AuthorizationPort => ({allowed: async () => true});
 
 /**
+ * The browser stand-in for the permission check: allows everything, unless this browser holds
+ * `sprint-standin-access` = `viewer` in its local storage. Then only reading is allowed, so the
+ * member's view and the "insufficient access" dialog can be tried without a permission platform.
+ */
+export const standInAuthorization = (): AuthorizationPort => ({
+  allowed: async (_ctx, request) => {
+    if (request.permission === 'read') return true;
+    try {
+      return globalThis.localStorage?.getItem('sprint-standin-access') !== 'viewer';
+    } catch {
+      return true;
+    }
+  },
+});
+
+/**
  * Stand-in for the external permission platform's write side (`PermissionAdminPort`): tenant
  * members and project writers kept in this process. Every method is idempotent, as the port asks.
  */

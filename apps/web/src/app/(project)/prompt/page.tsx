@@ -353,7 +353,7 @@ function LeftOut({m, cap, state, createdAt}: {m: ProjectState['reports'][number]
       {removed > 0 && (
         <span className="t-3">
           &nbsp;·&nbsp;
-          <Hov text={removed === 1 ? t('1 gold-labeled example removed') : t('{n} gold-labeled examples removed', {n: num(removed)})} tip={t('Removed from the eval dataset before this score was worked out. See the Removed list on Eval Dataset')} />
+          <Hov text={removed === 1 ? t('1 gold-labeled example removed') : t('{n} gold-labeled examples removed', {n: num(removed)})} tip={t('Removed from the eval dataset before this score was worked out. See the Removed list on Dataset')} />
         </span>
       )}
       {pending > 0 && (
@@ -591,7 +591,7 @@ function DroppedCard({state, v, round, box}: {state: ProjectState; v: PromptVers
         </div>
         <div style={{marginLeft: 'auto', display: 'flex', gap: 8, paddingBottom: 8}}>
           <EditPromptButton state={state} v={v} />
-          <Button label={t('View prompt')} href={href('/prompt/edit', {v: v.id, view: '1'})} />
+          <Button label={t('View prompt')} href={href('/prompt-design', {v: v.id, view: '1'})} />
         </div>
       </div>
     </Card>
@@ -664,7 +664,7 @@ function NoGoldCard({state, v, box}: {state: ProjectState; v: PromptVersion; box
         </span>
         <div style={{marginLeft: 'auto', display: 'flex', gap: 8}}>
           <EditPromptButton state={state} v={v} />
-          <Button label={t('View prompt')} href={href('/prompt/edit', {v: v.id, view: '1'})} />
+          <Button label={t('View prompt')} href={href('/prompt-design', {v: v.id, view: '1'})} />
         </div>
       </div>
       <div style={{display: 'flex', gap: 80, paddingTop: 16}}>
@@ -700,7 +700,7 @@ function VersionCard({state, v, box}: {state: ProjectState; v: PromptVersion; bo
   const actions = (
     <div style={{marginLeft: 'auto', display: 'flex', gap: 8, paddingBottom: rep ? 8 : 0}}>
       <EditPromptButton state={state} v={v} />
-      <Button label={t('View prompt')} href={href('/prompt/edit', {v: v.id, view: '1'})} />
+      <Button label={t('View prompt')} href={href('/prompt-design', {v: v.id, view: '1'})} />
     </div>
   );
   if (!thr || !rep) {
@@ -810,7 +810,7 @@ function Advice({state, selId, onStarted, onSwitch}: {state: ProjectState; selId
   const improve = (versionId: string) => {
     openAskAi();
     improveWithAi(state.project.id, versionId, currentLocale()).catch(e => reportActionError(t('Improve with AI failed: {why}', {why: t((e as Error).message)}), () => improve(versionId)));
-    return go(href('/prompt/edit', {v: versionId}));
+    return go(href('/prompt-design', {v: versionId}));
   };
   // Auto Optimise starts from the version selected in the list (R3-7). It always opens one dialog
   // (R4-3, design: U-J-Optimise-Dialog): where to start, shown only when a better minor of the same
@@ -983,7 +983,7 @@ function EditPromptButton({state, v}: {state: ProjectState; v: PromptVersion}) {
   const {href} = useProject();
   const go = useGo();
   const rebuildFirst = useRebuildFirst(state);
-  const to = href('/prompt/edit', {v: v.id});
+  const to = href('/prompt-design', {v: v.id});
   if (!rebuildFirst.stale) return <Button label={t('Edit prompt')} kind="ghost" href={to} />;
   return (
     <>

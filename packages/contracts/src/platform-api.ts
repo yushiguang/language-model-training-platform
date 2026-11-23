@@ -892,8 +892,9 @@ export interface Platform {
    */
   permissionAdmin?: PermissionAdminPort;
   /**
-   * Sends access requests to the external permission platform. Optional: without it they are kept
-   * in this process (`memoryAccessRequests`) and the dialog offers no tracking link.
+   * Sends access requests to the external permission platform. Optional: the stand-ins keep them
+   * in this process (`memoryAccessRequests`, no tracking link); a deployment that leaves it out
+   * refuses requests for access.
    */
   accessRequests?: AccessRequestPort;
   /**

@@ -60,7 +60,7 @@ export const TOOL_SPECS: Record<AgentToolName, {args: string; returns: string}> 
 /** Tools that spend money, and which helper may call which tool: in `@yushiguang/sprint-domain` (the tool host enforces them too). */
 export {START_TOOLS};
 
-const common = `You are one of the helpers inside Sprint, a website where people tune a labeling prompt for a language model against their own gold labels. The people you help know their business well and are usually not machine-learning experts. They count on you for the technical side, so write in plain words and short sentences. Say "the Optimiser", never "GEPA", and never say "teacher" or "student". Use the pages' own words: the steps are Prompt Design, Eval Dataset, Gold Labels and Prompt Tuning; versions are v1, v2 and so on; models go by the names the pages show. The labeling model and the pass rule live in Project Settings (the Settings button at the top). In Ask AI the helpers are called the Assistant, the Prompt helper and the Scores helper.
+const common = `You are one of the helpers inside Sprint, a website where people tune a labeling prompt for a language model against their own gold labels. The people you help know their business well and are usually not machine-learning experts. They count on you for the technical side, so write in plain words and short sentences. Say "the Optimiser", never "GEPA", and never say "teacher" or "student". Use the pages' own words: the steps are Prompt Design, Dataset, Gold Labels and Prompt Tuning; versions are v1, v2 and so on; models go by the names the pages show. The labeling model and the pass rule live in Project Settings (the Settings button at the top). In Ask AI the helpers are called the Assistant, the Prompt helper and the Scores helper.
 
 How the site divides the work. Code runs the workflow and decides what happens next. You explain, and the Prompt helper drafts changes to the prompt. A draft appears on the page; the user approves it there with the button at the top right, and nothing changes before that. You never move the workflow forward yourself. The user's own job is to know the business and to give correct gold labels; writing and tuning prompts is the site's job, so do not push that work onto the user.
 
@@ -248,7 +248,7 @@ export {PROMPT_SHAPE};
 export const presetModel = (p: AgentPreset | 'optimiser'): string => PRESETS[p].model;
 
 /** Words the helpers use in Chinese, so their replies match the pages (spec 1.1.0, 2.3). */
-const ZH_TERMS = ['Prompt Design', 'Eval Dataset', 'Gold Labels', 'Prompt Tuning', 'Project Settings', 'Settings', 'Ask AI', 'Assistant', 'Prompt helper', 'Scores helper', 'Optimiser', 'Auto Optimise', 'Improve with AI', 'Mismatches', 'gold label', 'eval set', 'version', 'label', 'value', 'Copy prompt', 'Finish'];
+const ZH_TERMS = ['Prompt Design', 'Dataset', 'Gold Labels', 'Prompt Tuning', 'Project Settings', 'Settings', 'Ask AI', 'Assistant', 'Prompt helper', 'Scores helper', 'Optimiser', 'Auto Optimise', 'Improve with AI', 'Mismatches', 'gold label', 'eval set', 'version', 'label', 'value', 'Copy prompt', 'Finish'];
 
 /** The line that tells a helper which language to answer in; empty for English. */
 export function languageLine(locale: Locale | undefined): string {

@@ -3,6 +3,16 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-23 (App shell on Astryx, #91)
+
+- **One frame for every page** (wireframes v346): a taller top bar with a full-width line under it, naming 「Sprint / tenant / project」 on the left (the project name opens a switch menu: search, recent projects, All projects), the four steps in the centre with arrows between them, and Ask AI, language and the avatar on the right. Pages are white and centred, at most 1200 wide.
+- **Step 2 is called Dataset** (数据集). In Chinese, Gold Labels the step is 人工标注 and a gold label is 人工标签; 评测集 is no longer used.
+- **A project opens on its overview**, which names the next unfinished step and holds Project settings; the step pages no longer have a Settings button.
+- **Ask AI is a full-height panel on the right**, under the top bar. On Prompt Design it is part of the page: always open, with no close button and no Ask AI button.
+- **The prompt editor lives on Prompt Design** (`/prompt-design?v=<version>`); the separate edit page is gone, and the agents' links point there.
+- **A refused action shows the "insufficient access" dialog**, whose Request access sends the request to the permission platform.
+- **Pages take Astryx only through `@/ui/astryx`**, so an upgrade or a wrapper of our own changes one file. The old kit stays in the `legacy` layer until the lanes have moved every page.
+
 ## 2026-11-23 (Current tenant and access requests, #91)
 
 - **Pages know the caller's tenant and role** from the runtime info: the top bar names the tenant, and admin entries show only to admins (holders of tenant write). Until tenants are records of their own, the name is the organization's name from the identity.
