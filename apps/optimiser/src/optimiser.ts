@@ -1,4 +1,4 @@
-import type {AgentRuntimeContract, RequestContext, Answer, CatalogContract, EndpointId, Example, ExampleBrief, ExampleWithFeatures, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserLabelingStep, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@yushiguang/sprint-contracts';
+import type {AgentRuntimeContract, RequestContext, Answer, CatalogContract, EndpointId, Example, ExampleBrief, ExampleWithFeatures, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserLabelingStep, OptimiserPosition, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@yushiguang/sprint-contracts';
 import {NO_TELEMETRY} from '@yushiguang/sprint-contracts';
 import {checkStructured, msg, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withComments, pickWrong, wrongExamples, type PoolEntry} from '@yushiguang/sprint-domain';
 
@@ -85,6 +85,17 @@ const STEP_NAME: Record<OptimiserStep, string> = {
   confirm: 'Confirming the pass of',
 };
 
+/**
+ * The run waits for a labeling job (docs/design/server.md, 4.4): its position is saved and this
+ * call ends; the job's `finally` queues the `optimiser.run` that goes on from there. Not an error.
+ */
+class Waiting {
+  readonly taskId: string;
+  constructor(taskId: string) {
+    this.taskId = taskId;
+  }
+}
+
 class StepFailed extends Error {
   readonly step: OptimiserStep;
   constructor(step: OptimiserStep, message: string) {
@@ -160,18 +171,18 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
   const tm = deps.telemetry ?? NO_TELEMETRY;
   const onChange = deps.onChange ?? ((_projectId: string) => {});
   const random = () => (deps.random ?? Math.random)();
-  /** Runs this runner is working on, and whether it is starting one. */
+  /** Runs this runner is working on, and the runs it is starting. */
   const active = new Map<string, {ctrl: AbortController; projectId: string}>();
-  let starting = false;
+  const starting = new Set<string>();
 
-  /** One start at a time in this runner; a second one while the first is being set up does nothing. */
-  async function once<T>(fn: () => Promise<T>): Promise<T | null> {
-    if (starting) return null;
-    starting = true;
+  /** One start of a run at a time in this runner; a second one while the first is being set up does nothing. */
+  async function once<T>(runId: string, fn: () => Promise<T>): Promise<T | null> {
+    if (starting.has(runId)) return null;
+    starting.add(runId);
     try {
       return await fn();
     } finally {
-      starting = false;
+      starting.delete(runId);
     }
   }
 
@@ -210,8 +221,11 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
     return run;
   }
 
-  /** Runs (or resumes) the loop of a saved run. Resolves when the run ends. */
-  async function runLoop(given: OptimisationRun, ctx: RequestContext, opts: {resumed?: boolean} = {}): Promise<OptimisationRun> {
+  /**
+   * Runs (or resumes) the loop of a saved run. Resolves when the run ends, or when it waits for a
+   * labeling job (still `running`). `at`: this call goes on after the labeling at that position.
+   */
+  async function runLoop(given: OptimisationRun, ctx: RequestContext, opts: {resumed?: boolean; at?: OptimiserPosition} = {}): Promise<OptimisationRun> {
     const host = bindHost(deps.host, ctx);
     const run: OptimisationRun = {...given, state: 'running', error: null, finishedAt: null, history: [...(given.history ?? [])]};
     const {projectId, endpoint} = run;
@@ -225,7 +239,8 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       onChange(run.projectId);
     };
     await save();
-    tm.event('optimiser_started', {slot: endpoint, trigger: run.auto ? 'auto' : 'user', resumed: !!opts.resumed, max_rounds: run.maxRounds});
+    // A run that goes on after its labeling is the same run: started once.
+    if (!opts.at) tm.event('optimiser_started', {slot: endpoint, trigger: run.auto ? 'auto' : 'user', resumed: !!opts.resumed, max_rounds: run.maxRounds});
 
     const setStep = (step: OptimiserStep | null, versionId: string | null) => save({step, stepVersionId: versionId, stepStartedAt: step ? nowIso() : null});
     /** Runs one step, trying it up to 3 times; the third error fails the run. */
@@ -238,6 +253,8 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
           return await fn();
         } catch (e) {
           if (signal.aborted || isAbort(e)) throw aborted();
+          // Waiting for labeling is no failure; labeling that failed has had its own retries.
+          if (e instanceof Waiting || e instanceof StepFailed) throw e;
           last = e;
           tm.counter('sprint_optimiser_step_failures_total', {step: name});
         }
@@ -245,16 +262,24 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       const what = `${STEP_NAME[name]}${version ? ` ${versionLabel(version)}` : ''}`;
       throw new StepFailed(name, `${what} failed after ${systemConfig().optimiser.stepRetries} tries: ${(last as Error)?.message ?? 'unknown error'}`);
     }
-    /** Labels examples as one try of a step; a stopped or failed task is an error. */
+    /**
+     * Labels examples in a step (docs/design/server.md, 4.4). Answers already in go on at once;
+     * otherwise the labeling is queued as a job of its own and the run waits (`Waiting`). The
+     * call that goes on after it (`opts.at`) only reads how it ended: labeling that ended without
+     * answers fails the run, and Retry queues it again.
+     */
+    let goingOn = opts.at ?? null;
     const label = async (v: PromptVersion, ids: string[] | 'eval', step: OptimiserLabelingStep, pass?: number) => {
-      const out = await host.label({projectId, promptVersionId: v.id, endpoint, ...(ids === 'eval' ? {} : {exampleIds: ids}), ...(pass ? {pass} : {}), runId: run.id, at: {round: run.round, step}, start: true});
-      const t = out.state === 'done' ? out.task : out.state === 'unfinished' ? out.task : null;
-      if (t) {
-        run.calls += t.done;
-        run.costUsd += t.costUsd;
-      }
+      const at = {round: run.round, step};
+      const after = !!goingOn && goingOn.round === at.round && goingOn.step === at.step;
+      if (after) goingOn = null;
       if (signal.aborted) throw aborted();
-      if (out.state !== 'done') throw new Error(out.state === 'unfinished' ? out.error : 'the labeling is still queued');
+      const out = await host.label({projectId, promptVersionId: v.id, endpoint, ...(ids === 'eval' ? {} : {exampleIds: ids}), ...(pass ? {pass} : {}), runId: run.id, at, start: !after});
+      if (signal.aborted) throw aborted();
+      if (out.state === 'queued') throw new Waiting(out.taskId);
+      if (out.state === 'unfinished') throw new StepFailed(step, `${STEP_NAME[step]} ${versionLabel(v)} failed: ${out.error}`);
+      run.calls += out.task.done;
+      run.costUsd += out.task.costUsd;
       return out.task;
     };
     const score = async (v: PromptVersion) => {
@@ -284,6 +309,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       keptSinceMerge++;
     }
     let passedVersion: PromptVersion | null = null;
+    let waiting = false;
     try {
       // A round left by a failure or a closed page: one with a saved change goes on from its step;
       // one without is tried again from the start.
@@ -434,12 +460,19 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
           // the parent wrongly gave it.
           const has = (a: Answer | null | undefined) => !!weak && !!a?.includes(weak.value);
           const focus = new Set(half.filter(id => has(state.gold[id]!.answer) || has(parentAnswers.get(id)?.answer)));
-          const ids = pickDryRun(
-            half.filter(id => parentAnswers.has(id)),
-            dryRunSize(half.length),
-            focus,
-            random,
-          );
+          // Picked once and saved: the call that goes on after the dry run's labeling compares the same ones.
+          const ids =
+            round.dryRunIds ??
+            pickDryRun(
+              half.filter(id => parentAnswers.has(id)),
+              dryRunSize(half.length),
+              focus,
+              random,
+            );
+          if (!round.dryRunIds) {
+            round = {...round, dryRunIds: ids};
+            await putRound(round);
+          }
           const result = await step('dry_run', cand, async () => {
             await label(cand, ids, 'dry_run');
             const mine = toMap(await labeling.predictions(cand.id, endpoint, settingsHash(settings)));
@@ -494,32 +527,40 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       }
       run.state = 'done';
     } catch (e) {
-      const stopped = isAbort(e);
-      run.state = stopped ? 'stopped' : 'failed';
-      run.stopReason = stopped ? 'user' : null;
-      run.error = stopped ? null : (e as Error).message;
-      const last = run.history.at(-1);
-      if (last?.outcome === 'running') {
-        const failedStep = e instanceof StepFailed ? e.step : (last.step ?? run.step ?? undefined);
-        run.history[run.history.length - 1] = {...last, outcome: stopped ? 'stopped' : 'failed', step: failedStep};
+      if (e instanceof Waiting) waiting = true;
+      else {
+        const stopped = isAbort(e);
+        run.state = stopped ? 'stopped' : 'failed';
+        run.stopReason = stopped ? 'user' : null;
+        run.error = stopped ? null : (e as Error).message;
+        const last = run.history.at(-1);
+        if (last?.outcome === 'running') {
+          const failedStep = e instanceof StepFailed ? e.step : (last.step ?? run.step ?? undefined);
+          run.history[run.history.length - 1] = {...last, outcome: stopped ? 'stopped' : 'failed', step: failedStep};
+        }
       }
     } finally {
       active.delete(run.id);
-      await save({finishedAt: nowIso(), step: null, stepStartedAt: null, stepVersionId: null});
-      const outcome = run.state === 'done' ? (run.stopReason ?? 'max_rounds') : run.state;
-      const kept = run.history.filter(h => h.outcome === 'kept');
-      tm.counter('sprint_optimiser_runs_total', {slot: endpoint, outcome});
-      if (run.state === 'stopped') tm.event('optimiser_stopped_by_user', {slot: endpoint, candidates: run.candidates, cost_usd: run.costUsd});
-      tm.event('optimiser_ended', {
-        slot: endpoint,
-        outcome,
-        rounds: run.round,
-        candidates: run.candidates,
-        kept: kept.length,
-        cost_usd: run.costUsd,
-        best_lowest_field_macro_f1: kept.length ? Math.max(...kept.map(h => h.score ?? 0)) : null,
-      });
     }
+    // Waiting: the position (round and step) is saved; the labeling job's `finally` goes on from it.
+    if (waiting) {
+      await save();
+      return run;
+    }
+    await save({finishedAt: nowIso(), step: null, stepStartedAt: null, stepVersionId: null});
+    const outcome = run.state === 'done' ? (run.stopReason ?? 'max_rounds') : run.state;
+    const kept = run.history.filter(h => h.outcome === 'kept');
+    tm.counter('sprint_optimiser_runs_total', {slot: endpoint, outcome});
+    if (run.state === 'stopped') tm.event('optimiser_stopped_by_user', {slot: endpoint, candidates: run.candidates, cost_usd: run.costUsd});
+    tm.event('optimiser_ended', {
+      slot: endpoint,
+      outcome,
+      rounds: run.round,
+      candidates: run.candidates,
+      kept: kept.length,
+      cost_usd: run.costUsd,
+      best_lowest_field_macro_f1: kept.length ? Math.max(...kept.map(h => h.score ?? 0)) : null,
+    });
     return run;
   }
 
@@ -536,14 +577,22 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       return run;
     },
 
-    async execute(ctx, runId) {
-      const run = await catalog.get('optimisation_runs', runId);
-      if (!run || !['failed', 'paused', 'running'].includes(run.state) || active.has(runId)) return null;
-      // A new run has no rounds yet; anything else goes on from where it stopped.
-      const resumed = run.state !== 'running' || run.round > 0 || run.history.length > 0;
-      const out = await once(() =>
-        // The lock covers every tab of this browser: a second tab never runs the same work twice.
-        locks.run(optimiserLock(run.projectId, run.endpoint), () => runLoop(run, ctx, {resumed})),
+    async execute(ctx, runId, at) {
+      const first = await catalog.get('optimisation_runs', runId);
+      if (!first || active.has(runId)) return null;
+      // Going on after a labeling job: only a run still waiting at that position (docs/design/server.md, 4.4).
+      const waitsAt = (r: OptimisationRun) => r.state === 'running' && r.round === at!.round && r.step === at!.step;
+      if (at ? !waitsAt(first) : !['failed', 'paused', 'running'].includes(first.state)) return null;
+      const out = await once(runId, () =>
+        // The lock covers every runner: a second one never runs the same work twice.
+        locks.run(optimiserLock(first.projectId, first.endpoint), async () => {
+          // Read again under the lock: the runner that held it may have moved the run on.
+          const run = await catalog.get('optimisation_runs', runId);
+          if (!run || (at ? !waitsAt(run) : !['failed', 'paused', 'running'].includes(run.state))) return null;
+          // A new run has no rounds yet; anything else goes on from where it stopped.
+          const resumed = run.state !== 'running' || run.round > 0 || run.history.length > 0;
+          return runLoop(run, ctx, {resumed, ...(at ? {at} : {})});
+        }),
       );
       return out ?? null;
     },
@@ -563,7 +612,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
 
     getRun: runId => catalog.get('optimisation_runs', runId),
     listRuns: projectId => catalog.find('optimisation_runs', {projectId}, 'startedAt desc'),
-    isRunning: async runId => active.has(runId) || starting,
+    isRunning: async runId => active.has(runId) || starting.has(runId),
 
     /** The project is being deleted: stop its runs here; the catalog removes their records. */
     async deleteProject(projectId) {
