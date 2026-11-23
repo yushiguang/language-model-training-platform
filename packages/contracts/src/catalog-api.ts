@@ -1,4 +1,4 @@
-import type {DocUpdatePatch} from './platform-api.ts';
+import type {DocFilterExpression, DocUpdatePatch} from './platform-api.ts';
 import type {
   AgentProposal,
   ChatMessage,
@@ -13,6 +13,7 @@ import type {
   GateApproval,
   GoldLabel,
   LabelComment,
+  LabelSet,
   OptimisationRun,
   Project,
   PromptVersion,
@@ -52,6 +53,8 @@ export interface CatalogRecords {
   gold_labels: GoldLabel;
   dataset_removals: DatasetRemoval;
   label_comments: LabelComment;
+  /** A dataset's label sets (docs/design/server.md 4.2); never deleted apart from their project. */
+  label_sets: LabelSet;
   prompt_versions: PromptVersion;
   eval_reports: EvalReport;
   optimisation_runs: OptimisationRun;
@@ -72,6 +75,14 @@ export interface CatalogRecords {
 
 export type CatalogKind = keyof CatalogRecords;
 
+/** What `CatalogContract.page` reads: a filter, an order ("field" or "field desc", comma-separated), and the window. */
+export interface CatalogPageQuery<T> {
+  where?: Partial<Record<keyof T & string, unknown>> | DocFilterExpression;
+  order?: string;
+  offset?: number;
+  limit?: number;
+}
+
 /** A new prompt version before the catalog numbers it. */
 /**
  * A new prompt version before the catalog numbers it. `kind`: 'major' = the next major (v5);
@@ -89,6 +100,12 @@ export interface CatalogContract {
   get<K extends CatalogKind>(kind: K, id: string): Promise<CatalogRecords[K] | null>;
   /** Equality filters on record fields; `order` is "field" or "field desc". */
   find<K extends CatalogKind>(kind: K, where?: Partial<Record<keyof CatalogRecords[K] & string, unknown>>, order?: string): Promise<CatalogRecords[K][]>;
+  /**
+   * One page of the records matching `where` (equality fields, or a `DocFilter` expression for
+   * ranges and `in`), in `order`, with how many match in all. For lists a page reads a part of,
+   * such as a dataset's samples (docs/design/server.md 6).
+   */
+  page<K extends CatalogKind>(kind: K, q: CatalogPageQuery<CatalogRecords[K]>): Promise<{items: CatalogRecords[K][]; total: number}>;
   findByIds<K extends CatalogKind>(kind: K, ids: string[]): Promise<CatalogRecords[K][]>;
   /** Partial update: only the given fields change. Values may be `DocFieldValue` operators (increment, arrayUnion...). */
   patch<K extends CatalogKind>(kind: K, id: string, patch: DocUpdatePatch<CatalogRecords[K]>): Promise<void>;

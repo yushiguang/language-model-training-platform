@@ -204,6 +204,13 @@ export interface FeatureValue {
 export interface Example {
   id: string;
   snapshotId: string;
+  /**
+   * The sample number in its dataset (docs/design/server.md 4.2): from 1, in the order examples
+   * were added, and never changed: removing an example leaves the others' numbers as they are,
+   * and label sets are ranges of these numbers. An example whose save failed leaves its number
+   * unused. Missing on examples saved before numbers; the workflow numbers them on first read.
+   */
+  number?: number;
   externalId: string;
   type: ExampleType;
   title: string;
@@ -305,6 +312,30 @@ export interface LabelComment {
   /** The version compared when it was written on Mismatches; null on the eval set. */
   promptVersionId: string | null;
   createdAt: string;
+}
+
+/**
+ * A label set (docs/design/server.md 4.2): a contiguous range of a dataset's sample numbers,
+ * `first` to `last` inclusive, labeled by the people in `labelerIds`. Sets never overlap, their
+ * range never changes after creation, and they are not deleted. Removed examples in the range are
+ * hidden from the set and counted nowhere; restored ones come back into it. One labeler per set
+ * for now; the list leaves room for more.
+ */
+export interface LabelSet {
+  id: string;
+  projectId: string;
+  snapshotId: string;
+  /** 1, 2, 3... in the order sets were created in the project; the name pages show when `name` is empty. */
+  number: number;
+  /** The name people gave it; empty for none. */
+  name: string;
+  first: number;
+  last: number;
+  /** User ids of its labelers; each was granted project write when added. */
+  labelerIds: string[];
+  createdAt: string;
+  /** User id of whoever created it. */
+  createdBy: string;
 }
 
 export interface DatasetSnapshot {
