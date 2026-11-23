@@ -5,7 +5,8 @@ import type {JobExecutor, LabelingContract} from '@yushiguang/sprint-contracts';
  * done, paused or stopped. The job points at the `LabelingTask`, which keeps the counters and the
  * failed list, so a job that runs again resumes from the saved answers. Arguments: `taskId`,
  * `trigger` (`user` or `system`, for metrics), `auto` (the cost counts as automatic spend), and
- * `retry` (Retry failed: label the failed examples again).
+ * `retry` (Retry failed: label the failed examples again). An Optimiser run's labeling also
+ * carries `optimiserRunId`, `round` and `step`, and its `finally` goes on with the run.
  *
  * A cancel is the user's Stop (`stopTask`). A lost lease leaves the task alone: the task's own
  * lock keeps a second runner off it until this one ends. That premise holds across processes
@@ -31,7 +32,9 @@ export function labelingExecutor(labeling: LabelingContract): JobExecutor {
         if (!t) return {state: 'cancelled', error: 'Another runner is labeling this task.'};
         if (t.state === 'done') return {state: 'done'};
         if (t.state === 'needs_attention' || t.state === 'failed') return {state: 'failed', error: t.error ?? 'Some examples could not be labeled.'};
-        return {state: 'paused', error: `The task ${t.state === 'stopped' ? 'was stopped' : 'paused'}.`};
+        // A Stop ends the job (its `finally` runs: an Optimiser run reads how its labeling ended).
+        if (t.state === 'stopped') return {state: 'cancelled', error: 'The task was stopped.'};
+        return {state: 'paused', error: 'The task paused.'};
       } finally {
         ctl.signal.removeEventListener('abort', stop);
       }

@@ -28,13 +28,14 @@ export interface OptimiserContract {
    * Runs a saved run, or goes on from the step a failed or paused run stopped at, until the run
    * ends or waits for a labeling job (docs/design/server.md, 4.4): a waiting run is returned with
    * state `running`, and the labeling job's `finally` queues the next `optimiser.run`. Null when
-   * another runner already works on it. `ctx` is the `optimiser.run` job's (the person who started
+   * another runner already works on it, or there is nothing to do (the run has ended, or is no
+   * longer at `at`). `ctx` is the `optimiser.run` job's (the person who started
    * or resumed the run, and the tenant): every `OptimiserHost` call and the helper's
    * `reflectPrompt` run as it, so the workflow's permission checks see a real caller.
    *
    * `at`: this call goes on after the labeling at that position ended. Its labeling is read, not
    * queued again: answers in go on, labeling that ended without them fails the run (Retry queues
-   * it again). A run that is no longer at `at` (it went on, or ended) is returned unchanged.
+   * it again).
    * Without `at` (a start, Retry or Resume) the labeling of the run's step is queued if needed.
    */
   execute(ctx: RequestContext, runId: string, at?: OptimiserPosition): Promise<OptimisationRun | null>;

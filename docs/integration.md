@@ -127,8 +127,8 @@ workflow calls `isHeld` for the Optimiser lock (which the Optimiser itself only 
 through `locks.run`), so those checks only agree with the runs behind them when labeling, the
 workflow and the Optimiser were all built over the same locks. Build the job module before
 labeling and also pass labeling `liveElsewhere`, answered from `jobs.api.list` as the in-process
-root does (a queued or running `labeling.runTask` job by task id, or an `optimiser.run` job by
-project for an optimiser-purpose task): a task that is live as job work is then never read as
+root does (a queued or running `labeling.runTask` job by task id; an Optimiser run's labeling is
+such a job too): a task that is live as job work is then never read as
 abandoned either, even by a unit whose locks cannot see the runner.
 
 Configuration in a server composition root: when the platform has a `configStore`, build

@@ -3,7 +3,8 @@ import {scoredExamples, visibleToAgents} from '@yushiguang/sprint-domain';
 import type {Instance, Scope} from './app.ts';
 import {authorize} from './access.ts';
 import {postEvent} from './chat-events.ts';
-import {confirmScore, labelEvalSet, labelExamples, scoreFromState, scoreOnOptimiserHalf} from './evaluation.ts';
+import {confirmScore, scoreFromState, scoreOnOptimiserHalf} from './evaluation.ts';
+import {queueOptimiserLabeling} from './work.ts';
 import {labelComments} from './mismatches.ts';
 
 import {exampleFeatures} from './features.ts';
@@ -67,14 +68,12 @@ function hostCalls(inst: Instance): OptimiserHost {
   };
   return {
     loadState: (ctx, projectId) => loadProjectState(at(ctx), projectId),
-    async label(ctx, {projectId, promptVersionId, endpoint, exampleIds, pass}) {
+    async label(ctx, req) {
       const w = at(ctx);
-      const {state, setup} = await loaded(w, projectId);
-      const v = version(state, promptVersionId);
-      // Until the chain lands (#79), the labeling still runs here, inside the run's job.
-      const t = exampleIds ? await labelExamples(w, projectId, setup, v, endpoint, exampleIds, 'optimiser', {pass}) : await labelEvalSet(w, projectId, setup, v, endpoint, state.examples, 'optimiser', {});
-      if (!t) return {state: 'unfinished', task: null, error: 'another runner is labeling this version'};
-      return t.state === 'done' ? {state: 'done', task: t} : {state: 'unfinished', task: t, error: t.error ?? `labeling ended as ${t.state}`};
+      const {state, setup} = await loaded(w, req.projectId);
+      const v = version(state, req.promptVersionId);
+      const exampleIds = req.exampleIds ?? state.examples.filter(e => e.split === 'eval').map(e => e.id);
+      return queueOptimiserLabeling(w, setup, v, {...req, exampleIds});
     },
     async score(ctx, {projectId, promptVersionId, endpoint}) {
       const w = at(ctx);

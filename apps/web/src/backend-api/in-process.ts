@@ -82,12 +82,11 @@ const labeling = createLabeling({
   /**
    * A running task whose lock this process cannot see may still be live as queued or running
    * job work (in another unit, whose runner holds the job's lease): such a task is never read
-   * as abandoned. An Optimiser-purpose task is covered by its project's Optimiser job, behind
-   * which it labels in-process.
+   * as abandoned. An Optimiser run's labeling is a `labeling.runTask` job of its own too (#79).
    */
   liveElsewhere: async task => {
-    const live = await jobs.api.list(systemContext('labeling'), {projectId: task.projectId, kinds: ['labeling.runTask', 'optimiser.run'], states: ['queued', 'running']});
-    return live.some(j => (j.kind === 'labeling.runTask' && j.args.taskId === task.id) || (task.purpose === 'optimiser' && j.kind === 'optimiser.run'));
+    const live = await jobs.api.list(systemContext('labeling'), {projectId: task.projectId, kinds: ['labeling.runTask'], states: ['queued', 'running']});
+    return live.some(j => j.args.taskId === task.id);
   },
 });
 /** The application module, with no state of its own; short-lived shared state goes to the platform's store. */

@@ -1,6 +1,6 @@
 # 服务端设计：提示词优化项目
 
-> 描述的版本：计划中，按 #59 的交付计划分 PR 实现，每个 PR 合并时把对应章节改成已实现的样子。已实现：第 2 节（权限，#63）、第 5 节（异步任务，#66）、第 7 节（配置，#61）、第 4.2 节（数据集和标注集，#82）。
+> 描述的版本：计划中，按 #59 的交付计划分 PR 实现，每个 PR 合并时把对应章节改成已实现的样子。已实现：第 2 节（权限，#63）、第 5 节（异步任务，#66）、第 7 节（配置，#61）、第 4.2 节（数据集和标注集，#82）、第 4.3 节（分数和重新计分，#86）、第 4.4 节（链式优化器，#79）。
 
 本文把前端整体评审（2026-11-22）里定下的规则落到服务端：权限、项目类型、数据源与特征、工作流规则、异步任务、批量数据存储、配置和通知。页面的设计见 [ui.md](ui.md)，现有架构见 [../architecture.md](../architecture.md)。
 
@@ -166,12 +166,18 @@
 - 一启动就创建并显示一个新版本。
 - 每次尝试都是一个 `PromptVersion`，被丢弃只改状态，不删除。
 - 每一轮的打标是一个单独的打标任务，和普通打标任务进同一个队列（第 5 节）。
-- 现在 `optimiser.run` 是一个长驻任务，在进程里直接调用打标（`OptimiserHost.label` → `labeling.runTask`），不经过队列。要改成分轮的链式任务，避免两种问题：父任务占着 endpoint 的唯一名额又等子任务（死锁），或者优化器打标绕过 endpoint 的并发上限。
-  1. `optimiser.run` 只做计算（生成候选、比较分数、决定下一步），并发键是常规任务的键。
-  2. 运行按状态机推进，位置是 `(runId, round, step)`；`step` 是一轮里的各个打标阶段（`parent`、`dry_run`、`full`、`confirm`）。每个要打标的阶段入队一个 `labeling.runTask`（模型任务的键），`args` 里带 `optimiserRunId`、`round`、`step`，然后这次 `optimiser.run` 结束，不等待。
-  3. 打标任务结束（完成、失败或取消）时，入队下一次 `optimiser.run`，幂等键是 `runId + round + step`，只会入队一次。`optimiser.run` 读到打标失败，就把运行标为 Failed，用户可以 Retry。
-  4. 巡检不能把等打标的运行误标为“已暂停”：判断孤儿运行时，除了看有没有活跃的 `optimiser.run`，还要看有没有带这个 `optimiserRunId` 的活跃打标任务。两样都没有时，巡检按最后一个打标任务的结果推进运行，或把运行标为 Failed。这也覆盖了 worker 失联 3 次、任务直接被标为失败的情况。
-  5. 停止优化器：取消这次运行下所有排队中和运行中的打标任务和 `optimiser.run`，直接把运行状态存为“已停止”，不依赖进程内存。运行中的打标任务收到取消后停下，不再调用模型。
+- 优化器不再在自己的任务里等打标：等打标的父任务会占着 endpoint 的唯一名额又等排在后面的子任务（死锁），在任务里直接打标又会绕过 endpoint 的并发上限。所以一次运行是一串链式任务。
+
+#### 实现（#79 已完成）
+
+- **只做计算**：`optimiser.run` 是常规任务（`compute:<tenantId>`），只做生成候选、比较分数、决定下一步。启动、Retry、Resume 入队的幂等键还是 `optimiser:<projectId>`。
+- **位置**：运行按 `(runId, round, step)` 推进，位置就是运行记录上已经保存的 `round` 和 `step`。要打标的步骤（`OptimiserLabelingStep`）是 `parent`、`dry_run`、`full`、`confirm`。每个步骤开始时先保存 `step`，再请求打标，所以入队时位置已经在库里。试跑挑的样本存在这一轮的 `dryRunIds` 上，接着跑时比的是同一批。
+- **入队打标**（`apps/workflow/src/services/work.ts` 的 `queueOptimiserLabeling`，`OptimiserHost.label` 调它）：按版本、模型、设置和样本找到或新建打标任务（已有答案照样复用）。任务已经完成就直接往下走；否则入队一个 `labeling.runTask`（模型任务的键 `model:<tenantId>:<endpointId>`），`args` 带 `optimiserRunId`、`round`、`step`，幂等键 `label:<taskId>`，`finally` 是接着跑的 `optimiser.run`（幂等键 `optimiser:<runId>:<round>:<step>`）。然后这次 `optimiser.run` 保存位置并以 `paused` 结束（不算终态，不触发 `finally`），不等待，运行状态仍是 `running`。运行只用这几种任务：已完成的、正由它自己的打标任务在打的、空闲且没有待处理停止请求的。别的任务正在打标这些样本时（同一版本的评分、刚停止的上一次运行），运行不等它（它的 `finally` 不会接着跑这次运行），而是另建一个自己的任务排在它后面；同一个键按先后执行，复用前面的答案。入队时幂等键撞上别人刚入队的同一任务，也改用新任务。
+- **接着跑**：`OptimiserContract.execute(ctx, runId, at)`。运行已经不在 `at`（已经往下走了、已结束、已停止）时什么都不做。在 `at` 时只读打标结果，不重新入队（`start: false`）：答案齐了就往下走；任务失败、被停止或任务丢了（没有活跃任务又没打完）就把运行标为 Failed，错误写明哪一步。Retry 从同一步开始，重新入队打标（失败的样本重打，已完成的保留）。运行的锁还被上一个任务占着时，接着跑的任务抛错，由任务模块延迟重试（最多 3 次）；巡检兜底。
+- **巡检**（`drive`）：运行是 `running`，没有活跃的 `optimiser.run`，也没有 `args.optimiserRunId` 是它的活跃打标任务，本进程没在跑，锁也没人拿着，才算孤儿。停在打标步骤的，它的打标任务若在 1 分钟内刚结束，先留给那个任务结束时入队的后续任务（它可能还没入队），下次巡检再看；否则按它的位置入队接着跑的任务（幂等键另加 `:sweep`，不会顶掉打标任务结束时以发起人身份入队的那个；两个都跑时，后跑的发现位置已变，什么都不做），由它按打标结果推进或标为 Failed（打标任务失联 3 次被标为失败也走这条路）；停在其它步骤的（比如生成候选时 worker 丢了、页面关了），在运行的锁下重新读任务和运行，确认仍是孤儿才标为 Failed，这一轮记为失败，可以 Retry。巡检以 `SYSTEM_CALLER` 运行，所以它入队的后续任务和通知按系统任务处理（第 8 节）。
+- **停止**（`stopOptimiser`）：不依赖进程内存。运行的锁空闲时，在锁下重读运行，直接存为“已停止”（这一轮也记为已停止），并记结束指标；有执行者拿着锁时，只在记录上写 `stopRequested`（`OptimisationRun.stopRequested`，执行者从不写这个字段，所以不会被它的保存覆盖），执行者每次保存前都先读记录，读到停止请求就在自己的锁下以“已停止”结束运行。两边都不会在没锁的情况下覆盖对方写的状态。然后取消这次运行排队中和运行中的 `optimiser.run` 和打标任务（`args.optimiserRunId`），并停止对应的打标任务，运行中的打标不再调用模型。入队打标的一方在入队前和入队后各读一次运行，已停止或有停止请求就不入队，或取消刚入队的任务，所以停止和入队同时发生时也不会有付费打标漏网。被取消的打标任务的 `finally` 入队的接着跑任务，读到已停止就什么都不做，读到停止请求就以“已停止”结束运行。巡检遇到有停止请求、执行者已不在的运行，也直接存为“已停止”。Ask AI 的“停止了优化器”在这里记一次；结束指标由真正把运行存为“已停止”的一方记一次。优化器的打标任务不会被自动开始（`dueStarts`）当作评分续跑，只随运行的 Retry 继续。打标任务被停止时，任务以 `cancelled` 结束（以前是 `paused`），所以它的 `finally` 一定会执行。
+- **页面**：运行在等自己的打标任务时，优化器面板显示那个打标任务的排队位置（`withQueue`）。
+- **通知**：每个 `optimiser.run` 都带 `finally: notifyWhenEnded(..., {about: 'optimiser', runId})`；让运行等打标的任务以 `paused` 结束，不触发 `finally`，所以只有结束运行的那个任务入队通知（第 8.2 节）。
 
 ## 5. 异步任务
 
@@ -237,11 +243,11 @@ COMMIT;
 
 ### 5.4 实现（#66 已完成）
 
-- **并发键**：`JobRequest.concurrencyKey` / `Job.concurrencyKey` 必填，类型是 `ConcurrencyKey`（`packages/contracts/src/jobs-api.ts`）。`packages/domain` 的 `jobConcurrencyKey(tenantId, target)` 拼键、`parseConcurrencyKey(key)` 反解；租户 ID 不能含 `:`，endpoint ID 是第二个 `:` 之后的全部。入队方在 `apps/workflow/src/services/queue.ts` 用 `modelKey` / `computeKey` 算，租户取调用方的（`authorize` 已经校验过它就是项目的租户）。`labeling.runTask` 和 `optimiser.run` 是模型任务（第 5 步之前优化器在自己的任务里直接打标，所以先占它的 endpoint），其余是常规任务。endpoint ID 现在是项目设置里的 `EndpointId`，第 4 步换成按租户的模型配置 ID。任务模块拒绝入队格式不对的键。
+- **并发键**：`JobRequest.concurrencyKey` / `Job.concurrencyKey` 必填，类型是 `ConcurrencyKey`（`packages/contracts/src/jobs-api.ts`）。`packages/domain` 的 `jobConcurrencyKey(tenantId, target)` 拼键、`parseConcurrencyKey(key)` 反解；租户 ID 不能含 `:`，endpoint ID 是第二个 `:` 之后的全部。入队方在 `apps/workflow/src/services/queue.ts` 用 `modelKey` / `computeKey` 算，租户取调用方的（`authorize` 已经校验过它就是项目的租户）。`labeling.runTask` 是模型任务，其余是常规任务（`optimiser.run` 在第 5 步改为常规任务，见 4.4）。endpoint ID 现在是项目设置里的 `EndpointId`，第 4 步换成按租户的模型配置 ID。任务模块拒绝入队格式不对的键。
 - **按键限并发**：`JobStorePort.claimNext(kinds, owner, leaseMs, now, limitOf)`。任务模块的 `limitOf` 反解键，调 `config.forTenant(tenantId).jobLimit(target)`，每次取任务都现读，调大上限立刻生效。内存替身按 5.2 的两段实现：先列出候选键并读好上限（不加锁），再逐个键在不 `await` 的一段里数运行数、取最早的任务（这一段相当于持有键行锁的短事务）。键按上次被取的时间轮流（从没取过的排最前），键内按 `createdAt`、再按 `id`。任务 ID 按时间可排序，同一个 worker 同一毫秒入队的任务也按先后执行。进程总并发（默认 16）保留。
 - **排队位置**：`JobStorePort.countAhead(concurrencyKey, createdAt, id)`（比设计多一个 `id`，同一毫秒创建的任务按取任务的顺序算），`JobsContract.ahead(ctx, jobId)`（不在排队时是 null）。工作流的 `loadProjectState` / `projectStatus` 给排队中的打标任务（`LabelingRun.queue`）和优化器运行（`OptimisationRun.queue`）加上 `{ahead}`，只出现在页面视图里，记录和工作流自己的规则看不到。Prompt Tuning 页面显示 “Queued” 或 “Queued · 2 ahead”（排队中 · 前面还有 2 个），优化器面板显示“在等模型空出来”。
 - **`finally`**：`JobRequest.finally` 在任务以完成、失败、取消结束时入队一次，幂等键默认 `finally:<jobId>`；`paused` 不是终态，不触发。巡检判失败或取消、排队中直接取消的任务也会触发，所以 `recoverExpired` 返回它结束的任务（`ended`），`requestCancel` 返回 `{job, ended}`。`then` 仍然只在完成时入队。
-- **失败状态统一**：打标的 `needs_attention` 在页面视图里显示为 Failed（`apps/workflow/src/services/views.ts` 的 `jobState`），打标执行器也按失败结束任务，有测试锁住。打标任务被停止时的终态统一为 `cancelled` 在第 5 步做。
+- **失败状态统一**：打标的 `needs_attention` 在页面视图里显示为 Failed（`apps/workflow/src/services/views.ts` 的 `jobState`），打标执行器也按失败结束任务，有测试锁住。打标任务被停止时，任务以 `cancelled` 结束（第 5 步，#79）。
 - **一致性测试**：`packages/platform/src/standins/job-store.test.ts` 的 `jobStoreCases(name, make)` 只依赖 `JobStorePort`，部署方的 MySQL 实现可以复制过去跑同一组用例。
 
 ## 6. 批量数据存储
@@ -366,7 +372,7 @@ export interface ConfigReader {
 - **挂在任务的 `finally` 上**：`labeling.runTask` 和 `optimiser.run` 入队时带 `finally: notify.send`（`apps/workflow/src/services/notify.ts` 的 `notifyWhenEnded`），这是一个常规任务（`compute:<tenantId>`）。任务以任何终态结束都会入队一次（第 5.4 节）。执行器先看前一个任务（幂等键 `finally:<jobId>`）：只有它以完成或失败结束才发，被取消的（用户停止、发现别的执行者已在做）不发，即使记录上还留着上一次的失败。说“完成”还是“失败”由前一个任务的结果决定，记录的当前状态必须和它一致，否则不发（比如失败的通知排队时 Retry 已经成功）。记录：打标任务 `done` 发“完成”，`failed` / `needs_attention` 发“失败”，`stopped` 等其它状态不发；优化器运行 `done` / `failed` 同理。Retry 是新的任务，结束时再发一次。
 - **收件人**：任务的调用方，也就是入队的人。Sprint 自己入队的任务（保存版本后页面检查自动开始的评分、服务端巡检）以 `SYSTEM_CALLER` 运行，发给项目创建人（`Project.createdById`），发之前用创建人的身份再查一次读权限，已经没有读权限（比如被移出租户）就不发；没有记录创建人的老项目不发。
 - **尽力而为**：工作流的 `notify(w, n)` 捕获发送错误，记 `sprint_notifications_total{notification, outcome="error"}` 和一行日志；成功记 `outcome="ok"`。`notify.send` 执行器总是以 done 结束、不重试；调用方已经没有读权限或项目已不在租户里时直接丢弃（done），不算失败。没有配置端口时什么都不发。第 8 步的标注集通知直接调 `notify`。
-- **交给第 5 步**：优化器改成链式任务后，`optimiser.run` 不再代表整次运行，`finally: notifyWhenEnded(..., {about: 'optimiser', runId})` 要挂在链的最后一个任务上（运行进入 `done` / `failed` 的那一步）；执行器读运行状态，中途结束的任务不会误发。
+- **链式的优化器**（#79）：一次运行是一串 `optimiser.run`，每个都带这个 `finally`，因为入队时不知道哪一个会结束运行。中间各环让运行去等打标，以 `paused` 结束，`paused` 不是终态，不触发 `finally`；只有结束运行的那个任务（`done` / `failed`）入队通知。被取消的（停止、已无事可做）入队了也不发。巡检把丢失的运行标为 Failed 时没有任务结束它，不发通知。
 
 ## 9. 租户和模型
 
@@ -397,7 +403,8 @@ export interface ConfigReader {
 | `ConfigPort`（`get`，可选 `getMany` / `subscribe`），移除 `TenantConfigPort` | 破坏性（第 1 步，#61 已完成） |
 | `NotificationPort`（尽力而为）、任务类型 `notify.send` | 新增（第 6 步，#71 已完成） |
 | `OptimiserContract.startRun` / `execute` / `stopRun`、`OptimiserHost` 每次调用和 `reflectPrompt` 带调用方上下文 | 破坏性（第 2 步，#63 已完成） |
-| `OptimiserHost.label` 改为入队打标任务（`OptimiserLabelRequest` 带 `runId`、`at`、`start`，返回 `OptimiserLabeling`：`done` / `queued` / `unfinished`），打标任务 `args` 带 `optimiserRunId` / `round` / `step`；`OptimiserContract.execute(ctx, runId, at?)`；`OptimiserRound.dryRunIds` | 破坏性：只有工作流实现 `OptimiserHost`，部署方的适配器不用改（第 5 步，#79） |
+| `OptimiserHost.label` 改为入队打标任务（`OptimiserLabelRequest` 带 `runId`、`at`、`start`，返回 `OptimiserLabeling`：`done` / `queued` / `unfinished`），打标任务 `args` 带 `optimiserRunId` / `round` / `step`；`OptimiserContract.execute(ctx, runId, at?)`；`OptimiserRound.dryRunIds` | 破坏性：只有工作流实现 `OptimiserHost`，部署方的适配器不用改（第 5 步，#79 已完成） |
+| `OptimisationRun.stopRequested`（可选） | 新增（第 5 步，#79，随 #81 合入） |
 | `LabelCallRequest`、对话请求和 `TryTemplateInput`（Prompt helper 的试跑）带 `tenantId`；模型按租户读取；`LabelingModels` / `AgentModel` 接受动态 endpoint；限流键改为“租户 + endpoint” | 破坏性：部署方的网关适配和限流存储要改（第 4 步，#69 已完成） |
 | 模型管理接口 `listModels` / `addModel` / `updateModel` / `removeModel` / `setDefaultModel`；`CatalogContract.remove('tenant_models', id)` | 新增（第 4 步，#69 已完成） |
 | `ObjectStorePort`（`Platform.objectStore` 可选）；基于它的 `LabelingStorePort`、`FeatureStorePort`；`Example.featureRef` 可选 | 新增（第 7 步，#72） |
@@ -412,7 +419,7 @@ export interface ConfigReader {
 2. 权限和租户隔离：`Project.tenantId`、`createWorkflow` 读写都接入 `AuthorizationPort`、按租户过滤和校验、系统调用方规则、接口权限点表、`PermissionAdminPort`。同一步把调用方上下文传给优化器（`OptimiserContract.startRun` / `execute` / `stopRun`、`OptimiserHost`、`reflectPrompt`），否则这一步合并后优化器会被权限校验拒绝。放在任务队列前面，因为并发键要用到项目的租户。
 3. 任务队列：`concurrencyKey`、`finally`（任何终态都续链）、按键限并发的 `claimNext`、排队位置、失败状态统一。（#66 已完成）
 4. 模型和网关：模型按租户读取、请求带 `tenantId`、限流键改为“租户 + endpoint”。（#69 已完成）
-5. 优化器改为按 `(runId, round, step)` 推进的链式任务：每个打标阶段入队，巡检识别等打标的运行，Stop 取消排队中和运行中的打标。
+5. 优化器改为按 `(runId, round, step)` 推进的链式任务：每个打标阶段入队，巡检识别等打标的运行，Stop 取消排队中和运行中的打标。（#79 已完成）
 6. 通知端口：评分和自动优化结束时通知发起人。（#71 已完成）
 7. 存储接口：`ObjectStorePort`，以及基于它的 `LabelingStorePort`、`FeatureStorePort`（issue #58）。（#72 已完成）
 8. 数据集和标注集：样本序号、软删除、标注集、清空受影响的人工标签。（#82 已完成）

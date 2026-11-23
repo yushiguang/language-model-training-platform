@@ -78,65 +78,6 @@ export async function findTask(w: Scope, projectId: string, version: PromptVersi
 }
 
 /**
- * Labels the eval set with one version on one model as a labeling task: reuses the task for the
- * same version + model + settings + examples when there is one (so a reload resumes it), and
- * creates one otherwise. Returns null when another tab is running it.
- *
- * `auto`: this run was started by code without a click, so its cost is recorded as automatic
- * spend (on the task, per run: an automatic resume of a task a user started counts too).
- */
-export async function labelEvalSet(w: Scope,
-  projectId: string,
-  setup: SetupVersion,
-  version: PromptVersion,
-  endpoint: EndpointId,
-  examples: Example[],
-  purpose: 'eval' | 'optimiser' = 'eval',
-  opts: {auto?: boolean; onTask?: (taskId: string) => void} = {},
-): Promise<LabelingTask | null> {
-  const exampleIds = examples.filter(e => e.split === 'eval').map(e => e.id);
-  return labelExamples(w, projectId, setup, version, endpoint, exampleIds, purpose, opts);
-}
-
-/**
- * Labels some examples with one version on one model (the eval set, or the Optimiser's dry run):
- * reuses the task for the same examples when there is one, else creates one. Answers are shared
- * by version + model + settings + example, so a later task over more examples reuses them.
- */
-export async function labelExamples(w: Scope,
-  projectId: string,
-  setup: SetupVersion,
-  version: PromptVersion,
-  endpoint: EndpointId,
-  exampleIds: string[],
-  purpose: 'eval' | 'optimiser',
-  opts: {auto?: boolean; onTask?: (taskId: string) => void; pass?: number} = {},
-): Promise<LabelingTask | null> {
-  const {labeling, user} = w;
-  // pass 2: the Optimiser's confirmation, a fresh labeling of the same examples.
-  const settings = opts.pass && opts.pass > 1 ? {...settingsFor(setup, endpoint), pass: opts.pass} : settingsFor(setup, endpoint);
-  let task = await findTask(w, projectId, version, endpoint, settingsHash(settings), exampleIds, ['eval', 'optimiser']);
-  if (task?.state === 'done') return task;
-  task ??= await labeling.createTask({
-    projectId,
-    tenantId: tenantOf(w),
-    purpose,
-    promptVersionId: version.id,
-    setupVersionId: setup.id,
-    endpoint,
-    settings,
-    exampleIds,
-    // 'auto' marks scoring code started without a click.
-    createdBy: purpose === 'optimiser' ? 'optimiser' : opts.auto ? 'auto' : (await user()).name,
-  });
-  opts.onTask?.(task.id);
-  const trigger = opts.auto || purpose === 'optimiser' ? 'system' : 'user';
-  const run = opts.auto ? {auto: true} : {};
-  if (task.state === 'needs_attention') return labeling.retryFailed(task.id, trigger, run);
-  return labeling.runTask(task.id, trigger, run);
-}
-
-/**
  * The user's Stop on scoring or on the test set's model answers; saved as an action line. The
  * task's own stop flag reaches a runner in any process; a job still queued is cancelled too.
  */

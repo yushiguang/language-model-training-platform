@@ -150,8 +150,8 @@ recovery of a dead runner's jobs, retries and cancel. A job holds ids only; the 
   `deleteProject` returns once the project is marked `deleting`. Pages read progress back through
   `loadProjectState`, as they did while work ran.
 - **Concurrency keys** (docs/design/server.md, 5). Every job names the resource it waits for:
-  `model:<tenantId>:<endpointId>` (`labeling.runTask`, and `optimiser.run` while the Optimiser
-  labels inside its job) or `compute:<tenantId>` (everything else), worked out by whoever queues
+  `model:<tenantId>:<endpointId>` (`labeling.runTask`, the Optimiser's labeling steps included) or
+  `compute:<tenantId>` (everything else, `optimiser.run` too), worked out by whoever queues
   it (`apps/workflow/src/services/queue.ts`). At most the key's limit
   (`config.forTenant(tenant).jobLimit(target)`: 1 per endpoint and 10 for compute by default) run
   at once across every runner; the store counts them at the claim. Keys take turns, so a long
