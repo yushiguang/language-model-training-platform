@@ -40,9 +40,10 @@ const telemetry = createTelemetry({
 });
 /**
  * Frozen features (docs/design/server.md 6): packed in segment files in the platform's object
- * storage when it has one, else one document each in `db`. Examples saved before stay readable.
+ * storage when it has one (examples saved before stay readable from `db`). Without it the catalog
+ * and the workflow keep one document per example, each written and skipped on its own, as before.
  */
-const features = platform.objectStore ? objectFeatureStore(platform.objectStore, docFeatureStore(platform.db)) : docFeatureStore(platform.db);
+const features = platform.objectStore ? objectFeatureStore(platform.objectStore, docFeatureStore(platform.db)) : undefined;
 const catalog = createCatalog(platform.db, {telemetry, features});
 /**
  * One process: the limits are counted here unless the platform shares a store (spec 5). Each

@@ -19,9 +19,10 @@ export interface WorkflowDeps {
   examples: ExampleSource;
   /**
    * Where taken examples' frozen features are written, a batch at a time (docs/design/server.md
-   * 6): the same store the catalog reads them from (`@yushiguang/sprint-catalog` has
-   * `objectFeatureStore` and `docFeatureStore`). Without it they are written one document each
-   * through the catalog, as before.
+   * 6): the object-storage store the catalog reads them from (`objectFeatureStore` in
+   * `@yushiguang/sprint-catalog`), whose batch is one write that lands whole or not at all. Leave
+   * it out otherwise: features are then written one document each through the catalog, so one
+   * failed write skips only its own example.
    */
   features?: FeatureStorePort;
   /** Optional media for people to look at; see `MediaSource`. */

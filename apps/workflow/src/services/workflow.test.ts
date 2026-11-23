@@ -1591,6 +1591,34 @@ test('frozen features in object storage (#72): a take writes one segment file pe
   }
 });
 
+test('frozen features in object storage (#72): a batch whose segment file cannot be written twice is skipped whole; no example of it is saved, the other batches are', async () => {
+  const {configureSystem} = await import('@yushiguang/sprint-domain');
+  const objects = memoryObjectStore();
+  let puts = 0;
+  // The second batch's segment fails both tries.
+  const flaky: ObjectStorePort = {...objects, put: (k, b, o) => (++puts === 2 || puts === 3 ? Promise.reject(new Error('storage down')) : objects.put(k, b, o))};
+  const w = await world('fzo2', {gold: null, objects: flaky});
+  Object.assign(w.inst, {examples: {async lookup(ids: string[]) {
+    return ids.map(externalId => ({externalId, type: 'video' as const, title: '', features: {Description: {text: `about ${externalId}`}}}));
+  }} satisfies ExampleSource});
+  configureSystem({dataset: {featureBatch: 4}});
+  try {
+    const {createProject} = await import('./projects.ts');
+    const {takeExamples} = await import('./dataset.ts');
+    const sourceId = await sourceOf(w, 'Feed', Array.from({length: 10}, (_, i) => `q${i}`));
+    const p = await createProject(w.ws, 'Flaky');
+    await takeExamples(w.ws, p.id, [{sourceId, count: 10}]);
+    await w.jobs.idle();
+    const state = (await loadProjectState(w.ws, p.id))!;
+    assert.equal(state.examples.length, 6, '10 in batches of 4: the second batch (4) is skipped');
+    assert.equal(objects.keys().length, 2);
+    const stored = await w.catalog.find('examples', {snapshotId: state.snapshot!.id});
+    assert.ok(stored.every(e => e.featureRef && objects.keys().includes(e.featureRef.key)), 'no example without its features');
+  } finally {
+    configureSystem();
+  }
+});
+
 test('frozen snapshots (#32): adding items that are all in the dataset already still counts what the checks left out', async () => {
   const w = await world('fz2', {gold: null});
   const {appendExamples} = await import('./governance.ts');
