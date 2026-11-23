@@ -894,12 +894,14 @@ test('answers in object storage (#72): counters that cannot be added after a sav
   const {db, catalog, v, ids} = await setup(7, 'lab-obj-7');
   const objects = memoryObjectStore();
   const base = objectLabelingStore(db, objects);
-  let failTallies = 2;
+  // Batch 1 (4): counters fail twice. Batch 2 (3): fail once, then added.
+  let failTallies = 3;
   const store = {...base, addToTask: async (...args: Parameters<typeof base.addToTask>) => ((args[1].done ?? 0) > 0 && failTallies-- > 0 ? Promise.reject(new Error('db blip')) : base.addToTask(...args))};
   const lab = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": "Vlog"}'), locks: memoryLocks(), store, answerBatch: {size: 4, maxWaitMs: 60_000}});
-  const t = await lab.runTask((await lab.createTask(input(ids, v, {parallel: 1}))).id);
+  const t = await lab.runTask((await lab.createTask(input(ids, v, {parallel: 1}))).id, 'system', {auto: true});
   assert.deepEqual([t?.state, t?.done, t?.valid, t?.failed], ['done', 7, 7, 0]);
   assert.ok(Math.abs((t?.costUsd ?? 0) - 0.07) < 1e-9);
+  assert.ok(Math.abs((t?.autoCostUsd ?? 0) - 0.07) < 1e-9, `automatic spend counted once: ${t?.autoCostUsd}`);
 });
 
 test('objectLabelingStore: an id given twice in one batch is saved once, and says saved once', async () => {

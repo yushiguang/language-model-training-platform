@@ -355,14 +355,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         add.tokens += pred.tokens ?? 0;
         if (opts.auto && paid) add.autoCostUsd += pred.costUsd;
       }
-      try {
-        await store.addToTask(taskId, add);
-      } catch (e) {
-        // Not added: the run ends by recounting; the automatic spend, which answers do not
-        // record, is added then.
-        missedAutoCostUsd += add.autoCostUsd;
-        throw e;
-      }
+      await store.addToTask(taskId, add);
       counts.done += add.done;
       counts.costUsd += add.costUsd;
       for (const {prediction: pred, saved: paid} of results) {
@@ -398,7 +391,10 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           return await tally(results);
         } catch {
           if (attempt >= 1) {
+            // Not added: the run ends by recounting; the automatic spend, which answers do not
+            // record, is added then (once per batch, whatever the tries).
             countsStale = true;
+            if (opts.auto) missedAutoCostUsd += results.reduce((n, r) => n + (r.saved ? r.prediction.costUsd : 0), 0);
             return;
           }
         }
@@ -546,11 +542,13 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         state = 'paused';
         stopReason = 'closed';
       }
-      if (missedAutoCostUsd > 0) await store.addToTask(taskId, {autoCostUsd: missedAutoCostUsd}).catch(() => undefined);
     }
     // Failures whose own write was lost: the run's record of them is written whole.
     if (failedStale) recount = {...recount, failed: failedNow.size, failedExampleIds: [...failedNow]};
-    await store.patchTask(taskId, {...recount, state, stopReason, error, stopRequested: false, finishedAt: state === 'paused' ? null : now()});
+    const end: LabelingTaskPatch = {...recount, state, stopReason, error, stopRequested: false, finishedAt: state === 'paused' ? null : now()};
+    // The missed automatic spend goes in the same write as the end, so neither lands alone.
+    if (missedAutoCostUsd > 0) await store.addToTask(taskId, {autoCostUsd: missedAutoCostUsd}, {set: end});
+    else await store.patchTask(taskId, end);
     emit(task.projectId);
     tm.counter('sprint_labeling_tasks_ended_total', {task_purpose: purpose, state, reason: stopReason ?? 'none'});
     if (state === 'needs_attention') tm.event('run_needs_attention', {task_purpose: purpose, failed: counts.failed, total: task.total});
