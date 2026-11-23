@@ -24,7 +24,7 @@ export const standInAuthorization = (): AuthorizationPort => ({
 
 /** What `memoryPermissionAdmin` starts from, and where a browser keeps it. */
 export interface MemoryPermissionOptions {
-  /** Members it holds before anything is written (the local user as an admin of `default`). */
+  /** Members it holds before anything is kept (the local user as an admin of `default`). */
   seed?: (TenantMember & {tenantId: string})[];
   /** A local-storage key: what is written is kept there, so a reload keeps new tenants and members. */
   storageKey?: string;
@@ -47,17 +47,18 @@ export function memoryPermissionAdmin(opts: MemoryPermissionOptions = {}): Permi
     const k = `${tenantId}/${projectId}`;
     return writers.get(k) ?? writers.set(k, new Set()).get(k)!;
   };
-  for (const m of opts.seed ?? []) tenant(m.tenantId).set(m.userId, m.role);
   const {storageKey} = opts;
-  if (storageKey) {
-    try {
-      const kept = JSON.parse(globalThis.localStorage?.getItem(storageKey) ?? 'null') as {members: [string, [string, TenantRole][]][]; writers: [string, string[]][]} | null;
-      for (const [t, list] of kept?.members ?? []) for (const [u, r] of list) tenant(t).set(u, r);
-      for (const [k, list] of kept?.writers ?? []) writers.set(k, new Set(list));
-    } catch {
-      // Unreadable or blocked storage: start from the seed.
-    }
+  let kept: {members: [string, [string, TenantRole][]][]; writers: [string, string[]][]} | null = null;
+  try {
+    kept = storageKey ? JSON.parse(globalThis.localStorage?.getItem(storageKey) ?? 'null') : null;
+  } catch {
+    // Unreadable or blocked storage: start from the seed.
   }
+  // What was kept wins over the seed, so a member removed stays removed after a reload.
+  if (kept) {
+    for (const [t, list] of kept.members ?? []) for (const [u, r] of list) tenant(t).set(u, r);
+    for (const [k, list] of kept.writers ?? []) writers.set(k, new Set(list));
+  } else for (const m of opts.seed ?? []) tenant(m.tenantId).set(m.userId, m.role);
   const save = () => {
     if (!storageKey) return;
     try {

@@ -39,6 +39,9 @@ test('memoryPermissionAdmin (#94): lists a user\'s tenants, starts from a seed, 
     assert.deepEqual(await again.listUserTenants('u_1'), [{tenantId: 'default', role: 'admin'}, {tenantId: 't2', role: 'member'}], 'a reload keeps them');
     assert.equal(again.canWrite('t2', 'pr_1', 'u_1'), true);
     assert.deepEqual(await memoryPermissionAdmin().listUserTenants('u_1'), [], 'without a key nothing is read');
+    await again.removeTenantMember(ctx, 'default', 'u_1');
+    const third = memoryPermissionAdmin({seed: [{tenantId: 'default', userId: 'u_1', role: 'admin'}], storageKey: 'perm'});
+    assert.deepEqual(await third.listUserTenants('u_1'), [{tenantId: 't2', role: 'member'}], 'what was kept wins over the seed');
   } finally {
     g.localStorage = before;
   }
