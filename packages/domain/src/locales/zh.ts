@@ -239,6 +239,7 @@ export const ZH: Readonly<Record<string, string>> = {
   "Restore": "恢复",
   "Broken": "损坏",
   "Out of scope": "不在范围内",
+  "Other": "其他",
   "Downsampled": "降采样",
   "Unlabeled extra": "多余的未标注样本",
   "This file can't be used. Upload a text or CSV file of item IDs.": "这个文件无法使用。请上传包含条目 ID 的文本或 CSV 文件。",
