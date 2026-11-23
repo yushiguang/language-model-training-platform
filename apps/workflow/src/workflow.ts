@@ -134,6 +134,8 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     getDataSource: (ctx, sourceId) => sources.getDataSource(at(ctx), sourceId),
     createDataSource: (ctx, r) => sources.createDataSource(at(ctx), r),
     addSourceFile: (ctx, r) => sources.addSourceFile(at(ctx), r),
+    renameDataSource: (ctx, r) => sources.renameDataSource(at(ctx), r),
+    deleteDataSource: (ctx, r) => sources.deleteDataSource(at(ctx), r),
 
     listModels: ctx => models.listModels(at(ctx)),
     addModel: (ctx, r) => models.addModel(at(ctx), r),

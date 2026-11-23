@@ -230,7 +230,26 @@ export interface ModelSaveResult {
   error?: string;
 }
 
-/** Add a file to a data source; its items join the ones there (#29). */
+/** A new name for a data source (trimmed, not empty, not another source's of the tenant). */
+export interface RenameDataSourceRequest {
+  sourceId: string;
+  name: string;
+}
+
+/** The name as saved, or why nothing was saved (shown under the name field). */
+export interface RenameDataSourceResult {
+  name?: string;
+  error?: string;
+}
+
+export interface DeleteDataSourceRequest {
+  sourceId: string;
+}
+
+/**
+ * Add a file to a data source; its items join the ones there (#29).
+ * @deprecated One file is one data source (2026-11-22): upload a new data source instead.
+ */
 export interface AddSourceFileRequest {
   sourceId: string;
   fileName: string;
@@ -441,15 +460,25 @@ export interface BffContract {
   // Project Settings (the pass rule and the labeling model). Saving also confirms them.
   saveSettings(req: SaveSettingsRequest): Promise<void>;
 
-  // Data Source (#29): tenant scope, shared by the tenant's projects. No delete or rename yet.
+  // Data Source (#29): tenant scope, shared by the tenant's projects. One file is one data source.
   /** The caller's tenant's data sources, the built-in sample data included, newest first. */
   listDataSources(): Promise<DataSourceSummary[]>;
   /** One data source and its files; null when it is not the caller's tenant's. */
   getDataSource(sourceId: string): Promise<DataSourceDetail | null>;
   /** Creates a data source from its first file; the import runs as a `source.ingest` job. */
   createDataSource(req: CreateDataSourceRequest): Promise<SourceUploadResult>;
-  /** Adds a file to a data source; items already in it are counted as repeats and left out. */
+  /**
+   * Adds a file to a data source; items already in it are counted as repeats and left out.
+   * @deprecated One file is one data source (2026-11-22): pages upload a new data source instead.
+   */
   addSourceFile(req: AddSourceFileRequest): Promise<SourceUploadResult>;
+  /** Renames a data source (tenant admins). The built-in sample data keeps its name. */
+  renameDataSource(req: RenameDataSourceRequest): Promise<RenameDataSourceResult>;
+  /**
+   * Deletes a data source (tenant admins): it leaves every list and no dataset takes from it
+   * again; examples already in datasets stay. Cannot be undone. The built-in sample data stays.
+   */
+  deleteDataSource(req: DeleteDataSourceRequest): Promise<void>;
 
   // Tenant models (docs/design/server.md, 9): every member lists them; tenant admins change them.
   /** The caller's tenant's models, the default first. */

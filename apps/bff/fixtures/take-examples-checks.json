@@ -96,7 +96,9 @@
         },
         "source": {
           "builtIn": false,
+          "createdAt": "$time",
           "createdBy": "Tester",
+          "fileName": "feed.txt",
           "files": 1,
           "id": "$id:5",
           "importing": {
@@ -106,7 +108,9 @@
           "items": 0,
           "name": "Feed",
           "notUsed": 0,
-          "updatedAt": "$time"
+          "state": "reading",
+          "updatedAt": "$time",
+          "usedBy": 0
         }
       }
     },

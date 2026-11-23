@@ -1,4 +1,4 @@
-import {DEFAULT_TENANT, DocFieldValue, type AddSourceFileRequest, type CreateDataSourceRequest, type DataSource, type DataSourceDetail, type DataSourceSummary, type DatasetSourceLine, type Example, type Job, type JobControl, type JobOutcome, type SourceChunk, type SourceCut, type SourceFile, type SourcePick, type SourceUploadResult} from '@yushiguang/sprint-contracts';
+import {DEFAULT_TENANT, DocFieldValue, type AddSourceFileRequest, type CreateDataSourceRequest, type DataSource, type DataSourceDetail, type DataSourceSummary, type DatasetSourceLine, type DeleteDataSourceRequest, type RenameDataSourceRequest, type RenameDataSourceResult, type Example, type Job, type JobControl, type JobOutcome, type SourceChunk, type SourceCut, type SourceFile, type SourcePick, type SourceUploadResult} from '@yushiguang/sprint-contracts';
 import {hashString, newId, readItemIdFile, seededShuffle} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {computeKey} from './queue.ts';
@@ -36,9 +36,15 @@ export async function withLock<T>(w: Scope, name: string, fn: () => Promise<T>, 
 /** The caller's tenant's source, or an error a page can show. */
 async function ownSource(w: Scope, sourceId: string): Promise<DataSource> {
   const src = await w.catalog.get('data_sources', sourceId);
-  if (!src || src.tenantId !== tenantOf(w)) throw new Error('This data source does not exist.');
+  if (!src || src.tenantId !== tenantOf(w) || src.deletedAt) throw new Error('This data source does not exist.');
   return src;
 }
+
+/** The tenant's sources that are not deleted. */
+const liveSources = async (w: Scope) => (await w.catalog.find('data_sources', {tenantId: tenantOf(w)})).filter(s => !s.deletedAt);
+
+/** The projects whose datasets took from a source: its cuts that are not retired. */
+const usingProjects = (cuts: SourceCut[]) => [...new Set(cuts.filter(c => !c.retired).map(c => c.projectId))];
 
 /**
  * The sample data that ships with the platform, as a built-in source of the tenant (made the first
@@ -85,8 +91,10 @@ function holes(src: DataSource, files: SourceFile[]): {from: number; to: number;
     .map(f => ({from: f.start! + f.done, to: f.start! + f.items, failed: f.state === 'failed'}));
 }
 
-function summary(src: DataSource, files: SourceFile[]): DataSourceSummary {
+function summary(src: DataSource, files: SourceFile[], cuts: SourceCut[]): DataSourceSummary {
   const importing = placed(src, files).filter(f => f.state === 'importing');
+  const first = [...files].sort((a, b) => a.uploadedAt.localeCompare(b.uploadedAt))[0];
+  const failed = files.length > 0 && files.every(f => f.state === 'failed');
   // `src.items` counts reserved positions; ones not written are not items anyone can take.
   const hs = holes(src, files);
   const items = src.items - hs.reduce((n, h) => n + h.to - h.from, 0);
@@ -96,9 +104,14 @@ function summary(src: DataSource, files: SourceFile[]): DataSourceSummary {
     name: src.name,
     builtIn: !!src.builtIn,
     files: files.length,
+    fileName: first?.name ?? src.name,
     items,
     notUsed: Math.max(0, src.items - src.next - unusedHoles),
+    state: importing.length ? 'reading' : failed ? 'failed' : 'ready',
+    ...(failed ? {error: files[0].error ?? null} : {}),
+    usedBy: usingProjects(cuts).length,
     createdBy: src.createdBy,
+    createdAt: src.createdAt,
     updatedAt: src.updatedAt,
     // Before its positions are reserved, a file's size is its rows less the bad ones and repeats.
     importing: importing.length ? {done: importing.reduce((n, f) => n + f.done, 0), total: importing.reduce((n, f) => n + (f.start == null ? f.rows - f.bad - f.repeats : f.items), 0)} : null,
@@ -124,24 +137,62 @@ async function settleStuck(w: Scope, files: SourceFile[]): Promise<boolean> {
 export async function listDataSources(w: Scope): Promise<DataSourceSummary[]> {
   await ensureBuiltIn(w);
   const tenantId = tenantOf(w);
-  const read = () => Promise.all([w.catalog.find('data_sources', {tenantId}), w.catalog.find('source_files', {tenantId})]);
+  const read = () => Promise.all([liveSources(w), w.catalog.find('source_files', {tenantId})]);
   let [sources, files] = await read();
   if (await settleStuck(w, files)) [sources, files] = await read();
+  const cuts = await Promise.all(sources.map(s => w.catalog.find('source_cuts', {sourceId: s.id})));
   return sources
-    .sort((a, b) => Number(!!a.builtIn) - Number(!!b.builtIn) || b.updatedAt.localeCompare(a.updatedAt))
-    .map(s => summary(s, files.filter(f => f.sourceId === s.id)));
+    .map((s, i) => ({s, cuts: cuts[i]}))
+    .sort((a, b) => Number(!!a.s.builtIn) - Number(!!b.s.builtIn) || b.s.createdAt.localeCompare(a.s.createdAt))
+    .map(({s, cuts}) => summary(s, files.filter(f => f.sourceId === s.id), cuts));
 }
 
 export async function getDataSource(w: Scope, sourceId: string): Promise<DataSourceDetail | null> {
   await ensureBuiltIn(w);
   const src = await w.catalog.get('data_sources', sourceId);
-  if (!src || src.tenantId !== tenantOf(w)) return null;
+  if (!src || src.tenantId !== tenantOf(w) || src.deletedAt) return null;
   const read = () => Promise.all([w.catalog.get('data_sources', sourceId), w.catalog.find('source_files', {sourceId}, 'uploadedAt desc'), w.catalog.find('source_cuts', {sourceId})]);
   let [fresh, files, cuts] = await read();
   if (await settleStuck(w, files)) [fresh, files, cuts] = await read();
-  const live = cuts.filter(c => !c.retired);
-  const source = summary(fresh!, files);
-  return {source, files: placed(fresh!, files), taken: source.items - source.notUsed, projects: new Set(live.map(c => c.projectId)).size};
+  const source = summary(fresh!, files, cuts);
+  const ids = usingProjects(cuts);
+  const projects = ids.length ? await w.catalog.findByIds('projects', ids) : [];
+  const usedByProjects = projects.map(p => ({id: p.id, name: p.name})).sort((a, b) => a.name.localeCompare(b.name));
+  return {source, files: placed(fresh!, files), taken: source.items - source.notUsed, projects: ids.length, usedByProjects};
+}
+
+/** Renames a source; the name is checked against the tenant's other sources under the tenant's lock. */
+export async function renameDataSource(w: Scope, req: RenameDataSourceRequest): Promise<RenameDataSourceResult> {
+  const name = req.name.trim();
+  if (!name) return {error: 'Give the data source a name.'};
+  const src = await ownSource(w, req.sourceId);
+  if (src.builtIn) return {error: "The built-in sample data can't be renamed."};
+  const tenantId = tenantOf(w);
+  return withLock(w, `sources:${tenantId}`, async () => {
+    if ((await liveSources(w)).some(s => s.id !== src.id && s.name.toLowerCase() === name.toLowerCase())) return {error: 'A data source with this name already exists.'};
+    if (name !== src.name) {
+      await w.catalog.patch('data_sources', src.id, {name, updatedAt: now()});
+      await w.catalog.audit(null, (await w.user()).name, 'data_source.renamed', {sourceId: src.id});
+      w.emitChange(null);
+    }
+    return {name};
+  });
+}
+
+/**
+ * Deletes a source: it leaves every list and read, and no dataset takes from it again (`allocate`
+ * and the picks check go through `ownSource` and the list). Its record stays, so examples already
+ * taken keep its name. A file still being read stops: its import finds the source deleted.
+ */
+export async function deleteDataSource(w: Scope, req: DeleteDataSourceRequest): Promise<void> {
+  const src = await ownSource(w, req.sourceId);
+  if (src.builtIn) throw new Error("The built-in sample data can't be deleted.");
+  const user = await w.user();
+  await withLock(w, `source:${src.id}`, async () => {
+    await w.catalog.patch('data_sources', src.id, {deletedAt: now(), deletedBy: user.name});
+  });
+  await w.catalog.audit(null, user.name, 'data_source.deleted', {sourceId: src.id});
+  w.emitChange(null);
 }
 
 export async function createDataSource(w: Scope, req: CreateDataSourceRequest): Promise<SourceUploadResult> {
@@ -155,7 +206,7 @@ export async function createDataSource(w: Scope, req: CreateDataSourceRequest): 
   const user = await w.user();
   // The name check and the insert hold the tenant's lock: two creates never make one name twice.
   return withLock(w, `sources:${tenantId}`, async () => {
-    if ((await w.catalog.find('data_sources', {tenantId})).some(s => s.name.toLowerCase() === name.toLowerCase())) return {error: 'A data source with this name already exists.'};
+    if ((await liveSources(w)).some(s => s.name.toLowerCase() === name.toLowerCase())) return {error: 'A data source with this name already exists.'};
     const at = now();
     const src: DataSource = {id: newId('src'), tenantId, name, items: 0, files: 1, next: 0, createdAt: at, createdBy: user.name, createdById: user.id, updatedAt: at};
     // The file is staged first and the source goes last: a create cut short leaves no empty source.
@@ -192,9 +243,11 @@ async function queued(w: Scope, src: DataSource, file: SourceFile, read: ReadFil
   await w.catalog.audit(null, file.uploadedBy, 'data_source.file_added', {sourceId: src.id, fileId: file.id, rows: read.rows, bad: read.bad, repeats: read.repeats});
   w.tm.event('source_file_uploaded', {rows: read.rows, bad: read.bad, repeats: read.repeats});
   w.emitChange(null);
-  const files = await w.catalog.find('source_files', {sourceId: src.id});
-  return {source: summary((await w.catalog.get('data_sources', src.id))!, files), file};
+  const [files, cuts] = await Promise.all([w.catalog.find('source_files', {sourceId: src.id}), w.catalog.find('source_cuts', {sourceId: src.id})]);
+  return {source: summary((await w.catalog.get('data_sources', src.id))!, files, cuts), file};
 }
+
+class DeletedSource extends Error {}
 
 /** Times a failed import is tried again before its file is marked failed. */
 export const INGEST_RETRIES = 2;
@@ -226,6 +279,7 @@ export async function runIngest(w: Scope, job: Job, ctl: JobControl): Promise<Jo
       await settleReservation(w, (await w.catalog.get('data_sources', first.sourceId))!);
       const [src, file] = await Promise.all([w.catalog.get('data_sources', first.sourceId), w.catalog.get('source_files', fileId)]);
       if (!src || !file || file.state !== 'importing') return false;
+      if (src.deletedAt) throw new DeletedSource();
       const chunks = await w.catalog.find('source_chunks', {sourceId: file.sourceId});
       const staged = chunks.filter(c => c.staged && c.fileId === fileId).sort((a, b) => a.start - b.start).flatMap(c => c.ids);
       const start = file.start ?? src.items;
@@ -257,6 +311,11 @@ export async function runIngest(w: Scope, job: Job, ctl: JobControl): Promise<Jo
     if (ctl.cancelled()) await markFailed(w, fileId, 'Stopped.');
     return {state: 'cancelled', error: 'Stopped.'};
   } catch (e) {
+    // A deleted source's file is not read further, and not tried again.
+    if (e instanceof DeletedSource) {
+      await markFailed(w, fileId, 'The data source was deleted.').catch(() => undefined);
+      return {state: 'done'};
+    }
     if (job.attempts > INGEST_RETRIES) await markFailed(w, fileId, (e as Error).message).catch(() => undefined);
     throw e;
   } finally {
@@ -297,7 +356,7 @@ export async function allocate(w: Scope, projectId: string, pick: SourcePick, kn
     await settleReservation(w, await ownSource(w, pick.sourceId));
     const src = await ownSource(w, pick.sourceId);
     const [all, files] = await Promise.all([w.catalog.find('source_chunks', {sourceId: src.id}), w.catalog.find('source_files', {sourceId: src.id})]);
-    const left = summary(src, files).notUsed;
+    const left = summary(src, files, []).notUsed;
     if (pick.count > left) throw new Error(`Only ${left} unused items are left in ${src.name}; ${pick.count} were asked for.`);
     const chunks = all.filter(c => !c.staged).sort((a, b) => a.start - b.start);
     const skip = holes(src, files).filter(h => h.failed);
