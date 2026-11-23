@@ -10,9 +10,10 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
   per-endpoint limits, bulk storage, a config module and notifications, delivered as the
   numbered pull requests in the issue. The design doc is merged (#60); step 1, the config
   module, is merged (#61); step 2, permissions and tenant isolation, is merged (#63); step 3,
-  the job queue with per-key limits and the queue position on pages, is merged (#66). Step 4,
-  models read per tenant and limits per tenant and endpoint in the gateway, is in progress (#69):
-  pull request 1 of 2, the contract change and the gateway, is under review.
+  the job queue with per-key limits and the queue position on pages, is merged (#66); step 6,
+  notifications when scoring or Auto Optimise ends, is merged (#71). Step 4, models read per
+  tenant and limits per tenant and endpoint in the gateway, is in progress (#69): pull request 1
+  of 2, the contract change and the gateway, is merged. Step 7, the storage ports, is in progress.
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
   tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are merged (see Done);
   step 3, action tools, is next, with their cards drawn on the UI design first.

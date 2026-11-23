@@ -1,4 +1,4 @@
-import {NO_TELEMETRY, type AuthorizationPort, type PermissionAdminPort, type ConfigReader, type TicketPort, type AgentRuntimeContract, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FeatureStorePort, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@yushiguang/sprint-contracts';
+import {NO_TELEMETRY, type AuthorizationPort, type PermissionAdminPort, type ConfigReader, type TicketPort, type NotificationPort, type AgentRuntimeContract, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FeatureStorePort, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@yushiguang/sprint-contracts';
 import {newId, processConfigReader} from '@yushiguang/sprint-domain';
 
 /**
@@ -33,6 +33,11 @@ export interface WorkflowDeps {
   documents?: DocumentSource;
   /** Where problem reports go (spec 1.1.0, 3). Without it the helpers say reports cannot be sent. */
   tickets?: TicketPort;
+  /**
+   * Sends notifications (docs/design/server.md, 8): the person who started scoring or an
+   * Optimiser run hears how it ended. Best effort; without it nothing is sent.
+   */
+  notifications?: NotificationPort;
   /** The app's version, written into problem reports. */
   appVersion?: string;
   standIns: string[];
