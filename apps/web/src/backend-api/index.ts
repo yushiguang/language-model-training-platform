@@ -45,6 +45,7 @@ export const client: BffClient = chosen;
 export const {
   getRuntimeInfo,
   signOut,
+  requestAccess,
   listProjects,
   createProject,
   getProject,

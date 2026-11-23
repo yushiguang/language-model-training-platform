@@ -1,4 +1,4 @@
-import type {BffContract, CallerUser, Identity, Locale, RequestContext, WorkflowContract} from '@yushiguang/sprint-contracts';
+import {DEFAULT_TENANT, type BffContract, type CallerUser, type Identity, type Locale, type RequestContext, type WorkflowContract} from '@yushiguang/sprint-contracts';
 import {newId} from '@yushiguang/sprint-domain';
 
 /**
@@ -27,10 +27,10 @@ export function createBffApi(deps: BffDeps): BffContract {
 
   // The signed-in user, asked once; a failed sign-in check is asked again on the next call. Their
   // organization is the tenant: what a tenant owns (data sources, #29) is kept per organization.
-  let user: Promise<{user: CallerUser; tenantId?: string}> | null = null;
-  const currentUser = (): Promise<{user: CallerUser; tenantId?: string}> => {
+  let user: Promise<{user: CallerUser; tenantId?: string; tenantName?: string}> | null = null;
+  const currentUser = (): Promise<{user: CallerUser; tenantId?: string; tenantName?: string}> => {
     if (!user) {
-      user = identity.currentUser().then(u => ({user: {id: u.id, name: u.name, ...(u.email ? {email: u.email} : {})}, ...(u.organization ? {tenantId: u.organization} : {})}));
+      user = identity.currentUser().then(u => ({user: {id: u.id, name: u.name, ...(u.email ? {email: u.email} : {})}, ...(u.organization ? {tenantId: u.organization} : {}), ...(u.organizationName ? {tenantName: u.organizationName} : {})}));
       user.catch(() => (user = null));
     }
     return user;
@@ -76,13 +76,18 @@ export function createBffApi(deps: BffDeps): BffContract {
   return {
     async getRuntimeInfo() {
       const ctx = await context();
-      return {...(await workflow.runtimeInfo(ctx)), user: {id: ctx.user.id, name: ctx.user.name}, canSignOut: typeof identity.signOut === 'function'};
+      const {tenantRole, ...info} = await workflow.runtimeInfo(ctx);
+      // The tenant as the top bar names it: the organization's name, else its id.
+      const tenantId = ctx.tenantId ?? DEFAULT_TENANT;
+      const tenantName = (await currentUser()).tenantName ?? tenantId;
+      return {...info, user: {id: ctx.user.id, name: ctx.user.name}, canSignOut: typeof identity.signOut === 'function', tenant: {id: tenantId, name: tenantName, role: tenantRole ?? 'member'}};
     },
     async signOut() {
       if (!identity.signOut) throw new Error('This site has no sign-out.');
       await identity.signOut();
       user = null;
     },
+    requestAccess: pass('requestAccess'),
 
     listProjects: pass('listProjects'),
     createProject: pass('createProject'),

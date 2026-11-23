@@ -67,7 +67,7 @@ Your module exports `createPlatform()` returning the `Platform` object from
 | `db: DocRuntime` | Document collections: add, get, set, partial update with `DocFieldValue` (increment, arrayUnion, arrayRemove, delete), delete, find, query with filters and offset paging, polling subscribe, batch writes. `createdAt` is server time | `localDocRuntime('sprint-doc')` (`localStorage`) |
 | `models: LabelingModels` | One labeling call per example (`chat`, `chatStream`). `endpoints()` lists the platform's default labeling models (ids are opaque strings, the stand-ins use `A` and `B`); `ChatRequest.endpoint` is decided per call and may also be the Endpoint a tenant admin entered for a tenant model, so the adapter must call any endpoint it is given, not only ones it knew at start (`tenantId` comes along for logs); returns text and token usage. Throw `LlmCallError` (or an error with an HTTP `status`) so the gateway can tell busy from rejected; throw `LlmCallError('filtered', …)` when the endpoint's safety filter stops the answer (Prompt versions shows it as Filtered) | `simulatedModels` |
 | `agent: AgentModel` | Agent chat (`chat`, `complete` with usage and thinking, `chatStream`), and `models()`: the model registry (opaque ids, capabilities, prices, active flag; spec 5) | `scriptedAgent`, `STAND_IN_MODELS` |
-| `identity: Identity` | The signed-in user (id, name, email, organization); `currentUser()` rejects when nobody is signed in, and the site then shows a sign-in error with Retry. Optional `signOut()` ends the single sign-on session: when it is there, the avatar menu shows Sign out and the page reloads after it (2026-11-16) | `localIdentity` (no sign-out) |
+| `identity: Identity` | The signed-in user (id, name, email, organization and its display name `organizationName`); `currentUser()` rejects when nobody is signed in, and the site then shows a sign-in error with Retry. Optional `signOut()` ends the single sign-on session: when it is there, the avatar menu shows Sign out and the page reloads after it (2026-11-16) | `localIdentity` (no sign-out) |
 | `files: FileStore` | Uploads for prompt images and chat attachments; returns a URL the model can fetch. When stored URLs must be signed per call, the composition root passes labeling a `resolveUrl` that returns a Promise (next section) | `browserFiles` (data URLs) |
 | `examples: ExampleSource` | An item's features by its id (`lookup`), and optionally the item ids of the sample data that every tenant gets as a built-in data source (`builtIn`) | `sampleExamples` |
 | `media?: MediaSource` | The player page and still images of one example by item id, for people to look at on Gold Labels (see "Media") | `sampleMedia` (made-up pictures, no player) |
@@ -143,7 +143,7 @@ services `w.config.forTenant(w.ctx.tenantId)`. `stop()` before the process exits
 
 Sprint keeps no permission table: the three permission points (`read`, `project_write`,
 `tenant_write`, docs/design/server.md, 2) live on the deployment's permission platform.
-A deployment supplies two optional ports in `Platform`:
+A deployment supplies three optional ports in `Platform`:
 
 - `authorization` (`AuthorizationPort`): `allowed(ctx, {action, permission, projectId?})`. The
   workflow fills `permission` from its own table, so the adapter only asks the platform whether
@@ -151,8 +151,15 @@ A deployment supplies two optional ports in `Platform`:
 - `permissionAdmin` (`PermissionAdminPort`): tenant members and roles, and project write grants,
   for the members pages and labelers. Every method must be idempotent; the ones that change
   something get the caller's context first, for the platform's audit trail.
+- `accessRequests` (`AccessRequestPort`): `request(ctx, {tenantId, permission, projectId?,
+  reason?})` sends a request from the "insufficient access" dialog to the platform, where
+  approvers handle it; return `trackUrl` when the platform has a page to follow it on. Sprint
+  stores and approves nothing (#91). Without it requests are kept in memory
+  (`memoryAccessRequests`).
 
-Pass both to `createWorkflow` (`authorization`, `permissionAdmin`), as the in-process root does.
+Pass them to `createWorkflow` (`authorization`, `permissionAdmin`, `accessRequests`), as the
+in-process root does. The top bar names the tenant by `Identity.currentUser().organizationName`
+(else its id) and shows admin entries to callers that `authorization` allows `tenant_write`.
 The workflow then checks every contract call, agent tool call, workflow job and Optimiser step
 (docs/design/server.md, 2.3): first the permission point, before any record is read, then that
 the project named is the caller's tenant's (another tenant's project reads as missing). So the

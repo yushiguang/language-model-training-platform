@@ -1,4 +1,4 @@
-import {NO_TELEMETRY, type AuthorizationPort, type PermissionAdminPort, type ConfigReader, type TicketPort, type NotificationPort, type AgentRuntimeContract, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FeatureStorePort, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@yushiguang/sprint-contracts';
+import {NO_TELEMETRY, type AccessRequestPort, type AuthorizationPort, type PermissionAdminPort, type ConfigReader, type TicketPort, type NotificationPort, type AgentRuntimeContract, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FeatureStorePort, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@yushiguang/sprint-contracts';
 import {newId, processConfigReader} from '@yushiguang/sprint-domain';
 
 /**
@@ -77,6 +77,8 @@ export interface WorkflowDeps {
   authorization?: AuthorizationPort;
   /** Writes permissions (the creator's project write). Without it no grant is written. */
   permissionAdmin?: PermissionAdminPort;
+  /** Sends access requests to the permission platform. Without it Request access is refused. */
+  accessRequests?: AccessRequestPort;
   /** The first wait before a failed grant is tried again (default 200 ms, doubling; tests pass 0). */
   grantRetryMs?: number;
 }

@@ -1,6 +1,6 @@
 import type {AgentProgressPort, AgentToolHost, EventStreamPort, EventTopic, JobExecutor, OptimiserHost, RequestContext, WorkflowContract} from '@yushiguang/sprint-contracts';
 import {createInstance, type Connected, type Scope, type WorkflowDeps} from './services/app.ts';
-import {authorize, NO_PROJECT, systemScope} from './services/access.ts';
+import {authorize, NO_PROJECT, requestAccess, systemScope, tenantRole} from './services/access.ts';
 import * as agents from './services/agents.ts';
 import * as dataset from './services/dataset.ts';
 import * as evaluation from './services/evaluation.ts';
@@ -99,8 +99,9 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
   const api: WorkflowContract = {
     async runtimeInfo(ctx) {
       const w = at(ctx);
-      return {standIns: w.standIns, endpoints: w.gateway.labelingEndpoints(), hasBundledGold: dataset.hasBundledGold(w)};
+      return {standIns: w.standIns, endpoints: w.gateway.labelingEndpoints(), hasBundledGold: dataset.hasBundledGold(w), tenantRole: await tenantRole(w)};
     },
+    requestAccess: (ctx, req) => requestAccess(at(ctx), req),
 
     listProjects: ctx => projects.listProjects(at(ctx)),
     createProject: (ctx, name) => projects.createProject(at(ctx), name),

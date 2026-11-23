@@ -399,7 +399,7 @@ export interface AgentModel {
 
 export interface Identity {
   /** The signed-in user. Rejects when nobody is signed in. */
-  currentUser(): Promise<{id: string; name: string; email?: string; organization?: string}>;
+  currentUser(): Promise<{id: string; name: string; email?: string; organization?: string; organizationName?: string}>;
   /** Ends the session (the hosting platform's single sign-on). Absent: the site offers no Sign out. */
   signOut?(): Promise<void>;
 }
@@ -798,6 +798,28 @@ export interface AuthorizationPort {
   allowed(ctx: RequestContext, request: AuthorizationRequest): Promise<boolean>;
 }
 
+/**
+ * A request for a permission point, sent to the external permission platform (docs/design/server.md,
+ * 2.2). Sprint approves nothing itself: approvers handle the request on that platform.
+ */
+export interface AccessRequest {
+  tenantId: string;
+  permission: PermissionPoint;
+  /** The project, for `project_write`. */
+  projectId?: string;
+  /** Why the caller needs it, in their own words. */
+  reason?: string;
+}
+
+/**
+ * Sends access requests to the external permission platform (the "insufficient access" dialog's
+ * Request access). Throw when the platform cannot be reached; the page says the request failed.
+ */
+export interface AccessRequestPort {
+  /** `trackUrl`: where the caller can follow the request on the platform, when it has such a page. */
+  request(ctx: RequestContext, request: AccessRequest): Promise<{trackUrl?: string}>;
+}
+
 /** A member's role in a tenant: `admin` holds `tenant_write`. */
 export type TenantRole = 'admin' | 'member';
 
@@ -869,6 +891,11 @@ export interface Platform {
    * without it they are kept in this process (`memoryPermissionAdmin`).
    */
   permissionAdmin?: PermissionAdminPort;
+  /**
+   * Sends access requests to the external permission platform. Optional: without it they are kept
+   * in this process (`memoryAccessRequests`) and the dialog offers no tracking link.
+   */
+  accessRequests?: AccessRequestPort;
   /**
    * Where background jobs are kept (`jobs-api.ts`). Optional: without it the job module keeps them
    * in the memory of its own process (`memoryJobStore`), which is right for the browser build.

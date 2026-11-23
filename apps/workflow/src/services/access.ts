@@ -1,4 +1,4 @@
-import {AccessDeniedError, SYSTEM_CALLER, type PermissionPoint, type Project, type RequestContext} from '@yushiguang/sprint-contracts';
+import {AccessDeniedError, SYSTEM_CALLER, type PermissionPoint, type Project, type RequestAccessRequest, type RequestAccessResult, type RequestContext, type TenantRole} from '@yushiguang/sprint-contracts';
 import {newId} from '@yushiguang/sprint-domain';
 import type {Instance, Scope} from './app.ts';
 import {backfillTenants} from './projects.ts';
@@ -32,6 +32,29 @@ export async function authorize(w: Scope, action: string, permission: Permission
   const project = await w.catalog.get('projects', projectId);
   if (project && project.tenantId !== tenantOf(w)) throw new Error(NO_PROJECT);
   return project;
+}
+
+/**
+ * The caller's role in its tenant: `admin` when it holds `tenant_write`. With no `AuthorizationPort`
+ * every signed-in user may do everything, so everyone is an admin.
+ */
+export async function tenantRole(w: Scope): Promise<TenantRole> {
+  if (!w.authorization) return 'admin';
+  return (await w.authorization.allowed(w.ctx, {action: 'workflow.runtimeInfo', permission: 'tenant_write'})) ? 'admin' : 'member';
+}
+
+const POINTS: PermissionPoint[] = ['read', 'project_write', 'tenant_write'];
+
+/**
+ * Passes a request for a permission point to the external permission platform
+ * (docs/design/server.md, 2.2). Nothing is checked or stored here: approvers decide there.
+ */
+export async function requestAccess(w: Scope, req: RequestAccessRequest): Promise<RequestAccessResult> {
+  if (!w.accessRequests) throw new Error('Requests for access are not set up here.');
+  if (!POINTS.includes(req.permission)) throw new Error('There is no such permission.');
+  const reason = req.reason?.trim().slice(0, 1000);
+  const r = await w.accessRequests.request(w.ctx, {tenantId: tenantOf(w), permission: req.permission, ...(req.projectId ? {projectId: req.projectId} : {}), ...(reason ? {reason} : {})});
+  return r.trackUrl ? {trackUrl: r.trackUrl} : {};
 }
 
 /**

@@ -1,5 +1,5 @@
 import type {BffContract, RuntimeInfo} from './bff-api.ts';
-import type {PermissionPoint, RequestContext} from './platform-api.ts';
+import type {PermissionPoint, RequestContext, TenantRole} from './platform-api.ts';
 
 /**
  * Contract 6: the application module (`@yushiguang/sprint-workflow`, deployment readiness spec, 2).
@@ -17,8 +17,12 @@ import type {PermissionPoint, RequestContext} from './platform-api.ts';
 /** `(ctx, ...args) => result` for a contract method `(...args) => result`. */
 export type WithContext<F> = F extends (...args: infer A) => infer R ? (ctx: RequestContext, ...args: A) => R : never;
 
-/** What the workflow knows of the runtime; the bff adds the signed-in user and Sign out. */
-export type WorkflowRuntimeInfo = Omit<RuntimeInfo, 'user' | 'canSignOut'>;
+/**
+ * What the workflow knows of the runtime; the bff adds the signed-in user, Sign out and the
+ * tenant's id and name. `tenantRole`: the caller's role in its tenant (`admin` when it holds
+ * `tenant_write`).
+ */
+export type WorkflowRuntimeInfo = Omit<RuntimeInfo, 'user' | 'canSignOut' | 'tenant'> & {tenantRole?: TenantRole};
 
 export type WorkflowContract = {
   [K in Exclude<keyof BffContract, 'getRuntimeInfo' | 'signOut'>]: WithContext<BffContract[K]>;

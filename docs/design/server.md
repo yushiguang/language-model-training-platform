@@ -29,6 +29,8 @@
 
 - 所有权限都存在外部权限平台，Sprint 不存权限表。
 - 申请和审批都在外部平台完成。Sprint 只在用户缺权限时弹出“权限不足”对话框，按钮跳到外部平台。
+- 申请经 `requestAccess({permission, projectId?, reason?})` 发出（#91）：工作流把它连同租户和申请人交给 `AccessRequestPort`（`Platform.accessRequests`，替身 `memoryAccessRequests` 只在内存里记下），外部平台有查看页面时返回 `trackUrl`。任何登录的人都能申请（权限点表里是 `null`），Sprint 不校验也不保存。
+- 页面要知道当前租户和自己是不是管理员：`RuntimeInfo.tenant = {id, name, role}`（#91）。名称取身份里的 `organizationName`（没有就用租户 id），`role` 是工作流问 `AuthorizationPort` 有没有 `tenant_write` 得出的（没接时人人都是管理员）。
 - 成员页面的添加和移除保留，由 Sprint 调外部平台的接口写入。
 - 每个后端请求带用户信息，由网关按接口所需的权限点校验。
 - 后端内部也要校验一次（`AuthorizationPort`），读和写都校验，因为 AI 工具调用（包括 AI 的读工具）和异步任务不经过网关。异步任务以入队人的身份执行，执行时按 `JobContext` 校验。
