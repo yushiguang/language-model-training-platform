@@ -312,7 +312,7 @@ test('access (#91): the runtime says whether the caller is an admin; anyone sign
   const {api} = world('wf-access', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin, accessRequests: requests});
   assert.equal((await api.runtimeInfo(inTenant(alice, 't1'))).tenantRole, 'admin');
   assert.equal((await api.runtimeInfo(inTenant(bob, 't1'))).tenantRole, 'member');
-  assert.equal((await api.runtimeInfo(inTenant(eve, 't1'))).tenantRole, 'member', 'not a member at all');
+  assert.equal((await api.runtimeInfo(inTenant(eve, 't1'))).tenantRole, undefined, 'not in the tenant at all: no role (#94)');
   const p = await api.createProject(inTenant(alice, 't1'), 'Formats');
   // Eve is not even a member: she can still ask, for the tenant or for a project.
   assert.deepEqual(await api.requestAccess(inTenant(eve, 't1'), {permission: 'read'}), {});
@@ -429,6 +429,54 @@ test('creating a project (#63): a grant that keeps failing removes the new proje
   failures = 3;
   const p = await api.createProject(inTenant(alice, 't1'), 'Kept');
   assert.deepEqual(await admin.listProjectWriters('t1', p.id), [alice.id], 'three failed tries, then the fourth works');
+});
+
+test('tenants (#94): anyone signed in creates one and becomes its admin; names are unique without case; the home page lists the caller\'s own', async () => {
+  const perms = checking();
+  const {api, catalog} = world('wf-tenant-records', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
+  const made = await api.createTenant(ctxOf(alice), {name: '  Content   Safety '});
+  assert.ok(made.tenant, made.error ?? 'no tenant');
+  assert.deepEqual({...made.tenant, id: undefined}, {id: undefined, name: 'Content Safety', role: 'admin', projects: 0});
+  assert.match(made.tenant.id, /^tn_/);
+  assert.equal(perms.admin.roleOf(made.tenant.id, alice.id), 'admin', 'the creator is the first admin');
+  // Blank names and taken names (any case, any spacing) come back as the form's error.
+  assert.deepEqual(await api.createTenant(ctxOf(bob), {name: '   '}), {error: 'Enter a name. Spaces alone are not a name.'});
+  assert.deepEqual(await api.createTenant(ctxOf(bob), {name: 'content safety'}), {error: 'A tenant with this name already exists. Pick another name.'});
+  const other = (await api.createTenant(ctxOf(bob), {name: 'Ads'})).tenant!;
+  // Inside a tenant it reads like any other: projects counted, the record names it in the runtime.
+  const t1 = inTenant(alice, made.tenant.id);
+  await api.createProject(t1, 'One');
+  await api.createProject(t1, 'Two');
+  await perms.admin.addTenantMember(ctxOf(bob), other.id, alice.id, 'member');
+  assert.deepEqual(await api.listTenants(ctxOf(alice)), [
+    {id: other.id, name: 'Ads', role: 'member', projects: 0},
+    {id: made.tenant.id, name: 'Content Safety', role: 'admin', projects: 2},
+  ]);
+  assert.deepEqual(await api.listTenants(ctxOf(eve)), [], 'in no tenant yet');
+  const info = await api.runtimeInfo(t1);
+  assert.deepEqual([info.tenantRole, info.tenantName], ['admin', 'Content Safety']);
+  assert.equal((await api.runtimeInfo(inTenant(eve, made.tenant.id))).tenantRole, undefined, 'not in it: no role');
+  assert.equal((await catalog.find('tenants', {})).length, 2);
+});
+
+test('tenants (#94): an admin that cannot be written removes the new tenant; without a permission platform none is made', async () => {
+  const admin = memoryPermissionAdmin();
+  let failures = Infinity;
+  const flaky = {
+    ...admin,
+    async addTenantMember(...a: Parameters<typeof admin.addTenantMember>) {
+      if (failures-- > 0) throw new Error('permission platform down');
+      return admin.addTenantMember(...a);
+    },
+  };
+  const {api, catalog} = world('wf-tenant-grant', noHelpers, undefined, {permissionAdmin: flaky});
+  await assert.rejects(api.createTenant(ctxOf(alice), {name: 'Lost'}), /could not be created/);
+  assert.deepEqual(await catalog.find('tenants', {}), [], 'no tenant left that nobody is in');
+  failures = 3;
+  assert.ok((await api.createTenant(ctxOf(alice), {name: 'Lost'})).tenant, 'the name is free again, and the fourth try works');
+  const bare = world('wf-tenant-bare', noHelpers);
+  await assert.rejects(bare.api.createTenant(ctxOf(alice), {name: 'X'}), /cannot be created here/);
+  assert.deepEqual(await bare.api.listTenants(inTenant(alice, 't9')), [{id: 't9', name: 't9', role: 'admin', projects: 0}], 'no platform: the current tenant alone');
 });
 
 test('page views carry the place of waiting work in its queue (#66)', async () => {

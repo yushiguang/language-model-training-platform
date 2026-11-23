@@ -17,6 +17,13 @@ export interface BffDeps {
   appVersion?: string;
   /** The caller's time zone, when the channel knows it (a browser does). */
   timeZone?: () => string | undefined;
+  /**
+   * The tenant the caller is working in, as the channel says it (#94): the page's tenant in the
+   * browser, a request header over HTTP. Left out or empty: the identity's organization, else
+   * `default`. The workflow checks the caller is in it (`AuthorizationPort`), so naming another
+   * tenant gains nothing.
+   */
+  tenant?: () => string | undefined;
 }
 
 /** How many idempotency keys a bff keeps; the oldest go first. */
@@ -40,10 +47,11 @@ export function createBffApi(deps: BffDeps): BffContract {
   const context = async (locale?: Locale, known?: Awaited<ReturnType<typeof currentUser>>): Promise<RequestContext> => {
     const timeZone = deps.timeZone?.();
     const who = known ?? (await currentUser());
+    const tenantId = deps.tenant?.()?.trim() || who.tenantId;
     return {
       requestId: newId('rq'),
       user: who.user,
-      ...(who.tenantId ? {tenantId: who.tenantId} : {}),
+      ...(tenantId ? {tenantId} : {}),
       caller: 'bff',
       ...(locale ? {locale} : {}),
       ...(timeZone ? {timeZone} : {}),
@@ -69,6 +77,12 @@ export function createBffApi(deps: BffDeps): BffContract {
     return p;
   }
 
+  /**
+   * A tenant with no record (#94): the identity's own tenant (its organization, else `default`)
+   * is called by the organization's name; any other by its id.
+   */
+  const nameOf = (who: Awaited<ReturnType<typeof currentUser>>, tenantId: string) => ((who.tenantId ?? DEFAULT_TENANT) === tenantId ? (who.tenantName ?? tenantId) : tenantId);
+
   /** Every other method: the same arguments, with the context in front. */
   const pass = <K extends keyof WorkflowContract>(method: K) =>
     (async (...args: unknown[]) => (workflow[method] as (...a: unknown[]) => unknown)(await context(), ...args)) as unknown as BffContract[K & keyof BffContract];
@@ -78,11 +92,15 @@ export function createBffApi(deps: BffDeps): BffContract {
       // One read of the caller, so a sign-out during the call can't mix two users in the answer.
       const who = await currentUser();
       const ctx = await context(undefined, who);
-      const {tenantRole, ...info} = await workflow.runtimeInfo(ctx);
-      // The tenant as the top bar names it: the organization's name, else its id.
+      const {tenantRole, tenantName, ...info} = await workflow.runtimeInfo(ctx);
       const tenantId = ctx.tenantId ?? DEFAULT_TENANT;
-      const tenantName = who.tenantName ?? tenantId;
-      return {...info, user: {id: ctx.user.id, name: ctx.user.name}, canSignOut: typeof identity.signOut === 'function', tenant: {id: tenantId, name: tenantName, role: tenantRole ?? 'member'}};
+      return {
+        ...info,
+        user: {id: ctx.user.id, name: ctx.user.name},
+        canSignOut: typeof identity.signOut === 'function',
+        // No role: the caller is not in this tenant, and the site sends them home.
+        ...(tenantRole ? {tenant: {id: tenantId, name: tenantName ?? nameOf(who, tenantId), role: tenantRole}} : {}),
+      };
     },
     async signOut() {
       if (!identity.signOut) throw new Error('This site has no sign-out.');
@@ -90,6 +108,13 @@ export function createBffApi(deps: BffDeps): BffContract {
       user = null;
     },
     requestAccess: pass('requestAccess'),
+    // Tenants without a record are named as the top bar names them.
+    async listTenants() {
+      const who = await currentUser();
+      const list = await workflow.listTenants(await context(undefined, who));
+      return list.map(t => (t.name === t.id ? {...t, name: nameOf(who, t.id)} : t));
+    },
+    createTenant: pass('createTenant'),
 
     listProjects: pass('listProjects'),
     createProject: pass('createProject'),

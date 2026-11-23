@@ -69,7 +69,10 @@ export interface RuntimeInfo {
   hasBundledGold: boolean;
   /** True when the platform can end the session: the avatar menu shows Sign out. */
   canSignOut?: boolean;
-  /** The caller's current tenant: the top bar names it, and admin pages show only to its admins. */
+  /**
+   * The caller's current tenant: the top bar names it, and admin pages show only to its admins.
+   * Missing when the caller is not in it (the site then goes to the home page).
+   */
   tenant?: TenantInfo;
 }
 
@@ -79,6 +82,26 @@ export interface TenantInfo {
   name: string;
   /** `admin`: the caller holds `tenant_write` (tenant settings, members, models, data sources). */
   role: TenantRole;
+}
+
+/** A tenant the caller is in, as the home page lists it (#94). */
+export interface TenantSummary extends TenantInfo {
+  /** Its projects (those being deleted left out). */
+  projects: number;
+}
+
+/**
+ * A new tenant (#94). The name is trimmed with its runs of spaces made one; it must not be empty
+ * and no other tenant may have it (compared without case).
+ */
+export interface CreateTenantRequest {
+  name: string;
+}
+
+/** The new tenant, its creator its admin; or why nothing was created (shown under the name field). */
+export interface CreateTenantResult {
+  tenant?: TenantSummary;
+  error?: string;
 }
 
 /**
@@ -460,6 +483,13 @@ export interface BffContract {
   signOut(): Promise<void>;
   /** Sends a request for a permission point to the external permission platform. Any signed-in caller may ask. */
   requestAccess(req: RequestAccessRequest): Promise<RequestAccessResult>;
+
+  // Tenants (#94). Which tenant a call is about is the channel's to say (the page's tenant):
+  // see `BffDeps.tenant`. Both methods only need a signed-in caller.
+  /** The tenants the caller is in, by name. */
+  listTenants(): Promise<TenantSummary[]>;
+  /** Creates a tenant; the caller becomes its admin. */
+  createTenant(req: CreateTenantRequest): Promise<CreateTenantResult>;
 
   // Projects & workflow gates
   listProjects(): Promise<Project[]>;

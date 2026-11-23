@@ -393,6 +393,14 @@ export interface ConfigReader {
 - **请求带租户**：`LabelCallRequest.tenantId`（必填）、`TryTemplateInput.tenantId`、`CreateTaskInput.tenantId` / `LabelingTask.tenantId`（旧任务没有时按 `default`）、`AgentChatOptions.tenantId`。工作流创建打标任务和试跑时传调用方的租户（`authorize` 已经校验过它就是项目的租户）；agents 运行时按每次请求的 `ctx.tenantId` 包一层模型（`modelForTenant`），助手和优化器反思的每次调用都带租户。
 - **限流键**：`<tenantId>:<endpointId>`，`LimiterStorePort` 接口不变。两个租户用同一个 endpoint（包括平台默认）时各用各的 QPM / TPM，429 降速只影响触发它的租户。租户模型改了 QPM / TPM 后，同一个键换用新的上限。租户模型 ID 不作为指标标签，统一记为 `tenant_model`。
 
+### 9.2 租户记录（#94 已完成）
+
+- **记录**：`Tenant`（catalog 的 `tenants` 集合）：系统生成的 `id`（`tn_…`，权限平台和其他服务用它）、`name`、创建人和创建时间。成员和角色仍然只存在外部权限平台。
+- **接口**：`listTenants()` 列出调用方所在的租户（名称、角色、项目数，按名称排序），`createTenant({name})` 新建租户，两者只要登录。名称空白合并、首尾去掉；空的或只有空格、和已有租户重名（不分大小写，全局唯一，持有 `tenants:names` 锁检查）时，返回值的 `error` 给出原因，页面显示在输入框下。创建人经 `addTenantMember` 成为管理员，失败重试 3 次，还失败就删掉记录并报错，不会留下没人在的租户。
+- **我在哪些租户**：`PermissionAdminPort.listUserTenants(userId)`（破坏性新方法）。没接权限平台时只有当前租户，且不能新建租户。
+- **每次调用的租户**：由渠道给出（`createBffApi({tenant})`：浏览器是页面所在的租户，HTTP 部署读请求头），没给时照旧用身份的 organization，否则 `default`。各接口照常按 `ctx.tenantId` 校验权限，所以选了自己不在的租户会被拒绝；`runtimeInfo` 在调用方不在这个租户时不给 `tenant`，页面回到首页。
+- **旧租户**：没有记录的租户（`default`、organization）照常可用，名称照旧（身份自己的租户用 `organizationName`，其他用 id）。浏览器替身里本地用户是 `default` 的管理员，权限替身存进 localStorage，刷新后新建的租户还在。
+
 ## 10. Contract 改动
 
 按 CONTRIBUTING，每个 contract 改动单独一个 PR，标明是新增还是破坏性：
@@ -411,6 +419,8 @@ export interface ConfigReader {
 | 模型管理接口 `listModels` / `addModel` / `updateModel` / `removeModel` / `setDefaultModel`；`CatalogContract.remove('tenant_models', id)` | 新增（第 4 步，#69 已完成） |
 | `ObjectStorePort`（`Platform.objectStore` 可选）；基于它的 `LabelingStorePort`、`FeatureStorePort`；`Example.featureRef` 可选 | 新增（第 7 步，#72） |
 | `Example.number`（样本序号，可选，旧样本第一次读时补上）、`DatasetSnapshot.numbered`、`LabelSet` 和 catalog 的 `label_sets` 集合、`CatalogContract.page`（分页读取） | 新增：catalog 在本仓库实现，部署方的文档库适配器不用改（第 8 步，#82 已完成） |
+| `Tenant` 和 catalog 的 `tenants` 集合、`listTenants` / `createTenant`、`RuntimeInfo.tenant` 在调用方不在租户时省略、`BffDeps.tenant` | 新增（#94） |
+| `PermissionAdminPort.listUserTenants` | 破坏性：部署方的权限平台适配器要实现（#94） |
 | `ScoreBasis`、`EvalReport.basis`（可选，旧报告没有）、`ScoringState`、任务类型 `report.rescore`、`ProjectState.scoring`、`WorkflowFacts.scoringReady`、`rescore` 接口 | 新增：只有工作流产出和读取，部署方的适配器不用改（第 9 步，#86 已完成） |
 
 ## 11. 交付计划

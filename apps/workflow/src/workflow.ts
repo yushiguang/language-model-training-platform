@@ -13,6 +13,7 @@ import * as settings from './services/settings.ts';
 import * as scores from './services/scores.ts';
 import * as sources from './services/sources.ts';
 import * as models from './services/models.ts';
+import * as tenants from './services/tenants.ts';
 import * as samples from './services/samples.ts';
 import * as labelSets from './services/label-sets.ts';
 import * as work from './services/work.ts';
@@ -99,9 +100,14 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
   const api: WorkflowContract = {
     async runtimeInfo(ctx) {
       const w = at(ctx);
-      return {standIns: w.standIns, endpoints: w.gateway.labelingEndpoints(), hasBundledGold: dataset.hasBundledGold(w), tenantRole: await tenantRole(w)};
+      // A caller who is not in the tenant the channel names gets no role: the site sends them home.
+      const [member, name] = await Promise.all([tenants.inTenant(w), tenants.tenantName(w)]);
+      return {standIns: w.standIns, endpoints: w.gateway.labelingEndpoints(), hasBundledGold: dataset.hasBundledGold(w), ...(member ? {tenantRole: await tenantRole(w)} : {}), ...(name ? {tenantName: name} : {})};
     },
     requestAccess: (ctx, req) => requestAccess(at(ctx), req),
+
+    listTenants: ctx => tenants.listTenants(at(ctx)),
+    createTenant: (ctx, r) => tenants.createTenant(at(ctx), r),
 
     listProjects: ctx => projects.listProjects(at(ctx)),
     createProject: (ctx, name) => projects.createProject(at(ctx), name),
