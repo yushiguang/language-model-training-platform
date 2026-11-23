@@ -342,7 +342,7 @@ export interface BffContract {
   /** Adds a file to a data source; items already in it are counted as repeats and left out. */
   addSourceFile(req: AddSourceFileRequest): Promise<SourceUploadResult>;
 
-  // Tenant models (docs/design/server.md, 9): tenant settings, tenant admins only.
+  // Tenant models (docs/design/server.md, 9): every member lists them; tenant admins change them.
   /** The caller's tenant's models, the default first. */
   listModels(): Promise<TenantModelView[]>;
   /** Adds a model; it becomes the default when the tenant has none (its first model). */

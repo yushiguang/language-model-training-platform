@@ -58,21 +58,22 @@ export async function initSettings(w: Scope, projectId: string): Promise<SetupVe
 /** Saves Project Settings. Saving is also the confirmation asked for before the first paid run. */
 export async function saveSettings(w: Scope, projectId: string, s: ProjectSettings): Promise<void> {
   const {catalog, user, gateway} = w;
-  const {prev, settingsConfirmed} = await currentSetup(w, projectId);
   const clamp = (x: number | null | undefined) => (x == null ? null : Math.min(1, Math.max(0, x)));
   const thresholds: Thresholds =
     s.thresholds.mode === 'default'
       ? DEFAULT_THRESHOLDS
       : {...DEFAULT_THRESHOLDS, mode: 'custom', macroF1: clamp(s.thresholds.macroF1) ?? DEFAULT_THRESHOLDS.macroF1, valueF1: clamp(s.thresholds.valueF1), precision: clamp(s.thresholds.precision), recall: clamp(s.thresholds.recall)};
   // One of the tenant's own models (read now, not from a cache) or a platform default. The check
-  // and the write hold the tenant's models lock, so the model chosen is not removed in between.
-  const model = await withModelsLock(w, async () => {
+  // and the write hold the tenant's models lock, so the model chosen is not removed in between;
+  // the current setup is read under it too, so a label change saved meanwhile is kept.
+  const {model, settingsConfirmed} = await withModelsLock(w, async () => {
+    const {prev, settingsConfirmed} = await currentSetup(w, projectId);
     const own = await catalog.get('tenant_models', s.model.endpoint);
     const ep = own && own.tenantId === tenantOf(w) ? {id: own.id, supportsTemperature: false} : gateway.labelingEndpoints().find(e => e.id === s.model.endpoint);
     if (!ep) throw new Error('This model is not available.');
     const m: ModelSettings = {endpoint: ep.id, maxOutputTokens: Math.max(1, Math.round(s.model.maxOutputTokens) || 1024), temperature: ep.supportsTemperature ? (s.model.temperature ?? 0) : null};
     await writeSetup(w, projectId, prev, {schema: prev?.schema ?? null, schemaVersion: prev?.schemaVersion ?? 0, thresholds, models: [m]});
-    return m;
+    return {model: m, settingsConfirmed};
   });
   await catalog.patch('projects', projectId, {settingsConfirmed: true});
   await catalog.audit(projectId, (await user()).name, 'settings.save', {mode: thresholds.mode, endpoint: model.endpoint});
@@ -87,6 +88,12 @@ export async function saveSettings(w: Scope, projectId: string, s: ProjectSettin
  * the new prompt version belongs to.
  */
 export async function syncLabels(w: Scope, projectId: string, labels: Schema, opts: {wording: boolean}): Promise<SetupVersion> {
+  // Under the tenant's models lock, like every setup write: the model the new setup version
+  // carries over is never removed in between, and a settings save never writes over it.
+  return withModelsLock(w, () => syncLabelsLocked(w, projectId, labels, opts));
+}
+
+async function syncLabelsLocked(w: Scope, projectId: string, labels: Schema, opts: {wording: boolean}): Promise<SetupVersion> {
   const {catalog} = w;
   const {prev} = await currentSetup(w, projectId);
   const d = prev ? null : await defaultSettings(w);

@@ -396,7 +396,8 @@ test('tenant models (#69): admins manage them; the first is the default; new pro
   await perms.admin.addTenantMember(sys, 't2', eve.id, 'admin');
   const {api, forgotten} = world('wf-models', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
   const a = inTenant(alice, 't1');
-  for (const call of [api.listModels(inTenant(bob, 't1')), api.addModel(inTenant(bob, 't1'), {name: 'x', endpoint: 'e', qpm: 1, tpm: 1})]) await assert.rejects(call, {code: 'forbidden'}, 'a member does not manage models');
+  assert.deepEqual(await api.listModels(inTenant(bob, 't1')), [], 'a member sees the models');
+  for (const call of [api.addModel(inTenant(bob, 't1'), {name: 'x', endpoint: 'e', qpm: 1, tpm: 1}), api.setDefaultModel(inTenant(bob, 't1'), {modelId: 'x'})]) await assert.rejects(call, {code: 'forbidden'}, 'a member does not change models');
 
   assert.equal((await api.addModel(a, {name: ' ', endpoint: 'e', qpm: 1, tpm: 1})).error, 'Give the model a name.');
   assert.equal((await api.addModel(a, {name: 'Team', endpoint: 'e', qpm: 0, tpm: 1})).error, 'QPM must be a whole number above 0.');
@@ -440,4 +441,27 @@ test('tenant models (#69): admins manage them; the first is the default; new pro
   const changed = (await api.updateModel(a, {modelId: second.id, qpm: 120})).model!;
   assert.deepEqual([changed.name, changed.qpm, changed.tpm, changed.usedBy], ['Second', 120, 10_000, 2]);
   assert.deepEqual((await api.listModels(a)).map(m => m.name), ['Second']);
+});
+
+test('tenant models (#69): no default means the platform default; removing the default picks none; a deleted project frees its model', async () => {
+  const {api} = world('wf-models-default', noHelpers);
+  const a = inTenant(alice, 't1');
+  const before = await api.createProject(a, 'Before');
+  assert.equal((await api.loadProjectState(a, before.id))!.setup!.models[0].endpoint, 'A', 'no tenant model: the platform default');
+  const m1 = (await api.addModel(a, {name: 'One', endpoint: 'e1', qpm: 1, tpm: 1})).model!;
+  const m2 = (await api.addModel(a, {name: 'Two', endpoint: 'e2', qpm: 1, tpm: 1})).model!;
+  assert.deepEqual([m1.default, m2.default], [true, false]);
+  // The default removed: no other model becomes the default, and new projects use the platform's.
+  assert.deepEqual(await api.removeModel(a, {modelId: m1.id}), {});
+  assert.deepEqual((await api.listModels(a)).map(m => [m.name, m.default]), [['Two', false]]);
+  const p = await api.createProject(a, 'After');
+  assert.equal((await api.loadProjectState(a, p.id))!.setup!.models[0].endpoint, 'A');
+  // With no default, the next model added becomes it.
+  const m3 = (await api.addModel(a, {name: 'Three', endpoint: 'e3', qpm: 1, tpm: 1})).model!;
+  assert.equal(m3.default, true);
+  const uses = await api.createProject(a, 'Uses three');
+  assert.match((await api.removeModel(a, {modelId: m3.id})).error!, /A project uses this model/);
+  await api.deleteProject(a, {projectId: uses.id});
+  assert.equal((await api.listModels(a)).find(m => m.id === m3.id)!.usedBy, 0, 'a project being deleted no longer holds its model');
+  assert.deepEqual(await api.removeModel(a, {modelId: m3.id}), {});
 });

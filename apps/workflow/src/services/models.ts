@@ -56,10 +56,10 @@ function clean(f: {name: string; endpoint: string; qpm: number; tpm: number}): {
 const nameTaken = (list: TenantModel[], name: string, except?: string) => list.some(m => m.id !== except && m.name.toLowerCase() === name.toLowerCase());
 
 /** After a change: the gateway in this process reads the tenant's models again, and pages refresh. */
-function changed(w: Scope, action: string, m: TenantModel, by: string) {
+async function changed(w: Scope, action: string, m: TenantModel, by: string) {
   w.gateway.forgetTenant(m.tenantId);
-  void w.catalog.audit(null, by, `model.${action}`, {modelId: m.id});
   w.emitChange(null);
+  await w.catalog.audit(null, by, `model.${action}`, {modelId: m.id});
 }
 
 export async function addModel(w: Scope, req: AddModelRequest): Promise<ModelSaveResult> {
@@ -72,7 +72,7 @@ export async function addModel(w: Scope, req: AddModelRequest): Promise<ModelSav
     const at = now();
     const m: TenantModel = {id: newId('model'), tenantId: tenantOf(w), ...f, default: !list.some(x => x.default), createdAt: at, createdBy: user.name, updatedAt: at};
     await w.catalog.insert('tenant_models', m);
-    changed(w, 'add', m, user.name);
+    await changed(w, 'add', m, user.name);
     return {model: {...m, usedBy: 0}};
   });
 }
@@ -93,7 +93,7 @@ export async function updateModel(w: Scope, req: UpdateModelRequest): Promise<Mo
     if (nameTaken(await tenantModels(w), f.name, m.id)) return {error: 'A model with this name already exists.'};
     const next: TenantModel = {...m, ...f, updatedAt: now()};
     await w.catalog.patch('tenant_models', m.id, {...f, updatedAt: next.updatedAt});
-    changed(w, 'update', next, user.name);
+    await changed(w, 'update', next, user.name);
     return {model: await view(w, next)};
   });
 }
@@ -106,7 +106,7 @@ export async function removeModel(w: Scope, modelId: string): Promise<{error?: s
     const used = (await usage(w)).get(m.id) ?? 0;
     if (used) return {error: used === 1 ? 'A project uses this model. Choose another model in its settings first.' : 'Projects use this model. Choose another model in their settings first.'};
     await w.catalog.remove('tenant_models', m.id);
-    changed(w, 'remove', m, user.name);
+    await changed(w, 'remove', m, user.name);
     return {};
   });
 }
@@ -120,7 +120,7 @@ export async function setDefaultModel(w: Scope, modelId: string): Promise<ModelS
     for (const x of await tenantModels(w)) if (x.default && x.id !== m.id) await w.catalog.patch('tenant_models', x.id, {default: false, updatedAt: at});
     if (!m.default) await w.catalog.patch('tenant_models', m.id, {default: true, updatedAt: at});
     const next = {...m, default: true, updatedAt: at};
-    changed(w, 'default', next, user.name);
+    await changed(w, 'default', next, user.name);
     return {model: await view(w, next)};
   });
 }

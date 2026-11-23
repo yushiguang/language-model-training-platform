@@ -51,9 +51,9 @@
 | 权限点 | 方法 |
 | --- | --- |
 | 只要登录 | `runtimeInfo` |
-| 读 | 列表和读取（`listProjects`、`getProject`、`loadProjectState`、`projectStatus`、数据源列表和详情、样本、特征、不一致、预测、聊天记录、提议列表）；`createProject`（任何成员都能建）；`tick`；`sendUserMessage`（问 AI 是读，AI 要开始工作时它的工具再查项目写） |
+| 读 | 列表和读取（`listProjects`、`getProject`、`loadProjectState`、`projectStatus`、数据源列表和详情、模型列表（`listModels`）、样本、特征、不一致、预测、聊天记录、提议列表）；`createProject`（任何成员都能建）；`tick`；`sendUserMessage`（问 AI 是读，AI 要开始工作时它的工具再查项目写） |
 | 项目写 | 其余改项目的方法：下一步、改名、删除、设置、取样本和增删、人工标签、复核、重建分数、建版本、打分、停止、优化器开始 / 停止 / 重试、Improve with AI、写评论、处理提议 |
-| 租户写 | `createDataSource`、`addSourceFile` |
+| 租户写 | `createDataSource`、`addSourceFile`、`addModel`、`updateModel`、`removeModel`、`setDefaultModel` |
 
 **校验在哪里做**（`apps/workflow/src/services/access.ts` 的 `authorize`）：
 
@@ -302,8 +302,8 @@ export interface ConfigReader {
 ### 9.1 实现（#69 已完成）
 
 - **记录**：`TenantModel`（`packages/contracts/src/types.ts`）：系统生成的 `id`、`tenantId`、`name`、`endpoint`（管理员填的 Endpoint）、`qpm`、`tpm`、`default`、创建和修改时间。存在 catalog 的 `tenant_models` 集合。项目设置的 `ModelSettings.endpoint` 存模型的 `id`，不存 Endpoint 文字，所以任务并发键 `model:<tenantId>:<endpointId>` 和限流键都用它。
-- **管理接口**（`apps/workflow/src/services/models.ts`，都要 `tenant_write`）：`listModels`（默认在前，每个带 `usedBy`：当前设置用它的项目数）、`addModel`、`updateModel`（没给的字段不变）、`removeModel`、`setDefaultModel`。租户还没有默认模型时，新加的模型成为默认（也就是第一个）；删掉默认模型后不自动换。名称在租户内不能重复（不分大小写），QPM / TPM 必须是正整数。被项目使用的模型删除时返回原因，不删。别的租户的模型 ID 和不存在的 ID 回答一样。表单错误通过返回值的 `error` 给出，页面直接显示。
-- **加锁**：每次增删改、新项目取默认模型、保存项目设置选模型，都持有 `models:<tenantId>` 锁（`withModelsLock`），所以不会出现“刚检查没人用就删掉、同时有项目选了它”。保存设置时直接从 catalog 读模型校验，不用网关缓存。
+- **管理接口**（`apps/workflow/src/services/models.ts`）：`listModels`（`read`，租户成员都能看；默认在前，每个带 `usedBy`：当前设置用它的项目数）、`addModel`、`updateModel`（没给的字段不变）、`removeModel`、`setDefaultModel`（这四个要 `tenant_write`）。租户还没有默认模型时，新加的模型成为默认（也就是第一个）；删掉默认模型后不自动换。名称在租户内不能重复（不分大小写），QPM / TPM 必须是正整数。被项目使用的模型删除时返回原因，不删。别的租户的模型 ID 和不存在的 ID 回答一样。表单错误通过返回值的 `error` 给出，页面直接显示。
+- **加锁**：每次增删改、新项目取默认模型、保存项目设置选模型、保存版本时同步标签写新的设置版本，都持有 `models:<tenantId>` 锁（`withModelsLock`），所以不会出现“刚检查没人用就删掉、同时有项目选了它”。保存设置时直接从 catalog 读模型校验，不用网关缓存。
 - **新项目和设置页**：新项目用租户默认模型，没有就用平台第一个默认模型。`loadProjectState` 的 `endpoints` 先列租户自己的模型，再列平台默认模型（租户模型读不出来时只列平台默认，页面照常打开）。租户模型没有价格（费用按 0 算），不支持温度（`temperature` 为 null）。
 - **网关**（`apps/llm-gateway/src/gateway.ts`）：`createGateway` 的 `tenantModels`（`TenantModelSource.list(tenantId)`，组合根用 catalog 实现）按租户读取并缓存 `gateway.tenantModelsTtlMs`（默认 30 秒）；请求缓存里没有的模型 ID 时立刻重读（同一租户最多每秒一次），所以新加的模型马上能用；读失败时继续用上次读到的。工作流每次增删改后调 `forgetTenant`，本进程立刻重读；别的进程最迟一个缓存周期生效，不用重启。一个租户能调用自己的模型和平台默认模型（`Platform.endpoints` / `LabelingModels.endpoints()`，只作为平台默认保留），别的租户的模型被拒绝。`labelingEndpointsFor(tenantId)` 给出这个列表。
 - **动态 Endpoint**：`ChatRequest.endpoint` 是调用时决定的目标：租户模型是管理员填的 Endpoint，平台默认是它的 ID；同时带上 `tenantId`。`AgentChatOptions.model` 是租户模型 ID 时，网关把它的 Endpoint 放在 `AgentChatOptions.endpoint` 交给适配器（调用方传的会被丢掉）。适配器不能要求 Endpoint 在启动时登记过。
