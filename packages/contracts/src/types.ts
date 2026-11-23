@@ -215,6 +215,20 @@ export interface Example {
   /** The data source and the file of it the example was taken from (#29); missing on older datasets. */
   sourceId?: string;
   sourceFileId?: string;
+  /**
+   * Where its frozen features sit in a packed segment file in object storage (docs/design/server.md
+   * 6). Missing: they are a document of their own, read by `featureDocId` (examples saved before
+   * object storage, and deployments without it).
+   */
+  featureRef?: FeatureRef;
+}
+
+/** A byte range of one object: a record packed in a segment file (one JSON line). */
+export interface FeatureRef {
+  /** The segment file's object key. */
+  key: string;
+  offset: number;
+  length: number;
 }
 
 /** An example's features: placeholder key -> value. Image features hold URLs in `items`. */
