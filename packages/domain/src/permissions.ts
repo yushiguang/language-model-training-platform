@@ -26,6 +26,8 @@ export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: Acti
   // A caller's own tenants, and a new one: any signed-in caller (#94).
   listTenants: {permission: null, project: null},
   createTenant: {permission: null, project: null},
+  // The tenant's members: any member reads them (label set labelers, tenant settings).
+  listTenantMembers: read(),
 
   listProjects: read(),
   // Any member of the tenant creates projects, and becomes the project's first writer.
@@ -61,6 +63,7 @@ export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: Acti
   removeExamples: write('request'),
   listSamples: read('request'),
   listLabelSets: read('arg'),
+  previewLabelSets: read('request'),
   // Labelers are picked by whoever edits the project; each gets project write when added.
   createLabelSet: write('request'),
   createLabelSets: write('request'),

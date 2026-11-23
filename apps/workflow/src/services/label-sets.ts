@@ -1,8 +1,10 @@
-import type {CreateLabelSetRequest, CreateLabelSetsRequest, LabelSet, LabelSetList, UpdateLabelSetRequest} from '@yushiguang/sprint-contracts';
+import type {CreateLabelSetRequest, CreateLabelSetsRequest, LabelSet, LabelSetList, LabelSetPreview, LabelSetsPreview, PreviewLabelSetsRequest, UpdateLabelSetRequest} from '@yushiguang/sprint-contracts';
 import {msg, newId} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {withRetries} from './access.ts';
 import {latestGold} from './evaluation.ts';
+import {isMismatch, versionAnswers} from './mismatches.ts';
+import {loadProjectState} from './projects.ts';
 import {notify} from './notify.ts';
 import {ensureNumbered, withSamplesLock} from './samples.ts';
 import {withLock} from './sources.ts';
@@ -78,29 +80,38 @@ const cleanName = (name: string | undefined) => (name ?? '').trim().replace(/\s+
  * samples lock, so a take still saving examples is waited for: a range is never cut while a
  * sample inside it is still being written. Locks are always taken in that order.
  */
-async function cut(w: Scope, projectId: string, sizesOf: (free: number) => number[], extra: {name?: string; labelerIds?: string[]} = {}): Promise<LabelSet[]> {
+/**
+ * The ranges new sets of these sizes would get, after the sets there are: each starts after the
+ * last one and ends on the sample that makes its size, so removed samples are skipped.
+ */
+function plan(sets: LabelSet[], free: number[], sizesOf: (free: number) => number[]): LabelSetPreview[] {
+  if (!free.length) throw new Error('Every sample is already in a label set.');
+  const sizes = sizesOf(free.length);
+  const want = sizes.reduce((n, k) => n + k, 0);
+  if (want > free.length) throw new Error(`Only ${free.length} samples are left without a label set.`);
+  const top = sets.reduce((n, s) => Math.max(n, s.number), 0);
+  let at = 0;
+  let first = sets.reduce((n, s) => Math.max(n, s.last), 0) + 1;
+  return sizes.map((size, i) => {
+    const last = free[at + size - 1];
+    const p = {number: top + i + 1, first, last, samples: size};
+    at += size;
+    first = last + 1;
+    return p;
+  });
+}
+
+async function cut(w: Scope, projectId: string, sizesOf: (free: number) => number[], extra: {name?: string; labelers: (setIndex: number) => string[]}): Promise<LabelSet[]> {
   const {project, snap} = await datasetOf(w, projectId);
   const user = await w.user();
-  const labelers = await checkLabelers(w, project.tenantId, extra.labelerIds ?? []);
   return withSetsLock(w, projectId, () =>
     withSamplesLock(w, snap.id, async () => {
       const sets = await setsOf(w, projectId);
-      const free = await unassignedNumbers(w, snap.id, sets);
-      if (!free.length) throw new Error('Every sample is already in a label set.');
-      const sizes = sizesOf(free.length);
-      const want = sizes.reduce((n, k) => n + k, 0);
-      if (want > free.length) throw new Error(`Only ${free.length} samples are left without a label set.`);
-      await grantLabelers(w, project.tenantId, projectId, labelers);
-      const made: LabelSet[] = [];
-      const top = sets.reduce((n, s) => Math.max(n, s.number), 0);
-      let at = 0;
-      let first = sets.reduce((n, s) => Math.max(n, s.last), 0) + 1;
-      for (const size of sizes) {
-        const last = free[at + size - 1];
-        made.push({id: newId('ls'), projectId, snapshotId: snap.id, number: top + made.length + 1, name: cleanName(extra.name), first, last, labelerIds: labelers, createdAt: now(), createdBy: user.id});
-        at += size;
-        first = last + 1;
-      }
+      const ranges = plan(sets, await unassignedNumbers(w, snap.id, sets), sizesOf);
+      const want = ranges.reduce((n, r) => n + r.samples, 0);
+      const labelers = await Promise.all(ranges.map((_, i) => checkLabelers(w, project.tenantId, extra.labelers(i))));
+      await grantLabelers(w, project.tenantId, projectId, [...new Set(labelers.flat())]);
+      const made: LabelSet[] = ranges.map((r, i) => ({id: newId('ls'), projectId, snapshotId: snap.id, number: r.number, name: cleanName(extra.name), first: r.first, last: r.last, labelerIds: labelers[i], createdAt: now(), createdBy: user.id}));
       // One after another, in order: a write that fails leaves the sets before it and none after,
       // so no range is skipped and trying again cuts what is left.
       for (const set of made) await w.catalog.insert('label_sets', set);
@@ -128,24 +139,60 @@ async function tellLabelers(w: Scope, set: LabelSet, userIds: string[], kind: 'l
 }
 
 export async function createLabelSet(w: Scope, req: CreateLabelSetRequest): Promise<LabelSet> {
-  if (!Number.isInteger(req.count) || req.count < 1) throw new Error('A label set needs at least 1 sample.');
-  const [set] = await cut(w, req.projectId, () => [req.count], {name: req.name, labelerIds: req.labelerIds});
+  oneOf(req.count);
+  const [set] = await cut(w, req.projectId, () => [req.count], {name: req.name, labelers: () => req.labelerIds ?? []});
   await tellLabelers(w, set, set.labelerIds, 'label_set_created');
   return set;
 }
 
-/** Splits the unassigned samples into sets by number of sets or by samples per set; see `CreateLabelSetsRequest`. */
-export async function createLabelSets(w: Scope, req: CreateLabelSetsRequest): Promise<LabelSet[]> {
+/** The sizes of several sets, by number of sets or by samples per set (checked before anything is read). */
+function splitBy(req: {sets?: number; perSet?: number}): (free: number) => number[] {
   const by = req.sets != null ? 'sets' : 'perSet';
   const n = req.sets ?? req.perSet;
   if ((req.sets != null) === (req.perSet != null)) throw new Error('Give the number of sets or the samples per set.');
   if (!Number.isInteger(n) || n! < 1) throw new Error(by === 'sets' ? 'Make at least 1 label set.' : 'A label set needs at least 1 sample.');
-  // Sizes come from the samples left when the sets lock is held, so a set made meanwhile is counted.
-  return cut(w, req.projectId, free => {
+  return free => {
     if (by === 'perSet') return Array.from({length: Math.ceil(free / n!)}, (_, i) => Math.min(n!, free - i * n!));
     if (n! > free) throw new Error(`Only ${free} samples are left without a label set.`);
     return Array.from({length: n!}, (_, i) => Math.floor(free / n!) + (i < free % n! ? 1 : 0));
-  });
+  };
+}
+
+/** One set of `count` samples (checked before anything is read). */
+function oneOf(count: number | undefined): (free: number) => number[] {
+  if (!Number.isInteger(count) || count! < 1) throw new Error('A label set needs at least 1 sample.');
+  return () => [count!];
+}
+
+/** Splits the unassigned samples into sets by number of sets or by samples per set; see `CreateLabelSetsRequest`. */
+export async function createLabelSets(w: Scope, req: CreateLabelSetsRequest): Promise<LabelSet[]> {
+  const sizesOf = splitBy(req);
+  // Sizes come from the samples left when the sets lock is held, so a set made meanwhile is counted.
+  const made = await cut(w, req.projectId, sizesOf, {labelers: i => (req.labelers?.[i] ? [req.labelers[i]!] : [])});
+  for (const set of made) await tellLabelers(w, set, set.labelerIds, 'label_set_created');
+  return made;
+}
+
+/**
+ * The sets a create would make now (#107), for the create dialogs: the same ranges and the same
+ * refusals as the create, read without the locks and saving nothing. A refusal comes back as
+ * `error`, with no sets.
+ */
+export async function previewLabelSets(w: Scope, req: PreviewLabelSetsRequest): Promise<LabelSetsPreview> {
+  const project = await w.catalog.get('projects', req.projectId);
+  const snap = project?.snapshotId ? await w.catalog.get('dataset_snapshots', project.snapshotId) : null;
+  if (!project || project.deleting) throw new Error('This project does not exist.');
+  if (!snap) return {sets: [], unassigned: 0, error: 'Add samples to the dataset first.'};
+  await ensureNumbered(w, snap);
+  const sets = await setsOf(w, req.projectId);
+  const free = await unassignedNumbers(w, snap.id, sets);
+  try {
+    const sizesOf = req.count != null ? (req.sets != null || req.perSet != null ? null : oneOf(req.count)) : splitBy(req);
+    if (!sizesOf) throw new Error('Give the number of samples, the number of sets or the samples per set.');
+    return {sets: plan(sets, free, sizesOf), unassigned: free.length};
+  } catch (e) {
+    return {sets: [], unassigned: free.length, error: (e as Error).message};
+  }
 }
 
 export async function updateLabelSet(w: Scope, req: UpdateLabelSetRequest): Promise<LabelSet> {
@@ -171,22 +218,32 @@ export async function updateLabelSet(w: Scope, req: UpdateLabelSetRequest): Prom
   return set;
 }
 
-/** The project's label sets with how many samples each has (not removed) and how many are gold-labeled. */
+/**
+ * The project's label sets with how many samples each has (not removed), how many are gold-labeled
+ * and how many of those are mismatches (the Dataset page's rule: the gold label against the best
+ * version's answer), and the same two counts for the whole dataset.
+ */
 export async function listLabelSets(w: Scope, projectId: string): Promise<LabelSetList> {
   const project = await w.catalog.get('projects', projectId);
   const snap = project?.snapshotId ? await w.catalog.get('dataset_snapshots', project.snapshotId) : null;
-  if (!project || !snap) return {sets: [], unassigned: 0};
+  if (!project || !snap) return {sets: [], unassigned: 0, labeled: 0, mismatch: 0};
   await ensureNumbered(w, snap);
   const setup = project.setupVersionId ? await w.catalog.get('setup_versions', project.setupVersionId) : null;
-  const [sets, examples, {current: gold}] = await Promise.all([setsOf(w, projectId), w.catalog.find('examples', {snapshotId: snap.id}), latestGold(w, projectId, setup?.schemaVersion ?? 0)]);
+  const [sets, examples, {current: gold}, state] = await Promise.all([setsOf(w, projectId), w.catalog.find('examples', {snapshotId: snap.id}), latestGold(w, projectId, setup?.schemaVersion ?? 0), loadProjectState(w, projectId)]);
+  const found = state ? await versionAnswers(w, state) : null;
+  const answers = found?.answers.get(found.best.id);
   const live = examples.filter(e => !e.removed);
+  const labeledIn = (list: typeof live) => list.filter(e => !!gold[e.id]);
+  const mismatchIn = (list: typeof live) => (answers ? labeledIn(list).filter(e => answers.has(e.id) && isMismatch(gold[e.id]!.answer, answers.get(e.id))).length : 0);
   const inRange = (s: LabelSet) => live.filter(e => e.number! >= s.first && e.number! <= s.last);
   const end = sets.reduce((n, s) => Math.max(n, s.last), 0);
   return {
     sets: sets.map(s => {
       const own = inRange(s);
-      return {...s, samples: own.length, labeled: own.filter(e => !!gold[e.id]).length};
+      return {...s, samples: own.length, labeled: labeledIn(own).length, mismatch: mismatchIn(own)};
     }),
     unassigned: live.filter(e => e.number! > end).length,
+    labeled: labeledIn(live).length,
+    mismatch: mismatchIn(live),
   };
 }

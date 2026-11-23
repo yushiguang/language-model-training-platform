@@ -115,6 +115,7 @@ export function createBffApi(deps: BffDeps): BffContract {
       return list.map(t => (t.name === t.id ? {...t, name: nameOf(who, t.id)} : t));
     },
     createTenant: pass('createTenant'),
+    listTenantMembers: pass('listTenantMembers'),
 
     listProjects: pass('listProjects'),
     createProject: pass('createProject'),
@@ -144,6 +145,7 @@ export function createBffApi(deps: BffDeps): BffContract {
     removeExamples: pass('removeExamples'),
     listSamples: pass('listSamples'),
     listLabelSets: pass('listLabelSets'),
+    previewLabelSets: pass('previewLabelSets'),
     createLabelSet: pass('createLabelSet'),
     createLabelSets: pass('createLabelSets'),
     updateLabelSet: pass('updateLabelSet'),

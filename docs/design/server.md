@@ -116,15 +116,17 @@
 
 - 记录：项目内的编号 `number`（1、2、3……，没起名时页面显示 `#1`）、名称（可空，最多 80 字）、样本序号闭区间 `first`–`last`、标注人 `labelerIds`、创建人和时间。
 - `createLabelSet({projectId, count, name?, labelerIds?})`：从上一个标注集之后开始，取接下来 `count` 条没被移除的样本，`last` 是第 `count` 条的序号，所以范围里可能夹着被移除的样本（看不到、不计数，恢复后回到这个标注集）。剩下的不够时报“只剩 N 条样本没有标注集”。
-- `createLabelSets({projectId, sets} | {projectId, perSet})`：把剩下的样本全部切开。按个数切时各标注集的样本数尽量平均（多出来的从前往后各加一条）；按每个的样本数切时最后一个可以少一些。两个参数必须且只能给一个。
+- `createLabelSets({projectId, sets} | {projectId, perSet}, labelers?)`：把剩下的样本全部切开。按个数切时各标注集的样本数尽量平均（多出来的从前往后各加一条）；按每个的样本数切时最后一个可以少一些。两个参数必须且只能给一个。`labelers` 按顺序给每个新标注集一个标注人（`null` 或缺省表示没有），所有标注人先检查再保存。
+- `previewLabelSets({projectId, count | sets | perSet})`（读权限，#107）：按现在剩下的样本算出创建会切出的各标注集（编号、范围、样本数），不加锁、不保存；创建会报的错放在 `error` 里返回。创建对话框用它显示范围预览。
 - 创建和修改都在 `label-sets:<projectId>` 锁里，所以两个人同时创建也不会重叠，编号连续。切分时在里面再拿数据集的 `samples:<snapshotId>` 锁（加锁顺序固定），所以不会在取样任务还在写样本时切出范围；批量切分的各标注集大小在锁里按当时剩下的样本数计算。范围创建后不能改，也不能删除（只随项目一起删除）。在一个标注集之后追加的样本不属于任何标注集，等新的标注集。
 - `updateLabelSet({projectId, labelSetId, name?, labelerIds?})`：只改名称和标注人，没给的字段不变。
-- `listLabelSets(projectId)`（读权限）：按编号排列，每个带样本数（不含被移除的）和已有人工标签的条数，另给出还没分配的样本数。
+- `listLabelSets(projectId)`（读权限）：按编号排列，每个带样本数（不含被移除的）、已有人工标签的条数和其中不一致的条数（规则和数据集页的“不一致”一样，#107），另给出还没分配的样本数，以及整个数据集的已标注数和不一致数。
 - 创建、修改都要项目写权限。
 
 **标注人**
 
 - 本次每个标注集最多一个标注人（`labelerIds` 是列表，以后可以放多个）。有 `PermissionAdminPort` 时，标注人必须在 `listTenantMembers` 里，否则报错。
+- 选标注人的列表来自 BFF 的 `listTenantMembers()`（读权限，#107）：当前租户的成员，带名字和角色，按名字排序。名字来自 `TenantMember.name`；平台没给名字时，调用者自己用身份里的名字，其他人显示用户 ID。没有 `PermissionAdminPort` 时只有调用者自己（管理员）。这是页面读成员的唯一接口，租户设置的成员页也用它。
 - 新加的标注人先通过 `grantProjectWrite` 授予项目写权限（`withRetries`，最多重试 3 次）；授权失败时整个操作报错，什么都不保存。被换下的标注人保留项目写权限，因为不知道这个权限是不是因为别的原因给的。
 - 通知（第 8 节，尽力而为）：创建带标注人的标注集时发 `label_set_created` 给标注人；修改时只发 `labeler_added` 给新加的人。操作人自己不收。链接到 `/gold/?p=<projectId>&set=<labelSetId>`（以后的标注集详情页），内容只有标注集名称、样本序号范围和项目名。
 

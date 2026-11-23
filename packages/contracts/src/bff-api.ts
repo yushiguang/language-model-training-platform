@@ -91,6 +91,16 @@ export interface TenantSummary extends TenantInfo {
 }
 
 /**
+ * A member of the page's tenant (#107): the one list of members the pages read (label set
+ * labelers, tenant settings). `name` is the platform's display name, or the user id when it has none.
+ */
+export interface TenantMemberView {
+  userId: string;
+  name: string;
+  role: TenantRole;
+}
+
+/**
  * A new tenant (#94). The name is trimmed with its runs of spaces made one; it must not be empty
  * and no other tenant may have it (compared without case).
  */
@@ -365,14 +375,20 @@ export interface SamplePage {
   counts: Record<SampleFilter, number>;
 }
 
-/** A label set with its counts: samples in its range that are not removed, and how many of them have a gold label. */
-export type LabelSetView = LabelSet & {samples: number; labeled: number};
+/**
+ * A label set with its counts: samples in its range that are not removed, how many of them have a
+ * gold label, and how many of those disagree with the model (the Mismatch tab's rule, see `SampleRow`).
+ */
+export type LabelSetView = LabelSet & {samples: number; labeled: number; mismatch: number};
 
 export interface LabelSetList {
   /** By number. */
   sets: LabelSetView[];
   /** Samples not removed and in no label set yet: what the next sets take from. */
   unassigned: number;
+  /** Over the whole dataset (samples not removed, in a set or not): gold-labeled, and of those the mismatches. */
+  labeled: number;
+  mismatch: number;
 }
 
 /**
@@ -386,12 +402,40 @@ export interface CreateLabelSetRequest {
   labelerIds?: string[];
 }
 
-/** Splits every sample not in a set into label sets: `sets` of them (sizes as even as can be), or `perSet` samples each (the last may be smaller). Give one of the two. */
+/**
+ * Splits every sample not in a set into label sets: `sets` of them (sizes as even as can be), or
+ * `perSet` samples each (the last may be smaller). Give one of the two. `labelers`: the labeler of
+ * each new set in order (null or missing for none); each must be a member of the tenant and gets
+ * project write, as in `CreateLabelSetRequest`.
+ */
 export interface CreateLabelSetsRequest {
   projectId: string;
   sets?: number;
   perSet?: number;
+  labelers?: (string | null)[];
 }
+
+/**
+ * What creating would make, without saving (#107): `count` for one set (`createLabelSet`), or
+ * `sets` / `perSet` for several (`createLabelSets`). Give one of the three.
+ */
+export interface PreviewLabelSetsRequest {
+  projectId: string;
+  count?: number;
+  sets?: number;
+  perSet?: number;
+}
+
+/** One set a create would make: the number and range it would get, and its samples (removed ones are skipped). */
+export interface LabelSetPreview {
+  number: number;
+  first: number;
+  last: number;
+  samples: number;
+}
+
+/** The sets a create would make, in order, or why it would be refused (the message the create would give). */
+export type LabelSetsPreview = {sets: LabelSetPreview[]; unassigned: number; error?: string};
 
 /** Changes a label set's name or labelers; its range never changes. A field left out stays as it is. */
 export interface UpdateLabelSetRequest {
@@ -490,6 +534,8 @@ export interface BffContract {
   listTenants(): Promise<TenantSummary[]>;
   /** Creates a tenant; the caller becomes its admin. */
   createTenant(req: CreateTenantRequest): Promise<CreateTenantResult>;
+  /** The members of the page's tenant, by name (#107). Any member may read them. */
+  listTenantMembers(): Promise<TenantMemberView[]>;
 
   // Projects & workflow gates
   listProjects(): Promise<Project[]>;
@@ -582,6 +628,8 @@ export interface BffContract {
   listSamples(req: ListSamplesRequest): Promise<SamplePage>;
   /** The project's label sets with their counts. */
   listLabelSets(projectId: string): Promise<LabelSetList>;
+  /** The ranges a create would cut now, without saving (the create dialogs' preview). */
+  previewLabelSets(req: PreviewLabelSetsRequest): Promise<LabelSetsPreview>;
   createLabelSet(req: CreateLabelSetRequest): Promise<LabelSet>;
   createLabelSets(req: CreateLabelSetsRequest): Promise<LabelSet[]>;
   updateLabelSet(req: UpdateLabelSetRequest): Promise<LabelSet>;

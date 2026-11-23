@@ -3,6 +3,13 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-23 (Label sets page, #107)
+
+- **One members read for every page**: `listTenantMembers()` gives the page's tenant's members with a name and role. The label set labeler picker uses it now; the tenant settings Members tab builds add and remove on top of it. The platform's `TenantMember` carries an optional `name`.
+- **Create dialogs show the ranges before saving**: `previewLabelSets` cuts the same ranges as the create, skipping removed samples, so the dialog can show "#829–953" without guessing. Several sets can each get their own labeler in one create.
+- **The label set list counts mismatches** per set and for the dataset, by the Dataset page's rule.
+- The browser stand-in seeds four made-up colleagues in the default tenant, so there is someone to pick as a labeler.
+
 ## 2026-11-23 (Prompt Design on Astryx, #96)
 
 - **Versions show flat numbers** (v1, v2…; wireframes v346): one per major. A save over a version is the next minor of its major (`kind: 'minor'`), so the version keeps its number on screen and shows its newest save; every save stays in the records. An Optimiser run's major shows the best try it kept, never its tries one by one. `shownVersions` in `@yushiguang/sprint-domain` is the one rule the pages use. No contract change.

@@ -826,6 +826,8 @@ export type TenantRole = 'admin' | 'member';
 export interface TenantMember {
   userId: string;
   role: TenantRole;
+  /** The member's display name, when the platform knows it (#107); pages show the user id otherwise. */
+  name?: string;
 }
 
 /** A tenant a user is in, and as what (#94). */
