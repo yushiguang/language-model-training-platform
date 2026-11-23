@@ -3,6 +3,13 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-23 (Prompt Design on Astryx, #96)
+
+- **Versions show flat numbers** (v1, v2…; wireframes v346): one per major. A save over a version is the next minor of its major (`kind: 'minor'`), so the version keeps its number on screen and shows its newest save; every save stays in the records. An Optimiser run's major shows the best try it kept, never its tries one by one. `shownVersions` in `@yushiguang/sprint-domain` is the one rule the pages use. No contract change.
+- **Prompt Design is one prompt card beside Ask AI**: Sections (the parts, no XML tags), Changes (word marks against the version it was made from, or the saved version while editing) and Full prompt (the text the model reads). Each part is edited in its own dialog; the card's Save keeps the version. The first save is v1; Approve and "Next: Dataset" are gone (the step bar moves on).
+- **Save asks before it costs something**: over a version that is still labeling it asks to stop the run first ("Stop and save"), and when the label change clears gold labels it says how many first (`goldLabelsCleared`). A save labels the dataset again at once.
+- **Discard** shows while the card holds unsaved edits or a helper's draft, so a draft can be closed without saving (the helper can still recall it, #39).
+
 ## 2026-11-23 (App shell on Astryx, #91)
 
 - **One frame for every page** (wireframes v346): a taller top bar with a full-width line under it, naming 「Sprint / tenant / project」 on the left (the project name opens a switch menu: search, recent projects, All projects), the four steps in the centre with arrows between them, and Ask AI, language and the avatar on the right. Pages are white and centred, at most 1200 wide.

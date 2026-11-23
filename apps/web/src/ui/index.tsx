@@ -329,22 +329,40 @@ export function Button({
       }
     }
   };
-  const failed = (e: unknown) => {
-    console.warn(e);
-    // A missing permission is not a failure to retry: the shell asks whether to request access.
-    if (isAccessDenied(e)) return reportAccessDenied(e.permission);
-    // A plain sentence from the backend ("Fix 2 errors in Checks first.") says why; anything else is a connection problem.
-    const msg = e instanceof Error ? e.message : '';
-    const why = /^[A-Z][^{}<>\n]{0,160}\.$/.test(msg) ? t(msg) : t('Check your connection and try again.');
-    // "{action} failed." reads right for any button label (resilience spec, 8).
-    const what = label ?? ariaLabel;
-    reportActionError(what ? t('{action} failed. {why}', {action: what, why}) : t("Couldn't do that. {why}", {why}), () => click());
-  };
+  const failed = (e: unknown) => reportFailure(e, label ?? ariaLabel, () => click());
   return (
     <button type="button" className={cls} disabled={disabled || busy || (!!group?.pending && !busy)} aria-busy={busy || undefined} onClick={() => void click()} title={title} aria-label={ariaLabel}>
       {inner}
     </button>
   );
+}
+
+/**
+ * What a failed action shows: the access dialog for a missing permission, else the page's red
+ * banner with Retry. `what` is the action's name, as on its button.
+ */
+export function reportFailure(e: unknown, what: string | undefined, retry?: () => void | Promise<unknown>) {
+  console.warn(e);
+  // A missing permission is not a failure to retry: the shell asks whether to request access.
+  if (isAccessDenied(e)) return reportAccessDenied(e.permission);
+  // A plain sentence from the backend ("Fix 2 errors in Checks first.") says why; anything else is a connection problem.
+  const msg = e instanceof Error ? e.message : '';
+  const why = /^[A-Z][^{}<>\n]{0,160}\.$/.test(msg) ? t(msg) : t('Check your connection and try again.');
+  // "{action} failed." reads right for any button label (resilience spec, 8).
+  reportActionError(what ? t('{action} failed. {why}', {action: what, why}) : t("Couldn't do that. {why}", {why}), retry);
+}
+
+/** Runs an action from an Astryx button (`clickAction`): a failure is reported as `reportFailure` does. */
+export function action(what: string, fn: () => Promise<unknown> | void): () => Promise<void> {
+  const run = async (): Promise<void> => {
+    try {
+      await fn();
+      clearActionError();
+    } catch (e) {
+      reportFailure(e, what, run);
+    }
+  };
+  return run;
 }
 
 // ---------- badges ----------

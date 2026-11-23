@@ -28,6 +28,9 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Done
 
+- 2026-11-23: Prompt Design on Astryx (#90 lane 3, #96): one prompt card beside Ask AI with
+  Sections, Changes and Full prompt, each part edited in a dialog, and flat version numbers (a save
+  overwrites the version on screen; every save is kept).
 - 2026-11-23: the server design for the reworked Prompt Tuning project (#59) is fully delivered:
   the design doc (#60) and steps 1 to 9, each listed below.
 - 2026-11-23: notifications (#59 step 6): when scoring or Auto Optimise ends, the person who

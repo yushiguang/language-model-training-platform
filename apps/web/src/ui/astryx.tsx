@@ -17,6 +17,8 @@ export {Avatar} from '@astryxdesign/core/Avatar';
 export {Badge} from '@astryxdesign/core/Badge';
 export {Button} from '@astryxdesign/core/Button';
 export {Card} from '@astryxdesign/core/Card';
+export {CheckboxInput} from '@astryxdesign/core/CheckboxInput';
+export {CodeBlock} from '@astryxdesign/core/CodeBlock';
 export {ClickableCard} from '@astryxdesign/core/ClickableCard';
 export {Dialog} from '@astryxdesign/core/Dialog';
 export {Divider} from '@astryxdesign/core/Divider';
@@ -27,11 +29,14 @@ export {Icon} from '@astryxdesign/core/Icon';
 export {IconButton} from '@astryxdesign/core/IconButton';
 export {HStack, Layout, LayoutContent, StackItem, VStack} from '@astryxdesign/core/Layout';
 export {Link} from '@astryxdesign/core/Link';
+export {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl';
 export {SideNav, SideNavItem, SideNavSection} from '@astryxdesign/core/SideNav';
 export {Spinner} from '@astryxdesign/core/Spinner';
 export {Heading, Text} from '@astryxdesign/core/Text';
 export {TextArea} from '@astryxdesign/core/TextArea';
 export {TextInput} from '@astryxdesign/core/TextInput';
+export {Token} from '@astryxdesign/core/Token';
+export {Toolbar} from '@astryxdesign/core/Toolbar';
 export {TopNav, TopNavItem} from '@astryxdesign/core/TopNav';
 
 /**

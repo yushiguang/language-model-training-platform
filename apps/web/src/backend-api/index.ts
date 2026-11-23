@@ -75,6 +75,7 @@ export const {
   reviewGold,
   rebuildReports,
   createVersion,
+  goldLabelsCleared,
   scoreVersion,
   stopRun,
   startOptimiser,

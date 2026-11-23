@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {applyFix, checkTemplate, diffLines, diffWords, hasAnyFeature, isFeatureEmpty, renderPrompt, withReasons, toFeatures} from './index.ts';
 import {pageFromPath} from './pages.ts';
 import {computeMetrics, judge, DEFAULT_THRESHOLDS} from './metrics.ts';
-import {nextVersion, versionLabel} from './versions.ts';
+import {nextVersion, shownVersions, versionLabel} from './versions.ts';
 import type {Schema} from '@yushiguang/sprint-contracts';
 
 const sel = {video: ['Description', 'Frame'], photo_text: ['Description', 'Title'], metadata: ['Language']};
@@ -98,6 +98,18 @@ test('versions: Save makes the next minor, Save as new version the next major, a
   assert.deepEqual(nextVersion(all, {major: 2}, 'major', {reserved: [3]}), {major: 4, minor: 0});
   assert.equal(versionLabel({major: 13, minor: 0}), 'v13');
   assert.equal(versionLabel({major: 4, minor: 2}), 'v4.2');
+});
+
+test('shown versions: one card per major, a save over a version keeps its number, an Optimiser run shows its best kept try', () => {
+  const v = (id: string, major: number, minor: number, madeBy: string) => ({id, major, minor, madeBy}) as never;
+  const versions = [v('a', 1, 0, 'user'), v('b', 1, 1, 'user'), v('c', 2, 0, 'prompt_agent'), v('t1', 3, 1, 'optimiser'), v('t2', 3, 2, 'optimiser'), v('t3', 4, 1, 'optimiser')];
+  const round = (versionId: string, outcome: string, score: number | null) => ({versionId, outcome, score}) as never;
+  const runs = [{major: 3, history: [round('t1', 'kept', 0.8), round('t2', 'kept', 0.85)]}, {major: 4, history: [round('t3', 'dropped', null)]}, {major: 5, history: []}] as never[];
+  const shown = shownVersions(versions, runs);
+  assert.deepEqual(shown.map(s => [s.label, s.version && (s.version as {id: string}).id]), [['v5', null], ['v4', null], ['v3', 't2'], ['v2', 'c'], ['v1', 'b']]);
+  // A save over the Optimiser's result is a minor of its major: the card shows it from then on.
+  const edited = shownVersions([...versions, v('e', 3, 3, 'user')], runs);
+  assert.equal((edited.find(s => s.major === 3)!.version as {id: string}).id, 'e');
 });
 
 test('diff', () => {
