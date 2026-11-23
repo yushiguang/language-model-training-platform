@@ -9,6 +9,7 @@ import {allowAll, memoryPermissionAdmin} from './standins/enterprise.ts';
 import {memoryConfig} from './standins/config-store.ts';
 import {browserFiles, localIdentity, localTelemetrySink} from './standins/local.ts';
 import {localTickets} from './standins/tickets.ts';
+import {logNotifications} from './standins/notifications.ts';
 import {memorySharedState} from './standins/shared-state.ts';
 
 /**
@@ -36,8 +37,9 @@ export function createPlatform(): Platform {
     authorization: allowAll(),
     permissionAdmin: memoryPermissionAdmin(),
     tickets: localTickets(),
+    notifications: logNotifications(),
     sharedState: memorySharedState(),
-    standIns: ['storage', 'labeling models', 'agent model', 'identity', 'files', 'examples', 'media', 'feature descriptions', 'document links', 'telemetry', 'problem reports', 'shared state', 'configuration', 'permissions'],
+    standIns: ['storage', 'labeling models', 'agent model', 'identity', 'files', 'examples', 'media', 'feature descriptions', 'document links', 'telemetry', 'problem reports', 'notifications', 'shared state', 'configuration', 'permissions'],
   };
 }
 
