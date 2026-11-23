@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, ClientDiagnostics, RequestContext, SharedStatePort, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission, NotificationPort, TelemetryPort} from '@yushiguang/sprint-contracts';
+import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, ClientDiagnostics, RequestContext, SharedStatePort, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission, NotificationPort, TelemetryPort, AuthorizationPort} from '@yushiguang/sprint-contracts';
 import {createCatalog} from '@yushiguang/sprint-catalog';
 import {createLabeling, labelingExecutor, memoryLocks} from '@yushiguang/sprint-labeling';
 import {createOptimiser, optimiserExecutor} from '@yushiguang/sprint-optimiser';
@@ -52,6 +52,7 @@ interface WorldOpts {
   retryDelayMs?: number;
   notifications?: NotificationPort;
   telemetry?: TelemetryPort;
+  authorization?: AuthorizationPort;
 }
 
 /** The helpers' tools on the world's project, with no turn: calls run as the world's caller. */
@@ -94,6 +95,7 @@ async function world(prefix: string, opts: WorldOpts = {}) {
     tickets: opts.tickets,
     notifications: opts.notifications,
     telemetry: opts.telemetry,
+    authorization: opts.authorization,
     appVersion: '1.1.0-test',
     sharedState: opts.sharedState ?? memorySharedState(),
   });
@@ -2177,4 +2179,42 @@ test('notifications (#71): an Optimiser run that ends tells the person who start
   assert.equal((await w.state()).optimisation[0].state, 'done');
   const ended = n.port.sent().filter(x => x.kind.startsWith('optimiser'));
   assert.deepEqual(ended.map(x => [x.kind, x.userIds, x.text, x.link]), [['optimiser_finished', ['u_1'], 'Auto Optimise finished in p.', `/prompt/?p=${w.projectId}`]]);
+});
+
+test('notifications (#71): Stop on a Retry still waiting for its model sends nothing, though the task still shows its earlier failure', async () => {
+  const n = notifications();
+  const w = await world('nt6', {notifications: n.port, delayMs: 40, answer: () => {
+    throw new Error('the model is down');
+  }});
+  const v1 = await w.newVersion();
+  const {runIds} = await scoreVersion(w.ws, w.projectId, v1);
+  await w.jobs.idle();
+  assert.equal(n.port.sent().length, 1);
+  // Another version holds the model; the Retry of the first waits behind it, and is stopped there.
+  const v2 = await w.newVersion('another');
+  await scoreVersion(w.ws, w.projectId, v2);
+  await scoreVersion(w.ws, w.projectId, v1);
+  const retry = (await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask'], states: ['queued']})).find(j => j.args.taskId === runIds[0]);
+  assert.ok(retry, 'the Retry waits');
+  const {stopRun} = await import('./evaluation.ts');
+  await stopRun(w.ws, w.projectId, runIds[0]);
+  await w.jobs.idle();
+  const sent = n.port.sent().map(x => `${x.kind} ${(x.msg?.params as {version: string}).version}`);
+  assert.deepEqual(sent, [`scoring_failed ${versionLabel(v1)}`, `scoring_failed ${versionLabel(v2)}`], 'the stopped Retry adds nothing');
+});
+
+test("notifications (#71): work Sprint started goes to the creator only while they can still read the project", async () => {
+  const n = notifications();
+  const readers = new Set(['u_1', 'u_owner']);
+  const w = await world('nt7', {notifications: n.port, authorization: {allowed: async ctx => readers.has(ctx.user.id)}});
+  await w.catalog.patch('projects', w.projectId, {createdById: 'u_owner'});
+  const {systemScope} = await import('./access.ts');
+  await scoreVersion(systemScope(w.inst, 'default'), w.projectId, await w.newVersion());
+  await w.jobs.idle();
+  assert.deepEqual(n.port.sent().map(x => x.userIds), [['u_owner']]);
+  readers.delete('u_owner');
+  await scoreVersion(systemScope(w.inst, 'default'), w.projectId, await w.newVersion('another'));
+  await w.jobs.idle();
+  assert.equal((await w.state()).runs.filter(r => r.state === 'done').length, 2);
+  assert.equal(n.port.sent().length, 1, 'a creator who left is not told');
 });

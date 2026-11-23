@@ -44,17 +44,27 @@ const promptTuning = (projectId: string) => `/prompt/?p=${encodeURIComponent(pro
 /**
  * The `notify.send` executor. It reads how the work ended from its record, not from the job: a
  * finished task says finished, a failed one failed. A Stop the user pressed, and work that has
- * not really ended (a run paused, a job lost and queued again), send nothing. Always ends done:
+ * not really ended (a run paused, a job lost and queued again), send nothing. Only a job that
+ * ended done or failed is told about: a cancelled one is a Stop (or a runner that found the work
+ * already taken), even while the record still shows how an earlier try ended. Always ends done:
  * a notification is never tried again.
  */
 export async function runNotify(w: Scope, job: Job): Promise<JobOutcome> {
   if (!job.projectId) return {state: 'done'};
   const projectId = job.projectId;
+  const parentId = job.idempotencyKey?.startsWith('finally:') ? job.idempotencyKey.slice('finally:'.length) : null;
+  const parent = parentId ? await w.jobs.get(w.ctx, parentId) : null;
+  if (!parent || (parent.state !== 'done' && parent.state !== 'failed')) return {state: 'done'};
   const state = await loadProjectState(w, projectId);
   if (!state) return {state: 'done'};
   const project = state.project.name;
   const recipient = w.ctx.caller === SYSTEM_CALLER ? state.project.createdById : w.ctx.user.id;
   if (!recipient) return {state: 'done'};
+  // Sprint's own work is checked for the tenant only: the creator it goes to must still read the project.
+  if (w.ctx.caller === SYSTEM_CALLER && w.authorization) {
+    const creator = {requestId: w.ctx.requestId, user: {id: recipient, name: state.project.createdBy}, tenantId: state.project.tenantId, caller: 'worker'};
+    if (!(await w.authorization.allowed(creator, {action: `job.${job.kind}`, permission: 'read', projectId}))) return {state: 'done'};
+  }
   const to = [recipient];
   if (job.args.about === 'labeling') {
     const task = await w.labeling.getTask(String(job.args.taskId));
