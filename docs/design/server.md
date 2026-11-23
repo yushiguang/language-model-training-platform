@@ -378,6 +378,7 @@ export interface ConfigReader {
 | 模型管理接口 `listModels` / `addModel` / `updateModel` / `removeModel` / `setDefaultModel`；`CatalogContract.remove('tenant_models', id)` | 新增（第 4 步，#69 已完成） |
 | `ObjectStorePort`（`Platform.objectStore` 可选）；基于它的 `LabelingStorePort`、`FeatureStorePort`；`Example.featureRef` 可选 | 新增（第 7 步，#72） |
 | `Example.number`（样本序号，可选，旧样本第一次读时补上）、`DatasetSnapshot.numbered`、`LabelSet` 和 catalog 的 `label_sets` 集合、`CatalogContract.page`（分页读取） | 新增：catalog 在本仓库实现，部署方的文档库适配器不用改（第 8 步，#82 已完成） |
+| `ScoreBasis`、`EvalReport.basis`（可选，旧报告没有）、`ScoringState`、任务类型 `report.rescore`；第二个 PR 加 `ProjectState.scoring`、`WorkflowFacts.scoringReady`、`rescore` 接口 | 新增：只有工作流产出和读取，部署方的适配器不用改（第 9 步，#86） |
 
 ## 11. 交付计划
 

@@ -106,7 +106,7 @@ export type MetricName = keyof typeof METRICS;
 export const LABEL_VALUES: Record<string, readonly string[]> = {
   purpose: ['labeling', 'chat'],
   outcome: ['ok', 'error', 'rate_limited', 'server', 'timeout', 'rejected', 'filtered', 'aborted', 'gave_up', 'shown', 'accepted', 'cancelled', 'approved', 'discarded', 'joined', 'passes', 'no_new_ideas', 'budget', 'max_rounds', 'stopped', 'failed', 'done', 'paused', 'lost', 'retried', 'requeued'],
-  job_kind: ['labeling.runTask', 'report.build', 'dataset.sample', 'source.ingest', 'optimiser.run', 'project.delete', 'batch_labeling.run', 'export.run', 'notify.send'],
+  job_kind: ['labeling.runTask', 'report.build', 'report.rescore', 'dataset.sample', 'source.ingest', 'optimiser.run', 'project.delete', 'batch_labeling.run', 'export.run', 'notify.send'],
   reason: ['rate_limited', 'server', 'timeout', 'user', 'failures', 'closed', 'none'],
   kind: ['input', 'output', 'reasoning', 'qpm', 'tpm', 'concurrency', 'script', 'asset', 'backend', 'image', 'schema', 'prompt', 'other'],
   assumed: ['true', 'false'],

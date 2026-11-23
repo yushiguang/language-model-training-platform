@@ -17,7 +17,7 @@ import type {ConfigReader, RequestContext} from './platform-api.ts';
  * The kinds of work. `batch_labeling.run` and `export.run` are reserved: no executor yet.
  * `notify.send` tells the person who started a piece of work that it ended (the work's `finally`).
  */
-export type JobKind = 'labeling.runTask' | 'report.build' | 'dataset.sample' | 'source.ingest' | 'optimiser.run' | 'project.delete' | 'batch_labeling.run' | 'export.run' | 'notify.send';
+export type JobKind = 'labeling.runTask' | 'report.build' | 'report.rescore' | 'dataset.sample' | 'source.ingest' | 'optimiser.run' | 'project.delete' | 'batch_labeling.run' | 'export.run' | 'notify.send';
 
 /**
  * - `queued`: waiting for a runner.
