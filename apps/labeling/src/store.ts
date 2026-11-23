@@ -128,12 +128,21 @@ export function objectLabelingStore(db: DocRuntime, objects: ObjectStorePort): L
         await repo.insert(SEGMENTS, {id: newId('ps'), projectId, promptVersionId, endpoint, settingsHash, key, predictionIds: fresh.map(p => p.id), createdAt: new Date().toISOString()} satisfies PredictionSegment);
         for (const p of fresh) out.set(p.id, {prediction: p, saved: true});
       }
-      return predictions.map(p => out.get(p.id)!);
+      // An id given twice is saved once: only its first place says saved.
+      const first = new Set<string>();
+      return predictions.map(p => {
+        const r = out.get(p.id)!;
+        if (!r.saved || !first.has(p.id)) return (first.add(p.id), r);
+        return {prediction: r.prediction, saved: false};
+      });
     },
     async predictionsFor(promptVersionId, endpoint, settingsHash) {
       const segs = await segmentsOf(promptVersionId, endpoint, settingsHash);
-      const all = [...(await docs.predictionsFor(promptVersionId, endpoint, settingsHash)), ...(await Promise.all(segs.map(read))).flat()];
-      return all.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      const all = [...(await docs.predictionsFor(promptVersionId, endpoint, settingsHash)), ...(await Promise.all(segs.map(read))).flat()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+      // Two runners that saved the same answer at once (a model limit above 1 per endpoint) left it
+      // in two segments: it counts once, the first saved.
+      const seen = new Set<string>();
+      return all.filter(p => !seen.has(p.id) && !!seen.add(p.id));
     },
     async deletePredictions(where) {
       await removeSegments(await repo.find<PredictionSegment>(SEGMENTS, where));

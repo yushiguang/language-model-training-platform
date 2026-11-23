@@ -9,6 +9,7 @@ import {
   type ExampleWithFeatures,
   type LabelingContract,
   type LabelingStorePort,
+  type LabelingTaskPatch,
   type LabelingTaskTally,
   type LabelingTask,
   type LlmGatewayContract,
@@ -326,7 +327,10 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     // The same timer saves a batch of answers that has waited long enough.
     const stopTimer = setInterval(() => {
       void checkStop();
-      void answers.flushIfDue().then(n => n && emit(task.projectId));
+      void answers
+        .flushIfDue()
+        .then(n => n && emit(task.projectId))
+        .catch(() => undefined);
     }, systemConfig().labeling.stopCheckMs);
     (stopTimer as {unref?: () => void}).unref?.();
 
@@ -345,13 +349,20 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         add.costUsd += pred.costUsd;
         add.tokens += pred.tokens ?? 0;
         if (opts.auto && paid) add.autoCostUsd += pred.costUsd;
-        tm.counter('sprint_labeling_examples_total', {task_purpose: purpose, result: pred.answer ? 'valid' : pred.filtered ? 'filtered' : 'invalid'});
-        if (paid) tm.counter('sprint_labeling_cost_usd_total', {task_purpose: purpose}, pred.costUsd);
       }
       await store.addToTask(taskId, add);
       counts.done += add.done;
       counts.costUsd += add.costUsd;
+      for (const {prediction: pred, saved: paid} of results) {
+        tm.counter('sprint_labeling_examples_total', {task_purpose: purpose, result: pred.answer ? 'valid' : pred.filtered ? 'filtered' : 'invalid'});
+        if (paid) tm.counter('sprint_labeling_cost_usd_total', {task_purpose: purpose}, pred.costUsd);
+      }
     };
+    /**
+     * Answers saved in a batch whose counters could not be added (tried twice): the run ends
+     * by recounting the task from the saved answers, as a new run does, so they are never lost.
+     */
+    let countsStale = false;
     /** Examples whose answers could not be saved: failed, so Retry failed labels them again. */
     const failSave = async (preds: Prediction[], e: unknown) => {
       lastError = (e as Error).message ?? String(e);
@@ -361,8 +372,21 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         inARow++;
         await store.addToTask(taskId, {failed: 1}, {failedExampleId: p.exampleId, set: {error: lastError}}).catch(() => undefined);
       }
+      // Seen by every worker at once: a later answer that resets the run of failures does not undo it.
+      stopReason ||= overLimit();
     };
-    const answers = answerBuffer(deps.answerBatch, store, tally, failSave);
+    const answers = answerBuffer(deps.answerBatch, store, async results => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await tally(results);
+        } catch {
+          if (attempt >= 1) {
+            countsStale = true;
+            return;
+          }
+        }
+      }
+    }, failSave);
 
     /**
      * Labels one example under a lock on its prediction, so two tasks for the same version,
@@ -435,7 +459,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
 
     const worker = async () => {
       while (next < pending.length && !stopReason && !ctrl.signal.aborted) {
-        stopReason = overLimit();
+        stopReason ||= overLimit();
         if (stopReason) break;
         const exampleId = pending[next++];
         const exStarted = Date.now();
@@ -456,7 +480,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           lastError = (e as Error).message ?? String(e);
           await store.addToTask(taskId, {failed: 1}, {failedExampleId: exampleId, set: {error: lastError}});
         }
-        stopReason = overLimit();
+        stopReason ||= overLimit();
         emit(task.projectId);
       }
     };
@@ -487,7 +511,24 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       state = 'done';
       error = null;
     }
-    await store.patchTask(taskId, {state, stopReason, error, stopRequested: false, finishedAt: now()});
+    let recount: LabelingTaskPatch = {};
+    if (countsStale) {
+      // Counters behind the saved answers: rebuilt from them, as a new run would. If even that
+      // read fails, the task is left paused, and its next run rebuilds them.
+      const fresh = await allPredictions(task.promptVersionId, task.endpoint, task.settingsHash).catch(() => null);
+      if (fresh) {
+        const best = task.exampleIds.flatMap(id => {
+          const ps = fresh.get(id);
+          const p = ps?.find(x => x.answer) ?? ps?.[0];
+          return p ? [p] : [];
+        });
+        recount = {done: best.length, valid: best.filter(p => p.answer).length, invalid: best.filter(p => !p.answer).length, filtered: best.filter(p => p.filtered).length, costUsd: best.reduce((n, p) => n + p.costUsd, 0), tokens: best.reduce((n, p) => n + (p.tokens ?? 0), 0)};
+      } else if (state === 'done') {
+        state = 'paused';
+        stopReason = 'closed';
+      }
+    }
+    await store.patchTask(taskId, {...recount, state, stopReason, error, stopRequested: false, finishedAt: state === 'paused' ? null : now()});
     emit(task.projectId);
     tm.counter('sprint_labeling_tasks_ended_total', {task_purpose: purpose, state, reason: stopReason ?? 'none'});
     if (state === 'needs_attention') tm.event('run_needs_attention', {task_purpose: purpose, failed: counts.failed, total: task.total});

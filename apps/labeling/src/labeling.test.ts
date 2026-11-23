@@ -861,3 +861,50 @@ test('objectLabelingStore: answers saved as documents before are still read and 
   assert.deepEqual(await store.predictionsFor('pv_1', 'A', 'h'), []);
   assert.deepEqual(objects.keys(), []);
 });
+
+test('answers in object storage (#72): a run stopped by failures saves the batch in hand; failed saves count toward the run of failures and stop it for every worker', async () => {
+  const {configureSystem} = await import('@yushiguang/sprint-domain');
+  configureSystem({labeling: {maxFailedInARow: 3}});
+  try {
+    // Model calls fail from the sixth example on (2 of 20 is over 5%): the five answers in hand are saved at the end.
+    const a = await setup(20, 'lab-obj-5');
+    const objectsA = memoryObjectStore();
+    let callsA = 0;
+    const labA = createLabeling({db: a.db, catalog: a.catalog, gateway: fakeGateway(async () => (++callsA > 5 ? Promise.reject(new Error('model down')) : '{"format": "Vlog"}')), locks: memoryLocks(), store: objectLabelingStore(a.db, objectsA), answerBatch: {size: 50, maxWaitMs: 60_000}});
+    const ta = await labA.runTask((await labA.createTask(input(a.ids, a.v, {parallel: 1}))).id);
+    assert.deepEqual([ta?.state, ta?.done, ta?.failed], ['needs_attention', 5, 2]);
+    assert.equal(objectsA.keys().length, 1);
+    // Every save fails: the first batch's four failures stop the run, though the next answer succeeds.
+    const b = await setup(20, 'lab-obj-6');
+    const objectsB = memoryObjectStore();
+    let callsB = 0;
+    const down = {...objectsB, put: async () => Promise.reject(new Error('storage down'))};
+    const labB = createLabeling({db: b.db, catalog: b.catalog, gateway: fakeGateway(async () => (callsB++, '{"format": "Vlog"}')), locks: memoryLocks(), store: objectLabelingStore(b.db, down), answerBatch: {size: 4, maxWaitMs: 60_000}});
+    const tb = await labB.runTask((await labB.createTask(input(b.ids, b.v, {parallel: 2}))).id);
+    assert.equal(tb?.state, 'needs_attention');
+    assert.ok(callsB <= 6, `the run stops after the failed save (${callsB} calls)`);
+  } finally {
+    configureSystem();
+  }
+});
+
+test('answers in object storage (#72): counters that cannot be added after a saved batch are rebuilt from the saved answers when the run ends', async () => {
+  const {db, catalog, v, ids} = await setup(7, 'lab-obj-7');
+  const objects = memoryObjectStore();
+  const base = objectLabelingStore(db, objects);
+  let failTallies = 2;
+  const store = {...base, addToTask: async (...args: Parameters<typeof base.addToTask>) => ((args[1].done ?? 0) > 0 && failTallies-- > 0 ? Promise.reject(new Error('db blip')) : base.addToTask(...args))};
+  const lab = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": "Vlog"}'), locks: memoryLocks(), store, answerBatch: {size: 4, maxWaitMs: 60_000}});
+  const t = await lab.runTask((await lab.createTask(input(ids, v, {parallel: 1}))).id);
+  assert.deepEqual([t?.state, t?.done, t?.valid, t?.failed], ['done', 7, 7, 0]);
+  assert.ok(Math.abs((t?.costUsd ?? 0) - 0.07) < 1e-9);
+});
+
+test('objectLabelingStore: an id given twice in one batch is saved once, and says saved once', async () => {
+  const db = localDocRuntime('lab-obj-8');
+  const objects = memoryObjectStore();
+  const store = objectLabelingStore(db, objects);
+  const p = {id: 'pd_1', projectId: 'pr_1', promptVersionId: 'pv_1', endpoint: 'A', settingsHash: 'h', exampleId: 'ex_1', output: '', answer: ['Vlog'], invalidReason: null, costUsd: 0.01, createdAt: '2026-11-01'};
+  assert.deepEqual((await store.savePredictions([p, {...p}])).map(r => r.saved), [true, false]);
+  assert.equal((await store.predictionsFor('pv_1', 'A', 'h')).length, 1);
+});
