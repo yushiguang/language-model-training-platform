@@ -216,7 +216,7 @@ export interface ObjectStorePort {
   /** 按字节范围读，用于打包的特征段和答案段（HTTP Range GET）。 */
   getRange(key: string, offset: number, length: number): Promise<Uint8Array | null>;
   delete(key: string): Promise<void>;
-  deleteBatch(keys: string[]): Promise<number>;
+  deleteBatch(keys: string[]): Promise<void>;
   /** 可选：按需生成带签名的链接，用于图片或预览。 */
   signUrl?(key: string, expiresSec?: number): Promise<string>;
 }

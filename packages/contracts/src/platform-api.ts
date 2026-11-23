@@ -647,8 +647,11 @@ export interface ObjectStorePort {
   getRange(key: string, offset: number, length: number): Promise<Uint8Array | null>;
   /** Removes an object; a missing one is not an error. */
   delete(key: string): Promise<void>;
-  /** Removes many objects in as few requests as the store allows; returns how many existed. */
-  deleteBatch(keys: string[]): Promise<number>;
+  /**
+   * Removes many objects in as few requests as the store allows (S3 `DeleteObjects`); missing
+   * keys are not an error. Nothing is returned: a batch delete cannot tell which keys existed.
+   */
+  deleteBatch(keys: string[]): Promise<void>;
   /** Optional: a signed link to read the object for a while (images, previews). */
   signUrl?(key: string, expiresSec?: number): Promise<string>;
 }

@@ -27,9 +27,7 @@ export function memoryObjectStore(): ObjectStorePort & {keys(): string[]} {
       objects.delete(key);
     },
     async deleteBatch(keys) {
-      let n = 0;
-      for (const k of new Set(keys)) if (objects.delete(k)) n++;
-      return n;
+      for (const k of keys) objects.delete(k);
     },
     /** The stored keys, for tests that check nothing is left behind. */
     keys: () => [...objects.keys()].sort(),

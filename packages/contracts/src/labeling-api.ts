@@ -145,6 +145,13 @@ export interface TryTemplateRow {
 /** Additions to a task's counters, applied atomically (`LabelingStorePort.addToTask`). */
 export type LabelingTaskTally = Partial<Record<'done' | 'valid' | 'invalid' | 'filtered' | 'failed' | 'costUsd' | 'tokens' | 'autoCostUsd', number>>;
 
+/** The version, model and settings a set of answers was saved for. */
+export interface PredictionScope {
+  promptVersionId: string;
+  endpoint: EndpointId;
+  settingsHash: string;
+}
+
 /** Fields a task's runner and Stop set (never its id, project or example list). */
 export type LabelingTaskPatch = Partial<Omit<LabelingTask, 'id' | 'projectId' | 'exampleIds' | 'createdAt' | 'createdBy'>>;
 
@@ -167,8 +174,12 @@ export interface LabelingStorePort {
    * `failedExampleIds` unless it is there, and sets `set`. Two runners adding at once both count.
    */
   addToTask(taskId: string, tally: LabelingTaskTally, opts?: {failedExampleId?: string; set?: LabelingTaskPatch}): Promise<void>;
-  /** One saved answer by its id (`predictionId`), or null. */
-  getPrediction(id: string): Promise<Prediction | null>;
+  /**
+   * One saved answer by its id (`predictionId`), or null. `scope` is the version, model and
+   * settings it was saved for (the id is a hash that cannot be read back), so a segment-pointer
+   * store looks only through that scope's pointers.
+   */
+  getPrediction(id: string, scope: PredictionScope): Promise<Prediction | null>;
   /**
    * Saves a batch of answers, written once. An answer whose id is already saved is not written
    * again: the saved one is returned with `saved: false`. Results are in the order given. Throws

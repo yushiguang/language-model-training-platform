@@ -131,6 +131,11 @@ export interface FeatureStorePort {
    * are not found are left out. Ranges of one segment file are read together.
    */
   getBatch(items: FeatureItem[]): Promise<Record<string, Features>>;
-  /** Removes these items' features (segment files whole, once none of theirs is wanted). Missing ones are skipped. */
+  /**
+   * Removes these items' features; missing ones are skipped. **Caller's precondition**: pass
+   * every item of each segment file at once (a whole snapshot), never a part of one: the
+   * object-storage implementation keeps no index of its own and deletes every segment file the
+   * items point to, whole, so the features of other items packed in it would be lost.
+   */
   deleteBatch(items: FeatureItem[]): Promise<void>;
 }

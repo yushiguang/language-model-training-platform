@@ -48,7 +48,7 @@ export function objectStoreCases(name: string, make: () => ObjectStorePort | Pro
     assert.deepEqual([...(await s.get('t/c.bin'))!], [1, 2]);
   });
 
-  test(`${name}: delete skips a missing key; deleteBatch counts the ones that existed`, async () => {
+  test(`${name}: delete and deleteBatch skip missing keys`, async () => {
     const s = await make();
     await s.delete('t/never');
     await s.put('t/d1', 'a');
@@ -56,9 +56,10 @@ export function objectStoreCases(name: string, make: () => ObjectStorePort | Pro
     await s.put('t/d3', 'c');
     await s.delete('t/d3');
     assert.equal(await s.get('t/d3'), null);
-    assert.equal(await s.deleteBatch(['t/d1', 't/d2', 't/d2', 't/never']), 2);
+    await s.deleteBatch(['t/d1', 't/d2', 't/d2', 't/never']);
     assert.equal(await s.get('t/d1'), null);
-    assert.equal(await s.deleteBatch([]), 0);
+    assert.equal(await s.get('t/d2'), null);
+    await s.deleteBatch([]);
   });
 }
 
