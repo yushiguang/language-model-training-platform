@@ -307,11 +307,16 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     setRunning(purpose, 1);
     let stopReason: LabelingTask['stopReason'] = null;
     let inARow = 0;
+    /** Failed saves since a batch was last saved (`answerBatch`): answers kept in memory do not reset it. */
+    let savesInARow = 0;
+    /** Every example failed in this run or left failed before it, kept here too in case a write of it fails. */
+    const failedNow = new Set(failedSet);
+    let failedStale = false;
     let lastError: string | null = null;
     let next = 0;
     // Checked before every example, so a resumed task that is already over a limit makes no call.
     const overLimit = (): LabelingTask['stopReason'] => {
-      if (counts.failed / task.total > systemConfig().labeling.maxFailedShare || inARow >= systemConfig().labeling.maxFailedInARow) return 'failures';
+      if (counts.failed / task.total > systemConfig().labeling.maxFailedShare || Math.max(inARow, savesInARow) >= systemConfig().labeling.maxFailedInARow) return 'failures';
       return null;
     };
 
@@ -350,7 +355,14 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         add.tokens += pred.tokens ?? 0;
         if (opts.auto && paid) add.autoCostUsd += pred.costUsd;
       }
-      await store.addToTask(taskId, add);
+      try {
+        await store.addToTask(taskId, add);
+      } catch (e) {
+        // Not added: the run ends by recounting; the automatic spend, which answers do not
+        // record, is added then.
+        missedAutoCostUsd += add.autoCostUsd;
+        throw e;
+      }
       counts.done += add.done;
       counts.costUsd += add.costUsd;
       for (const {prediction: pred, saved: paid} of results) {
@@ -363,19 +375,24 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
      * by recounting the task from the saved answers, as a new run does, so they are never lost.
      */
     let countsStale = false;
+    let missedAutoCostUsd = 0;
     /** Examples whose answers could not be saved: failed, so Retry failed labels them again. */
     const failSave = async (preds: Prediction[], e: unknown) => {
       lastError = (e as Error).message ?? String(e);
+      // Counted and checked before any write, so no worker starts another call meanwhile.
+      counts.failed += preds.length;
+      savesInARow += preds.length;
+      for (const p of preds) failedNow.add(p.exampleId);
+      stopReason ||= overLimit();
       for (const p of preds) {
         tm.counter('sprint_labeling_examples_total', {task_purpose: purpose, result: 'failed'});
-        counts.failed++;
-        inARow++;
-        await store.addToTask(taskId, {failed: 1}, {failedExampleId: p.exampleId, set: {error: lastError}}).catch(() => undefined);
+        await store.addToTask(taskId, {failed: 1}, {failedExampleId: p.exampleId, set: {error: lastError}}).catch(() => {
+          failedStale = true;
+        });
       }
-      // Seen by every worker at once: a later answer that resets the run of failures does not undo it.
-      stopReason ||= overLimit();
     };
     const answers = answerBuffer(deps.answerBatch, store, async results => {
+      savesInARow = 0;
       for (let attempt = 0; ; attempt++) {
         try {
           return await tally(results);
@@ -477,6 +494,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           tm.counter('sprint_labeling_examples_total', {task_purpose: purpose, result: 'failed'});
           inARow++;
           counts.failed++;
+          failedNow.add(exampleId);
           lastError = (e as Error).message ?? String(e);
           await store.addToTask(taskId, {failed: 1}, {failedExampleId: exampleId, set: {error: lastError}});
         }
@@ -517,17 +535,21 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       // read fails, the task is left paused, and its next run rebuilds them.
       const fresh = await allPredictions(task.promptVersionId, task.endpoint, task.settingsHash).catch(() => null);
       if (fresh) {
+        // As at the start: an example still waiting for its one more try is not done yet.
         const best = task.exampleIds.flatMap(id => {
           const ps = fresh.get(id);
-          const p = ps?.find(x => x.answer) ?? ps?.[0];
-          return p ? [p] : [];
+          if (!ps?.length || (relabelSet.has(id) && ps.length === 1 && !ps[0].answer)) return [];
+          return [ps.find(x => x.answer) ?? ps[0]];
         });
         recount = {done: best.length, valid: best.filter(p => p.answer).length, invalid: best.filter(p => !p.answer).length, filtered: best.filter(p => p.filtered).length, costUsd: best.reduce((n, p) => n + p.costUsd, 0), tokens: best.reduce((n, p) => n + (p.tokens ?? 0), 0)};
       } else if (state === 'done') {
         state = 'paused';
         stopReason = 'closed';
       }
+      if (missedAutoCostUsd > 0) await store.addToTask(taskId, {autoCostUsd: missedAutoCostUsd}).catch(() => undefined);
     }
+    // Failures whose own write was lost: the run's record of them is written whole.
+    if (failedStale) recount = {...recount, failed: failedNow.size, failedExampleIds: [...failedNow]};
     await store.patchTask(taskId, {...recount, state, stopReason, error, stopRequested: false, finishedAt: state === 'paused' ? null : now()});
     emit(task.projectId);
     tm.counter('sprint_labeling_tasks_ended_total', {task_purpose: purpose, state, reason: stopReason ?? 'none'});

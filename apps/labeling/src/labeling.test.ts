@@ -874,15 +874,17 @@ test('answers in object storage (#72): a run stopped by failures saves the batch
     const ta = await labA.runTask((await labA.createTask(input(a.ids, a.v, {parallel: 1}))).id);
     assert.deepEqual([ta?.state, ta?.done, ta?.failed], ['needs_attention', 5, 2]);
     assert.equal(objectsA.keys().length, 1);
-    // Every save fails: the first batch's four failures stop the run, though the next answer succeeds.
-    const b = await setup(20, 'lab-obj-6');
+    // Every save fails, on a task large enough that the failed share stays under 5%: failed
+    // saves in a row (batches of 2, limit 3) stop it, although the model answers meanwhile.
+    const b = await setup(200, 'lab-obj-6');
     const objectsB = memoryObjectStore();
     let callsB = 0;
     const down = {...objectsB, put: async () => Promise.reject(new Error('storage down'))};
-    const labB = createLabeling({db: b.db, catalog: b.catalog, gateway: fakeGateway(async () => (callsB++, '{"format": "Vlog"}')), locks: memoryLocks(), store: objectLabelingStore(b.db, down), answerBatch: {size: 4, maxWaitMs: 60_000}});
+    const labB = createLabeling({db: b.db, catalog: b.catalog, gateway: fakeGateway(async () => (callsB++, '{"format": "Vlog"}')), locks: memoryLocks(), store: objectLabelingStore(b.db, down), answerBatch: {size: 2, maxWaitMs: 60_000}});
     const tb = await labB.runTask((await labB.createTask(input(b.ids, b.v, {parallel: 2}))).id);
     assert.equal(tb?.state, 'needs_attention');
-    assert.ok(callsB <= 6, `the run stops after the failed save (${callsB} calls)`);
+    assert.ok(tb!.failed < 10, `under 5% failed: ${tb?.failed}`);
+    assert.ok(callsB <= 8, `the run stops after failed saves in a row (${callsB} calls)`);
   } finally {
     configureSystem();
   }
