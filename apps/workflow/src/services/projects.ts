@@ -1,12 +1,12 @@
-import {DEFAULT_TENANT, DocFieldValue, type GateApproval, type Job, type JobOutcome, type LabelComment, type NodeId, type Project, type ProjectState, type ProjectStatus, type ScoringState, type WorkflowFacts} from '@yushiguang/sprint-contracts';
-import {asAnswerOrNull, compareVersions, gate, inRanges, judge, labelSetProgress, newId, scoreBasis, staleScores, systemConfig} from '@yushiguang/sprint-domain';
+import {DEFAULT_TENANT, DocFieldValue, type EndpointId, type GateApproval, type NewProjectRequest, type NewProjectResult, type ProjectDefaults, type ProjectRow, type ProjectRows, type ProjectRowsRequest, type Job, type JobOutcome, type LabelComment, type NodeId, type Project, type ProjectState, type ProjectStatus, type ScoringState, type WorkflowFacts} from '@yushiguang/sprint-contracts';
+import {asAnswerOrNull, bestReport, compareVersions, currentStep, DEFAULT_THRESHOLDS, gate, inRanges, judge, labelSetProgress, newId, scoreBasis, staleScores, systemConfig} from '@yushiguang/sprint-domain';
 import {now, type Instance, type Scope} from './app.ts';
 import {withRetries} from './access.ts';
 import {getSamplingTask} from './dataset.ts';
 import {datasetSources, retireCuts, tenantOf} from './sources.ts';
 import {cannotBuildOn, latestGold, rescoresLeft} from './evaluation.ts';
 import {runView} from './views.ts';
-import {initSettings} from './settings.ts';
+import {defaultSettings, initSettings, saveSettings} from './settings.ts';
 import {indexOnly} from './features.ts';
 import {balanceHalves} from './governance.ts';
 import {computeKey} from './queue.ts';
@@ -66,6 +66,75 @@ export async function createProject(w: Scope, name: string): Promise<Project> {
   w.tm.event('project_created', {});
   w.emitChange(p.id);
   return p;
+}
+
+export const NAME_BLANK = 'Enter a name. Spaces alone are not a name.';
+
+/**
+ * The tenant page's rows (#103): a page of the tenant's projects, newest first, each read whole so
+ * its step and best score follow the same rules as its own pages. `mine`: only the caller's.
+ */
+export async function listProjectRows(w: Scope, req: ProjectRowsRequest = {}): Promise<ProjectRows> {
+  const all = await listProjects(w);
+  const me = req.mine ? (await w.user()).id : null;
+  const list = me ? all.filter(p => p.createdById === me) : all;
+  const offset = Math.max(0, Math.floor(req.offset ?? 0));
+  const limit = Math.min(50, Math.max(1, Math.floor(req.limit ?? 10)));
+  const rows = await Promise.all(list.slice(offset, offset + limit).map(p => projectRow(w, p)));
+  return {rows: rows.filter((r): r is ProjectRow => !!r), total: list.length};
+}
+
+async function projectRow(w: Scope, p: Project): Promise<ProjectRow | null> {
+  const [state, last] = await Promise.all([loadProjectState(w, p.id), w.catalog.page('audit_log', {where: {projectId: p.id}, order: 'createdAt desc', limit: 1})]);
+  // Deleted while the page was read.
+  if (!state) return null;
+  const best = bestReport(state);
+  const running = state.runs.filter(r => r.state === 'running').length + state.optimisation.filter(o => o.state === 'running').length + (state.samplingTask?.state === 'running' ? 1 : 0);
+  return {
+    id: p.id,
+    name: p.name,
+    createdBy: p.createdBy,
+    ...(p.createdById ? {createdById: p.createdById} : {}),
+    createdAt: p.createdAt,
+    step: currentStep(state),
+    best: best ? {macroF1: best.metrics.macroF1, passed: best.passed, rough: best.rough} : null,
+    running,
+    updatedAt: last.items[0]?.createdAt ?? p.createdAt,
+  };
+}
+
+/** The models a new project can use (as Project Settings offers them), the one picked first, and the thresholds (#103). */
+export async function projectDefaults(w: Scope): Promise<ProjectDefaults> {
+  const models = await modelsFor(w, tenantOf(w), []);
+  const model = await defaultSettings(w).then(
+    d => d.model.endpoint as EndpointId,
+    () => null,
+  );
+  const t = DEFAULT_THRESHOLDS;
+  return {models: models.map(m => ({id: m.id, name: m.name})), model: model ?? models[0]?.id ?? null, thresholds: {macroF1: t.macroF1, precision: t.precision ?? null, recall: t.recall ?? null}};
+}
+
+/**
+ * A project from the new-project dialog (#103): checked first (a name, a model the tenant can use,
+ * thresholds between 0 and 1), then made and its settings saved, which confirms them.
+ */
+export async function newProject(w: Scope, req: NewProjectRequest): Promise<NewProjectResult> {
+  const name = cleanName(String(req.name ?? ''));
+  if (!name) return {error: NAME_BLANK};
+  const th = req.thresholds;
+  const share = (x: number | null | undefined) => x == null || (typeof x === 'number' && x >= 0 && x <= 1);
+  if (th && (typeof th.macroF1 !== 'number' || !share(th.macroF1) || !share(th.precision) || !share(th.recall))) return {error: 'Thresholds are between 0% and 100%.'};
+  if (req.model && !(await modelsFor(w, tenantOf(w), [req.model])).some(m => m.id === req.model)) return {error: 'This model is not available.'};
+  const project = await createProject(w, name);
+  if (!req.model && !th) return {project};
+  const d = await defaultSettings(w);
+  const t = DEFAULT_THRESHOLDS;
+  const same = !th || (th.macroF1 === t.macroF1 && (th.precision ?? null) === (t.precision ?? null) && (th.recall ?? null) === (t.recall ?? null));
+  await saveSettings(w, project.id, {
+    thresholds: same ? t : {...t, mode: 'custom', macroF1: th!.macroF1, precision: th!.precision ?? null, recall: th!.recall ?? null},
+    model: {endpoint: req.model ?? d.model.endpoint, maxOutputTokens: 1024, temperature: null},
+  });
+  return {project: (await getProject(w, project.id)) ?? project};
 }
 
 /** A project name as saved: one line, trimmed, cut at `project.nameMaxChars` (spec 1.1.0, 1.2). */

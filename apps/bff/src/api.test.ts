@@ -183,6 +183,7 @@ test('contract: the channel names the tenant of each call; tenants without a rec
   const workflow = {
     runtimeInfo: async (ctx: RequestContext) => (seen.push(ctx.tenantId), {standIns: [], endpoints: [], hasBundledGold: false, tenantRole: 'admin', ...(ctx.tenantId === 'tn_1' ? {tenantName: 'Ads'} : {})}),
     listTenants: async (ctx: RequestContext) => (seen.push(ctx.tenantId), [{id: 'org_acme', name: 'org_acme', role: 'admin', projects: 3}, {id: 'tn_1', name: 'Ads', role: 'member', projects: 0}]),
+    getTenant: async (ctx: RequestContext) => ({id: ctx.tenantId, name: ctx.tenantId === 'tn_1' ? 'Ads' : ctx.tenantId, role: 'admin', projects: 1, dataSources: 2, models: 0, members: null}),
   } as unknown as WorkflowContract;
   const api = createBffApi({workflow, identity: {currentUser: async () => ({id: 'u_a', name: 'Ann', organization: 'org_acme', organizationName: 'Acme Safety'})}, tenant: () => chosen});
   assert.deepEqual((await api.getRuntimeInfo()).tenant, {id: 'org_acme', name: 'Acme Safety', role: 'admin'}, 'none chosen: the organization');
@@ -192,6 +193,10 @@ test('contract: the channel names the tenant of each call; tenants without a rec
   await api.getRuntimeInfo();
   assert.deepEqual(await api.listTenants(), [{id: 'org_acme', name: 'Acme Safety', role: 'admin', projects: 3}, {id: 'tn_1', name: 'Ads', role: 'member', projects: 0}]);
   assert.deepEqual(seen, ['org_acme', 'tn_1', 'org_acme', 'org_acme'], 'a blank choice is no choice');
+  // The tenant page's tenant (#103) is named like the top bar's.
+  assert.equal((await api.getTenant()).name, 'Acme Safety');
+  chosen = 'tn_1';
+  assert.equal((await api.getTenant()).name, 'Ads');
 });
 
 test('contract: the signed-in organization is the tenant; one organization never sees another one\'s data sources (#29)', async () => {

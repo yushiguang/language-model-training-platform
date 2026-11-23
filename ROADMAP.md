@@ -10,7 +10,9 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
   shell and navigation (#91), goes first: the current tenant and access requests in the contract,
   then the shell itself. Three lanes follow in parallel: tenant and project pages, data (data
   sources, dataset, gold labels), and the prompt pages. Tenant lane, piece 1 (#94): tenants as
-  records (create, list, the tenant of each call), then the home page.
+  records (create, list, the tenant of each call), then the home page. Piece 2 (#103): the
+  tenant page's project rows and counts, and new projects with their model and thresholds, then
+  the tenant page.
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
   tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are merged (see Done);
   step 3, action tools, is next, with their cards drawn on the UI design first.

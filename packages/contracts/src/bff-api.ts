@@ -104,6 +104,78 @@ export interface CreateTenantResult {
   error?: string;
 }
 
+/** The page's tenant with what its Admin cards count (#103). `members`: null without a permission platform. */
+export interface TenantDetail extends TenantSummary {
+  dataSources: number;
+  models: number;
+  members: number | null;
+}
+
+/**
+ * One project as the tenant page lists it (#103): the step it is at (the step bar's rule), its best
+ * current score, how many of its tasks run now (labeling, Optimiser, taking examples), and when
+ * anything in it last changed.
+ */
+export interface ProjectRow {
+  id: string;
+  name: string;
+  createdBy: string;
+  createdById?: string;
+  createdAt: string;
+  step: NodeId;
+  /** The best current report's Macro-F1 and its verdict; `rough` when too few examples have gold labels for a verdict. */
+  best: {macroF1: number; passed: boolean; rough: boolean} | null;
+  running: number;
+  updatedAt: string;
+}
+
+/** A page of the tenant's projects, newest first; `mine`: only those the caller created. */
+export interface ProjectRowsRequest {
+  mine?: boolean;
+  offset?: number;
+  /** At most 50; 10 when left out. */
+  limit?: number;
+}
+
+export interface ProjectRows {
+  rows: ProjectRow[];
+  /** Every project matching, for the pager. */
+  total: number;
+}
+
+/** Thresholds as the new-project dialog sets them, as fractions (0.85); null = off. */
+export interface NewProjectThresholds {
+  macroF1: number;
+  precision: number | null;
+  recall: number | null;
+}
+
+/** What the new-project dialog starts from (#103): the models it offers, the one picked first, the thresholds. */
+export interface ProjectDefaults {
+  /** The tenant's models, else the platform's: the same list Project Settings offers. */
+  models: {id: EndpointId; name: string}[];
+  /** The tenant's default model, else the first in `models`; null when there is none. */
+  model: EndpointId | null;
+  thresholds: NewProjectThresholds;
+}
+
+/**
+ * A new project from the dialog (#103). The name is tidied like a rename and must not be empty
+ * (names may repeat). The model and thresholds are saved as its Project Settings, which count as
+ * confirmed; left out, the defaults are used and confirmed later, as before.
+ */
+export interface NewProjectRequest {
+  name: string;
+  model?: EndpointId;
+  thresholds?: NewProjectThresholds;
+}
+
+/** The new project; or why nothing was created (shown under the field it is about). */
+export interface NewProjectResult {
+  project?: Project;
+  error?: string;
+}
+
 /**
  * Ask for a permission point the caller lacks (the "insufficient access" dialog). The request goes
  * to the external permission platform; Sprint approves nothing itself (docs/design/server.md, 2.2).
@@ -493,6 +565,15 @@ export interface BffContract {
 
   // Projects & workflow gates
   listProjects(): Promise<Project[]>;
+  /** A page of the tenant page's project rows (#103). */
+  listProjectRows(req: ProjectRowsRequest): Promise<ProjectRows>;
+  /** The page's tenant and its Admin cards' counts (#103). */
+  getTenant(): Promise<TenantDetail>;
+  /** What the new-project dialog offers and starts from (#103). */
+  projectDefaults(): Promise<ProjectDefaults>;
+  /** Creates a project with its model and thresholds (the new-project dialog, #103). */
+  newProject(req: NewProjectRequest): Promise<NewProjectResult>;
+  /** Creates a project with default settings (scripts and tests; pages use `newProject`). */
   createProject(name: string): Promise<Project>;
   getProject(id: string): Promise<Project | null>;
   loadProjectState(projectId: string): Promise<ProjectState | null>;
