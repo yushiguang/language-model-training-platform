@@ -164,6 +164,10 @@ export async function drive(w: Scope, state: ProjectState) {
     if (fresh?.state !== 'running' || (await optimiser.isRunning(o.id))) continue;
     const step = OPTIMISER_LABELING_STEPS.find(s => s === fresh.step);
     if (step && !fresh.stopRequested) {
+      // Its labeling job ended just now: the follow-up its end queues (as the person who started
+      // the run) may not be in yet. Left for a later sweep.
+      const ended = await w.jobs.list(w.ctx, {projectId, kinds: ['labeling.runTask'], states: ['done', 'failed', 'cancelled']});
+      if (ended.some(j => j.args.optimiserRunId === o.id && j.endedAt && Date.now() - Date.parse(j.endedAt) < SWEEP_GRACE_MS)) continue;
       // Its own key: the follow-up the labeling job's end queues (as the person who started the
       // run) is never taken over by this one; the second of the two to run finds nothing to do.
       const at = {round: fresh.round, step};
@@ -430,6 +434,9 @@ function optimiserService(w: Scope) {
   if (!optimiser) throw new Error('The Optimiser is not available here.');
   return optimiser;
 }
+
+/** How long after its labeling job ended the sweep leaves a waiting run to that job's own follow-up. */
+export const SWEEP_GRACE_MS = 60_000;
 
 /** The lock an optimiser run on one model holds for as long as it runs, in any tab (the name `@yushiguang/sprint-optimiser` uses). */
 const optimiserLock = (projectId: string, endpoint: string) => `optimiser:${projectId}:${endpoint}`;

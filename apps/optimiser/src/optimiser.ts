@@ -333,9 +333,10 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
     const label = async (v: PromptVersion, ids: string[] | 'eval', step: OptimiserLabelingStep, pass?: number) => {
       const at = {round: run.round, step};
       const after = !!goingOn && goingOn.round === at.round && goingOn.step === at.step;
-      if (after) goingOn = null;
       if (signal.aborted) throw aborted();
       const out = await host.label({projectId, promptVersionId: v.id, endpoint, ...(ids === 'eval' ? {} : {exampleIds: ids}), ...(pass ? {pass} : {}), runId: run.id, at, start: !after});
+      // Cleared only once read: a try of this step again (a passing error) still only reads it.
+      if (after) goingOn = null;
       if (signal.aborted) throw aborted();
       if (out.state === 'queued') throw new Waiting(out.taskId);
       if (out.state === 'unfinished') throw new StepFailed(step, `${STEP_NAME[step]} ${versionLabel(v)} failed: ${out.error}`);
@@ -436,6 +437,8 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
           cand = state.versions.find(v => v.id === round.versionId)!;
           parent = state.versions.find(v => v.id === round.parentId) ?? start;
           if (!cand) {
+            // The round starts again: its labeling is new, never only read.
+            goingOn = null;
             run.history = run.history.filter(h => h.round !== round.round);
             run.round = Math.max(0, run.round - 1);
             continue;
