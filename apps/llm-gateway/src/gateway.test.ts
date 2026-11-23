@@ -596,11 +596,15 @@ test('tenants: once the cache has expired a failed read keeps the models read be
   try {
     const p = fakePlatform(async () => ({text: 'ok', inputTokens: 1, outputTokens: 1}));
     let down = false;
-    const gw = createGateway(p, {sleep: noWait, tenantModels: {list: async () => (down ? Promise.reject(new Error('down')) : [tenantModel()])}});
+    let reads = 0;
+    const gw = createGateway(p, {sleep: noWait, tenantModels: {list: async () => (reads++, down ? Promise.reject(new Error('down')) : [tenantModel()])}});
     await gw.label(call('t1', 'model_1'));
     down = true;
     await new Promise(r => setTimeout(r, 30));
+    const before = reads;
     assert.equal((await gw.label(call('t1', 'model_1'))).endpointId, 'model_1');
+    await gw.label(call('t1', 'model_1'));
+    assert.equal(reads, before + 1, 'after a failed read the old list serves for a while, without asking the store each call');
     assert.equal((await gw.label(call('t2', 'A'))).endpointId, 'labeling-A', 'a default works while the tenant has never been read');
   } finally {
     configureSystem();
@@ -624,7 +628,9 @@ test('tenants: a chat call naming a tenant model added since the last read finds
   p.agent.complete = async (_m, o) => (endpoints.push(o?.endpoint), {text: 'ok', model: String(o?.model), usage: {inputTokens: 1, outputTokens: 1}});
   let models: TenantModel[] = [];
   const gw = createGateway(p, {sleep: noWait, tenantModels: {list: async () => models}});
-  await gw.agentModel().complete(msg, {tenantId: 't1'});
+  // The tenant's (empty) list is read and cached first: naming the model falls back.
+  await gw.agentModel().complete(msg, {model: 'model_1', tenantId: 't1'});
+  assert.equal(endpoints.at(-1), undefined);
   models = [tenantModel()];
   await new Promise(r => setTimeout(r, 1010));
   await gw.agentModel().complete(msg, {model: 'model_1', tenantId: 't1'});

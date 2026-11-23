@@ -190,6 +190,9 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
   const tenantCache = new Map<string, TenantEntry>();
   const reading = new Map<string, Promise<TenantEntry>>();
   const generation = new Map<string, number>();
+  /** After a failed read with a list in hand: no new read before this time, the old list serves. */
+  const retryAfter = new Map<string, number>();
+  const FAILED_READ_WAIT_MS = 5000;
   const readTenant = (tenantId: string) => {
     let r = reading.get(tenantId);
     if (!r) {
@@ -214,10 +217,16 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
     const hit = tenantCache.get(tenantId);
     const age = hit ? Date.now() - hit.at : Infinity;
     if (hit && age < (fresh ? 1000 : systemConfig().gateway.tenantModelsTtlMs)) return hit;
+    if (hit && (retryAfter.get(tenantId) ?? 0) > Date.now()) return hit;
+    const gen = generation.get(tenantId) ?? 0;
     try {
       return await readTenant(tenantId);
     } catch (e) {
-      if (hit) return hit;
+      // The store is failing: the old list serves for a while, so calls do not all wait on it.
+      if (hit && (generation.get(tenantId) ?? 0) === gen) {
+        retryAfter.set(tenantId, Date.now() + FAILED_READ_WAIT_MS);
+        return hit;
+      }
       throw new LlmCallError('server', `The models of tenant ${tenantId} could not be read: ${(e as Error).message ?? String(e)}`);
     }
   }
@@ -452,6 +461,7 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
       generation.set(tenantId, (generation.get(tenantId) ?? 0) + 1);
       tenantCache.delete(tenantId);
       reading.delete(tenantId);
+      retryAfter.delete(tenantId);
     },
 
     async label(req: LabelCallRequest): Promise<LabelCallResult> {
