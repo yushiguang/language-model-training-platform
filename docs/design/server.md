@@ -333,7 +333,7 @@ export interface ConfigReader {
 | `ConfigPort`（`get`，可选 `getMany` / `subscribe`），移除 `TenantConfigPort` | 破坏性（第 1 步，#61 已完成） |
 | `NotificationPort`（尽力而为）、任务类型 `notify.send` | 新增（第 6 步，#71 已完成） |
 | `OptimiserContract.startRun` / `execute` / `stopRun`、`OptimiserHost` 每次调用和 `reflectPrompt` 带调用方上下文 | 破坏性（第 2 步，#63 已完成） |
-| `OptimiserHost.label` 改为入队打标任务，打标任务 `args` 带 `optimiserRunId` / `round` / `step` | 破坏性（第 5 步） |
+| `OptimiserHost.label` 改为入队打标任务（`OptimiserLabelRequest` 带 `runId`、`at`、`start`，返回 `OptimiserLabeling`：`done` / `queued` / `unfinished`），打标任务 `args` 带 `optimiserRunId` / `round` / `step`；`OptimiserContract.execute(ctx, runId, at?)`；`OptimiserRound.dryRunIds` | 破坏性：只有工作流实现 `OptimiserHost`，部署方的适配器不用改（第 5 步，#79） |
 | `LabelCallRequest`、对话请求和 `TryTemplateInput`（Prompt helper 的试跑）带 `tenantId`；模型按租户读取；`LabelingModels` / `AgentModel` 接受动态 endpoint；限流键改为“租户 + endpoint” | 破坏性：部署方的网关适配和限流存储要改（第 4 步，#69 已完成） |
 | 模型管理接口 `listModels` / `addModel` / `updateModel` / `removeModel` / `setDefaultModel`；`CatalogContract.remove('tenant_models', id)` | 新增（第 4 步，#69 已完成） |
 | `ObjectStorePort`（`Platform.objectStore` 可选）；基于它的 `LabelingStorePort`、`FeatureStorePort`；`Example.featureRef` 可选 | 新增（第 7 步，#72） |

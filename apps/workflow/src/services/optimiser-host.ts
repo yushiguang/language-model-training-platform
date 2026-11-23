@@ -71,7 +71,10 @@ function hostCalls(inst: Instance): OptimiserHost {
       const w = at(ctx);
       const {state, setup} = await loaded(w, projectId);
       const v = version(state, promptVersionId);
-      return exampleIds ? labelExamples(w, projectId, setup, v, endpoint, exampleIds, 'optimiser', {pass}) : labelEvalSet(w, projectId, setup, v, endpoint, state.examples, 'optimiser', {});
+      // Until the chain lands (#79), the labeling still runs here, inside the run's job.
+      const t = exampleIds ? await labelExamples(w, projectId, setup, v, endpoint, exampleIds, 'optimiser', {pass}) : await labelEvalSet(w, projectId, setup, v, endpoint, state.examples, 'optimiser', {});
+      if (!t) return {state: 'unfinished', task: null, error: 'another runner is labeling this version'};
+      return t.state === 'done' ? {state: 'done', task: t} : {state: 'unfinished', task: t, error: t.error ?? `labeling ended as ${t.state}`};
     },
     async score(ctx, {projectId, promptVersionId, endpoint}) {
       const w = at(ctx);

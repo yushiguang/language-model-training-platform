@@ -1,4 +1,4 @@
-import type {AgentRuntimeContract, RequestContext, Answer, CatalogContract, EndpointId, Example, ExampleBrief, ExampleWithFeatures, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@yushiguang/sprint-contracts';
+import type {AgentRuntimeContract, RequestContext, Answer, CatalogContract, EndpointId, Example, ExampleBrief, ExampleWithFeatures, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserLabelingStep, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@yushiguang/sprint-contracts';
 import {NO_TELEMETRY} from '@yushiguang/sprint-contracts';
 import {checkStructured, msg, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withComments, pickWrong, wrongExamples, type PoolEntry} from '@yushiguang/sprint-domain';
 
@@ -246,14 +246,16 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       throw new StepFailed(name, `${what} failed after ${systemConfig().optimiser.stepRetries} tries: ${(last as Error)?.message ?? 'unknown error'}`);
     }
     /** Labels examples as one try of a step; a stopped or failed task is an error. */
-    const label = async (v: PromptVersion, ids: string[] | 'eval', pass?: number) => {
-      const t = await host.label({projectId, promptVersionId: v.id, endpoint, ...(ids === 'eval' ? {} : {exampleIds: ids}), ...(pass ? {pass} : {})});
-      if (!t) throw new Error('another tab is labeling this version');
-      run.calls += t.done;
-      run.costUsd += t.costUsd;
+    const label = async (v: PromptVersion, ids: string[] | 'eval', step: OptimiserLabelingStep, pass?: number) => {
+      const out = await host.label({projectId, promptVersionId: v.id, endpoint, ...(ids === 'eval' ? {} : {exampleIds: ids}), ...(pass ? {pass} : {}), runId: run.id, at: {round: run.round, step}, start: true});
+      const t = out.state === 'done' ? out.task : out.state === 'unfinished' ? out.task : null;
+      if (t) {
+        run.calls += t.done;
+        run.costUsd += t.costUsd;
+      }
       if (signal.aborted) throw aborted();
-      if (t.state !== 'done') throw new Error(t.error ?? `labeling ended as ${t.state}`);
-      return t;
+      if (out.state !== 'done') throw new Error(out.state === 'unfinished' ? out.error : 'the labeling is still queued');
+      return out.task;
     };
     const score = async (v: PromptVersion) => {
       const s = await host.score({projectId, promptVersionId: v.id, endpoint});
@@ -306,7 +308,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
         // The start version must be labeled on the eval set before anything can be compared.
         if (!state.reports.some(r => r.promptVersionId === start.id && r.endpoint === endpoint && !r.archivedNow)) {
           await step('parent', start, async () => {
-            await label(start, 'eval');
+            await label(start, 'eval', 'parent');
             const s = await score(start);
             if (s.passed) passedVersion = start;
           });
@@ -439,7 +441,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
             random,
           );
           const result = await step('dry_run', cand, async () => {
-            await label(cand, ids);
+            await label(cand, ids, 'dry_run');
             const mine = toMap(await labeling.predictions(cand.id, endpoint, settingsHash(settings)));
             return compareDryRun(
               parent.id,
@@ -458,7 +460,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
           await putRound(round);
         }
         if (round.step === 'full') {
-          await step('full', cand, () => label(cand, 'eval'));
+          await step('full', cand, () => label(cand, 'eval', 'full'));
           round = {...round, step: 'report'};
           await putRound(round);
         }
@@ -471,7 +473,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
           await putRound(round);
           confirm = await step('confirm', cand, async () => {
             const fresh = (await host.loadState(projectId))!;
-            await label(cand, fresh.examples.filter(e => e.split === 'eval' && !e.optimiserHalf).map(e => e.id), 2);
+            await label(cand, fresh.examples.filter(e => e.split === 'eval' && !e.optimiserHalf).map(e => e.id), 'confirm', 2);
             return host.confirmScore({projectId, promptVersionId: cand.id, endpoint});
           });
         }
