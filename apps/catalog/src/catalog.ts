@@ -27,6 +27,7 @@ const ID_PREFIX: Record<CatalogKind, string> = {
   source_files: 'sf',
   source_chunks: 'sc',
   source_cuts: 'cut',
+  tenants: 'tn',
   tenant_models: 'model',
 };
 

@@ -22,6 +22,7 @@ import type {
   SourceCut,
   SourceFile,
   StartRequest,
+  Tenant,
   TenantModel,
 } from './types.ts';
 
@@ -65,6 +66,8 @@ export interface CatalogRecords {
   audit_log: AuditEntry;
   /** Tenant records (#29): data sources belong to a tenant, never to a project. */
   data_sources: DataSource;
+  /** Tenants created in Sprint (#94); older tenants have no record. */
+  tenants: Tenant;
   /** Each tenant's labeling models (docs/design/server.md, 9). */
   tenant_models: TenantModel;
   source_files: SourceFile;
@@ -109,8 +112,11 @@ export interface CatalogContract {
   findByIds<K extends CatalogKind>(kind: K, ids: string[]): Promise<CatalogRecords[K][]>;
   /** Partial update: only the given fields change. Values may be `DocFieldValue` operators (increment, arrayUnion...). */
   patch<K extends CatalogKind>(kind: K, id: string, patch: DocUpdatePatch<CatalogRecords[K]>): Promise<void>;
-  /** Removes one record. Only for records nothing else keeps a copy of (a tenant's model). */
-  remove(kind: 'tenant_models', id: string): Promise<void>;
+  /**
+   * Removes one record. Only for records nothing else keeps a copy of: a tenant's model, or a
+   * tenant whose creation could not be finished.
+   */
+  remove(kind: 'tenant_models' | 'tenants', id: string): Promise<void>;
   /** Patches many records of one kind in one request. */
   patchMany<K extends CatalogKind>(kind: K, patches: {id: string; patch: Partial<CatalogRecords[K]>}[]): Promise<void>;
   /** Saves a prompt version with the next number in its line (Save) or the next major (Save as). */
