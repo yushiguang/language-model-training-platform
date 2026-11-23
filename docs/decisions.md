@@ -10,6 +10,11 @@ where it matters, why. The code follows these; change a line here when a decisio
 - **Save asks before it costs something**: over a version that is still labeling it asks to stop the run first ("Stop and save"), and when the label change clears gold labels it says how many first (`goldLabelsCleared`). A save labels the dataset again at once.
 - **Discard** shows while the card holds unsaved edits or a helper's draft, so a draft can be closed without saving (the helper can still recall it, #39).
 
+## 2026-11-23 (One file is one data source, #95)
+
+- **A data source is the one file it was made from**: pages no longer add files to a source (`addSourceFile` is deprecated and kept for sources made before). The list shows each source's file name, whether its file is still being read or could not be read (with the reason), and how many projects use it.
+- **Tenant admins rename and delete data sources.** A name is checked like a new one (not blank, not another source's of the tenant, in any case). Delete cannot be undone: the source leaves every list and read, and no dataset takes from it again, but examples already taken stay and keep its name, so the record is kept and its name is free again. A file still being read stops. The built-in sample data is neither renamed nor deleted.
+
 ## 2026-11-23 (App shell on Astryx, #91)
 
 - **One frame for every page** (wireframes v346): a taller top bar with a full-width line under it, naming 「Sprint / tenant / project」 on the left (the project name opens a switch menu: search, recent projects, All projects), the four steps in the centre with arrows between them, and Ask AI, language and the avatar on the right. Pages are white and centred, at most 1200 wide.

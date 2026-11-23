@@ -60,6 +60,8 @@ export const {
   getDataSource,
   createDataSource,
   addSourceFile,
+  renameDataSource,
+  deleteDataSource,
   exampleMedia,
   getExampleFeatures,
   takeExamples,
