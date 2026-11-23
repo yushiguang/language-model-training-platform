@@ -8,6 +8,11 @@ where it matters, why. The code follows these; change a line here when a decisio
 - **Tenants are records**: anyone signed in creates one and becomes its first admin. A tenant name is unique across Sprint (compared without case, spaces tidied); a blank or taken name is shown under the name field, as for every named object. Who is in a tenant stays on the permission platform, which now also lists the tenants a person is in.
 - **The page says which tenant a call works in**: one person can be in several tenants, so the channel names the tenant of each call (the page's tenant in the browser, a header over HTTP), and the permission checks make sure the caller is in it. Without one, the identity's organization is the tenant, as before; tenants from before records (the organization, `default`) keep working under their old names.
 
+## 2026-11-23 (One file is one data source, #95)
+
+- **A data source is the one file it was made from**: pages no longer add files to a source (`addSourceFile` is deprecated and kept for sources made before). The list shows each source's file name, whether its file is still being read or could not be read (with the reason), and how many projects use it.
+- **Tenant admins rename and delete data sources.** A name is checked like a new one (not blank, not another source's of the tenant, in any case). Delete cannot be undone: the source leaves every list and read, and no dataset takes from it again, but examples already taken stay and keep its name, so the record is kept and its name is free again. A file still being read stops. The built-in sample data is neither renamed nor deleted.
+
 ## 2026-11-23 (App shell on Astryx, #91)
 
 - **One frame for every page** (wireframes v346): a taller top bar with a full-width line under it, naming 「Sprint / tenant / project」 on the left (the project name opens a switch menu: search, recent projects, All projects), the four steps in the centre with arrows between them, and Ask AI, language and the avatar on the right. Pages are white and centred, at most 1200 wide.

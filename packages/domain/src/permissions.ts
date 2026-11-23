@@ -44,6 +44,8 @@ export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: Acti
   getDataSource: read(),
   createDataSource: admin,
   addSourceFile: admin,
+  renameDataSource: admin,
+  deleteDataSource: admin,
 
   // Every member sees the tenant's models; only admins change them.
   listModels: read(),

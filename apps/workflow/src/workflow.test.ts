@@ -371,6 +371,8 @@ test('permissions (#63): the creator gets project write; a member only reads; a 
   assert.ok(await api.loadProjectState(inTenant(bob, 't1'), p.id), 'a member reads');
   await assert.rejects(api.renameProject(inTenant(bob, 't1'), {projectId: p.id, name: 'x'}), {code: 'forbidden'});
   await assert.rejects(api.createDataSource(inTenant(alice, 't1'), {name: 's', fileName: 'a.csv', text: 'id\n1\n'}), {code: 'forbidden'});
+  await assert.rejects(api.renameDataSource(inTenant(alice, 't1'), {sourceId: 'src_x', name: 'x'}), {code: 'forbidden'}, 'only admins rename data sources');
+  await assert.rejects(api.deleteDataSource(inTenant(alice, 't1'), {sourceId: 'src_x'}), {code: 'forbidden'}, 'only admins delete data sources');
   await assert.rejects(api.listProjects(inTenant(eve, 't1')), {code: 'forbidden'}, 'not a member: no read');
   const tool = (user: CallerUser, name: AgentToolRequest['name'], agent: AgentToolRequest['agent'] = 'front_desk') => wf.toolHost.call({agent, name, args: {}, projectId: p.id, turnId: null, ctx: inTenant(user, 't1')});
   assert.ok(await tool(bob, 'list_versions'), "a member's helper reads");

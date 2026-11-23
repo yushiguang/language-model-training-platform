@@ -991,8 +991,8 @@ export interface Tenant {
 // Data sources (#29, #30): a tenant's item-id files, shared by its projects.
 
 /**
- * A data source of a tenant: a name and the files uploaded to it, which all count together (no
- * versions). Its items have one fixed order (each file's items are shuffled once at import and
+ * A data source of a tenant: a name and the file uploaded to it (one file is one data source since
+ * 2026-11-22; sources made before may hold several, which all count together, no versions). Its items have one fixed order (each file's items are shuffled once at import and
  * appended); datasets take continuous segments of that order, so two cuts never share an item.
  */
 export interface DataSource {
@@ -1015,6 +1015,12 @@ export interface DataSource {
   createdBy: string;
   createdById?: string;
   updatedAt: string;
+  /**
+   * Deleted by a tenant admin: gone from every list and read, and no dataset takes from it again.
+   * The record stays, so examples already taken keep their source's name.
+   */
+  deletedAt?: string | null;
+  deletedBy?: string;
 }
 
 /** One file of a data source. Items already in the source are repeats and left out. */
@@ -1080,10 +1086,22 @@ export interface DataSourceSummary {
   name: string;
   builtIn: boolean;
   files: number;
+  /** The uploaded file's name (the first file's, for a source made before one file was one source). */
+  fileName: string;
   items: number;
   /** Items no dataset has taken yet. */
   notUsed: number;
+  /**
+   * `reading`: its file is still being read; `failed`: no file could be read (`error` says why);
+   * `ready`: its items can be taken.
+   */
+  state: 'reading' | 'ready' | 'failed';
+  /** Why the file could not be read, when `state` is `failed`. */
+  error?: string | null;
+  /** Projects whose datasets took items from it (deleted projects not counted). */
+  usedBy: number;
   createdBy: string;
+  createdAt: string;
   updatedAt: string;
   /** A file is being imported: items written so far, of its items. */
   importing: {done: number; total: number} | null;
@@ -1097,6 +1115,8 @@ export interface DataSourceDetail {
   /** Items taken by datasets, and by how many projects. */
   taken: number;
   projects: number;
+  /** The projects using it (`projects` of them), by name: the page lists them and Delete names them. */
+  usedByProjects: {id: string; name: string}[];
 }
 
 /** Where a project's eval dataset came from: per data source, how many examples and when last added. */

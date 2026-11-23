@@ -211,4 +211,9 @@ test('contract: the signed-in organization is the tenant; one organization never
   // The same name is free in another organization.
   assert.ok((await other.createDataSource({name: 'Feed', fileName: 'feed.txt', text: 'v9'})).source);
   assert.equal((await w.api.listDataSources()).length, 1);
+  // Rename and delete pass through, and reach only the caller's own sources.
+  await assert.rejects(other.deleteDataSource({sourceId: made.source!.id}), /does not exist/);
+  assert.deepEqual(await w.api.renameDataSource({sourceId: made.source!.id, name: 'Weekly'}), {name: 'Weekly'});
+  await w.api.deleteDataSource({sourceId: made.source!.id});
+  assert.deepEqual(await w.api.listDataSources(), []);
 });

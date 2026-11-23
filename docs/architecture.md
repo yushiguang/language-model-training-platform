@@ -145,8 +145,8 @@ recovery of a dead runner's jobs, retries and cancel. A job holds ids only; the 
 
 - **Commands return once queued.** `scoreVersion` returns the tasks it queued (each labeling job
   is followed by `report.build`), `startOptimiser` and `retryOptimiser` the run's id,
-  `takeExamples` the work as the Dataset page shows it, `createDataSource` and `addSourceFile`
-  the file (imported by a `source.ingest` job), and
+  `takeExamples` the work as the Dataset page shows it, `createDataSource` (and the deprecated
+  `addSourceFile`) the file (imported by a `source.ingest` job), and
   `deleteProject` returns once the project is marked `deleting`. Pages read progress back through
   `loadProjectState`, as they did while work ran.
 - **Concurrency keys** (docs/design/server.md, 5). Every job names the resource it waits for:
