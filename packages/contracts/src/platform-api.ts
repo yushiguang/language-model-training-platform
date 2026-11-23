@@ -621,6 +621,38 @@ export interface LimiterStats {
   waiting: number;
 }
 
+/** Options of one object written (`ObjectStorePort.put`). */
+export interface ObjectPutOptions {
+  contentType?: string;
+  contentEncoding?: string;
+}
+
+/**
+ * Object storage (S3-compatible in a server deployment; docs/design/server.md 6): the one port
+ * every write-once, read-in-bulk store is built on (feature segments, answer segments; later the
+ * data sources' ID files, large tool results and training sets). Keys are plain paths
+ * (`features/<snapshotId>/<segment>.jsonl`); Sprint never lists a prefix, it keeps every key it
+ * needs in its records. `@yushiguang/sprint-platform` has the in-memory one (`memoryObjectStore`)
+ * and the cases any implementation must pass (`objectStoreCases`).
+ */
+export interface ObjectStorePort {
+  /** Writes (or replaces) an object whole. A string is stored as UTF-8. `size` is in bytes. */
+  put(key: string, body: Uint8Array | string, opts?: ObjectPutOptions): Promise<{key: string; size: number}>;
+  /** The whole object, or null when there is none. */
+  get(key: string): Promise<Uint8Array | null>;
+  /**
+   * Bytes `offset` to `offset + length` (HTTP Range GET), cut at the object's end: empty when
+   * `offset` is at or past it. Null when there is no object. A negative offset or length throws.
+   */
+  getRange(key: string, offset: number, length: number): Promise<Uint8Array | null>;
+  /** Removes an object; a missing one is not an error. */
+  delete(key: string): Promise<void>;
+  /** Removes many objects in as few requests as the store allows; returns how many existed. */
+  deleteBatch(keys: string[]): Promise<number>;
+  /** Optional: a signed link to read the object for a while (images, previews). */
+  signUrl?(key: string, expiresSec?: number): Promise<string>;
+}
+
 /**
  * The gateway's rate-limiter state for every endpoint, shared by every replica of every caller
  * (deployment readiness spec, 5), so one endpoint has one budget. Each method is one atomic step
@@ -842,6 +874,13 @@ export interface Platform {
    * cannot be sent here. See docs/integration.md, "Problem reports".
    */
   tickets?: TicketPort;
+  /**
+   * Object storage for data written once and read whole or by byte range (docs/design/server.md
+   * 6): frozen feature snapshots and the models' answers, packed in segment files. Optional:
+   * without it they stay in `db`, which is right for the browser build (stand-in:
+   * `memoryObjectStore`).
+   */
+  objectStore?: ObjectStorePort;
   /** Shown in the header so nobody mistakes a stand-in for the real service. */
   standIns: string[];
 }

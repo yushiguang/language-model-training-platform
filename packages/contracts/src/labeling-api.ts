@@ -141,3 +141,47 @@ export interface TryTemplateRow {
   costUsd: number;
   error: string | null;
 }
+
+/** Additions to a task's counters, applied atomically (`LabelingStorePort.addToTask`). */
+export type LabelingTaskTally = Partial<Record<'done' | 'valid' | 'invalid' | 'filtered' | 'failed' | 'costUsd' | 'tokens' | 'autoCostUsd', number>>;
+
+/** Fields a task's runner and Stop set (never its id, project or example list). */
+export type LabelingTaskPatch = Partial<Omit<LabelingTask, 'id' | 'projectId' | 'exampleIds' | 'createdAt' | 'createdBy'>>;
+
+/**
+ * Where labeling keeps its tasks and the models' answers (#58; docs/design/server.md 6). Tasks
+ * are small records that change while they run (MySQL in a server deployment). Answers are
+ * written once and read a whole version at a time: the object-storage implementation writes each
+ * batch passed to `savePredictions` as one segment file and keeps only a pointer row per segment.
+ * `createLabeling` takes one as `store`; without it, both stay in the document store.
+ */
+export interface LabelingStorePort {
+  getTask(taskId: string): Promise<LabelingTask | null>;
+  /** A project's tasks, newest first. */
+  findTasks(projectId: string): Promise<LabelingTask[]>;
+  insertTask(task: LabelingTask): Promise<void>;
+  /** Sets only the given fields, so a runner and a Stop never undo each other. */
+  patchTask(taskId: string, patch: LabelingTaskPatch): Promise<void>;
+  /**
+   * In one atomic write: adds `tally` to the counters, adds `failedExampleId` (when given) to
+   * `failedExampleIds` unless it is there, and sets `set`. Two runners adding at once both count.
+   */
+  addToTask(taskId: string, tally: LabelingTaskTally, opts?: {failedExampleId?: string; set?: LabelingTaskPatch}): Promise<void>;
+  /** One saved answer by its id (`predictionId`), or null. */
+  getPrediction(id: string): Promise<Prediction | null>;
+  /**
+   * Saves a batch of answers, written once. An answer whose id is already saved is not written
+   * again: the saved one is returned with `saved: false`. Results are in the order given. Throws
+   * when the batch was not stored.
+   */
+  savePredictions(predictions: Prediction[]): Promise<{prediction: Prediction; saved: boolean}[]>;
+  /** Every saved answer for one version, model and settings, oldest first. */
+  predictionsFor(promptVersionId: string, endpoint: EndpointId, settingsHash: string): Promise<Prediction[]>;
+  /**
+   * Removes answers: all of a project's, or (answers saved before they carried their project)
+   * all for one version, model and settings.
+   */
+  deletePredictions(where: {projectId: string} | {promptVersionId: string; endpoint: EndpointId; settingsHash: string}): Promise<void>;
+  /** Removes a project's tasks. */
+  deleteTasks(projectId: string): Promise<void>;
+}
