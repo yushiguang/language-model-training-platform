@@ -1267,6 +1267,8 @@ test('take examples: progress stays on until the dataset is saved; a save that f
   assert.equal(tries.get(failOne), 2, 'a failed write is tried once more');
   const saved = await app.catalog.find('examples', {snapshotId: snap.id});
   assert.ok(Math.abs(2 * saved.filter(e => e.optimiserHalf).length - saved.length) <= 1, 'the halves are even over the saved examples');
+  const numbers = () => saved.map(e => e.number!).sort((a, b) => a - b);
+  assert.deepEqual(numbers(), [2, 3, 4, 5, 6, 7, 8, 9, 10], 'the sample that was not saved leaves its number unused; nothing is renumbered');
   // Nothing saved: the job fails with the reason, and its segment is retired.
   failAll = true;
   const failing = await takeExamples(w.ws, p.id, [{sourceId, count: 3}]);
@@ -1298,6 +1300,8 @@ test('take examples: progress stays on until the dataset is saved; a save that f
   await takeExamples(w.ws, p.id, [{sourceId, count: 2}]);
   await w.jobs.idle();
   assert.equal(await getSamplingTask(w.ws, p.id), null);
+  const after = (await app.catalog.find('examples', {snapshotId: snap.id})).map(e => e.number!).sort((a, b) => a - b);
+  assert.deepEqual(after.slice(-2), [11, 12], 'added samples follow the last number');
 });
 
 test('take examples (review): Add examples whose items are all in the dataset already succeeds and adds nothing', async () => {
@@ -2345,7 +2349,12 @@ test('sample numbers: an older dataset is numbered once in saved order; added sa
   const w = await world('num1');
   const {listSamples} = await import('./samples.ts');
   const {appendExamples, removeExamples, restoreExamples} = await import('./governance.ts');
+  // An older dataset with a removal already standing: numbering keeps it removed.
+  await w.catalog.patch('examples', 'ex_num1_5', {removed: true});
+  await w.catalog.insert('dataset_removals', {id: 'rm_old', projectId: w.projectId, exampleId: 'ex_num1_5', externalId: '5', half: 'held_out', gold: ['Vlog'], reason: 'broken', removedBy: 'Tester', removedAt: '2026-11-01T00:00:00Z', restoredAt: null});
   const s0 = await w.state();
+  assert.equal((await w.catalog.get('examples', 'ex_num1_5'))?.removed, true, 'a removed sample stays removed');
+  await restoreExamples(w.ws, w.projectId, ['rm_old']);
   const numberOf = async () => Object.fromEntries((await w.catalog.find('examples', {snapshotId: s0.snapshot!.id})).map(e => [e.externalId, e.number]));
   assert.deepEqual(await numberOf(), Object.fromEntries(Array.from({length: EVAL}, (_, i) => [String(i), i + 1])), 'numbered in the order saved');
   assert.equal((await w.catalog.get('dataset_snapshots', s0.snapshot!.id))?.numbered, true);

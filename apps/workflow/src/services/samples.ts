@@ -30,7 +30,9 @@ export async function ensureNumbered(w: Scope, snap: DatasetSnapshot): Promise<v
     if (!again || again.numbered) return;
     const examples = await w.catalog.find('examples', {snapshotId: snap.id});
     let next = nextNumber(examples);
-    const patches = examples.filter(e => e.number == null || e.removed == null).map(e => ({id: e.id, patch: {...(e.number == null ? {number: next++} : {}), removed: !!e.removed}}));
+    // Only what is missing is written: a removal or restore made meanwhile (they do not take this
+    // lock) keeps its `removed`.
+    const patches = examples.filter(e => e.number == null || e.removed == null).map(e => ({id: e.id, patch: {...(e.number == null ? {number: next++} : {}), ...(e.removed == null ? {removed: false} : {})}}));
     if (patches.length) await w.catalog.patchMany('examples', patches);
     await w.catalog.patch('dataset_snapshots', snap.id, {numbered: true});
   });
@@ -48,7 +50,9 @@ export async function listSamples(w: Scope, req: ListSamplesRequest): Promise<Sa
   const filters: DocFilterExpression[] = [field('snapshotId', '==', snap.id), field('removed', '==', req.filter === 'removed')];
   const query = req.query?.trim();
   if (query) {
-    const asNumber = /^#?\d+$/.test(query) ? Number(query.replace('#', '')) : null;
+    // A number only when it can be one (a long numeric sample ID is looked up as an ID only).
+    const n = /^#?\d{1,9}$/.test(query) ? Number(query.replace('#', '')) : 0;
+    const asNumber = n >= 1 ? n : null;
     filters.push(asNumber != null ? {type: 'or', filters: [field('number', '==', asNumber), field('externalId', '==', query)]} : field('externalId', '==', query));
   }
   const limit = Math.min(500, Math.max(1, req.limit ?? 50));
