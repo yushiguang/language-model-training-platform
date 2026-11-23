@@ -90,7 +90,7 @@ const labeling = createLabeling({
   },
 });
 /** The application module, with no state of its own; short-lived shared state goes to the platform's store. */
-const workflow = createWorkflow({jobs: jobs.api, catalog, features, labeling, gateway, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, tickets: platform.tickets, notifications: platform.notifications, appVersion: APP_VERSION, standIns: platform.standIns, telemetry, locks, sharedState: platform.sharedState ?? memorySharedState(), config: config?.reader, authorization: platform.authorization, permissionAdmin: platform.permissionAdmin});
+const workflow = createWorkflow({jobs: jobs.api, catalog, features, labeling, gateway, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, tickets: platform.tickets, notifications: platform.notifications, appVersion: APP_VERSION, standIns: platform.standIns, telemetry, locks, sharedState: platform.sharedState ?? memorySharedState(), config: config?.reader, authorization: platform.authorization, permissionAdmin: platform.permissionAdmin, accessRequests: platform.accessRequests});
 /** The helpers, built once with their model, the project tools and where live progress goes. */
 const agentRuntime = createAgentRuntime({llm: gateway.agentModel(), tools: workflow.toolHost, progress: workflow.agentProgress});
 const optimiser = createOptimiser({catalog, labeling, agents: agentRuntime, host: workflow.optimiserHost, locks, telemetry, onChange: projectId => workflow.changed(projectId)});

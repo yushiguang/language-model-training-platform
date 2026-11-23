@@ -155,6 +155,16 @@ test('contract: a failed sign-in check is asked again on the next call; a good o
   assert.equal(asked, 2);
 });
 
+test('contract: the runtime names the caller\'s tenant, by its organization\'s name when the platform has one (#91)', async () => {
+  const plain = await world('tn1');
+  assert.deepEqual((await plain.api.getRuntimeInfo()).tenant, {id: 'default', name: 'default', role: 'admin'}, 'no organization: the default tenant; no permission checks: an admin');
+  const named = await world('tn2', {currentUser: async () => ({id: 'u_a', name: 'Ann', organization: 'org_acme', organizationName: 'Acme Safety'})});
+  const info = await named.api.getRuntimeInfo();
+  assert.deepEqual(info.tenant, {id: 'org_acme', name: 'Acme Safety', role: 'admin'});
+  assert.deepEqual(JSON.parse(JSON.stringify(info)), info, 'plain JSON');
+  assert.equal('tenantRole' in info, false, 'the workflow\'s field stays inside');
+});
+
 test('contract: the signed-in organization is the tenant; one organization never sees another one\'s data sources (#29)', async () => {
   const acme: Identity = {currentUser: async () => ({id: 'u_a', name: 'Ann', organization: 'org_acme'})};
   const globex: Identity = {currentUser: async () => ({id: 'u_g', name: 'Gus', organization: 'org_globex'})};

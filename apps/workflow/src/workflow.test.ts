@@ -6,7 +6,7 @@ import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, CallerUse
 import {createCatalog} from '@yushiguang/sprint-catalog';
 import {createLabeling, memoryLocks} from '@yushiguang/sprint-labeling';
 import {createJobs} from '@yushiguang/sprint-jobs';
-import {localDocRuntime, loopback, memoryJobStore, memoryPermissionAdmin, memorySharedState} from '@yushiguang/sprint-platform';
+import {localDocRuntime, loopback, memoryAccessRequests, memoryJobStore, memoryPermissionAdmin, memorySharedState} from '@yushiguang/sprint-platform';
 import {createWorkflow} from './workflow.ts';
 import type {WorkflowDeps} from './services/app.ts';
 
@@ -24,7 +24,7 @@ const ctxOf = (user: CallerUser): RequestContext => ({requestId: `rq_${++n}`, us
 const page = (agent: PageContext['agent'] = 'front_desk'): PageContext => ({label: 'Projects', agent, intent: 'answer', context: {}, where: {page: 'projects', params: {}}});
 
 /** A workflow over the real catalog and labeling, with a fake model and the given helpers. */
-function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) => AgentRuntimeContract, documents?: DocumentSource, access: Pick<WorkflowDeps, 'authorization' | 'permissionAdmin'> = {}) {
+function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) => AgentRuntimeContract, documents?: DocumentSource, access: Pick<WorkflowDeps, 'authorization' | 'permissionAdmin' | 'accessRequests'> = {}) {
   const db = localDocRuntime(prefix);
   const catalog = createCatalog(db);
   const forgotten: string[] = [];
@@ -301,6 +301,32 @@ test('tenant isolation (#63): another tenant cannot list, read, change or point 
     ['projectStatus', id => api.projectStatus(evil, id)],
   ];
   for (const [name, call] of calls) assert.deepEqual(await answer(call(mine.id)), await answer(call('pr_missing')), name);
+});
+
+test('access (#91): the runtime says whether the caller is an admin; anyone signed in may ask the permission platform for access', async () => {
+  const perms = checking();
+  const sys = {requestId: 'rq_setup', user: {id: 'u_admin', name: 'Admin'}};
+  await perms.admin.addTenantMember(sys, 't1', alice.id, 'admin');
+  await perms.admin.addTenantMember(sys, 't1', bob.id, 'member');
+  const requests = memoryAccessRequests();
+  const {api} = world('wf-access', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin, accessRequests: requests});
+  assert.equal((await api.runtimeInfo(inTenant(alice, 't1'))).tenantRole, 'admin');
+  assert.equal((await api.runtimeInfo(inTenant(bob, 't1'))).tenantRole, 'member');
+  assert.equal((await api.runtimeInfo(inTenant(eve, 't1'))).tenantRole, 'member', 'not a member at all');
+  const p = await api.createProject(inTenant(alice, 't1'), 'Formats');
+  // Eve is not even a member: she can still ask, for the tenant or for a project.
+  assert.deepEqual(await api.requestAccess(inTenant(eve, 't1'), {permission: 'read'}), {});
+  assert.deepEqual(await api.requestAccess(inTenant(bob, 't1'), {permission: 'project_write', projectId: p.id, reason: '  I label the Food examples  '}), {});
+  assert.deepEqual(requests.sent, [
+    {tenantId: 't1', permission: 'read', userId: eve.id},
+    {tenantId: 't1', permission: 'project_write', projectId: p.id, reason: 'I label the Food examples', userId: bob.id},
+  ]);
+  await assert.rejects(api.requestAccess(inTenant(bob, 't1'), {permission: 'owner' as never}), /no such permission/);
+  // Nothing is granted here: approvers decide on the platform.
+  await assert.rejects(api.renameProject(inTenant(bob, 't1'), {projectId: p.id, name: 'x'}), {code: 'forbidden'});
+  const bare = world('wf-access-none', noHelpers);
+  await assert.rejects(bare.api.requestAccess(inTenant(bob, 't1'), {permission: 'read'}), /not set up/);
+  assert.equal((await bare.api.runtimeInfo(inTenant(bob, 't1'))).tenantRole, 'admin', 'no permission checks: everyone may do everything');
 });
 
 test('label sets (#82): members read them; changing them needs project write', async () => {

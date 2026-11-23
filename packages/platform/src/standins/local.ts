@@ -1,8 +1,8 @@
 import type {FileStore, FileUploadOptions, Identity, TelemetryEvent, TelemetrySink, UploadedFileInfo} from '@yushiguang/sprint-contracts';
 
-/** Stand-in identity: one built-in user. */
+/** Stand-in identity: one built-in user, in a team of its own (the default tenant). */
 export function localIdentity(name = 'Evelyn'): Identity {
-  return {currentUser: async () => ({id: 'local-user', name})};
+  return {currentUser: async () => ({id: 'local-user', name, organizationName: 'My team'})};
 }
 
 /** Stand-in file store: keeps files as data URLs, which is fine for small prompt images. */

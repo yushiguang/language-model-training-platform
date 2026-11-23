@@ -3,6 +3,11 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-23 (Current tenant and access requests, #91)
+
+- **Pages know the caller's tenant and role** from the runtime info: the top bar names the tenant, and admin entries show only to admins (holders of tenant write). Until tenants are records of their own, the name is the organization's name from the identity.
+- **Request access goes to the permission platform**: any signed-in person may send one, with an optional reason; Sprint passes it on and keeps nothing. The dialog links to the platform's page for the request when the platform has one.
+
 ## 2026-11-23 (Scores from label sets and Rescore, #86)
 
 - **Scores are made only once every label set is finished**, on the eval samples inside label sets (a removed sample counts nowhere, a sample in no set waits for one). A project with no label set yet keeps the rule from before label sets (scores on the samples with a gold label), until the label set pages ship.

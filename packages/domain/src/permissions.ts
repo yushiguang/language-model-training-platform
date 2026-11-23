@@ -4,9 +4,9 @@ import type {PermissionPoint, WorkflowContract} from '@yushiguang/sprint-contrac
  * What each `WorkflowContract` method needs (docs/design/server.md, 2.3): its permission point,
  * and where its project id is. The workflow checks every call against it, and a gateway can be
  * configured from the same table, so the two never disagree. `permission: null`: any signed-in
- * caller (the runtime info the site needs before it knows a tenant). `project`: `arg` when the
- * first argument is the project id, `request` when it is a request object with `projectId`, null
- * when the method is not about one project.
+ * caller (the runtime info the site needs before it knows a tenant, and a request for access).
+ * `project`: `arg` when the first argument is the project id, `request` when it is a request
+ * object with `projectId`, null when the method is not about one project.
  */
 export interface ActionRule {
   permission: PermissionPoint | null;
@@ -20,6 +20,8 @@ const admin: ActionRule = {permission: 'tenant_write', project: null};
 /** Every method of `WorkflowContract`: the type makes a new method name its rule here. */
 export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: ActionRule} = {
   runtimeInfo: {permission: null, project: null},
+  // Asking for access is for people who lack it: any signed-in caller may ask.
+  requestAccess: {permission: null, project: null},
 
   listProjects: read(),
   // Any member of the tenant creates projects, and becomes the project's first writer.

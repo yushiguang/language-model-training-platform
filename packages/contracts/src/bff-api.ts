@@ -35,7 +35,7 @@ import type {
   StructuredPrompt,
   TenantModel,
 } from './types.ts';
-import type {ExampleMedia, FeatureInfo} from './platform-api.ts';
+import type {ExampleMedia, FeatureInfo, PermissionPoint, TenantRole} from './platform-api.ts';
 
 /**
  * Contract 1: Frontend Web App <-> BFF Service (`@yushiguang/sprint-contracts/bff-api`).
@@ -69,6 +69,33 @@ export interface RuntimeInfo {
   hasBundledGold: boolean;
   /** True when the platform can end the session: the avatar menu shows Sign out. */
   canSignOut?: boolean;
+  /** The caller's current tenant: the top bar names it, and admin pages show only to its admins. */
+  tenant?: TenantInfo;
+}
+
+/** The caller's current tenant (docs/design/server.md, 2). */
+export interface TenantInfo {
+  id: string;
+  name: string;
+  /** `admin`: the caller holds `tenant_write` (tenant settings, members, models, data sources). */
+  role: TenantRole;
+}
+
+/**
+ * Ask for a permission point the caller lacks (the "insufficient access" dialog). The request goes
+ * to the external permission platform; Sprint approves nothing itself (docs/design/server.md, 2.2).
+ */
+export interface RequestAccessRequest {
+  permission: PermissionPoint;
+  /** The project, for `project_write`. */
+  projectId?: string;
+  /** Why the caller needs it, in their own words. Optional. */
+  reason?: string;
+}
+
+export interface RequestAccessResult {
+  /** Where the caller can follow the request on the permission platform, when it has such a page. */
+  trackUrl?: string;
 }
 
 /** Paid or mutating starts take an optional key: the same key never starts the same work twice. */
@@ -385,6 +412,8 @@ export interface BffContract {
   getRuntimeInfo(): Promise<RuntimeInfo>;
   /** Ends the session; refused when the platform has no sign-out. */
   signOut(): Promise<void>;
+  /** Sends a request for a permission point to the external permission platform. Any signed-in caller may ask. */
+  requestAccess(req: RequestAccessRequest): Promise<RequestAccessResult>;
 
   // Projects & workflow gates
   listProjects(): Promise<Project[]>;

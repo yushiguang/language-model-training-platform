@@ -6,6 +6,10 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Now
 
+- **Frontend on Astryx** (#90). The web app rebuilt from the approved wireframes. Step 0, the app
+  shell and navigation (#91), goes first: the current tenant and access requests in the contract,
+  then the shell itself. Three lanes follow in parallel: tenant and project pages, data (data
+  sources, dataset, gold labels), and the prompt pages.
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
   tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are merged (see Done);
   step 3, action tools, is next, with their cards drawn on the UI design first.

@@ -1,4 +1,4 @@
-import type {AuthorizationPort, PermissionAdminPort, TenantMember, TenantRole} from '@yushiguang/sprint-contracts';
+import type {AccessRequest, AccessRequestPort, AuthorizationPort, PermissionAdminPort, TenantMember, TenantRole} from '@yushiguang/sprint-contracts';
 
 /**
  * Single-tenant stand-in for the permission port: every action allowed. (The job store's
@@ -42,5 +42,20 @@ export function memoryPermissionAdmin(): PermissionAdminPort & {
     },
     roleOf: (tenantId, userId) => members.get(tenantId)?.get(userId) ?? null,
     canWrite: (tenantId, projectId, userId) => writers.get(`${tenantId}/${projectId}`)?.has(userId) ?? false,
+  };
+}
+
+/**
+ * Stand-in for the permission platform's request side (`AccessRequestPort`): requests are kept in
+ * this process, with who asked, and there is no page to follow them on (no `trackUrl`).
+ */
+export function memoryAccessRequests(): AccessRequestPort & {sent: (AccessRequest & {userId: string})[]} {
+  const sent: (AccessRequest & {userId: string})[] = [];
+  return {
+    sent,
+    async request(ctx, request) {
+      sent.push({...request, userId: ctx.user.id});
+      return {};
+    },
   };
 }
