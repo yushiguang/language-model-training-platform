@@ -1,5 +1,5 @@
-import type {EndpointId, EvalReport, Example, GoldLabel, LabelingTask, ModelSettings, Prediction, PromptVersion, SetupVersion, TaskPurpose} from '@yushiguang/sprint-contracts';
-import {asAnswer, toMap, computeMetrics, judge, newId, settingsHash, versionLabel, type Scored, msg} from '@yushiguang/sprint-domain';
+import type {EndpointId, EvalReport, Example, GoldLabel, LabelingTask, ModelSettings, Prediction, ProjectState, PromptVersion, ScoreBasis, SetupVersion, TaskPurpose} from '@yushiguang/sprint-contracts';
+import {asAnswer, toMap, computeMetrics, judge, newId, scoredExamples, settingsHash, versionLabel, type Scored, msg} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {tenantOf} from './sources.ts';
 import {postEvent} from './chat-events.ts';
@@ -119,8 +119,17 @@ export async function predictionsFor(w: Scope, versionId: string, endpoint: Endp
 }
 
 /**
- * Builds the report for a version on a model from its saved answers. Scores use only the
- * held-out half of the eval set, and of it the examples with a gold label.
+ * Builds the report for a version on a model from its saved answers, on the project's basis today
+ * (docs/design/server.md 4.3): nothing while a label set is unfinished.
+ */
+export function scoreFromState(w: Scope, state: ProjectState, version: PromptVersion, endpoint: EndpointId, opts: {replace?: boolean} = {}): Promise<EvalReport | null> {
+  if (!state.setup) return Promise.resolve(null);
+  return buildReport(w, state.project.id, state.setup, version, endpoint, scoredExamples(state), state.gold, {contextId: state.contextId, basis: state.scoring.basis}, opts);
+}
+
+/**
+ * Builds the report for a version on a model from its saved answers. `examples` are the samples
+ * scores rest on (`scoredExamples`); scores use only their held-out half.
  */
 export async function buildReport(w: Scope,
   projectId: string,
@@ -129,13 +138,14 @@ export async function buildReport(w: Scope,
   endpoint: EndpointId,
   examples: Example[],
   gold: Record<string, GoldLabel>,
-  contextId: string,
+  on: {contextId: string; basis: ScoreBasis},
   opts: {replace?: boolean} = {},
 ): Promise<EvalReport | null> {
   const {catalog} = w;
+  const {contextId, basis} = on;
   const evalExamples = examples.filter(e => e.split === 'eval');
-  // Scored on the held-out examples that have a gold label now (spec 1.0.0, 2.5 and 4.4): scoring
-  // never waits for every example. It needs 2 gold labels in each half.
+  // Scored on the held-out examples that have a gold label (spec 1.0.0, 2.5 and 4.4). It needs 2
+  // gold labels in each half.
   const labeled = evalExamples.filter(e => !!gold[e.id]);
   if (!setup.schema || labeled.filter(e => !e.optimiserHalf).length < 2 || labeled.filter(e => e.optimiserHalf).length < 2) return null;
   const existing = (await catalog.find('eval_reports', {projectId, promptVersionId: version.id, endpoint, contextId})).filter(r => !r.archived);
@@ -159,12 +169,15 @@ export async function buildReport(w: Scope,
     ...(snapshotId ? {snapshotId} : {}),
     settings,
     metrics: computeMetrics(setup.schema, items),
+    basis,
     archived: false,
     createdAt: now(),
   };
   await catalog.insert('eval_reports', report);
-  // Rebuild scores (2026-11-12): the new report replaces the one for the same context.
-  for (const old of existing) await catalog.patch('eval_reports', old.id, {archived: true});
+  // The new report replaces every earlier one of this version and model (Rescore, 2026-11-12): the
+  // newest is the only one shown, current or out of date (docs/design/server.md 4.3).
+  const earlier = (await catalog.find('eval_reports', {projectId, promptVersionId: version.id, endpoint})).filter(r => !r.archived && r.id !== report.id);
+  for (const old of earlier) await catalog.patch('eval_reports', old.id, {archived: true});
   w.emitChange(projectId);
   return report;
 }

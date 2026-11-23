@@ -1,5 +1,5 @@
 import type {AgentProposal, AuditEntry, GoldUploadRefusal, ProjectState, PromptVersion, SourceFile} from '@yushiguang/sprint-contracts';
-import {answersForHelpers, dryRunSize, featureText, isImageKey, findGuideTopic, gate, isRight, labelBalance, NODES, pickWrong, productGuide, promptKeys, settingsHash, stepLine, systemConfig, toMap, versionLabel, visibleToAgents, wrongExamples} from '@yushiguang/sprint-domain';
+import {answersForHelpers, dryRunSize, featureText, isImageKey, findGuideTopic, gate, isRight, labelBalance, NODES, pickWrong, productGuide, promptKeys, scoredExamples, settingsHash, stepLine, systemConfig, toMap, versionLabel, visibleToAgents, wrongExamples} from '@yushiguang/sprint-domain';
 import type {Scope} from './app.ts';
 import {getSamplingTask} from './dataset.ts';
 import {scoreOnOptimiserHalf} from './evaluation.ts';
@@ -279,7 +279,7 @@ export async function mistakes(w: Scope, state: ProjectState, ref: unknown) {
   const wrong = half.filter(e => gold.has(e.id) && !isRight(gold.get(e.id)!, answers.get(e.id)?.answer ?? null)).length;
   const said = answersForHelpers(half.filter(e => answers.has(e.id)).map(e => answers.get(e.id)!));
   const examples = withComments(wrongExamples(await withFeatures(w, pickWrong(half, gold, said.predicted)), promptKeys(v), gold, said.predicted, undefined, said.notes), half, await labelComments(w, state.project.id, state));
-  const m = await scoreOnOptimiserHalf(w, setup, v, report.endpoint, state.examples, state.gold);
+  const m = await scoreOnOptimiserHalf(w, setup, v, report.endpoint, scoredExamples(state), state.gold);
   return {
     version: versionLabel(v),
     versionId: v.id,

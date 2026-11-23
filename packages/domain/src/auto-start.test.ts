@@ -20,7 +20,7 @@ const state = (over: Partial<ProjectState> = {}): ProjectState =>
     reports: [],
     runs: [],
     optimisation: [],
-    facts: {examples: 4, goldEvalDone: 4, goldHalves: {optimiser: 2, heldOut: 2}, settingsConfirmed: true},
+    facts: {examples: 4, goldEvalDone: 4, goldHalves: {optimiser: 2, heldOut: 2}, scoringReady: true, settingsConfirmed: true},
     endpoints: [{id: 'A', priceIn: 1, priceOut: 4}],
     ...over,
   }) as unknown as ProjectState;
@@ -51,6 +51,8 @@ test('nothing starts by itself before settings are confirmed and enough gold lab
   assert.deepEqual(dueStarts(state({facts: {...facts, settingsConfirmed: false}})), []);
   assert.deepEqual(dueStarts(state({facts: {...facts, goldEvalDone: 1, goldHalves: {optimiser: 1, heldOut: 0}}})), []);
   assert.deepEqual(dueStarts(state({facts: {...facts, goldHalves: {optimiser: 3, heldOut: 1}}})), []);
+  // Scores are made only once every label set is finished (docs/design/server.md 4.3).
+  assert.deepEqual(dueStarts(state({facts: {...facts, scoringReady: false}})), []);
   assert.equal(dueStarts(state()).length, 1);
 });
 

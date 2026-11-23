@@ -3,7 +3,7 @@ import {autoSpendUsd, dueStarts, settingsHash, versionLabel, type DueStart, syst
 import {now, type Scope} from './app.ts';
 import {tenantOf} from './sources.ts';
 import {postEvent} from './chat-events.ts';
-import {buildReport, findTask, settingsFor} from './evaluation.ts';
+import {findTask, scoreFromState, settingsFor} from './evaluation.ts';
 import {modelName} from './page-views.ts';
 import {loadProjectState} from './projects.ts';
 import {lockHoldout} from './governance.ts';
@@ -79,7 +79,7 @@ export async function runReport(w: Scope, job: Job): Promise<JobOutcome> {
   const v = state?.versions.find(x => x.id === job.args.promptVersionId);
   if (!state?.setup || !v) return {state: 'cancelled', error: 'The project or the version no longer exists.'};
   const endpoint = String(job.args.endpoint) as EndpointId;
-  const report = await buildReport(w, projectId, state.setup, v, endpoint, state.examples, state.gold, state.contextId);
+  const report = await scoreFromState(w, state, v, endpoint);
   if (report && job.args.taskId) {
     const task = await w.labeling.getTask(String(job.args.taskId));
     const passed = (await loadProjectState(w, projectId))?.reports.some(r => r.id === report.id && r.passed) ?? false;

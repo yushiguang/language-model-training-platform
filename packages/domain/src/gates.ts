@@ -20,11 +20,12 @@ export interface Gate {
 
 /**
  * Enough gold labels to score at all: the hard minimum, with 2 in each half (the Optimiser learns
- * from one half, scores come from the other). Scoring never waits for every example.
+ * from one half, scores come from the other), once every label set is finished.
  */
-export function canScore(f: Pick<WorkflowFacts, 'examples' | 'goldEvalDone' | 'goldHalves'>): boolean {
+export function canScore(f: Pick<WorkflowFacts, 'examples' | 'goldEvalDone' | 'goldHalves' | 'scoringReady'>): boolean {
   const {minEvalHard} = systemConfig().dataset;
-  return f.examples >= minEvalHard && f.goldEvalDone >= minEvalHard && f.goldHalves.optimiser >= 2 && f.goldHalves.heldOut >= 2;
+  // Scores are made only once every label set is finished (docs/design/server.md 4.3).
+  return f.scoringReady && f.examples >= minEvalHard && f.goldEvalDone >= minEvalHard && f.goldHalves.optimiser >= 2 && f.goldHalves.heldOut >= 2;
 }
 
 const READY: Gate = {ready: true, reason: null, msg: null};
@@ -40,6 +41,7 @@ export function gate(node: NodeId, f: WorkflowFacts): Gate {
       if (f.examples < minEvalHard) return blocked(msg('The eval dataset needs at least {n} examples.', {n: minEvalHard}));
       return READY;
     case 'gold':
+      if (f.goldEvalDone >= minEvalHard && !f.scoringReady) return blocked(msg('Finish every label set to continue.'));
       if (!canScore(f)) return blocked(msg('Label at least {n} examples to continue ({done} so far).', {n: minEvalHard, done: f.goldEvalDone}));
       return READY;
     case 'prompt':

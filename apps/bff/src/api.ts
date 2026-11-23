@@ -124,6 +124,7 @@ export function createBffApi(deps: BffDeps): BffContract {
     mismatches: pass('mismatches'),
     reviewGold: pass('reviewGold'),
     rebuildReports: pass('rebuildReports'),
+    rescore: pass('rescore'),
 
     createVersion: r => idempotent('createVersion', r.idempotencyKey, async () => workflow.createVersion(await context(), r)),
     scoreVersion: r => idempotent('scoreVersion', r.idempotencyKey, async () => workflow.scoreVersion(await context(), r)),
