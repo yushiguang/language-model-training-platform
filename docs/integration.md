@@ -310,7 +310,7 @@ Sprint tells people about work that ended through `Platform.notifications` (`doc
 `label_set_created`, `labeler_added`), the project id, the message in English (`text`), the same
 message as a translatable `msg` (render it with the site's catalog for each person's language), an
 optional `title`, and `link`: a path inside the site such as `/prompt/?p=pr_1`. Ids and site words
-only: never prompt text, examples or labels.
+(project name, version number, model name) only: never prompt text, examples or labels.
 
 1. Implement `send(n)` in your platform module: look each user id up in your instant-message tool,
    put the site's address in front of `link`, and send one card per person. Throw when it fails.

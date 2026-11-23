@@ -900,7 +900,10 @@ export interface TicketPort {
  */
 export type NotificationKind = 'scoring_finished' | 'scoring_failed' | 'optimiser_finished' | 'optimiser_failed' | 'label_set_created' | 'labeler_added';
 
-/** One notification, to one or more people. Ids and site words only: no prompt text, no examples. */
+/**
+ * One notification, to one or more people. Ids and site words (the project's name, a version
+ * number, a model's name) only: never prompt text, examples or labels.
+ */
 export interface Notification {
   /** Who gets it: user ids, as in `CallerUser.id`. Never empty. */
   userIds: string[];
