@@ -216,7 +216,7 @@ export interface ObjectStorePort {
   /** 按字节范围读，用于打包的特征段和答案段（HTTP Range GET）。 */
   getRange(key: string, offset: number, length: number): Promise<Uint8Array | null>;
   delete(key: string): Promise<void>;
-  deleteBatch(keys: string[]): Promise<number>;
+  deleteBatch(keys: string[]): Promise<void>;
   /** 可选：按需生成带签名的链接，用于图片或预览。 */
   signUrl?(key: string, expiresSec?: number): Promise<string>;
 }
@@ -318,7 +318,7 @@ export interface ConfigReader {
 | `OptimiserContract.startRun` / `execute` / `stopRun`、`OptimiserHost` 每次调用和 `reflectPrompt` 带调用方上下文 | 破坏性（第 2 步，#63 已完成） |
 | `OptimiserHost.label` 改为入队打标任务，打标任务 `args` 带 `optimiserRunId` / `round` / `step` | 破坏性（第 5 步） |
 | `LabelCallRequest`、对话请求和 `TryTemplateInput`（Prompt helper 的试跑）带 `tenantId`；模型按租户读取；`LabelingModels` / `AgentModel` 接受动态 endpoint；限流键改为“租户 + endpoint” | 破坏性：部署方的网关适配和限流存储要改 |
-| `ObjectStorePort`；基于它的 `LabelingStorePort`、`FeatureStorePort` | 新增（issue #58） |
+| `ObjectStorePort`（`Platform.objectStore` 可选）；基于它的 `LabelingStorePort`、`FeatureStorePort`；`Example.featureRef` 可选 | 新增（第 7 步，#72） |
 | 样本序号和软删除、标注集 | 新增 |
 
 ## 11. 交付计划
