@@ -55,8 +55,9 @@ export async function listSamples(w: Scope, req: ListSamplesRequest): Promise<Sa
     const asNumber = n >= 1 ? n : null;
     filters.push(asNumber != null ? {type: 'or', filters: [field('number', '==', asNumber), field('externalId', '==', query)]} : field('externalId', '==', query));
   }
-  const limit = Math.min(500, Math.max(1, req.limit ?? 50));
-  const offset = Math.max(0, req.offset ?? 0);
+  const whole = (x: number | undefined, d: number) => (Number.isFinite(x) ? Math.floor(x!) : d);
+  const limit = Math.min(500, Math.max(1, whole(req.limit, 50)));
+  const offset = Math.max(0, whole(req.offset, 0));
   const page = await catalog.page('examples', {where: {type: 'and', filters}, order: 'number', offset, limit});
   const ids = page.items.map(e => e.id);
   const sourceIds = [...new Set(page.items.map(e => e.sourceId).filter((x): x is string => !!x))];
