@@ -172,7 +172,7 @@ function importPrompt(r: Req) {
   if (!structured) return {reply: '', question: 'I could not find the label in that prompt. Which values should the model choose from, and what does each one mean?'};
   const n = unmapped.length;
   return {
-    reply: `I sorted your prompt into the label ${structured.label.name} with ${structured.label.values.length} values, the task and the rules. ${n ? `${n} passage${n === 1 ? ' has' : 's have'} no place in the structured prompt (for example examples or output format): the page lists ${n === 1 ? 'it' : 'them'} under "Not carried over".` : 'Everything was carried over.'} Check the draft, then approve it at the top right.`,
+    reply: `I sorted your prompt into the label ${structured.label.name} with ${structured.label.values.length} values, the task and the rules. ${n ? `${n} passage${n === 1 ? ' has' : 's have'} no place in the structured prompt (for example examples or output format): the page lists ${n === 1 ? 'it' : 'them'} under "Not carried over".` : 'Everything was carried over.'} Check the draft, then press Save at the top right.`,
     prompt: structured,
     change: 'Imported from an existing prompt',
     unmapped,
@@ -216,7 +216,7 @@ function promptAgent(r: Req) {
   if (t && isVague(t)) return {reply: '', question: 'Which value should the change help, and what goes wrong with it today?'};
   if (!current?.label.values.length || r.intent === 'draft_prompt') {
     const prompt = structuredClone(SAMPLE_STRUCTURED);
-    return {reply: `I drafted a prompt from your description: the label ${prompt.label.name} with ${prompt.label.values.length} values, each with a definition, and the input features they need. It is on the page: edit anything, then press Approve at the top right.`, prompt, change: 'First draft'};
+    return {reply: `I drafted a prompt from your description: the label ${prompt.label.name} with ${prompt.label.values.length} values, each with a definition, and the input features they need. It is on the page: edit anything, then press Save at the top right.`, prompt, change: 'First draft'};
   }
   const prompt = structuredClone(current);
   const add = t.match(/add (?:a |the )?(?:value )?["“]?([^"”]+?)["”]?(?: (?:to|in) (?:the )?(?:label|values))?$/i);

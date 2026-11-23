@@ -207,7 +207,7 @@ function build(state: ProjectState, loc: PageLocation, unsaved: Record<string, u
   switch (page) {
     case 'prompt_design': {
       const v = state.versions[0];
-      return base(v ? 'Prompt Design: the prompt was approved as v1. Later changes are made on Prompt Tuning.' : 'Prompt Design: the first prompt is being written. The user approves it as v1 with the Approve button at the top right.', {
+      return base(v ? 'Prompt Design: the prompt is saved. The user edits one part at a time and saves; a save overwrites the version on screen and labels the dataset again.' : 'Prompt Design: the first prompt is being written. The user saves it as v1 with Save at the top of the prompt card.', {
         approved: !!v,
         prompt: v ? v.structured : null,
         settings,

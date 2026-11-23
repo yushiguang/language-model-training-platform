@@ -35,7 +35,7 @@ export function gate(node: NodeId, f: WorkflowFacts): Gate {
   const {minEvalHard} = systemConfig().dataset;
   switch (node) {
     case 'prompt_design':
-      return f.versions ? READY : blocked(msg('Approve the first prompt to continue.'));
+      return f.versions ? READY : blocked(msg('Save the first prompt to continue.'));
     case 'dataset':
       if (!f.snapshot) return blocked(msg('Add examples to continue.'));
       if (f.examples < minEvalHard) return blocked(msg('The eval dataset needs at least {n} examples.', {n: minEvalHard}));

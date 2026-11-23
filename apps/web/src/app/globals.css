@@ -8,3 +8,4 @@
 @import '../ui/kit.css' layer(legacy);
 @import '../ui/app.css' layer(legacy);
 @import '../components/shell/shell.css';
+@import '../components/prompt/prompt.css';
