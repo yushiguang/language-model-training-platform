@@ -150,7 +150,9 @@ A deployment supplies three optional ports in `Platform`:
   `ctx.user` holds `permission` in `ctx.tenantId` (and, for `project_write`, on `projectId`).
 - `permissionAdmin` (`PermissionAdminPort`): tenant members and roles, and project write grants,
   for the members pages and labelers. Every method must be idempotent; the ones that change
-  something get the caller's context first, for the platform's audit trail.
+  something get the caller's context first, for the platform's audit trail. `listUserTenants(userId)`
+  (#94) lists the tenants a user is in, with the role in each: the home page lists them, and the
+  runtime info leaves out the tenant (the site goes home) when the caller is not in it.
 - `accessRequests` (`AccessRequestPort`): `request(ctx, {tenantId, permission, projectId?,
   reason?})` sends a request from the "insufficient access" dialog to the platform, where
   approvers handle it; return `trackUrl` when the platform has a page to follow it on. Sprint
@@ -158,8 +160,15 @@ A deployment supplies three optional ports in `Platform`:
   (`memoryAccessRequests`); a deployment without it refuses requests for access.
 
 Pass them to `createWorkflow` (`authorization`, `permissionAdmin`, `accessRequests`), as the
-in-process root does. The top bar names the tenant by `Identity.currentUser().organizationName`
-(else its id) and shows admin entries to callers that `authorization` allows `tenant_write`.
+in-process root does. The top bar names the tenant by its record (tenants created in Sprint,
+#94), else by `Identity.currentUser().organizationName` when it is the identity's own tenant, else
+by its id; it shows admin entries to callers that `authorization` allows `tenant_write`.
+
+**Which tenant a call is about** (#94): a person may be in several tenants, so the channel says
+which one each call works in, through `createBffApi({tenant: () => id})`. The browser build passes
+the tenant of the page; an HTTP deployment reads it from a request header its own client sets.
+Without it (or empty) the tenant is the identity's organization, else `default`, as before. The
+gateway and `authorization` check that the caller is in that tenant like any other read.
 The workflow then checks every contract call, agent tool call, workflow job and Optimiser step
 (docs/design/server.md, 2.3): first the permission point, before any record is read, then that
 the project named is the caller's tenant's (another tenant's project reads as missing). So the
@@ -169,6 +178,8 @@ adapter may get a `projectId` that does not exist or belongs to another tenant: 
 configured from the same table, `WORKFLOW_PERMISSIONS` in `@yushiguang/sprint-domain`: each method's
 permission point and where its project id is. Creating a project grants its creator project
 write through `permissionAdmin`; when that still fails after three retries the project is removed.
+
+Breaking in #94: `PermissionAdminPort.listUserTenants(userId)` is a new required method.
 
 Breaking in #63: `Project.tenantId` is required. A deployment with project records saved before
 it gives each one its tenant (the workflow writes `default` on records that have none). Custom

@@ -3,6 +3,11 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-23 (Tenants, #94)
+
+- **Tenants are records**: anyone signed in creates one and becomes its first admin. A tenant name is unique across Sprint (compared without case, spaces tidied); a blank or taken name is shown under the name field, as for every named object. Who is in a tenant stays on the permission platform, which now also lists the tenants a person is in.
+- **The page says which tenant a call works in**: one person can be in several tenants, so the channel names the tenant of each call (the page's tenant in the browser, a header over HTTP), and the permission checks make sure the caller is in it. Without one, the identity's organization is the tenant, as before; tenants from before records (the organization, `default`) keep working under their old names.
+
 ## 2026-11-23 (App shell on Astryx, #91)
 
 - **One frame for every page** (wireframes v346): a taller top bar with a full-width line under it, naming 「Sprint / tenant / project」 on the left (the project name opens a switch menu: search, recent projects, All projects), the four steps in the centre with arrows between them, and Ask AI, language and the avatar on the right. Pages are white and centred, at most 1200 wide.

@@ -24,6 +24,26 @@ test('memoryPermissionAdmin: members, roles and project writers per tenant; ever
   assert.equal(p.roleOf('t1', 'u_1'), null);
 });
 
+test('memoryPermissionAdmin (#94): lists a user\'s tenants, starts from a seed, and keeps what is written under a storage key', async () => {
+  const kept = new Map<string, string>();
+  const g = globalThis as {localStorage?: unknown};
+  const before = g.localStorage;
+  g.localStorage = {getItem: (k: string) => kept.get(k) ?? null, setItem: (k: string, v: string) => void kept.set(k, v)};
+  try {
+    const p = memoryPermissionAdmin({seed: [{tenantId: 'default', userId: 'u_1', role: 'admin'}], storageKey: 'perm'});
+    await p.addTenantMember(ctx, 't2', 'u_1', 'member');
+    await p.grantProjectWrite(ctx, 't2', 'pr_1', 'u_1');
+    assert.deepEqual(await p.listUserTenants('u_1'), [{tenantId: 'default', role: 'admin'}, {tenantId: 't2', role: 'member'}]);
+    assert.deepEqual(await p.listUserTenants('u_2'), []);
+    const again = memoryPermissionAdmin({storageKey: 'perm'});
+    assert.deepEqual(await again.listUserTenants('u_1'), [{tenantId: 'default', role: 'admin'}, {tenantId: 't2', role: 'member'}], 'a reload keeps them');
+    assert.equal(again.canWrite('t2', 'pr_1', 'u_1'), true);
+    assert.deepEqual(await memoryPermissionAdmin().listUserTenants('u_1'), [], 'without a key nothing is read');
+  } finally {
+    g.localStorage = before;
+  }
+});
+
 test('standInAuthorization: allows everything, or only reading when the browser asks for a viewer (#91)', async () => {
   const auth = standInAuthorization();
   const ask = (permission: 'read' | 'project_write' | 'tenant_write') => auth.allowed(ctx, {action: 'workflow.x', permission, tenantId: 't1'} as never);
