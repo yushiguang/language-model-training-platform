@@ -2957,7 +2957,7 @@ test('label set labelers: one per set, tenant members only, granted project writ
   assert.equal((await w.sets.listLabelSets(w.ws, w.projectId)).sets.length, 0, 'nothing saved');
   const a = await w.sets.createLabelSet(w.ws, {projectId: w.projectId, count: 2, labelerIds: ['u_2']});
   assert.ok(w.admin.canWrite('default', w.projectId, 'u_2'), 'the labeler can edit the project');
-  assert.deepEqual(w.sent.map(n => [n.kind, n.userIds, n.link]), [['label_set_created', ['u_2'], `/gold/?p=${w.projectId}&set=${a.id}`]]);
+  assert.deepEqual(w.sent.map(n => [n.kind, n.userIds, n.link]), [['label_set_created', ['u_2'], `/gold/set/?p=${w.projectId}&set=${a.id}`]]);
   assert.match(w.sent[0].text, /label set #1 \(samples 1 to 2\) in p/);
   // Changing the labeler tells the new one only; the creator setting themselves hears nothing.
   await w.sets.updateLabelSet(w.ws, {projectId: w.projectId, labelSetId: a.id, labelerIds: ['u_3']});

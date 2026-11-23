@@ -24,7 +24,8 @@ const withSetsLock = <T>(w: Scope, projectId: string, fn: () => Promise<T>) => w
 const MAX_LABELERS = 1;
 const NAME_MAX = 80;
 
-const goldPage = (projectId: string, setId: string) => `/gold/?p=${encodeURIComponent(projectId)}&set=${encodeURIComponent(setId)}`;
+/** The label set page (W-LabelSet), where a labeler labels it. */
+const goldPage = (projectId: string, setId: string) => `/gold/set/?p=${encodeURIComponent(projectId)}&set=${encodeURIComponent(setId)}`;
 const setName = (s: Pick<LabelSet, 'name' | 'number'>) => s.name || `#${s.number}`;
 
 async function datasetOf(w: Scope, projectId: string) {
