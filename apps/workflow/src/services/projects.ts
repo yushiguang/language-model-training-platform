@@ -100,12 +100,20 @@ export async function getProject(w: Scope, id: string): Promise<Project | null> 
  * within its cache time) makes it read again once, so the page always knows the project's model.
  */
 async function modelsFor(w: Scope, tenantId: string, used: string[]) {
-  const {gateway} = w;
-  const read = () => gateway.labelingEndpointsFor(tenantId).catch(() => gateway.labelingEndpoints());
-  const eps = await read();
-  if (used.every(id => eps.some(e => e.id === id))) return eps;
+  const {gateway, catalog} = w;
+  let eps;
+  try {
+    eps = await gateway.labelingEndpointsFor(tenantId);
+  } catch {
+    // The store is failing: keep the gateway's cache as it is for the tenant's other work.
+    return gateway.labelingEndpoints();
+  }
+  const missing = used.filter(id => !eps.some(e => e.id === id));
+  // Only a model the tenant really has (not a platform model taken away) makes it read again.
+  const found = await Promise.all(missing.map(id => catalog.get('tenant_models', id).catch(() => null)));
+  if (!found.some(m => m?.tenantId === tenantId)) return eps;
   gateway.forgetTenant(tenantId);
-  return read();
+  return gateway.labelingEndpointsFor(tenantId).catch(() => eps);
 }
 
 export async function loadProjectState(w: Scope, projectId: string): Promise<ProjectState | null> {

@@ -467,7 +467,7 @@ test('tenant models (#69): no default means the platform default; removing the d
 });
 
 test('tenant models (#69): a project page reads the models again when the gateway\'s cache lacks the one its settings use', async () => {
-  const {api, gateway, forgotten} = world('wf-models-stale', noHelpers);
+  const {api, gateway, forgotten, catalog} = world('wf-models-stale', noHelpers);
   const a = inTenant(alice, 't1');
   const m = (await api.addModel(a, {name: 'New', endpoint: 'e', qpm: 1, tpm: 1})).model!;
   const p = await api.createProject(a, 'Uses new');
@@ -486,4 +486,10 @@ test('tenant models (#69): a project page reads the models again when the gatewa
   // Nothing missing: no second read.
   await api.loadProjectState(a, p.id);
   assert.deepEqual(forgotten, ['t1']);
+  // A missing model that is not the tenant's (a platform model taken away) or a failing store: the cache is kept.
+  await catalog.patch('setup_versions', s.setup!.id, {models: [{...s.setup!.models[0], endpoint: 'gone'}]});
+  assert.deepEqual((await api.loadProjectState(a, p.id))!.endpoints.map(x => x.id), [m.id, 'A']);
+  Object.assign(gateway, {labelingEndpointsFor: async () => { throw new Error('store down'); }});
+  assert.deepEqual((await api.loadProjectState(a, p.id))!.endpoints.map(x => x.id), ['A']);
+  assert.deepEqual(forgotten, ['t1'], 'the gateway is not told to forget');
 });
