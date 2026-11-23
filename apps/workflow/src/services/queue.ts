@@ -23,7 +23,10 @@ export async function withQueue<T extends {runs: LabelingRun[]; optimisation: Pi
   const places = new Map<string, JobQueuePlace>();
   for (const j of waiting) {
     const ahead = await w.jobs.ahead(w.ctx, j.id);
-    if (ahead !== null) places.set(String(j.kind === 'labeling.runTask' ? j.args.taskId : j.args.runId), {ahead});
+    if (ahead === null) continue;
+    places.set(String(j.kind === 'labeling.runTask' ? j.args.taskId : j.args.runId), {ahead});
+    // A run waiting for its labeling job shows that job's place.
+    if (j.kind === 'labeling.runTask' && j.args.optimiserRunId) places.set(String(j.args.optimiserRunId), {ahead});
   }
   const mark = <R extends {id: string}>(r: R): R => (places.has(r.id) ? {...r, queue: places.get(r.id)} : r);
   return {...view, runs: view.runs.map(mark), optimisation: view.optimisation.map(mark)};

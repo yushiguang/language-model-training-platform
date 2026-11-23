@@ -763,6 +763,12 @@ export interface OptimisationRun {
   auto?: boolean;
   /** Page views only, never stored: set while its job waits for the model. */
   queue?: JobQueuePlace;
+  /**
+   * The user pressed Stop while a runner held the run (#79): the runner reads it before every
+   * save and ends the run as stopped itself, under its lock. A runner never writes this field, so
+   * the request is never lost to a runner's save.
+   */
+  stopRequested?: boolean;
 }
 
 export interface GateApproval {
