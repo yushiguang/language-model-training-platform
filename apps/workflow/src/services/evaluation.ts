@@ -1,8 +1,31 @@
 import type {EndpointId, EvalReport, Example, GoldLabel, LabelingTask, ModelSettings, Prediction, ProjectState, PromptVersion, ScoreBasis, SetupVersion, TaskPurpose} from '@yushiguang/sprint-contracts';
 import {asAnswer, toMap, computeMetrics, judge, newId, scoredExamples, settingsHash, versionLabel, type Scored, msg} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
-import {tenantOf} from './sources.ts';
+import {tenantOf, withLock} from './sources.ts';
 import {postEvent} from './chat-events.ts';
+
+/** How long the record of versions Rescore cannot score stays (keyed by the basis, so it only matters while that basis lasts). */
+const CANNOT_BUILD_TTL_MS = 30 * 24 * 3600_000;
+const cannotBuildKey = (projectId: string, contextId: string) => `cannot-build:${projectId}:${contextId}`;
+
+/**
+ * The versions and models ("versionId|endpoint") whose saved answers do not cover the samples of
+ * this basis, so a Rescore skipped them. In shared state, so the page reading it need not be the
+ * process that ran the Rescore.
+ */
+export async function cannotBuildOn(w: Scope, projectId: string, contextId: string): Promise<Set<string>> {
+  try {
+    return new Set((await w.shared.get<string[]>(cannotBuildKey(projectId, contextId))) ?? []);
+  } catch {
+    return new Set();
+  }
+}
+
+async function markCannotBuild(w: Scope, projectId: string, contextId: string, key: string): Promise<void> {
+  const had = await cannotBuildOn(w, projectId, contextId);
+  if (had.has(key)) return;
+  await w.shared.set(cannotBuildKey(projectId, contextId), [...had, key], CANNOT_BUILD_TTL_MS).catch(() => undefined);
+}
 
 /** Latest gold label per example for the current schema; older-schema labels are kept as hints. */
 export async function latestGold(w: Scope, projectId: string, schemaVersion: number) {
@@ -148,36 +171,41 @@ export async function buildReport(w: Scope,
   // gold labels in each half.
   const labeled = evalExamples.filter(e => !!gold[e.id]);
   if (!setup.schema || labeled.filter(e => !e.optimiserHalf).length < 2 || labeled.filter(e => e.optimiserHalf).length < 2) return null;
-  const existing = (await catalog.find('eval_reports', {projectId, promptVersionId: version.id, endpoint, contextId})).filter(r => !r.archived);
-  if (existing.length && !opts.replace) return existing[0];
-  const settings = settingsFor(setup, endpoint);
-  const byExample = await predictionsFor(w, version.id, endpoint, settings);
   const scoredOn = labeled.filter(e => !e.optimiserHalf);
-  if (scoredOn.some(e => !byExample.has(e.id))) {
-    w.local.cannotBuild.add(`${version.id}|${endpoint}|${contextId}`);
-    return null;
-  }
-  const items: Scored[] = scoredOn.map(e => ({exampleId: e.id, gold: gold[e.id].answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd}));
-  const snapshotId = scoredOn[0]?.snapshotId;
-  const report: EvalReport = {
-    id: newId('er'),
-    projectId,
-    promptVersionId: version.id,
-    endpoint,
-    contextId,
-    schemaVersion: setup.schemaVersion,
-    ...(snapshotId ? {snapshotId} : {}),
-    settings,
-    metrics: computeMetrics(setup.schema, items),
-    basis,
-    archived: false,
-    createdAt: now(),
-  };
-  await catalog.insert('eval_reports', report);
-  // The new report replaces every earlier one of this version and model (Rescore, 2026-11-12): the
-  // newest is the only one shown, current or out of date (docs/design/server.md 4.3).
-  const earlier = (await catalog.find('eval_reports', {projectId, promptVersionId: version.id, endpoint})).filter(r => !r.archived && r.id !== report.id);
-  for (const old of earlier) await catalog.patch('eval_reports', old.id, {archived: true});
+  // One build at a time per version and model in every process: two builds on one basis never
+  // both save, and replacing one never archives the other's report.
+  const report = await withLock(w, `report:${projectId}:${version.id}:${endpoint}`, async () => {
+    const existing = (await catalog.find('eval_reports', {projectId, promptVersionId: version.id, endpoint, contextId})).filter(r => !r.archived);
+    if (existing.length && !opts.replace) return existing[0];
+    const settings = settingsFor(setup, endpoint);
+    const byExample = await predictionsFor(w, version.id, endpoint, settings);
+    if (scoredOn.some(e => !byExample.has(e.id))) {
+      await markCannotBuild(w, projectId, contextId, `${version.id}|${endpoint}`);
+      return null;
+    }
+    const items: Scored[] = scoredOn.map(e => ({exampleId: e.id, gold: gold[e.id].answer, predicted: byExample.get(e.id)!.answer, filtered: byExample.get(e.id)!.filtered, costUsd: byExample.get(e.id)!.costUsd}));
+    const snapshotId = scoredOn[0]?.snapshotId;
+    const made: EvalReport = {
+      id: newId('er'),
+      projectId,
+      promptVersionId: version.id,
+      endpoint,
+      contextId,
+      schemaVersion: setup.schemaVersion,
+      ...(snapshotId ? {snapshotId} : {}),
+      settings,
+      metrics: computeMetrics(setup.schema!, items),
+      basis,
+      archived: false,
+      createdAt: now(),
+    };
+    await catalog.insert('eval_reports', made);
+    // Rescore (2026-11-12): the new report replaces the one on the same basis. Reports on other
+    // bases stay: an older one is out of date, and never hides a current one.
+    for (const old of existing) await catalog.patch('eval_reports', old.id, {archived: true});
+    return made;
+  }, 'Scores are being worked out. Try again in a minute.');
+  if (!report) return null;
   w.emitChange(projectId);
   return report;
 }

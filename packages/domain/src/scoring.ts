@@ -68,20 +68,25 @@ type StaleInput = Pick<ProjectState, 'setup' | 'versions' | 'reports' | 'context
 
 /**
  * The versions Rescore would work out again: of the current label, with a score on an older basis
- * and none on today's, for each model. `cannotBuild` holds "versionId|endpoint|contextId" a
- * Rescore found without saved answers for every sample (they need scoring again, not Rescore).
- * Nothing is out of date while a label set is unfinished: no scores are made then.
+ * and none on today's, on a model the project still uses. `cannotBuild` holds the
+ * "versionId|endpoint" a Rescore found without saved answers for today's samples (they need
+ * scoring again, not Rescore). Nothing is out of date while a label set is unfinished: no scores
+ * are made then. What changed is read from each version's newest older score.
  */
 export function staleScores(s: StaleInput, cannotBuild: ReadonlySet<string> = new Set()): {staleVersionIds: string[]; changed: ScoreBasisPart[]} {
   if (!s.ready || !s.setup?.schema) return {staleVersionIds: [], changed: []};
+  const setup = s.setup;
+  const models = new Set(setup.models.map(m => m.endpoint));
   const current = new Set(s.reports.filter(r => r.contextId === s.contextId).map(r => `${r.promptVersionId}|${r.endpoint}`));
   const newest = new Map<string, ProjectState['reports'][number]>();
+  // Closest to today first when two were made in the same instant.
+  const distance = (r: ProjectState['reports'][number]) => (r.basis ? basisChanges(r.basis, s.basis).length : 9);
   for (const r of s.reports) {
     const key = `${r.promptVersionId}|${r.endpoint}`;
-    if (r.contextId === s.contextId || current.has(key) || r.schemaVersion !== s.setup.schemaVersion) continue;
-    if (!s.versions.some(v => v.id === r.promptVersionId) || cannotBuild.has(`${key}|${s.contextId}`)) continue;
+    if (r.contextId === s.contextId || current.has(key) || r.schemaVersion !== setup.schemaVersion || !models.has(r.endpoint)) continue;
+    if (!s.versions.some(v => v.id === r.promptVersionId) || cannotBuild.has(key)) continue;
     const had = newest.get(key);
-    if (!had || r.createdAt > had.createdAt) newest.set(key, r);
+    if (!had || r.createdAt > had.createdAt || (r.createdAt === had.createdAt && distance(r) < distance(had))) newest.set(key, r);
   }
   const ids = new Set<string>();
   const changed = new Set<ScoreBasisPart>();

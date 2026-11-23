@@ -274,7 +274,7 @@ export async function mistakes(w: Scope, state: ProjectState, ref: unknown) {
   const {v, report, settings, setup} = scoredVersion(state, ref);
   const answers = toMap(await w.labeling.predictions(v.id, report.endpoint, settingsHash(settings)));
   // R3-9 (D3) and finding 3: everything here comes from the optimiser half.
-  const half = state.examples.filter(e => e.split === 'eval' && visibleToAgents(e));
+  const half = scoredExamples(state).filter(visibleToAgents);
   const gold = new Map(half.filter(e => !!state.gold[e.id]).map(e => [e.id, state.gold[e.id]!.answer]));
   const wrong = half.filter(e => gold.has(e.id) && !isRight(gold.get(e.id)!, answers.get(e.id)?.answer ?? null)).length;
   const said = answersForHelpers(half.filter(e => answers.has(e.id)).map(e => answers.get(e.id)!));
@@ -312,7 +312,7 @@ export async function flips(w: Scope, state: ProjectState, aRef: unknown, bRef: 
   if (a.v.id === b.v.id) throw new Error('Name two different versions.');
   if (a.report.endpoint !== b.report.endpoint) throw new Error('The two versions were scored on different models.');
   const [pa, pb] = await Promise.all([a, b].map(x => w.labeling.predictions(x.v.id, x.report.endpoint, settingsHash(x.settings)).then(toMap)));
-  const half = state.examples.filter(e => e.split === 'eval' && visibleToAgents(e) && !!state.gold[e.id] && pa.has(e.id) && pb.has(e.id));
+  const half = scoredExamples(state).filter(e => visibleToAgents(e) && !!state.gold[e.id] && pa.has(e.id) && pb.has(e.id));
   const ok = (p: typeof pa, id: string) => isRight(state.gold[id]!.answer, p.get(id)?.answer ?? null);
   const row = (id: string) => ({a: pa.get(id)!.answer, aReason: pa.get(id)!.reason ?? null, b: pb.get(id)!.answer, bReason: pb.get(id)!.reason ?? null});
   const fixed = half.filter(e => !ok(pa, e.id) && ok(pb, e.id));

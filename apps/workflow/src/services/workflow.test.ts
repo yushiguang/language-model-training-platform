@@ -980,6 +980,7 @@ test('scores wait for every label set; a new basis leaves old scores out of date
   await rescore(w.ws, w.projectId);
   assert.equal((await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['report.rescore']})).length, 1);
   await until(async () => !(await w.state()).scoresUpdating, 'rescored');
+  await w.jobs.idle();
   s = await w.state();
   const current = s.reports.filter(r => !r.archivedNow);
   assert.equal(current.length, 1);
@@ -1025,11 +1026,54 @@ test('scores wait for every label set; a new basis leaves old scores out of date
   await rescore(w.ws, w.projectId);
   await until(async () => !(await w.state()).scoring.rescoring, 'Rescore ended');
   assert.equal((await w.state()).reports.filter(r => !r.archivedNow).length, 0, 'no score without answers for every sample');
+  assert.deepEqual((await w.state()).scoring.staleVersionIds, [], 'skipped: kept in shared state, so any process reading the page knows');
   await scoreVersion(w.ws, w.projectId, v1);
   await until(async () => (await w.state()).reports.some(r => !r.archivedNow), 'v1 scored on the new basis');
   s = await w.state();
   assert.equal(s.scoresUpdating, false);
   assert.equal(s.facts.goldEvalDone, 11);
+});
+
+test('Rescore after a removal: out of date for its samples, worked out again without labeling; a model no longer used is left alone', async () => {
+  const w = await world('sc2', {macroF1: 0.5});
+  const {createLabelSets} = await import('./label-sets.ts');
+  const {removeExamples} = await import('./governance.ts');
+  const {rescore, rebuildReports} = await import('./scores.ts');
+  await createLabelSets(w.ws, {projectId: w.projectId, sets: 2});
+  const v1 = await w.newVersion();
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.state()).reports.some(r => !r.archivedNow), 'v1 scored');
+  let s = await w.state();
+  const runs = s.runs.length;
+  const gone = s.examples.find(e => e.number === 3)!;
+  await removeExamples(w.ws, w.projectId, [gone.id], 'broken');
+  s = await w.state();
+  assert.deepEqual({ready: s.scoring.ready, samples: s.scoring.samples, stale: s.scoring.staleVersionIds, changed: s.scoring.changed}, {ready: true, samples: EVAL - 1, stale: [v1.id], changed: ['samples']});
+  assert.equal(s.reports.filter(r => !r.archivedNow).length, 0, 'not worked out again by itself');
+  await rescore(w.ws, w.projectId);
+  await until(async () => !(await w.state()).scoresUpdating, 'rescored');
+  s = await w.state();
+  assert.equal(s.runs.length, runs, 'nothing labeled');
+  assert.equal(s.facts.goldEvalDone, EVAL - 1, 'the removed sample counts nowhere');
+
+  // The project's model changes to one v1 was never scored on: v1's old report stays as it was,
+  // is not listed as out of date, and a Rescore does not fail on it.
+  const setup = s.setup!;
+  await w.catalog.patch('setup_versions', setup.id, {models: [{endpoint: 'B', maxOutputTokens: 150, temperature: null}]});
+  await w.catalog.patch('setup_versions', setup.id, {thresholds: {...setup.thresholds!, macroF1: 0.3}});
+  s = await w.state();
+  assert.deepEqual(s.scoring.staleVersionIds, []);
+  assert.equal(await rebuildReports(w.ws, w.projectId), 0);
+
+  // Two Rescores at once wait for each other; both end, and the second finds nothing left to do.
+  await w.catalog.patch('setup_versions', setup.id, {models: setup.models});
+  s = await w.state();
+  assert.deepEqual(s.scoring.staleVersionIds, [v1.id], 'back on its model, v1 is out of date for the new thresholds');
+  const [a, b] = await Promise.all([rebuildReports(w.ws, w.projectId), rebuildReports(w.ws, w.projectId)]);
+  assert.equal(a + b, 2, 'each run rebuilds v1 once; neither is dropped');
+  s = await w.state();
+  assert.equal(s.scoresUpdating, false);
+  assert.equal(s.reports.filter(r => !r.archivedNow && r.promptVersionId === v1.id).length, 1, 'one current report: the second replaced the first');
 });
 
 test('removing examples leaves a trail with half and gold label, moves no other example, and can be undone', async () => {

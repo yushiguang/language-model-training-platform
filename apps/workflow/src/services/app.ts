@@ -119,8 +119,6 @@ export interface Instance extends WorkflowDeps, Connected {
    * State that stays with this instance: two caches of facts that can be worked out again.
    */
   local: {
-    /** Reports that cannot be built from saved answers, as "versionId|endpoint|contextId" (R5-4). */
-    cannotBuild: Set<string>;
     /** Saved answers on the whole eval set, by version, model and settings (R5-5). */
     fullAnswers: Map<string, Map<string, Prediction>>;
     /** Projects saved before `Project.tenantId` are given one once per instance, before the first read. */
@@ -181,7 +179,7 @@ export function createInstance(deps: WorkflowDeps): Instance & {connect(c: Conne
     async turnsIdle() {
       while (turns.size) await Promise.allSettled([...turns]);
     },
-    local: {cannotBuild: new Set(), fullAnswers: new Map()},
+    local: {fullAnswers: new Map()},
     // The scope reads the instance live (not a copy), so services connected later are seen.
     scope: ctx => Object.assign(Object.create(inst) as Scope, {ctx, user: async () => ctx.user}),
     connect(c) {

@@ -356,11 +356,15 @@ changed (gold labels, samples or thresholds), and whether a Rescore is queued or
 
 Nothing is worked out again by itself: gold edits, changed thresholds, new samples and new code all
 move scores, and sensing each one is fragile. A report whose basis is not today's is `archivedNow`:
-shown, never passing. Only the newest report per version and model is kept; earlier ones are
-`archived` and hidden. Rescore (`rescore`) queues one `report.rescore` job on the tenant's compute
-key, keyed by today's `contextId`, so a second press adds nothing; it gives every version of the
-current label with saved answers for today's samples a fresh report (nothing labeled) and skips a
-version missing answers, which scoring again fills in. The old in-request `rebuildReports` stays for
+shown, never passing. A new report replaces the one on the same basis (`archived`, hidden); reports
+on other bases stay, and an out-of-date one never hides a current one. One build per version and
+model runs at a time (shared lock `report:<projectId>:<versionId>:<endpoint>`). Rescore (`rescore`)
+queues one `report.rescore` job on the tenant's compute key, keyed by today's `contextId`, so a
+second press adds nothing. One Rescore per project runs at a time (shared lock), and it goes again
+if the basis moved while it ran. It gives every version of the current label on the project's
+model, with saved answers for today's samples, a fresh report (nothing labeled); a version missing
+answers is skipped and recorded in shared state for that basis, so no process lists it as out of
+date again (scoring it again fills in the answers). The old in-request `rebuildReports` stays for
 the current Prompt versions page, where Edit prompt, Improve with AI and Auto Optimise ask "Rebuild
 scores first?" and the AI Suggestion reads each version's newest score (`withNewestReports`).
 `tick` builds only a version's first report. Saved answers on the whole eval set are kept in memory

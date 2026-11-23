@@ -4,7 +4,7 @@ import {now, type Instance, type Scope} from './app.ts';
 import {withRetries} from './access.ts';
 import {getSamplingTask} from './dataset.ts';
 import {datasetSources, retireCuts, tenantOf} from './sources.ts';
-import {latestGold} from './evaluation.ts';
+import {cannotBuildOn, latestGold} from './evaluation.ts';
 import {runView} from './views.ts';
 import {initSettings} from './settings.ts';
 import {indexOnly} from './features.ts';
@@ -199,7 +199,7 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
     otherAutoSpendUsd: autoSpend.reduce((n, a) => n + Number((a.data as {costUsd?: number}).costUsd ?? 0), 0),
     revision,
   };
-  const stale = staleScores({...out, ready: progress.ready, basis}, w.local.cannotBuild);
+  const stale = staleScores({...out, ready: progress.ready, basis}, progress.ready ? await cannotBuildOn(w, projectId, contextId) : new Set());
   const scoring: ScoringState = {
     ready: progress.ready,
     ranges: progress.ranges,

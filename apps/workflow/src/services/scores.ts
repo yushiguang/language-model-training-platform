@@ -3,31 +3,45 @@ import type {Scope} from './app.ts';
 import {scoreFromState} from './evaluation.ts';
 import {loadProjectState} from './projects.ts';
 import {computeKey} from './queue.ts';
+import {withLock} from './sources.ts';
+
+/** How many times one Rescore follows a basis that moved while it ran. */
+const FOLLOW = 3;
 
 /**
  * Rescore (Evelyn, 2026-11-12; docs/design/server.md 4.3): only when someone presses it. Nothing
  * starts it by itself, since gold edits, thresholds and samples all move scores. Every version of
- * the current label with saved answers on today's samples gets a fresh report on today's basis,
- * from saved answers only: nothing is labeled. A version missing answers is skipped (scoring it
- * again labels what is missing). Returns how many reports it built.
+ * the current label, on the project's model, with saved answers on today's samples gets a fresh
+ * report on today's basis, from saved answers only: nothing is labeled. A version missing answers
+ * is skipped (scoring it again labels what is missing). One Rescore of a project runs at a time in
+ * every process; a second one waits for it, and one whose basis moved while it ran goes again on
+ * the new one. Returns how many reports it built.
  */
 export async function rebuildReports(w: Scope, projectId: string): Promise<number> {
-  return (
-    (await w.once(`rebuild:${projectId}`, async () => {
-      const state = await loadProjectState(w, projectId);
-      if (!state?.setup?.schema || !state.scoring.ready) return 0;
+  return withLock(
+    w,
+    `rescore:${projectId}`,
+    async () => {
       let built = 0;
-      const seen = new Set<string>();
-      for (const r of state.runs.filter(x => x.state === 'done')) {
-        const key = `${r.promptVersionId}|${r.endpoint}`;
-        const v = state.versions.find(x => x.id === r.promptVersionId && x.schemaVersion === state.setup!.schemaVersion);
-        if (!v || seen.has(key)) continue;
-        seen.add(key);
-        if (await scoreFromState(w, state, v, r.endpoint, {replace: true})) built++;
+      let done: string | null = null;
+      for (let i = 0; i < FOLLOW; i++) {
+        const state = await loadProjectState(w, projectId);
+        if (!state?.setup?.schema || !state.scoring.ready || state.contextId === done) break;
+        const models = new Set(state.setup.models.map(m => m.endpoint));
+        const seen = new Set<string>();
+        for (const r of state.runs.filter(x => x.state === 'done' && models.has(x.endpoint))) {
+          const key = `${r.promptVersionId}|${r.endpoint}`;
+          const v = state.versions.find(x => x.id === r.promptVersionId && x.schemaVersion === state.setup!.schemaVersion);
+          if (!v || seen.has(key)) continue;
+          seen.add(key);
+          if (await scoreFromState(w, state, v, r.endpoint, {replace: true})) built++;
+        }
+        done = state.contextId;
       }
       w.emitChange(projectId);
       return built;
-    })) ?? 0
+    },
+    'Scores are being worked out again. Try again in a minute.',
   );
 }
 
