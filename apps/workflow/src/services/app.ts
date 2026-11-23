@@ -1,4 +1,4 @@
-import {NO_TELEMETRY, type AuthorizationPort, type PermissionAdminPort, type ConfigReader, type TicketPort, type AgentRuntimeContract, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@yushiguang/sprint-contracts';
+import {NO_TELEMETRY, type AuthorizationPort, type PermissionAdminPort, type ConfigReader, type TicketPort, type AgentRuntimeContract, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FeatureStorePort, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@yushiguang/sprint-contracts';
 import {newId, processConfigReader} from '@yushiguang/sprint-domain';
 
 /**
@@ -17,6 +17,13 @@ export interface WorkflowDeps {
   gateway: LlmGatewayContract;
   files: FileStore;
   examples: ExampleSource;
+  /**
+   * Where taken examples' frozen features are written, a batch at a time (docs/design/server.md
+   * 6): the same store the catalog reads them from (`@yushiguang/sprint-catalog` has
+   * `objectFeatureStore` and `docFeatureStore`). Without it they are written one document each
+   * through the catalog, as before.
+   */
+  features?: FeatureStorePort;
   /** Optional media for people to look at; see `MediaSource`. */
   media?: MediaSource;
   /** Optional feature descriptions (hover text, and the agents' read_feature_info tool). */

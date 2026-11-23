@@ -1,5 +1,6 @@
-import {NO_TELEMETRY, type CatalogContract, type Example, type Features, type CatalogKind, type CatalogRecords, type DocRuntime, type NewPromptVersion, type NewSetupVersion, type PromptVersion, type SetupVersion, type TelemetryPort} from '@yushiguang/sprint-contracts';
+import {NO_TELEMETRY, type CatalogContract, type Example, type FeatureItem, type FeatureStorePort, type Features, type CatalogKind, type CatalogRecords, type DocRuntime, type NewPromptVersion, type NewSetupVersion, type PromptVersion, type SetupVersion, type TelemetryPort} from '@yushiguang/sprint-contracts';
 import {featureDocId, nextVersion} from '@yushiguang/sprint-domain';
+import {docFeatureStore} from './feature-store.ts';
 import {DocRepo, newId} from '@yushiguang/sprint-platform';
 
 const now = () => new Date().toISOString();
@@ -42,8 +43,10 @@ export const catalogKinds = () => Object.keys(ID_PREFIX) as CatalogKind[];
  * Writes are partial (`patch`), so a background run and a page action do not undo each other.
  * Version numbers are assigned here from what is stored, never from what a browser sent.
  */
-export function createCatalog(db: DocRuntime, opts: {telemetry?: TelemetryPort} = {}): CatalogContract {
+export function createCatalog(db: DocRuntime, opts: {telemetry?: TelemetryPort; features?: FeatureStorePort} = {}): CatalogContract {
   const repo = new DocRepo(db);
+  /** Where frozen features are kept: object storage when the composition passes it, else `db`. */
+  const features = opts.features ?? docFeatureStore(db);
   const orderOf = (order?: string) => order ?? '';
 
   const contract: CatalogContract = {
@@ -104,12 +107,11 @@ export function createCatalog(db: DocRuntime, opts: {telemetry?: TelemetryPort} 
       // In bulk: batch requests, never one awaited request per record (deployment readiness spec, 3).
       const snapshots = await repo.find<{id: string}>('dataset_snapshots', {projectId});
       for (const snap of snapshots) {
-        // Frozen features first (#32), by their ids from the dataset's index: the features
-        // collection is read by id only, never scanned. A delete cut short still finds them
+        // Frozen features first (#32), found through the dataset's index (by document id, or the
+        // segment files the index points to): never scanned. A delete cut short still finds them
         // through the index, which goes after.
-        const index = await repo.find<{externalId: string}>('examples', {snapshotId: snap.id});
-        const docIds = index.map(e => featureDocId(snap.id, e.externalId));
-        for (let i = 0; i < docIds.length; i += 30) await repo.deleteWhere('example_features', {type: 'field', field: 'id', op: 'in', value: docIds.slice(i, i + 30)});
+        const index = await repo.find<FeatureItem>('examples', {snapshotId: snap.id});
+        await features.deleteBatch(index.map(e => ({snapshotId: snap.id, externalId: e.externalId, ...(e.featureRef ? {featureRef: e.featureRef} : {})})));
         await repo.deleteWhere('examples', {snapshotId: snap.id});
       }
       for (const kind of OWNED) await repo.deleteWhere(kind, {projectId});
@@ -124,10 +126,10 @@ export function createCatalog(db: DocRuntime, opts: {telemetry?: TelemetryPort} 
     async exampleFeatures(examples) {
       const out: Record<string, Features> = {};
       const want = examples.map(e => ({exampleId: e.id, docId: featureDocId(e.snapshotId, e.externalId)}));
-      const docs = new Map((await contract.findByIds('example_features', want.map(w => w.docId))).map(d => [d.id, d.features]));
+      const found = await features.getBatch(examples);
       const missing: string[] = [];
       for (const w of want) {
-        const f = docs.get(w.docId);
+        const f = found[w.docId];
         if (f) out[w.exampleId] = f;
         else missing.push(w.exampleId);
       }

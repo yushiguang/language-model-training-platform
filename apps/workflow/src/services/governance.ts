@@ -1,4 +1,4 @@
-import type {DatasetRemoval, DatasetSnapshot, Example, ExampleFeatures, ExampleType, ExampleWithFeatures, ItemCheckCounts, LabelComment, RawExample, RemovalReason} from '@yushiguang/sprint-contracts';
+import type {DatasetRemoval, DatasetSnapshot, Example, ExampleFeatures, FeatureStorePort, ExampleType, ExampleWithFeatures, ItemCheckCounts, LabelComment, RawExample, RemovalReason} from '@yushiguang/sprint-contracts';
 import {addChecks, assignEvalHalves, checksTotal, computeFeatureMissingness, featureDocId, featureSizes, mergeFeatureMissingness, mergeFeatureSizes, newId, noChecks, pickToPrune, subtractFeatureMissingness, systemConfig} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {featuresOf} from './features.ts';
@@ -18,9 +18,12 @@ export type NewExample = ExampleWithFeatures & {fetchedAt?: string};
  * Before a retry, and after the last failure, the record is looked up: a write that failed on
  * the way back but was stored counts as saved and is not written twice. Returns the saved ones.
  *
- * Each example's features go first, as their own document (#32), then its index record: an
- * example is never in the dataset without its features. Features saved for an example whose
- * record then failed are deleted with the project.
+ * Features go first, then each example's index record: an example is never in the dataset
+ * without its features (#32). With a feature store (docs/design/server.md 6) they are written a
+ * batch at a time (`dataset.featureBatch`, one segment file in object storage); a batch that
+ * fails twice is skipped whole, and the index records keep where each example's features are
+ * (`featureRef`). Without one, each example's features are a document of their own. Features
+ * saved for an example whose record then failed are deleted with the project, or never read.
  */
 export async function insertExamplesSettled(w: Scope, examples: NewExample[], parallel = 8): Promise<NewExample[]> {
   const {catalog} = w;
@@ -35,18 +38,52 @@ export async function insertExamplesSettled(w: Scope, examples: NewExample[], pa
     }
     return false;
   };
-  const saveOne = async (e: NewExample) => {
-    const {features, fetchedAt, ...index} = e;
-    const doc: ExampleFeatures = {id: featureDocId(e.snapshotId, e.externalId), snapshotId: e.snapshotId, externalId: e.externalId, type: e.type, features, fetchedAt: fetchedAt ?? now()};
-    if (!(await settled(() => catalog.insert('example_features', doc), async () => !!(await catalog.get('example_features', doc.id))))) return false;
+  const featuresOf = (e: NewExample): ExampleFeatures => ({id: featureDocId(e.snapshotId, e.externalId), snapshotId: e.snapshotId, externalId: e.externalId, type: e.type, features: e.features, fetchedAt: e.fetchedAt ?? now()});
+  const saveIndex = (e: NewExample) => {
+    const {features: _features, fetchedAt: _fetchedAt, ...index} = e;
     return settled(() => catalog.insert('examples', index as Example), async () => !!(await catalog.get('examples', e.id)));
   };
+  const saveOne = async (e: NewExample) => {
+    const doc = featuresOf(e);
+    if (!(await settled(() => catalog.insert('example_features', doc), async () => !!(await catalog.get('example_features', doc.id))))) return false;
+    return saveIndex(e);
+  };
+  /** One batch's features in one write, tried once more; null: not stored. */
+  const putFeatures = async (store: FeatureStorePort, batch: NewExample[]) => {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await store.putBatch(batch[0].snapshotId, batch.map(featuresOf));
+      } catch {
+        // A segment written on a failed way back is never referenced: nothing reads it.
+      }
+    }
+    return null;
+  };
   const saved: NewExample[] = [];
-  for (let i = 0; i < examples.length; i += parallel) {
-    const batch = examples.slice(i, i + parallel);
-    const ok = await Promise.all(batch.map(saveOne));
-    batch.forEach((e, k) => ok[k] && saved.push(e));
-  }
+  const saveAll = async (list: NewExample[], one: (e: NewExample) => Promise<boolean>) => {
+    for (let i = 0; i < list.length; i += parallel) {
+      const batch = list.slice(i, i + parallel);
+      const ok = await Promise.all(batch.map(one));
+      batch.forEach((e, k) => ok[k] && saved.push(e));
+    }
+  };
+  if (w.features) {
+    const size = Math.max(1, systemConfig().dataset.featureBatch);
+    const bySnapshot = new Map<string, NewExample[]>();
+    for (const e of examples) bySnapshot.set(e.snapshotId, [...(bySnapshot.get(e.snapshotId) ?? []), e]);
+    for (const list of bySnapshot.values()) {
+      for (let i = 0; i < list.length; i += size) {
+        const batch = list.slice(i, i + size);
+        const refs = await putFeatures(w.features, batch);
+        if (!refs) continue;
+        for (const e of batch) {
+          const ref = refs[e.externalId];
+          if (ref) e.featureRef = ref;
+        }
+        await saveAll(batch, saveIndex);
+      }
+    }
+  } else await saveAll(examples, saveOne);
   if (saved.length < examples.length) w.tm.event('examples_not_saved', {count: examples.length - saved.length});
   return saved;
 }
