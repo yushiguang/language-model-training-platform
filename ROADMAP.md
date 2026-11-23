@@ -13,8 +13,8 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
   the job queue with per-key limits and the queue position on pages, is merged (#66); step 4,
   tenant models (managed by tenant admins, read per tenant by the gateway) and limits per tenant
   and endpoint, is merged (#69); step 6, notifications when scoring or Auto Optimise ends, is
-  merged (#71). Step 5, the Optimiser as a chain of jobs, is next. Step 7, the storage ports, is
-  in progress.
+  merged (#71); step 7, object storage for feature snapshots and model answers, is merged (#72).
+  Step 5, the Optimiser as a chain of jobs, is next.
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
   tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are merged (see Done);
   step 3, action tools, is next, with their cards drawn on the UI design first.
@@ -33,6 +33,8 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Done
 
+- 2026-11-23: object storage (#59 step 7): `ObjectStorePort`; frozen features and model answers
+  packed in segment files when the platform has object storage (#72, #74, #77).
 - 2026-11-23: tenant models and limits per tenant and endpoint (#59 step 4): tenant admins add,
   change, remove and pick the default model; new projects use the default; the gateway reads
   each tenant's models without a restart and counts limits per tenant (#69, #70).

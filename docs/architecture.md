@@ -49,7 +49,7 @@ without the bff or the pages changing.
 | App | Owns | Contract |
 |---|---|---|
 | `llm-gateway` | Endpoint registry; one limiter per endpoint; per-call retries; token and cost accounting | `LlmGatewayContract` (`gateway-api.ts`) |
-| `labeling` | Collections `labeling_tasks`, `predictions`. Runs tasks | `LabelingContract` (`labeling-api.ts`) |
+| `labeling` | Tasks and answers through `LabelingStorePort`: collections `labeling_tasks`, `predictions` (`docLabelingStore`), or answers in object-storage segment files with `prediction_segments` pointers (`objectLabelingStore`, #72). Runs tasks | `LabelingContract` (`labeling-api.ts`) |
 | `catalog` | All product collections (`CatalogRecords` in `catalog-api.ts`). Assigns version numbers | `CatalogContract` |
 | `agents` | Agent presets and the turn/handoff logic. Stateless | `AgentRuntimeContract` (`agent-api.ts`) |
 | `optimiser` | The Auto Optimise loop and the `optimisation_runs` records. Asks the workflow (through `OptimiserHost`) to save a version, label examples and build a score | `OptimiserContract` (`optimiser-api.ts`) |
