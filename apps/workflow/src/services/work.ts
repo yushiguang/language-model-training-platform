@@ -165,7 +165,8 @@ export async function drive(w: Scope, state: ProjectState) {
   // Reports for scoring that finished while no page built them cost nothing: always built.
   // None while a label set is unfinished: no score can be made then (docs/design/server.md 4.3).
   if (state.setup?.schema && state.scoring.ready) {
-    for (const r of state.runs.filter(r => r.state === 'done')) {
+    const models = new Set(state.setup.models.map(m => m.endpoint));
+    for (const r of state.runs.filter(r => r.state === 'done' && models.has(r.endpoint))) {
       // Only a first report: one a gold edit archived is rebuilt by the next reader of scores (lazy).
       if (state.reports.some(x => x.promptVersionId === r.promptVersionId && x.endpoint === r.endpoint)) continue;
       const v = state.versions.find(v => v.id === r.promptVersionId);

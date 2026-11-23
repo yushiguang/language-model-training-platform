@@ -982,6 +982,7 @@ test('scores wait for every label set; a new basis leaves old scores out of date
   await until(async () => !(await w.state()).scoresUpdating, 'rescored');
   await w.jobs.idle();
   s = await w.state();
+  assert.equal(s.scoring.rescoring, false, 'the flag comes down when the job ends');
   const current = s.reports.filter(r => !r.archivedNow);
   assert.equal(current.length, 1);
   assert.equal(s.runs.length, runsBefore, 'nothing is labeled again');
@@ -1074,6 +1075,20 @@ test('Rescore after a removal: out of date for its samples, worked out again wit
   s = await w.state();
   assert.equal(s.scoresUpdating, false);
   assert.equal(s.reports.filter(r => !r.archivedNow && r.promptVersionId === v1.id).length, 1, 'one current report: the second replaced the first');
+});
+
+test('a finished label set too small to score (fewer than 2 per half) lists nothing as out of date and refuses Rescore', async () => {
+  const w = await world('sc3', {macroF1: 0.5});
+  const {createLabelSet} = await import('./label-sets.ts');
+  const {rescore} = await import('./scores.ts');
+  await w.newVersion();
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'scored on the labeled samples (no label set yet)');
+  await createLabelSet(w.ws, {projectId: w.projectId, count: 3});
+  const s = await w.state();
+  assert.equal(s.scoring.ready, true);
+  assert.deepEqual(s.scoring.staleVersionIds, []);
+  await assert.rejects(rescore(w.ws, w.projectId), /more gold-labeled samples/);
 });
 
 test('removing examples leaves a trail with half and gold label, moves no other example, and can be undone', async () => {
