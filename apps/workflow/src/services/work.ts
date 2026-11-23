@@ -270,12 +270,20 @@ export async function queueOptimiserLabeling(w: Scope, setup: SetupVersion, vers
   // waited on: its job does not go on with this run. The run then uses a task of its own, queued
   // behind that job on the model's key, which reuses those answers.
   const usable = (t: LabelingTask | null): t is LabelingTask => !!t && (t.state === 'done' || (jobOf(t) ? jobOf(t)!.args.optimiserRunId === runId : !t.stopRequested));
-  const shared = await findTask(w, projectId, version, endpoint, hash, exampleIds, ['eval', 'optimiser']);
-  let task = usable(shared) ? shared : null;
-  if (!task) {
-    const own = (await w.labeling.listTasks(projectId)).filter(t => t.purpose === 'optimiser' && t.promptVersionId === version.id && t.endpoint === endpoint && t.settingsHash === hash && t.exampleIds.length === exampleIds.length && exampleIds.every(id => t.exampleIds.includes(id)));
-    task = own.find(usable) ?? null;
-  }
+  // Every task over these examples, version, model and settings, newest first. A done one wins
+  // (a newer unfinished one never hides it), then one this run's own job labels, then an idle
+  // one, the run's own kind first.
+  const want = new Set(exampleIds);
+  const matching = (await w.labeling.listTasks(projectId)).filter(
+    t => (t.purpose === 'eval' || t.purpose === 'optimiser') && t.promptVersionId === version.id && t.endpoint === endpoint && t.settingsHash === hash && t.exampleIds.length === want.size && t.exampleIds.every(id => want.has(id)),
+  );
+  const shared = matching[0] ?? null;
+  let task =
+    matching.find(t => t.state === 'done') ??
+    matching.find(t => jobOf(t)?.args.optimiserRunId === runId) ??
+    matching.find(t => t.purpose === 'optimiser' && usable(t)) ??
+    matching.find(usable) ??
+    null;
   if (task?.state === 'done') return {state: 'done', task};
   if (task && jobOf(task)) return {state: 'queued', taskId: task.id};
   if (!req.start) return {state: 'unfinished', task: task ?? shared, error: task ? (task.error ?? `the labeling ended as ${task.state}`) : 'the labeling was never started'};
@@ -369,10 +377,23 @@ async function saveStop(w: Scope, projectId: string, runId: string, endpoint: En
   });
   if (locked === 'saved') return 'saved';
   if (locked === 'ended') return null;
-  // A runner holds the run (the lock is busy): it reads the request before its next save.
-  if (!open(await optimiser.getRun(runId))) return null;
+  // The lock is busy: ask first, so a runner that holds (or just took) the run reads the request
+  // before its next save. A run that is not running has no runner (another run of the same model
+  // holds the lock): it is stopped here. If the lock is free by then, it is stopped here too.
+  const now = await optimiser.getRun(runId);
+  if (!open(now)) return null;
   await w.catalog.patch('optimisation_runs', runId, {stopRequested: true});
-  return 'asked';
+  if (now.state !== 'running') {
+    await endStopped(w, {...now, stopRequested: true});
+    return 'saved';
+  }
+  const after = await w.locks.run(optimiserLock(projectId, endpoint), async () => {
+    const run = await optimiser.getRun(runId);
+    if (!open(run) || (await optimiser.isRunning(runId))) return 'asked' as const;
+    await endStopped(w, run);
+    return 'saved' as const;
+  });
+  return after ?? 'asked';
 }
 
 /** Saves a run with no runner as stopped (its round in progress too) and records its end. */
@@ -387,6 +408,8 @@ async function endStopped(w: Scope, run: OptimisationRun) {
 export async function retryOptimiser(w: Scope, projectId: string, runId: string): Promise<{runId: string}> {
   const run = await runOf(w, projectId, runId);
   if (!['failed', 'paused', 'running'].includes(run.state)) throw new Error('This run has ended.');
+  // A Stop request left on a run that had already ended its try is not this Retry's.
+  if (run.state !== 'running' && run.stopRequested) await w.catalog.patch('optimisation_runs', runId, {stopRequested: false});
   await queueRun(w, projectId, runId);
   return {runId};
 }

@@ -2584,3 +2584,48 @@ test('sample numbers: an older dataset is numbered once in saved order; added sa
   assert.deepEqual((await listSamples(w.ws, {projectId: w.projectId, query: 'new-b'})).items.map(x => x.number), [12]);
   assert.deepEqual((await listSamples(w.ws, {projectId: w.projectId, query: '4'})).items.map(x => x.externalId), ['3', '4'], 'number 4, and the sample whose ID is 4');
 });
+
+test('a run labeling examples a done task already has uses it, even when a newer task over them did not finish (#79)', async () => {
+  const w = await world('b79f', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf});
+  const v = await w.newVersion();
+  const s0 = await w.state();
+  const ids = s0.examples.map(e => e.id).slice(0, 3);
+  const make = () => w.labeling.createTask({projectId: w.projectId, tenantId: 'default', purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: ids, createdBy: 'Tester'});
+  const repo = new DocRepo(w.db);
+  const done = await make();
+  await repo.patch('labeling_tasks', done.id, {state: 'done', done: ids.length});
+  const newer = await make();
+  await repo.patch('labeling_tasks', newer.id, {state: 'failed', error: 'the model went away'});
+  const {queueOptimiserLabeling} = await import('./work.ts');
+  const {id: runId} = await w.ws.optimiser!.startRun(w.ws.ctx, {projectId: w.projectId, endpoint: 'A', maxRounds: 10});
+  const version = (await w.state()).versions.find(x => x.id === v.id)!;
+  const got = await queueOptimiserLabeling(w.ws, s0.setup!, version, {projectId: w.projectId, promptVersionId: v.id, endpoint: 'A', exampleIds: ids, runId, at: {round: 1, step: 'dry_run'}, start: false});
+  assert.equal(got.state, 'done');
+  assert.equal(got.state === 'done' && got.task.id, done.id);
+});
+
+test('Stop on a Failed run while another run of the same model holds the lock stops it; nothing is left asked (#79)', async () => {
+  const w = await world('b79g', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf});
+  await w.newVersion();
+  const {stopOptimiser, retryOptimiser} = await import('./work.ts');
+  const {id: runId} = await w.ws.optimiser!.startRun(w.ws.ctx, {projectId: w.projectId, endpoint: 'A', maxRounds: 10});
+  await w.catalog.patch('optimisation_runs', runId, {state: 'failed', error: 'the model went away'});
+  await w.ws.locks.run(`optimiser:${w.projectId}:A`, async () => {
+    await stopOptimiser(w.ws, w.projectId, runId);
+  });
+  const run = (await w.state()).optimisation.find(o => o.id === runId)!;
+  assert.deepEqual([run.state, run.stopReason], ['stopped', 'user']);
+  await assert.rejects(retryOptimiser(w.ws, w.projectId, runId), /has ended/);
+});
+
+test('Retry on a Failed run clears a Stop request left on it, so the retried run goes on (#79)', async () => {
+  const w = await world('b79h', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf});
+  await w.newVersion();
+  const {retryOptimiser} = await import('./work.ts');
+  const {id: runId} = await w.ws.optimiser!.startRun(w.ws.ctx, {projectId: w.projectId, endpoint: 'A', maxRounds: 10});
+  await w.catalog.patch('optimisation_runs', runId, {state: 'failed', error: 'the model went away', stopRequested: true});
+  await retryOptimiser(w.ws, w.projectId, runId);
+  await w.jobs.idle();
+  const run = (await w.state()).optimisation.find(o => o.id === runId)!;
+  assert.deepEqual([run.state, run.stopReason], ['done', 'passes']);
+});
