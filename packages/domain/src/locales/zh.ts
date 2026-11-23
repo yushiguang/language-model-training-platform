@@ -175,7 +175,7 @@ export const ZH: Readonly<Record<string, string>> = {
   "{who} stopped scoring a version": "{who}停止了一个版本的评分",
   "{who} sent a problem report {ticket}": "{who}发送了问题报告 {ticket}",
   "{who} saved it as {version}": "{who}把它保存为 {version}",
-  "{who} approved the prompt as {version}": "{who}把提示词批准为 {version}",
+  "{who} saved the prompt as {version}": "{who}把提示词保存为 {version}",
   "{who} tried the prompt on 1 eval example with {model}": "{who}用 {model} 在 1 个评测样本上试用了提示词",
   "{who} tried the prompt on {n} eval examples with {model}": "{who}用 {model} 在 {n} 个评测样本上试用了提示词",
   "{who} started scoring {version} on {model}": "{who}开始用 {model} 给 {version} 评分",
