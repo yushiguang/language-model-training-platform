@@ -5,7 +5,7 @@ import {Button, Heading, HStack, Icon, Link, Text, TextArea, VStack} from '@/ui/
 import {ArrowTopRightOnSquareIcon, CheckCircleIcon, LockClosedIcon} from '@heroicons/react/24/outline';
 import type {PermissionPoint} from '@yushiguang/sprint-contracts';
 import {requestAccess} from '@/backend-api';
-import {clearAccessDenied, useAccessDenied} from '@/ui';
+import {accessDeniedText, clearAccessDenied, useAccessDenied} from '@/ui';
 import {t} from '@/i18n';
 import {useRuntime} from '../session';
 import {FormDialog} from './dialogs';
@@ -31,7 +31,7 @@ function NoAccessDialog({permission, project, onClose}: {permission: PermissionP
   const [sending, setSending] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
   const [sent, setSent] = useState<{trackUrl?: string} | null>(null);
-  const text = words(permission, tenant, permission === 'project_write' ? project?.name : undefined);
+  const text = {...words(permission, tenant, permission === 'project_write' ? project?.name : undefined), ...accessDeniedText()};
 
   const send = async () => {
     setSending(true);
