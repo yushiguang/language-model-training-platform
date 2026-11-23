@@ -347,7 +347,7 @@ export interface ConfigReader {
 | `LabelCallRequest`、对话请求和 `TryTemplateInput`（Prompt helper 的试跑）带 `tenantId`；模型按租户读取；`LabelingModels` / `AgentModel` 接受动态 endpoint；限流键改为“租户 + endpoint” | 破坏性：部署方的网关适配和限流存储要改（第 4 步，#69 已完成） |
 | 模型管理接口 `listModels` / `addModel` / `updateModel` / `removeModel` / `setDefaultModel`；`CatalogContract.remove('tenant_models', id)` | 新增（第 4 步，#69 已完成） |
 | `ObjectStorePort`（`Platform.objectStore` 可选）；基于它的 `LabelingStorePort`、`FeatureStorePort`；`Example.featureRef` 可选 | 新增（第 7 步，#72） |
-| `Example.number`（样本序号，可选，旧样本第一次读时补上）、`LabelSet` 和 catalog 的 `label_sets` 集合、`CatalogContract.page`（分页读取） | 新增：catalog 在本仓库实现，部署方的文档库适配器不用改（第 8 步，#82） |
+| `Example.number`（样本序号，可选，旧样本第一次读时补上）、`DatasetSnapshot.numbered`、`LabelSet` 和 catalog 的 `label_sets` 集合、`CatalogContract.page`（分页读取） | 新增：catalog 在本仓库实现，部署方的文档库适配器不用改（第 8 步，#82） |
 
 ## 11. 交付计划
 

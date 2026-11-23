@@ -208,7 +208,8 @@ export interface Example {
    * The sample number in its dataset (docs/design/server.md 4.2): from 1, in the order examples
    * were added, and never changed: removing an example leaves the others' numbers as they are,
    * and label sets are ranges of these numbers. An example whose save failed leaves its number
-   * unused. Missing on examples saved before numbers; the workflow numbers them on first read.
+   * unused. Missing on examples saved before numbers; the workflow numbers them on first read
+   * (see `DatasetSnapshot.numbered`).
    */
   number?: number;
   externalId: string;
@@ -342,6 +343,12 @@ export interface DatasetSnapshot {
   id: string;
   projectId: string;
   number: number;
+  /**
+   * Every example of this dataset has its `number` and an explicit `removed` (docs/design/server.md
+   * 4.2), so pages can filter and page them in the store. Missing on datasets made before numbers:
+   * the workflow numbers their examples on first read, then sets it.
+   */
+  numbered?: boolean;
   /** 'sources': taken from the tenant's data sources (#29). 'sample' and 'upload' are older datasets. */
   source: 'sources' | 'sample' | 'upload';
   sourceName: string;
