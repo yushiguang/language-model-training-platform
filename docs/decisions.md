@@ -3,6 +3,11 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-23 (Tenant models, #69)
+
+- **A tenant calls its own models and the platform's defaults.** Projects store the model's generated id, never the Endpoint text, so job keys and limits never collide or break on odd characters. The gateway reads a tenant's models per tenant and keeps them 30 s, and reads again at once for an id it does not hold, so an added model works without a restart.
+- **Rate limits are counted per tenant and endpoint**, also on the platform's defaults: a tenant's registered QPM/TPM is its own, and a busy reply slows down only that tenant.
+
 ## 2026-11-22 (Server design after the frontend review, #59)
 
 - **Three permission points only**: read (every tenant member), project write (requested; the creator and labelers get it), tenant write (tenant admins). All are kept on an external permission platform; the gateway checks each interface, and the server checks again through `AuthorizationPort` because agent tools and jobs bypass the gateway.

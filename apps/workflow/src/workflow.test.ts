@@ -374,7 +374,7 @@ test('page views carry the place of waiting work in its queue (#66)', async () =
   const {api, catalog, jobs, labeling} = world('wf-queue', noHelpers);
   const ctx = inTenant(alice, 't1');
   const p = await api.createProject(ctx, 'Queued');
-  const task = (n: number) => labeling.createTask({projectId: p.id, purpose: 'eval', promptVersionId: `pv_${n}`, setupVersionId: 'sv_1', endpoint: 'A', settings: {endpoint: 'A', maxOutputTokens: 150, temperature: null}, exampleIds: ['ex_1'], createdBy: 'Ann'});
+  const task = (n: number) => labeling.createTask({projectId: p.id, tenantId: 't1', purpose: 'eval', promptVersionId: `pv_${n}`, setupVersionId: 'sv_1', endpoint: 'A', settings: {endpoint: 'A', maxOutputTokens: 150, temperature: null}, exampleIds: ['ex_1'], createdBy: 'Ann'});
   const [a, b] = [await task(1), await task(2)];
   await catalog.insert('optimisation_runs', {id: 'or_1', projectId: p.id, endpoint: 'A', startVersionId: 'pv_1', major: 2, maxRounds: 10, round: 0, state: 'running', step: null, stepStartedAt: null, stepVersionId: null, history: [], calls: 0, candidates: 0, costUsd: 0, stopReason: null, error: null, startedAt: '', finishedAt: null});
   const key = 'model:t1:A';

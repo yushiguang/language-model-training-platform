@@ -411,6 +411,21 @@ test('createAgentRuntime: calls are plain data; progress goes to the injected po
 });
 
 
+test('createAgentRuntime: every model call of a turn carries the request\'s tenant, so the gateway counts it there (docs/design/server.md, 9)', async () => {
+  const base = scriptedAgent();
+  const tenants: (string | undefined)[] = [];
+  const llm = {
+    ...base,
+    chat: (m: Parameters<typeof base.chat>[0], o?: Parameters<typeof base.chat>[1]) => (tenants.push(o?.tenantId), base.chat(m, o)),
+    chatStream: (m: Parameters<typeof base.chatStream>[0], o?: Parameters<typeof base.chatStream>[1]) => (tenants.push(o?.tenantId), base.chatStream(m, o)),
+  };
+  const rt = createAgentRuntime({llm, tools: {call: async () => ({})}});
+  const ctx = {requestId: 'rq_1', user: {id: 'u_1', name: 'Ann'}, tenantId: 't7'};
+  await rt.runTurn({userText: 'Please add value "News" to primary_value', page: {label: 'Prompt Design', agent: 'front_desk' as const, intent: 'answer', context: {}}, workspace: {projectId: 'pr_1', task: '', prompt: null, history: [], pageView: null}, turnId: 't_1', ctx});
+  assert.ok(tenants.length > 0);
+  assert.ok(tenants.every(t => t === 't7'), tenants.join());
+});
+
 test('problem reports (1.1.0): every helper has report_problem, the Optimiser does not; the prompt says when to send', () => {
   for (const p of ['front_desk', 'prompt_agent', 'evaluation_agent'] as const) assert.ok(PRESETS[p].tools.includes('report_problem'), p);
   assert.ok(!PRESETS.optimiser.tools.includes('report_problem'));

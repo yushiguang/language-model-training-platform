@@ -25,6 +25,7 @@ const ID_PREFIX: Record<CatalogKind, string> = {
   source_files: 'sf',
   source_chunks: 'sc',
   source_cuts: 'cut',
+  tenant_models: 'model',
 };
 
 /** Every kind whose records carry their project's id (all but projects, examples and their features). */

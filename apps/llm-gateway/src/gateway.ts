@@ -15,6 +15,8 @@ import {
   type Platform,
   NO_TELEMETRY,
   type TelemetryPort,
+  type TenantModel,
+  type TenantModelSource,
 } from '@yushiguang/sprint-contracts';
 import {estimateTokens, systemConfig} from '@yushiguang/sprint-domain';
 import {EndpointLimiter} from './limiter.ts';
@@ -37,7 +39,41 @@ export interface GatewayOptions {
   /** How often a waiting call asks the store again (default 250 ms; tests shorten it). */
   limiterPollMs?: number;
   telemetry?: TelemetryPort;
+  /**
+   * Each tenant's own models (docs/design/server.md, 9). Left out, tenants have only the
+   * platform's defaults.
+   */
+  tenantModels?: TenantModelSource;
 }
+
+/** A tenant that names none (older records, calls with no tenant). */
+const NO_TENANT = 'default';
+/** Tenant model ids are not label values: their calls share one. */
+const TENANT_LABEL = 'tenant_model';
+
+/** A tenant model as the gateway calls it: its own limits, no price (it has none), no temperature. */
+function tenantEndpoint(m: TenantModel): EndpointConfig {
+  const l = systemConfig().gateway.unknownModelLimits;
+  return {
+    id: m.id,
+    tenantId: m.tenantId,
+    endpoint: m.endpoint,
+    purpose: 'labeling',
+    model: m.name,
+    tier: l.tier,
+    slot: m.id,
+    qpm: m.qpm,
+    tpm: m.tpm,
+    maxConcurrency: l.maxConcurrency,
+    priceIn: 0,
+    priceOut: 0,
+    supportsTemperature: false,
+    active: m.qpm > 0 && m.tpm > 0,
+    assumed: false,
+  };
+}
+
+const tenantInfo = (m: TenantModel): EndpointInfo => ({id: m.id, name: m.name, description: '', badge: '', cost: 'Lower', speed: 'Faster', supportsTemperature: false, priceIn: 0, priceOut: 0});
 
 
 const abortableSleep = (ms: number, signal?: AbortSignal) =>
@@ -85,12 +121,15 @@ async function withTimeout<T>(ep: EndpointConfig, timeoutMs: number | undefined,
  */
 export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'endpoints' | 'limiterStore'>, opts: GatewayOptions = {}): LlmGatewayContract {
   const registry = buildRegistry(platform);
+  // Metric labels: a registry endpoint's own id and model; a tenant model's are not label values.
+  const metricId = (ep: EndpointConfig) => (ep.tenantId ? TENANT_LABEL : ep.id);
+  const metricModel = (ep: EndpointConfig) => (ep.tenantId ? TENANT_LABEL : ep.model);
   const store = opts.limiterStore ?? platform.limiterStore;
   if (!store) throw new Error('The gateway needs a limiter store (Platform.limiterStore, or memoryLimiterStore() for one process).');
   const tm = opts.telemetry ?? NO_TELEMETRY;
   // Endpoint ids and models are label values; only the registry's own may appear.
-  tm.allowLabelValues('endpoint', registry.map(e => e.id));
-  tm.allowLabelValues('model', registry.map(e => e.model));
+  tm.allowLabelValues('endpoint', [...registry.map(e => e.id), TENANT_LABEL]);
+  tm.allowLabelValues('model', [...registry.map(e => e.model), TENANT_LABEL]);
   // Labeling endpoint ids are the `slot` label of product events (spec 5: no fixed list).
   tm.allowLabelValues('slot', platform.models.endpoints().map(e => e.id));
   for (const ep of registry)
@@ -125,42 +164,123 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
       if (!set.size) running.delete(requestId);
     }
   }
-  const limiterFor = (ep: EndpointConfig) => {
-    let l = limiters.get(ep.id);
-    if (!l) {
-      l = new EndpointLimiter({store, key: ep.id, qpm: ep.qpm, tpm: ep.tpm, maxConcurrency: ep.maxConcurrency, windowMs: opts.windowMs ?? systemConfig().gateway.windowMs, pollMs: opts.limiterPollMs});
-      limiters.set(ep.id, l);
+  /**
+   * The limiter of one endpoint for one tenant (docs/design/server.md, 9): counted under
+   * `<tenantId>:<endpointId>`, so tenants on the same endpoint never share a budget or a slowdown.
+   * A tenant model whose limits changed gets a limiter with the new ones on the same key.
+   */
+  const limiterFor = (tenantId: string, ep: EndpointConfig) => {
+    const key = `${tenantId}:${ep.id}`;
+    let l = limiters.get(key);
+    if (!l || l.qpm !== ep.qpm || l.tpm !== ep.tpm || l.maxConcurrency !== Math.max(1, ep.maxConcurrency)) {
+      l = new EndpointLimiter({store, key, qpm: ep.qpm, tpm: ep.tpm, maxConcurrency: ep.maxConcurrency, windowMs: opts.windowMs ?? systemConfig().gateway.windowMs, pollMs: opts.limiterPollMs});
+      limiters.set(key, l);
     }
     return l;
   };
+
+  /**
+   * Each tenant's models, read through the source and kept for `gateway.tenantModelsTtlMs`. One
+   * read at a time per tenant; a failed read keeps what was read before (or fails the call when
+   * nothing was). `forgetTenant` moves the tenant to a new generation: a read started before it
+   * neither fills the cache nor is shared with calls after it, so a change is never undone by an
+   * older answer.
+   */
+  type TenantEntry = {at: number; models: EndpointConfig[]; infos: EndpointInfo[]};
+  const tenantCache = new Map<string, TenantEntry>();
+  const reading = new Map<string, Promise<TenantEntry>>();
+  const generation = new Map<string, number>();
+  /** After a failed read with a list in hand: no new read before this time, the old list serves. */
+  const retryAfter = new Map<string, number>();
+  const FAILED_READ_WAIT_MS = 5000;
+  const readTenant = (tenantId: string) => {
+    let r = reading.get(tenantId);
+    if (!r) {
+      const gen = generation.get(tenantId) ?? 0;
+      const read: Promise<TenantEntry> = (async () => {
+        const list = opts.tenantModels ? await opts.tenantModels.list(tenantId) : [];
+        const own = list.filter(m => m.tenantId === tenantId).sort((a, b) => Number(b.default) - Number(a.default) || a.createdAt.localeCompare(b.createdAt));
+        const entry = {at: Date.now(), models: own.map(tenantEndpoint), infos: own.map(tenantInfo)};
+        if ((generation.get(tenantId) ?? 0) === gen) tenantCache.set(tenantId, entry);
+        return entry;
+      })().finally(() => {
+        if (reading.get(tenantId) === read) reading.delete(tenantId);
+      });
+      reading.set(tenantId, read);
+      r = read;
+    }
+    return r;
+  };
+  /** `fresh`: read again unless the last read is under a second old (an id it did not hold). */
+  async function tenantModelsOf(tenantId: string, fresh = false) {
+    if (!opts.tenantModels) return {at: 0, models: [], infos: []} as TenantEntry;
+    const hit = tenantCache.get(tenantId);
+    const age = hit ? Date.now() - hit.at : Infinity;
+    if (hit && age < (fresh ? 1000 : systemConfig().gateway.tenantModelsTtlMs)) return hit;
+    if (hit && (retryAfter.get(tenantId) ?? 0) > Date.now()) return hit;
+    const gen = generation.get(tenantId) ?? 0;
+    try {
+      return await readTenant(tenantId);
+    } catch (e) {
+      // The store is failing: the old list serves for a while, so calls do not all wait on it.
+      if (hit && (generation.get(tenantId) ?? 0) === gen) {
+        retryAfter.set(tenantId, Date.now() + FAILED_READ_WAIT_MS);
+        return hit;
+      }
+      throw new LlmCallError('server', `The models of tenant ${tenantId} could not be read: ${(e as Error).message ?? String(e)}`);
+    }
+  }
+
+  /**
+   * A model of the tenant's own, found in the cache or, for an id the cache lacks, in a read made
+   * at once (a model added since the last read works without waiting).
+   */
+  async function ownModel(tenantId: string, id: string): Promise<EndpointConfig | undefined> {
+    if (!opts.tenantModels) return undefined;
+    return (await tenantModelsOf(tenantId)).models.find(e => e.id === id) ?? (await tenantModelsOf(tenantId, true)).models.find(e => e.id === id);
+  }
+
+  /**
+   * A labeling model the tenant may call: a platform default, else its own. The defaults are looked
+   * up first, so they keep working while the tenant's models cannot be read; tenant model ids are
+   * generated (`model_…`) and never take a default's id.
+   */
+  async function labelingEndpointFor(tenantId: string, id: string): Promise<EndpointConfig> {
+    const ep = registry.find(e => e.purpose === 'labeling' && e.slot === id) ?? (await ownModel(tenantId, id));
+    if (!ep) throw new LlmCallError('rejected', `Model ${id} is not one of this tenant's models.`);
+    return ep;
+  }
 
   /** The endpoint's gauges, across every process sharing the store (read in the background). */
   const sample = (ep: EndpointConfig, l: EndpointLimiter) =>
     void l.stats().then(
       st => {
-        tm.gauge('sprint_llm_limiter_queue_length', st.waiting, {endpoint: ep.id});
-        tm.gauge('sprint_llm_in_flight', st.inFlight, {endpoint: ep.id});
-        tm.gauge('sprint_llm_concurrency_limit', st.concurrency, {endpoint: ep.id});
-        tm.gauge('sprint_llm_qpm_used_ratio', ep.qpm ? st.requestsInWindow / ep.qpm : 0, {endpoint: ep.id});
-        tm.gauge('sprint_llm_tpm_used_ratio', ep.tpm ? st.tokensInWindow / ep.tpm : 0, {endpoint: ep.id});
+        const endpoint = metricId(ep);
+        tm.gauge('sprint_llm_limiter_queue_length', st.waiting, {endpoint});
+        tm.gauge('sprint_llm_in_flight', st.inFlight, {endpoint});
+        tm.gauge('sprint_llm_concurrency_limit', st.concurrency, {endpoint});
+        tm.gauge('sprint_llm_qpm_used_ratio', ep.qpm ? st.requestsInWindow / ep.qpm : 0, {endpoint});
+        tm.gauge('sprint_llm_tpm_used_ratio', ep.tpm ? st.tokensInWindow / ep.tpm : 0, {endpoint});
       },
       () => undefined,
     );
 
   /** Runs one call under the endpoint's limiter, retrying busy or broken replies. */
-  async function call<T>(ep: EndpointConfig, estimate: number, signal: AbortSignal | undefined, fn: (signal?: AbortSignal) => Promise<{value: T; tokens?: number}>, timeoutMs?: number): Promise<{value: T; attempts: number}> {
+  async function call<T>(tenantId: string, ep: EndpointConfig, estimate: number, signal: AbortSignal | undefined, fn: (signal?: AbortSignal) => Promise<{value: T; tokens?: number}>, timeoutMs?: number): Promise<{value: T; attempts: number}> {
     const purpose = ep.purpose;
+    const id = metricId(ep);
+    const model = metricModel(ep);
     const started = Date.now();
     const done = (outcome: string) => {
-      tm.counter('sprint_llm_calls_total', {endpoint: ep.id, purpose, outcome});
-      tm.histogram('sprint_llm_call_duration_seconds', (Date.now() - started) / 1000, {endpoint: ep.id, purpose});
+      tm.counter('sprint_llm_calls_total', {endpoint: id, purpose, outcome});
+      tm.histogram('sprint_llm_call_duration_seconds', (Date.now() - started) / 1000, {endpoint: id, purpose});
     };
     if (!ep.active) {
       done('rejected');
-      throw new LlmCallError('rejected', `Endpoint ${ep.id} (${ep.model}) is not active.`);
+      throw new LlmCallError('rejected', `${ep.model} is not active.`);
     }
-    tm.histogram('sprint_llm_request_tokens', estimate, {endpoint: ep.id, purpose});
-    const limiter = limiterFor(ep);
+    tm.histogram('sprint_llm_request_tokens', estimate, {endpoint: id, purpose});
+    const limiter = limiterFor(tenantId, ep);
     let last: unknown;
     for (let attempt = 0; attempt <= delays.length; attempt++) {
       const asked = Date.now();
@@ -171,14 +291,14 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
         done('aborted');
         throw e;
       }
-      tm.histogram('sprint_llm_limiter_wait_seconds', (Date.now() - asked) / 1000, {endpoint: ep.id});
+      tm.histogram('sprint_llm_limiter_wait_seconds', (Date.now() - asked) / 1000, {endpoint: id});
       sample(ep, limiter);
       const sent = Date.now();
       try {
         const {value, tokens} = await withTimeout(ep, timeoutMs, signal, fn);
         permit.release(tokens);
-        tm.counter('sprint_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose, outcome: 'ok'});
-        tm.histogram('sprint_llm_request_duration_seconds', (Date.now() - sent) / 1000, {endpoint: ep.id, model: ep.model, purpose});
+        tm.counter('sprint_llm_requests_total', {endpoint: id, model, purpose, outcome: 'ok'});
+        tm.histogram('sprint_llm_request_duration_seconds', (Date.now() - sent) / 1000, {endpoint: id, model, purpose});
         sample(ep, limiter);
         done('ok');
         return {value, attempts: attempt + 1};
@@ -190,8 +310,8 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
         if (kind === 'rate_limited') await limiter.onRateLimited(retryAfter ?? delays[Math.min(attempt, delays.length - 1)] ?? 1000).catch(() => undefined);
         permit.release();
         sample(ep, limiter);
-        tm.counter('sprint_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose, outcome: kind});
-        tm.histogram('sprint_llm_request_duration_seconds', (Date.now() - sent) / 1000, {endpoint: ep.id, model: ep.model, purpose});
+        tm.counter('sprint_llm_requests_total', {endpoint: id, model, purpose, outcome: kind});
+        tm.histogram('sprint_llm_request_duration_seconds', (Date.now() - sent) / 1000, {endpoint: id, model, purpose});
         if (kind === 'aborted') {
           done('aborted');
           throw e;
@@ -206,7 +326,7 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
         }
         last = e;
         if (attempt === delays.length) break;
-        tm.counter('sprint_llm_retries_total', {endpoint: ep.id, purpose, reason: kind});
+        tm.counter('sprint_llm_retries_total', {endpoint: id, purpose, reason: kind});
         await sleep(Math.max(delays[attempt], retryAfter ?? 0), signal);
       }
     }
@@ -216,7 +336,7 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
   }
 
   const usage = (ep: EndpointConfig, input: number, output: number, reasoning = 0) => {
-    const l = {endpoint: ep.id, model: ep.model, purpose: ep.purpose};
+    const l = {endpoint: metricId(ep), model: metricModel(ep), purpose: ep.purpose};
     tm.counter('sprint_llm_tokens_total', {...l, kind: 'input'}, input);
     tm.counter('sprint_llm_tokens_total', {...l, kind: 'output'}, output);
     if (reasoning) tm.counter('sprint_llm_tokens_total', {...l, kind: 'reasoning'}, reasoning);
@@ -230,12 +350,18 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
   const fitOptions = (ep: EndpointConfig, o: AgentChatOptions): AgentChatOptions => {
     const caps = ep.capabilities;
     if (o.tools?.length && caps && !caps.tools) throw new LlmCallError('rejected', `${ep.model} cannot call tools natively.`);
-    const {reasoningEffort, ...rest} = o;
+    // `endpoint` is the gateway's to set: only a tenant model has one.
+    const {reasoningEffort, endpoint: _ignored, ...rest} = o;
     const effort = reasoningEffort && (!caps || caps.reasoningEffort.includes(reasoningEffort)) ? {reasoningEffort} : {};
-    return {...rest, ...effort, model: ep.model};
+    return {...rest, ...effort, model: ep.model, ...(ep.endpoint ? {endpoint: ep.endpoint} : {})};
   };
 
-  const chatEndpointFor = (model?: string): EndpointConfig => {
+  /** A chat call's endpoint: one of the tenant's models when `model` names one, else the registry's. */
+  const chatEndpointFor = async (tenantId: string, model?: string): Promise<EndpointConfig> => {
+    if (model && !registry.some(e => e.purpose === 'chat' && e.model === model)) {
+      const own = await ownModel(tenantId, model);
+      if (own?.active) return {...own, purpose: 'chat'};
+    }
     const chat = registry.filter(e => e.purpose === 'chat');
     const wanted = model ? chat.find(e => e.model === model) : undefined;
     if (wanted?.active) return wanted;
@@ -246,10 +372,12 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
   };
 
   async function complete(messages: ModelMessage[], o: AgentChatOptions = {}): Promise<AgentCompletionResult> {
-    const ep = chatEndpointFor(o.model);
+    const tenantId = o.tenantId ?? NO_TENANT;
+    const ep = await chatEndpointFor(tenantId, o.model);
     const fitted = fitOptions(ep, o);
     const estimate = estimateTokens(textOfMessages(messages)) + (o.maxOutputTokens ?? opts.defaultChatOutputTokens ?? 2000);
     const {value} = await call(
+      tenantId,
       ep,
       estimate,
       o.signal,
@@ -273,10 +401,12 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
       // chunk is retried like any call (a 429 slows the endpoint down); once text has come
       // back it is not, so nothing is shown twice. The slot's tokens are corrected to what the
       // stream returned (about 4 characters a token; streams carry no usage).
-      const ep = chatEndpointFor(o.model);
+      const tenantId = o.tenantId ?? NO_TENANT;
+      const ep = await chatEndpointFor(tenantId, o.model);
       // Native tools are for `complete`; a stream carries text and thinking only.
       const fitted = fitOptions(ep, {...o, tools: undefined});
-      const limiter = limiterFor(ep);
+      const limiter = limiterFor(tenantId, ep);
+      const labels = {endpoint: metricId(ep), model: metricModel(ep), purpose: ep.purpose};
       const estimate = estimateTokens(textOfMessages(messages)) + (o.maxOutputTokens ?? opts.defaultChatOutputTokens ?? 2000);
       const input = estimateTokens(textOfMessages(messages));
       for (let attempt = 0; ; attempt++) {
@@ -291,16 +421,16 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
             yield chunk;
           }
           permit.release(input + Math.ceil(chars / systemConfig().gateway.charsPerTokenEstimate));
-          tm.counter('sprint_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose: ep.purpose, outcome: 'ok'});
+          tm.counter('sprint_llm_requests_total', {...labels, outcome: 'ok'});
           return;
         } catch (e) {
           const kind = errorKindOf(e);
           const retryAfter = e instanceof LlmCallError ? e.retryAfterMs : undefined;
           if (kind === 'rate_limited') await limiter.onRateLimited(retryAfter ?? delays[Math.min(attempt, delays.length - 1)] ?? 1000).catch(() => undefined);
           permit.release(started ? input + Math.ceil(chars / systemConfig().gateway.charsPerTokenEstimate) : undefined);
-          tm.counter('sprint_llm_requests_total', {endpoint: ep.id, model: ep.model, purpose: ep.purpose, outcome: kind});
+          tm.counter('sprint_llm_requests_total', {...labels, outcome: kind});
           if (started || kind === 'aborted' || kind === 'rejected' || kind === 'filtered' || attempt >= delays.length) throw e;
-          tm.counter('sprint_llm_retries_total', {endpoint: ep.id, purpose: ep.purpose, reason: kind});
+          tm.counter('sprint_llm_retries_total', {endpoint: labels.endpoint, purpose: ep.purpose, reason: kind});
           await sleep(Math.max(delays[attempt], retryAfter ?? 0), o.signal);
         } finally {
           // The consumer can close this generator at the yield above (it throws on an error
@@ -312,29 +442,43 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
     },
   };
 
+  const labelingEndpoints = (): EndpointInfo[] =>
+    platform.models.endpoints().map(info => {
+      const ep = registry.find(e => e.purpose === 'labeling' && e.slot === info.id);
+      return ep ? {...info, priceIn: ep.priceIn, priceOut: ep.priceOut, supportsTemperature: ep.supportsTemperature} : info;
+    });
+
   return {
     endpoints: purpose => registry.filter(e => !purpose || e.purpose === purpose),
 
-    labelingEndpoints(): EndpointInfo[] {
-      const infos = platform.models.endpoints();
-      return infos.map(info => {
-        const ep = registry.find(e => e.purpose === 'labeling' && e.slot === info.id);
-        return ep ? {...info, priceIn: ep.priceIn, priceOut: ep.priceOut, supportsTemperature: ep.supportsTemperature} : info;
-      });
+    labelingEndpoints,
+
+    async labelingEndpointsFor(tenantId) {
+      return [...(await tenantModelsOf(tenantId)).infos, ...labelingEndpoints()];
+    },
+
+    forgetTenant(tenantId) {
+      generation.set(tenantId, (generation.get(tenantId) ?? 0) + 1);
+      tenantCache.delete(tenantId);
+      reading.delete(tenantId);
+      retryAfter.delete(tenantId);
     },
 
     async label(req: LabelCallRequest): Promise<LabelCallResult> {
-      const ep = registry.find(e => e.purpose === 'labeling' && e.slot === req.slot);
-      if (!ep) throw new LlmCallError('rejected', `No labeling endpoint is registered for Model ${req.slot}.`);
+      const tenantId = req.tenantId || NO_TENANT;
+      const ep = await labelingEndpointFor(tenantId, req.slot);
       const estimate = estimateTokens(textOfMessages(req.messages)) + req.maxOutputTokens;
       const {value, attempts} = await stoppable(req.requestId, outer =>
         call(
+          tenantId,
           ep,
           estimate,
           outer,
           async signal => {
             const r = await platform.models.chat({
-              endpoint: req.slot,
+              // What to call: the Endpoint the tenant admin entered, or the platform default's id.
+              endpoint: ep.endpoint ?? req.slot,
+              tenantId,
               messages: req.messages,
               maxOutputTokens: req.maxOutputTokens,
               temperature: req.temperature,

@@ -72,6 +72,11 @@ export interface SystemConfig {
     imageTokensEstimate: number;
     charsPerTokenEstimate: number;
     evalOutputTokensEstimate: number;
+    /**
+     * How long the gateway keeps a tenant's models before reading them again (docs/design/server.md,
+     * 9). A model id it has not seen is read at once, so a new model works immediately.
+     */
+    tenantModelsTtlMs: number;
   };
   agent: {
     maxToolCalls: number;

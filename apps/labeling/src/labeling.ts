@@ -343,6 +343,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         const parts = withReason(renderPrompt(version.template, ex, version.features, version.images));
         const res = await deps.gateway
           .label({
+            tenantId: task.tenantId ?? 'default',
             slot: task.endpoint,
             messages: await toMessages(parts, deps.resolveUrl),
             maxOutputTokens: task.settings.maxOutputTokens,
@@ -463,6 +464,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       const task: LabelingTask = {
         id: newId('lt'),
         projectId: input.projectId,
+        tenantId: input.tenantId,
         purpose: input.purpose,
         promptVersionId: input.promptVersionId,
         setupVersionId: input.setupVersionId,
@@ -578,6 +580,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           try {
             const parts = withReason(renderPrompt(input.template, ex, input.features, input.images));
             const res = await deps.gateway.label({
+              tenantId: input.tenantId,
               slot: input.settings.endpoint,
               messages: await toMessages(parts, deps.resolveUrl),
               maxOutputTokens: input.settings.maxOutputTokens,

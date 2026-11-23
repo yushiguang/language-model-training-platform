@@ -151,9 +151,9 @@ test('an automatic resume of a task the user started counts as automatic spend',
   const v = await w.newVersion();
   const s0 = await w.state();
   // The user started scoring, and the page closed after 4 examples.
-  const task = await w.labeling.createTask({projectId: w.projectId, purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: s0.examples.map(e => e.id).slice(0, 4), createdBy: 'Tester'});
+  const task = await w.labeling.createTask({projectId: w.projectId, tenantId: 'default', purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: s0.examples.map(e => e.id).slice(0, 4), createdBy: 'Tester'});
   await w.labeling.runTask(task.id, 'user');
-  const all = await w.labeling.createTask({projectId: w.projectId, purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: s0.examples.map(e => e.id), createdBy: 'Tester'});
+  const all = await w.labeling.createTask({projectId: w.projectId, tenantId: 'default', purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: s0.examples.map(e => e.id), createdBy: 'Tester'});
   await new DocRepo(w.db).patch('labeling_tasks', all.id, {state: 'paused', stopReason: 'closed', done: 4});
   const before = await w.state();
   await tick(w.ws, before);
@@ -168,7 +168,7 @@ test('two paused tasks of one version and model both resume in one check, each a
   const w = await world('b5b');
   const v = await w.newVersion();
   const s0 = await w.state();
-  const make = (ids: string[]) => w.labeling.createTask({projectId: w.projectId, purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: ids, createdBy: 'Tester'});
+  const make = (ids: string[]) => w.labeling.createTask({projectId: w.projectId, tenantId: 'default', purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: ids, createdBy: 'Tester'});
   const all = await make(s0.examples.map(e => e.id));
   const subset = await make(s0.examples.map(e => e.id).slice(0, 3));
   const repo = new DocRepo(w.db);
@@ -184,7 +184,7 @@ test('labeling waits for its endpoint: one labeling job per tenant and endpoint 
   const w = await world('b5c', {delayMs: 5});
   const v = await w.newVersion();
   const s0 = await w.state();
-  const make = (ids: string[]) => w.labeling.createTask({projectId: w.projectId, purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: ids, createdBy: 'Tester'});
+  const make = (ids: string[]) => w.labeling.createTask({projectId: w.projectId, tenantId: 'default', purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: ids, createdBy: 'Tester'});
   const repo = new DocRepo(w.db);
   const ids = s0.examples.map(e => e.id);
   for (const t of [await make(ids), await make(ids.slice(0, 3)), await make(ids.slice(0, 5))]) await repo.patch('labeling_tasks', t.id, {state: 'paused', stopReason: 'closed'});
@@ -494,7 +494,7 @@ test('an Optimiser run waiting for its model shows its place, and Stop ends it a
   const v = await w.newVersion();
   const s0 = await w.state();
   // A labeling task holds the model.
-  const task = await w.labeling.createTask({projectId: w.projectId, purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: s0.examples.map(e => e.id), createdBy: 'Tester'});
+  const task = await w.labeling.createTask({projectId: w.projectId, tenantId: 'default', purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: s0.examples.map(e => e.id), createdBy: 'Tester'});
   await new DocRepo(w.db).patch('labeling_tasks', task.id, {state: 'paused', stopReason: 'closed'});
   await tick(w.ws, await w.state());
   await until(async () => (await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask'], states: ['running']})).length === 1, 'the labeling job');
@@ -516,7 +516,7 @@ test('Stop on an Optimiser run whose queued job is cancelled leaves it to a runn
   const w = await world('b5e', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf, delayMs: 30});
   const v = await w.newVersion();
   const s0 = await w.state();
-  const task = await w.labeling.createTask({projectId: w.projectId, purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: s0.examples.map(e => e.id), createdBy: 'Tester'});
+  const task = await w.labeling.createTask({projectId: w.projectId, tenantId: 'default', purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: s0.examples.map(e => e.id), createdBy: 'Tester'});
   await new DocRepo(w.db).patch('labeling_tasks', task.id, {state: 'paused', stopReason: 'closed'});
   await tick(w.ws, await w.state());
   await until(async () => (await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask'], states: ['running']})).length === 1, 'the labeling job');
@@ -536,7 +536,7 @@ test('Stop on an Optimiser run never writes over a run its runner ended just bef
   const w = await world('b5f', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf, delayMs: 30});
   const v = await w.newVersion();
   const s0 = await w.state();
-  const task = await w.labeling.createTask({projectId: w.projectId, purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: s0.examples.map(e => e.id), createdBy: 'Tester'});
+  const task = await w.labeling.createTask({projectId: w.projectId, tenantId: 'default', purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: s0.examples.map(e => e.id), createdBy: 'Tester'});
   await new DocRepo(w.db).patch('labeling_tasks', task.id, {state: 'paused', stopReason: 'closed'});
   await tick(w.ws, await w.state());
   await until(async () => (await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask'], states: ['running']})).length === 1, 'the labeling job');

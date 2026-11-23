@@ -5,14 +5,21 @@ Contract: `LlmGatewayContract` in `packages/contracts/src/gateway-api.ts`.
 
 - `registry.ts`: registered endpoints from the platform, plus assumed limits per model for
   anything not registered. Assumed values are conservative and marked `assumed`.
-- `limiter.ts`: per endpoint, a 60 s sliding window for QPM and TPM, a cap on calls in flight and a
+- `limiter.ts`: per tenant + endpoint (store key `<tenantId>:<endpointId>`), a 60 s sliding window for QPM and TPM, a cap on calls in flight and a
   FIFO queue, counted in a `LimiterStorePort` (spec 5) that every process may share. Calls wait;
   they are never sent over the limit. Halves its rate after a 429 and holds calls, in every
   process, for the time asked. A permit's slot is leased (60 s) and renewed while the call runs;
   a waiter refreshes its ticket each time it asks (every 250 ms at most) and wakes at once when a
   slot in this process frees up; an aborted waiter lets the next one go.
-- `gateway.ts`: picks the endpoint (labeling by endpoint id; chat by registry model id, else an
-  active reasoning endpoint), fits the options to the model's capabilities, runs each try under
+- `gateway.ts`: picks the endpoint for the call's tenant (labeling: a platform default by its id,
+  else the tenant's own model by `TenantModel.id`, so defaults work while tenant models cannot be
+  read; chat: a tenant model named as `model`, else
+  the registry model, else an active reasoning endpoint). Tenant models come from the injected
+  `tenantModels` source, cached per tenant for `gateway.tenantModelsTtlMs` and read again at once
+  for an id the cache lacks (at most once a second); `forgetTenant` drops a tenant's cache and
+  moves it to a new generation, so a read started before it is neither cached nor shared. A
+  tenant model's Endpoint goes to the model service per call (`ChatRequest.endpoint`,
+  `AgentChatOptions.endpoint`); its id is never a metric label (`tenant_model` instead). It fits the options to the model's capabilities, runs each try under
   its `timeoutMs`, estimates tokens, retries busy/server/timeout errors (2, 4, 8, 16 s), and corrects the
   token count with real usage. Reasoning tokens count toward TPM. On a 429 the limiter slows down
   before the slot is given back (also on the last try), so no queued call goes out during the
@@ -22,7 +29,7 @@ Contract: `LlmGatewayContract` in `packages/contracts/src/gateway-api.ts`.
   (a labeling run shares one id) and stops calls that start under it later (kept for 60 s). The
   abort signal stays inside the gateway and goes to the platform's `ChatRequest`.
 
-Rules: no state but the limiter's, which lives in the injected store (`createGateway` takes
+Rules: no state but the limiter's, which lives in the injected store, and the short cache of tenant models (`createGateway` takes
 `limiterStore`, or the platform's); no knowledge of tasks or projects. Per-example failure
 handling belongs to labeling, not here. Imports: contracts, domain; tests also platform.
 Tests: `gateway.test.ts`, including several limiters on one store (aggregate QPM, TPM and calls

@@ -1,6 +1,7 @@
 import type {EndpointId, Job, JobOutcome, JobRequest, LabelingTask, ProjectState, PromptVersion, StartedRuns} from '@yushiguang/sprint-contracts';
 import {autoSpendUsd, dueStarts, settingsHash, versionLabel, type DueStart, systemConfig, msg} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
+import {tenantOf} from './sources.ts';
 import {postEvent} from './chat-events.ts';
 import {buildReport, findTask, settingsFor} from './evaluation.ts';
 import {modelName} from './page-views.ts';
@@ -48,6 +49,7 @@ export async function scoreVersion(w: Scope, projectId: string, version: PromptV
         (await findTask(w, projectId, version, m.endpoint, settingsHash(settings), exampleIds, ['eval', 'optimiser'])) ??
         (await w.labeling.createTask({
           projectId,
+          tenantId: tenantOf(w),
           purpose: 'eval',
           promptVersionId: version.id,
           setupVersionId: setup.id,
