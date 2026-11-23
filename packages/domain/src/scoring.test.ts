@@ -17,11 +17,10 @@ test('a label set is finished when every live sample in its range has a gold lab
   assert.equal(labelSetProgress(live, all, [...sets, {first: 3, last: 3}]).labelSetsDone, 3);
 });
 
-test('with no label set the whole dataset is one set, finished when every sample is labeled', () => {
+test('with no label set yet, the rule from before label sets holds: scores on the labeled samples', () => {
   const live = [1, 2, 3].map(ex);
-  assert.deepEqual(labelSetProgress(live, {ex_1: 1, ex_2: 1}, []), {ranges: null, labelSets: 0, labelSetsDone: 0, samples: 3, labeled: 2, ready: false});
-  assert.equal(labelSetProgress(live, {ex_1: 1, ex_2: 1, ex_3: 1}, []).ready, true);
-  assert.equal(labelSetProgress([], {}, []).ready, false, 'nothing to score on');
+  assert.deepEqual(labelSetProgress(live, {ex_1: 1, ex_2: 1}, []), {ranges: null, labelSets: 0, labelSetsDone: 0, samples: 3, labeled: 2, ready: true});
+  assert.equal(labelSetProgress(live, {}, []).ready, false, 'nothing to score on');
 });
 
 test('the score basis names what changed: samples, else gold labels, and thresholds', () => {

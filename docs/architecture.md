@@ -348,8 +348,8 @@ normalized. `apps/bff/src/fixtures.test.ts` replays them on the bff over the ref
 on with their halves, their gold labels, and the thresholds, each a hash; `contextId` is all of it
 with the label's schema version, and every report carries both. The samples are the eval samples
 inside label sets and not removed, and scores are made only once every label set is finished (every
-live sample in each range has a gold label). A project with no label set yet counts as one set over
-the whole dataset, until the label set pages ship. `ProjectState.scoring` (`ScoringState`) carries
+live sample in each range has a gold label). A project with no label set yet keeps the rule from before
+label sets (scores on the samples with a gold label), until the label set pages ship. `ProjectState.scoring` (`ScoringState`) carries
 that for the pages: whether scoring is ready, the ranges and counts, today's basis, the versions
 whose scores are out of date (`staleVersionIds`, so Prompt Tuning shows the Rescore banner), what
 changed (gold labels, samples or thresholds), and whether a Rescore is queued or running.

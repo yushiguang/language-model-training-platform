@@ -963,7 +963,7 @@ test('scores wait for every label set; a new basis leaves old scores out of date
   const {rescore} = await import('./scores.ts');
   const v1 = await w.newVersion();
   await tick(w.ws, await w.state());
-  await until(async () => (await w.state()).reports.length === 1, 'v1 scored, the whole dataset as one set (no label set yet)');
+  await until(async () => (await w.state()).reports.length === 1, 'v1 scored on the labeled samples (no label set yet)');
   let s = await w.state();
   assert.deepEqual({ready: s.scoring.ready, ranges: s.scoring.ranges, sets: s.scoring.labelSets}, {ready: true, ranges: null, sets: 0});
   // The first label set: only its samples count, so the first score is out of date.

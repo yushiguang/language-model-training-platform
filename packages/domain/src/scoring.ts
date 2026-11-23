@@ -16,18 +16,17 @@ export const inRanges = (e: Pick<Example, 'number'>, ranges: SampleRanges): bool
 /**
  * How far labeling is, from the live (not removed) eval samples, the current gold labels and the
  * dataset's label sets. A set is finished when every live sample in its range has a gold label
- * (a set whose samples were all removed is finished). With no set at all, the whole dataset is
- * one set: a transition until the label set pages ship.
+ * (a set whose samples were all removed is finished). A project with no set yet keeps the rule
+ * from before label sets, so today's pages work until the label set pages ship: it scores on the
+ * samples that have a gold label, ready as soon as one has (`canScore` asks for the minimum).
  */
 export function labelSetProgress(examples: Pick<Example, 'id' | 'number'>[], gold: Record<string, unknown>, sets: Pick<LabelSet, 'first' | 'last'>[]) {
   const ranges: SampleRanges = sets.length ? [...sets].sort((a, b) => a.first - b.first).map(s => ({first: s.first, last: s.last})) : null;
   const inside = examples.filter(e => inRanges(e, ranges));
   const labeled = inside.filter(e => !!gold[e.id]).length;
-  const done = ranges
-    ? ranges.filter(r => inside.every(e => !!gold[e.id] || e.number! < r.first || e.number! > r.last)).length
-    : inside.length && labeled === inside.length ? 1 : 0;
-  const total = ranges ? ranges.length : 1;
-  return {ranges, labelSets: ranges ? ranges.length : 0, labelSetsDone: ranges ? done : 0, samples: inside.length, labeled, ready: inside.length > 0 && done === total};
+  if (!ranges) return {ranges, labelSets: 0, labelSetsDone: 0, samples: inside.length, labeled, ready: labeled > 0};
+  const done = ranges.filter(r => inside.every(e => !!gold[e.id] || e.number! < r.first || e.number! > r.last)).length;
+  return {ranges, labelSets: ranges.length, labelSetsDone: done, samples: inside.length, labeled, ready: inside.length > 0 && done === ranges.length};
 }
 
 /** Thresholds as text that does not depend on key order, or on a missing value versus null. */
@@ -94,6 +93,9 @@ export function staleScores(s: StaleInput, cannotBuild: ReadonlySet<string> = ne
   return {staleVersionIds: s.versions.filter(v => ids.has(v.id)).map(v => v.id), changed: order.filter(p => changed.has(p))};
 }
 
-/** The samples scores are made on: eval samples inside label sets, none while a set is unfinished. */
+/**
+ * The samples scores are made on: eval samples inside label sets, none while a set is unfinished.
+ * Only those with a gold label count (all of them once every set is finished).
+ */
 export const scoredExamples = <E extends Pick<Example, 'split' | 'number'>>(s: {examples: E[]; scoring: Pick<ScoringState, 'ready' | 'ranges'>}): E[] =>
   s.scoring.ready ? s.examples.filter(e => e.split === 'eval' && inRanges(e, s.scoring.ranges)) : [];

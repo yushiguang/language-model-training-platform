@@ -626,8 +626,9 @@ export interface ScoringState {
   /** Every label set is finished, so versions get scores. False: no new scores and no Rescore. */
   ready: boolean;
   /**
-   * The label sets' sample number ranges, in order. null: the project has no label set yet, so
-   * the whole dataset counts as one (a transition until the label set pages ship).
+   * The label sets' sample number ranges, in order. null: the project has no label set yet, so the
+   * rule from before label sets holds (scores on the samples with a gold label; ready once one
+   * has), a transition until the label set pages ship.
    */
   ranges: {first: number; last: number}[] | null;
   labelSets: number;
