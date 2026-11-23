@@ -77,3 +77,20 @@ test('frozen features (#32): exampleFeatures answers plain JSON that survives a 
   assert.equal((await c.find('examples', {snapshotId: 'ds_f'})).length, 0);
   assert.ok(featureReads.length > 0 && featureReads.every(q => !q.includes('snapshotId')), `features are found by id only: ${featureReads.join(' ')}`);
 });
+
+test('catalog page reads one window of the matching records in order, with the total', async () => {
+  const c = createCatalog(localDocRuntime('cat-page'));
+  await c.insertMany(
+    'examples',
+    Array.from({length: 25}, (_, i) => ({id: `ex_${i}`, snapshotId: i < 20 ? 'ds_1' : 'ds_2', number: 20 - i, externalId: String(i), type: 'video' as const, title: '', split: null, optimiserHalf: false})),
+  );
+  const first = await c.page('examples', {where: {snapshotId: 'ds_1'}, order: 'number', limit: 5});
+  assert.equal(first.total, 20);
+  assert.deepEqual(first.items.map(e => e.number), [1, 2, 3, 4, 5]);
+  const next = await c.page('examples', {where: {snapshotId: 'ds_1'}, order: 'number', offset: 15, limit: 10});
+  assert.deepEqual(next.items.map(e => e.number), [16, 17, 18, 19, 20]);
+  // A range of numbers, as a label set reads its samples.
+  const range = await c.page('examples', {where: {type: 'and', filters: [{type: 'field', field: 'snapshotId', op: '==', value: 'ds_1'}, {type: 'field', field: 'number', op: '>=', value: 4}, {type: 'field', field: 'number', op: '<=', value: 6}]}, order: 'number'});
+  assert.deepEqual(range.items.map(e => e.number), [4, 5, 6]);
+  assert.equal(range.total, 3);
+});
