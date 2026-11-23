@@ -3,7 +3,7 @@ import {configureSystem, systemConfig} from '@yushiguang/sprint-domain';
 import {createCatalog, docFeatureStore, objectFeatureStore} from '@yushiguang/sprint-catalog';
 import {createTelemetry} from '@yushiguang/sprint-telemetry';
 import {createGateway} from '@yushiguang/sprint-llm-gateway';
-import {browserLocks, createLabeling, labelingExecutor} from '@yushiguang/sprint-labeling';
+import {browserLocks, createLabeling, labelingExecutor, objectLabelingStore} from '@yushiguang/sprint-labeling';
 import {createAgentRuntime} from '@yushiguang/sprint-agents';
 import {createPlatform} from '@yushiguang/sprint-platform-impl';
 import {leaseLocks, loopback, memoryJobStore, memoryLimiterStore, memorySharedState} from '@yushiguang/sprint-platform';
@@ -68,6 +68,11 @@ const jobs = createJobs({store: platform.jobStore ?? memoryJobStore(), telemetry
 const locks = platform.lockStore ? leaseLocks(platform.lockStore) : browserLocks();
 const labeling = createLabeling({
   db: platform.db,
+  /**
+   * With object storage, answers go into segment files of up to 50, each saved within 10 s of
+   * its first answer (docs/design/server.md 6); without it, each answer is a document, saved at once.
+   */
+  ...(platform.objectStore ? {store: objectLabelingStore(platform.db, platform.objectStore), answerBatch: {size: 50, maxWaitMs: 10_000}} : {}),
   catalog,
   gateway,
   locks,

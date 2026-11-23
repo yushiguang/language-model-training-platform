@@ -11,9 +11,10 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
   numbered pull requests in the issue. The design doc is merged (#60); step 1, the config
   module, is merged (#61); step 2, permissions and tenant isolation, is merged (#63); step 3,
   the job queue with per-key limits and the queue position on pages, is merged (#66); step 6,
-  notifications when scoring or Auto Optimise ends, is merged (#71). Step 4, models read per
-  tenant and limits per tenant and endpoint in the gateway, is in progress (#69): pull request 1
-  of 2, the contract change and the gateway, is merged. Step 7, the storage ports, is in progress.
+  notifications when scoring or Auto Optimise ends, is merged (#71); step 7, object storage for
+  feature snapshots and model answers, is merged (#72). Step 4, models read per tenant and limits
+  per tenant and endpoint in the gateway, is in progress (#69): pull request 1 of 2, the contract
+  change and the gateway, is merged.
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
   tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are merged (see Done);
   step 3, action tools, is next, with their cards drawn on the UI design first.
@@ -32,6 +33,8 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Done
 
+- 2026-11-23: object storage (#59 step 7): `ObjectStorePort`; frozen features and model answers
+  packed in segment files when the platform has object storage (#72, #74, #77).
 - 2026-11-22: permissions and tenant isolation (#59 step 2): every project has a tenant; the
   workflow checks the tenant and permission point of every call, agent tool, job and Optimiser
   step; the Optimiser runs as the person who started it (#63, #64, #65).

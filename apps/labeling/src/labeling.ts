@@ -1,5 +1,4 @@
 import {
-  DocFieldValue,
   NO_TELEMETRY,
   errorKindOf,
   type CatalogContract,
@@ -9,6 +8,8 @@ import {
   type EndpointId,
   type ExampleWithFeatures,
   type LabelingContract,
+  type LabelingStorePort,
+  type LabelingTaskTally,
   type LabelingTask,
   type LlmGatewayContract,
   type ModelMessage,
@@ -19,11 +20,27 @@ import {
   type TryTemplateRow,
 } from '@yushiguang/sprint-contracts';
 import {asAnswerOrNull, hashString, parseOutput, REASON_LINE, renderPrompt, settingsHash, type Part, systemConfig} from '@yushiguang/sprint-domain';
-import {DocRepo, newId} from '@yushiguang/sprint-platform';
+import {newId} from '@yushiguang/sprint-platform';
 import {browserLocks, type TaskLocks} from './locks.ts';
+import {docLabelingStore} from './store.ts';
 
 export interface LabelingDeps {
   db: DocRuntime;
+  /**
+   * Where tasks and answers are kept (docs/design/server.md 6). Default: both as documents in
+   * `db` (`docLabelingStore`); `objectLabelingStore` puts answers in object storage.
+   */
+  store?: LabelingStorePort;
+  /**
+   * How answers are saved: in batches of up to `size`, a batch saved at the latest `maxWaitMs`
+   * after its first answer, and whatever is left when a run ends. Default: each answer on its
+   * own, at once, under its prediction lock (the browser: tabs share no queue). Over object
+   * storage each batch is one segment file; a task's counters move a batch at a time, and a
+   * process that dies loses at most the batch not yet saved (labeled again on the next run).
+   * Batches are safe because a server queue runs one task per tenant and endpoint at a time, so
+   * two tasks never label the same version, model and settings at once (#66).
+   */
+  answerBatch?: {size: number; maxWaitMs: number};
   catalog: CatalogContract;
   gateway: LlmGatewayContract;
   locks?: TaskLocks;
@@ -47,8 +64,6 @@ export interface LabelingDeps {
 }
 
 
-const TASKS = 'labeling_tasks';
-const PREDICTIONS = 'predictions';
 const now = () => new Date().toISOString();
 const lockName = (taskId: string) => `labeling:${taskId}`;
 const FINISHED: TaskState[] = ['done'];
@@ -117,7 +132,7 @@ export const predictionId = (promptVersionId: string, endpoint: EndpointId, hash
  * calls under the endpoint's QPM/TPM and retries busy replies).
  */
 export function createLabeling(deps: LabelingDeps): LabelingContract {
-  const repo = new DocRepo(deps.db);
+  const store = deps.store ?? docLabelingStore(deps.db);
   const locks = deps.locks ?? browserLocks();
   const emit = (projectId?: string) => deps.onChange?.(projectId);
   const active = new Map<string, AbortController>();
@@ -151,11 +166,11 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     return r;
   }
 
-  const getTask = (id: string) => repo.get<LabelingTask>(TASKS, id);
+  const getTask = (id: string) => store.getTask(id);
 
   /** Every saved prediction per example, oldest first. */
   async function allPredictions(promptVersionId: string, endpoint: EndpointId, hash: string): Promise<Map<string, Prediction[]>> {
-    const rows = await repo.find<Prediction>(PREDICTIONS, {promptVersionId, endpoint, settingsHash: hash}, 'createdAt');
+    const rows = await store.predictionsFor(promptVersionId, endpoint, hash);
     const out = new Map<string, Prediction[]>();
     // Answers stored as a plain string earlier on 2026-11-16 read as a one-item list.
     for (const p0 of rows) {
@@ -186,7 +201,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
    */
   async function stopIfIdle(taskId: string, save = true): Promise<LabelingTask | null> {
     const request = async (t: LabelingTask | null) => {
-      if (save && t && !FINISHED.includes(t.state)) await repo.patch<LabelingTask>(TASKS, taskId, {stopRequested: true, stopRequestedAt: now()});
+      if (save && t && !FINISHED.includes(t.state)) await store.patchTask(taskId, {stopRequested: true, stopRequestedAt: now()});
       return t;
     };
     const held = await locks.run(lockName(taskId), async () => {
@@ -202,11 +217,11 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       if (!save && (elsewhere || !latest.stopRequested)) return {t: latest};
       if (!elsewhere && !OPEN.includes(latest.state)) {
         // Ended and idle: nothing to stop, and no request may wait for a later run.
-        if (latest.stopRequested) await repo.patch<LabelingTask>(TASKS, taskId, {stopRequested: false});
+        if (latest.stopRequested) await store.patchTask(taskId, {stopRequested: false});
         return {t: await getTask(taskId)};
       }
       if (!elsewhere && (latest.state !== 'running' || !!deps.liveElsewhere)) {
-        await repo.patch<LabelingTask>(TASKS, taskId, {state: 'stopped', stopReason: 'user', stopRequested: false, finishedAt: now()});
+        await store.patchTask(taskId, {state: 'stopped', stopReason: 'user', stopRequested: false, finishedAt: now()});
         return {t: latest};
       }
       return {t: await request(latest)};
@@ -226,14 +241,14 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     // this task runs gets null and changes nothing.
     let found = await getTask(taskId);
     if (found && opts.retry && !FINISHED.includes(found.state)) {
-      await repo.patch<LabelingTask>(TASKS, taskId, {failedExampleIds: [], failed: 0, state: 'queued', error: null, stopReason: null});
+      await store.patchTask(taskId, {failedExampleIds: [], failed: 0, state: 'queued', error: null, stopReason: null});
       found = await getTask(taskId);
     }
     if (!found || FINISHED.includes(found.state)) return found;
     // A Stop saved while this run was starting (no runner held the task yet): ended here, before
     // any model call. Every end clears the request, so one still set is never an old one.
     if (found.stopRequested) {
-      await repo.patch<LabelingTask>(TASKS, taskId, {state: 'stopped', stopReason: 'user', stopRequested: false, finishedAt: now()});
+      await store.patchTask(taskId, {state: 'stopped', stopReason: 'user', stopRequested: false, finishedAt: now()});
       stopPressed.delete(taskId);
       emit(found.projectId);
       return getTask(taskId);
@@ -246,7 +261,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     const runStarted = Date.now();
     const [version, setup] = await Promise.all([deps.catalog.get('prompt_versions', task.promptVersionId), deps.catalog.get('setup_versions', task.setupVersionId)]);
     if (!version || !setup?.schema) {
-      await repo.patch<LabelingTask>(TASKS, taskId, {state: 'failed', error: 'The prompt version or schema of this task no longer exists.', finishedAt: now()});
+      await store.patchTask(taskId, {state: 'failed', error: 'The prompt version or schema of this task no longer exists.', finishedAt: now()});
       emit(task.projectId);
       return getTask(taskId);
     }
@@ -278,7 +293,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       costUsd: mine.reduce((n, p) => n + p.costUsd, 0),
       tokens: mine.reduce((n, p) => n + (p.tokens ?? 0), 0),
     };
-    await repo.patch<LabelingTask>(TASKS, taskId, {...counts, failedExampleIds: [...failedSet], ...(task.relabelInvalid ? {relabelExampleIds: relabelIds} : {}), state: 'running', stopReason: null, error: null, startedAt: task.startedAt ?? now(), finishedAt: null});
+    await store.patchTask(taskId, {...counts, failedExampleIds: [...failedSet], ...(task.relabelInvalid ? {relabelExampleIds: relabelIds} : {}), state: 'running', stopReason: null, error: null, startedAt: task.startedAt ?? now(), finishedAt: null});
     emit(task.projectId);
 
     const examples = exampleReader(deps.catalog, pending);
@@ -308,8 +323,46 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           ctrl.abort();
         }
       });
-    const stopTimer = setInterval(() => void checkStop(), systemConfig().labeling.stopCheckMs);
+    // The same timer saves a batch of answers that has waited long enough.
+    const stopTimer = setInterval(() => {
+      void checkStop();
+      void answers.flushIfDue().then(n => n && emit(task.projectId));
+    }, systemConfig().labeling.stopCheckMs);
     (stopTimer as {unref?: () => void}).unref?.();
+
+    /**
+     * Counts saved answers on the task (prediction first, counters after: a crash in between
+     * undercounts, and the next run recounts). `saved: false`: another runner saved it, so this
+     * run did not pay for it.
+     */
+    const tally = async (results: {prediction: Prediction; saved: boolean}[]) => {
+      if (!results.length) return;
+      const add: Required<LabelingTaskTally> = {done: 0, valid: 0, invalid: 0, filtered: 0, failed: 0, costUsd: 0, tokens: 0, autoCostUsd: 0};
+      for (const {prediction: pred, saved: paid} of results) {
+        add.done++;
+        add[pred.answer ? 'valid' : 'invalid']++;
+        if (pred.filtered) add.filtered++;
+        add.costUsd += pred.costUsd;
+        add.tokens += pred.tokens ?? 0;
+        if (opts.auto && paid) add.autoCostUsd += pred.costUsd;
+        tm.counter('sprint_labeling_examples_total', {task_purpose: purpose, result: pred.answer ? 'valid' : pred.filtered ? 'filtered' : 'invalid'});
+        if (paid) tm.counter('sprint_labeling_cost_usd_total', {task_purpose: purpose}, pred.costUsd);
+      }
+      await store.addToTask(taskId, add);
+      counts.done += add.done;
+      counts.costUsd += add.costUsd;
+    };
+    /** Examples whose answers could not be saved: failed, so Retry failed labels them again. */
+    const failSave = async (preds: Prediction[], e: unknown) => {
+      lastError = (e as Error).message ?? String(e);
+      for (const p of preds) {
+        tm.counter('sprint_labeling_examples_total', {task_purpose: purpose, result: 'failed'});
+        counts.failed++;
+        inARow++;
+        await store.addToTask(taskId, {failed: 1}, {failedExampleId: p.exampleId, set: {error: lastError}}).catch(() => undefined);
+      }
+    };
+    const answers = answerBuffer(deps.answerBatch, store, tally, failSave);
 
     /**
      * Labels one example under a lock on its prediction, so two tasks for the same version,
@@ -328,15 +381,11 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
        * paying at all is the prediction lock's job, above; this only keeps the store to one
        * document and the counters to one answer when that lock did not reach.
        */
-      const savePrediction = async (pred: Prediction): Promise<{pred: Prediction; paid: boolean}> => {
-        const meanwhile = await repo.get<Prediction>(PREDICTIONS, pred.id);
-        if (meanwhile) return {pred: meanwhile, paid: false};
-        await repo.insert(PREDICTIONS, pred);
-        return {pred, paid: true};
-      };
+      const savePrediction = async (pred: Prediction) => (await answers.add(pred), {added: true});
       const r = await locks.run(`labeling:prediction:${id}`, async () => {
-        const saved = await repo.get<Prediction>(PREDICTIONS, id);
-        if (saved) return {pred: saved, paid: false};
+        const saved = await store.getPrediction(id, task);
+        if (saved) return {pred: saved};
+        if (answers.has(id)) return {pending: true};
         // Read only now: a saved answer needs no features, so a batch let go is not read again.
         const ex = await example();
         if (!ex) throw new Error('The example or its features could not be found.');
@@ -379,20 +428,8 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         return savePrediction(pred);
       });
       if (!r) return false;
-      const {pred, paid} = r;
-      // Prediction first, counters after: a crash in between undercounts, and the next run recounts.
-      await repo.patch<LabelingTask>(TASKS, taskId, {
-        done: DocFieldValue.increment(1),
-        [pred.answer ? 'valid' : 'invalid']: DocFieldValue.increment(1),
-        ...(pred.filtered ? {filtered: DocFieldValue.increment(1)} : {}),
-        costUsd: DocFieldValue.increment(pred.costUsd),
-        tokens: DocFieldValue.increment(pred.tokens ?? 0),
-        ...(opts.auto && paid ? {autoCostUsd: DocFieldValue.increment(pred.costUsd)} : {}),
-      });
-      counts.done++;
-      counts.costUsd += pred.costUsd;
-      tm.counter('sprint_labeling_examples_total', {task_purpose: purpose, result: pred.answer ? 'valid' : pred.filtered ? 'filtered' : 'invalid'});
-      if (paid) tm.counter('sprint_labeling_cost_usd_total', {task_purpose: purpose}, pred.costUsd);
+      // Saved by another runner since this one started: counted now, as its own.
+      if ('pred' in r && r.pred) await tally([{prediction: r.pred, saved: false}]);
       return true;
     };
 
@@ -417,7 +454,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
           inARow++;
           counts.failed++;
           lastError = (e as Error).message ?? String(e);
-          await repo.patch<LabelingTask>(TASKS, taskId, {failed: DocFieldValue.increment(1), failedExampleIds: DocFieldValue.arrayUnion(exampleId), error: lastError});
+          await store.addToTask(taskId, {failed: 1}, {failedExampleId: exampleId, set: {error: lastError}});
         }
         stopReason = overLimit();
         emit(task.projectId);
@@ -430,6 +467,8 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       await Promise.all(Array.from({length: Math.max(1, task.parallel)}, worker));
     } finally {
       clearInterval(stopTimer);
+      // Answers paid for are saved however the run ends (done, Stop, failures).
+      await answers.flush().catch(() => undefined);
       active.delete(taskId);
       setRunning(purpose, -1);
     }
@@ -448,7 +487,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       state = 'done';
       error = null;
     }
-    await repo.patch<LabelingTask>(TASKS, taskId, {state, stopReason, error, stopRequested: false, finishedAt: now()});
+    await store.patchTask(taskId, {state, stopReason, error, stopRequested: false, finishedAt: now()});
     emit(task.projectId);
     tm.counter('sprint_labeling_tasks_ended_total', {task_purpose: purpose, state, reason: stopReason ?? 'none'});
     if (state === 'needs_attention') tm.event('run_needs_attention', {task_purpose: purpose, failed: counts.failed, total: task.total});
@@ -492,7 +531,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         startedAt: null,
         finishedAt: null,
       };
-      await repo.insert(TASKS, task);
+      await store.insertTask(task);
       emit(task.projectId);
       return task;
     },
@@ -518,7 +557,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
      * worker: it shows as paused, and running it again resumes from the predictions already saved.
      */
     async listTasks(projectId: string) {
-      const tasks = await repo.find<LabelingTask>(TASKS, {projectId}, 'createdAt desc');
+      const tasks = await store.findTasks(projectId);
       let changed = false;
       for (const t of tasks) {
         // A Stop asked while its runner was starting, whose runner then went away: ended now.
@@ -563,7 +602,7 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
         }
         const end = latest.stopRequested ? {state: 'stopped' as const, stopReason: 'user' as const, stopRequested: false, finishedAt: now()} : {state: 'paused' as const, stopReason: 'closed' as const};
         Object.assign(t, end);
-        await repo.patch<LabelingTask>(TASKS, t.id, end);
+        await store.patchTask(t.id, end);
         changed = true;
       }
       if (changed) emit(projectId);
@@ -620,10 +659,10 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
 
   /** Stops the project's runs in this process, waits for them to end, then deletes its records. */
   async function removeProject(projectId: string) {
-    const tasks = await repo.find<LabelingTask>(TASKS, {projectId});
+    const tasks = await store.findTasks(projectId);
     for (const t of tasks) active.get(t.id)?.abort();
     await Promise.all(tasks.flatMap(t => [...(runs.get(t.id) ?? [])]));
-    await repo.deleteWhere(PREDICTIONS, {projectId});
+    await store.deletePredictions({projectId});
     // Answers saved before they carried their project: one batched delete per version, model
     // and settings (deployment readiness spec, 3).
     const seen = new Set<string>();
@@ -631,8 +670,63 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       const key = `${t.promptVersionId}|${t.endpoint}|${t.settingsHash}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      await repo.deleteWhere(PREDICTIONS, {promptVersionId: t.promptVersionId, endpoint: t.endpoint, settingsHash: t.settingsHash});
+      await store.deletePredictions({promptVersionId: t.promptVersionId, endpoint: t.endpoint, settingsHash: t.settingsHash});
     }
-    await repo.deleteWhere(TASKS, {projectId});
+    await store.deleteTasks(projectId);
   }
+}
+
+/**
+ * A run's answers on their way to the store (`LabelingDeps.answerBatch`). Without a batch each
+ * answer is saved at once, by the call that adds it. With one, answers wait until `size` are in,
+ * `maxWaitMs` has passed since the first (`flushIfDue`), or the run ends (`flush`); one save at a
+ * time, each tried once more before its examples count as failed.
+ */
+function answerBuffer(
+  batch: LabelingDeps['answerBatch'],
+  store: LabelingStorePort,
+  tally: (results: {prediction: Prediction; saved: boolean}[]) => Promise<void>,
+  failSave: (preds: Prediction[], e: unknown) => Promise<void>,
+) {
+  const size = Math.max(1, batch?.size ?? 1);
+  let waiting: Prediction[] = [];
+  let since = 0;
+  let chain: Promise<unknown> = Promise.resolve();
+  const save = async (preds: Prediction[]) => {
+    let results: {prediction: Prediction; saved: boolean}[] | null = null;
+    let error: unknown = null;
+    for (let attempt = 0; attempt < 2 && !results; attempt++) {
+      try {
+        results = await store.savePredictions(preds);
+      } catch (e) {
+        error = e;
+      }
+    }
+    if (results) await tally(results);
+    else await failSave(preds, error);
+  };
+  const flush = (): Promise<number> => {
+    const preds = waiting;
+    waiting = [];
+    if (!preds.length) return chain.then(() => 0);
+    const done = chain.then(() => save(preds)).then(() => preds.length);
+    chain = done.catch(() => undefined);
+    return done;
+  };
+  return {
+    has: (id: string) => waiting.some(p => p.id === id),
+    async add(pred: Prediction) {
+      if (!batch) {
+        // At once, in the caller's lock: an answer that cannot be saved fails its example there.
+        const [r] = await store.savePredictions([pred]);
+        await tally([r]);
+        return;
+      }
+      if (!waiting.length) since = Date.now();
+      waiting.push(pred);
+      if (waiting.length >= size) await flush();
+    },
+    flush,
+    flushIfDue: () => (batch && waiting.length && Date.now() - since >= batch.maxWaitMs ? flush() : Promise.resolve(0)),
+  };
 }
