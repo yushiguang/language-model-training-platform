@@ -648,14 +648,12 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       return out ?? null;
     },
 
-    /** The user's Stop: ends the run (and the labeling it is doing) and saves it in Ask AI. */
-    async stopRun(ctx, runId) {
-      const a = active.get(runId);
-      if (!a) return;
-      a.ctrl.abort();
-      const run = await catalog.get('optimisation_runs', runId);
-      if (!run) return;
-      for (const t of await labeling.listTasks(run.projectId)) if (t.purpose === 'optimiser' && t.state === 'running') await labeling.stopTask(t.id);
+    /**
+     * The user's Stop: aborts the run's runner in this process. The run labels only in labeling jobs
+     * of its own, which the caller cancels and stops by `optimiserRunId` (other tasks are left alone).
+     */
+    async stopRun(_ctx, runId) {
+      active.get(runId)?.ctrl.abort();
     },
 
     getRun: runId => catalog.get('optimisation_runs', runId),

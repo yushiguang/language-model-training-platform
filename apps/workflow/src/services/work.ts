@@ -383,17 +383,21 @@ async function saveStop(w: Scope, projectId: string, runId: string, endpoint: En
   const now = await optimiser.getRun(runId);
   if (!open(now)) return null;
   await w.catalog.patch('optimisation_runs', runId, {stopRequested: true});
-  if (now.state !== 'running') {
+  // Not running and no job of its own queued or running (no Retry that could be taking it now).
+  const retried = (await activeJobs(w, projectId, ['optimiser.run'])).some(j => j.args.runId === runId);
+  if (now.state !== 'running' && !retried) {
     await endStopped(w, {...now, stopRequested: true});
     return 'saved';
   }
   const after = await w.locks.run(optimiserLock(projectId, endpoint), async () => {
     const run = await optimiser.getRun(runId);
-    if (!open(run) || (await optimiser.isRunning(runId))) return 'asked' as const;
+    if (!open(run)) return 'ended' as const;
+    if (await optimiser.isRunning(runId)) return 'asked' as const;
     await endStopped(w, run);
     return 'saved' as const;
   });
-  return after ?? 'asked';
+  // The lock busy again: the runner has it and reads the request.
+  return after === 'ended' ? null : (after ?? 'asked');
 }
 
 /** Saves a run with no runner as stopped (its round in progress too) and records its end. */
