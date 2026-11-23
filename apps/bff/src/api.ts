@@ -105,6 +105,8 @@ export function createBffApi(deps: BffDeps): BffContract {
     getDataSource: pass('getDataSource'),
     createDataSource: pass('createDataSource'),
     addSourceFile: pass('addSourceFile'),
+    renameDataSource: pass('renameDataSource'),
+    deleteDataSource: pass('deleteDataSource'),
     listModels: pass('listModels'),
     addModel: pass('addModel'),
     updateModel: pass('updateModel'),

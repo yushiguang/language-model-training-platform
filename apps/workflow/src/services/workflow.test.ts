@@ -1496,6 +1496,86 @@ test('data sources (#29): the sample data is a built-in source of every tenant, 
   assert.match((await addSourceFile(w.ws, {sourceId: all[0].id, fileName: 'x.txt', text: 'z'})).error ?? '', /built-in/);
 });
 
+test('data sources (one file each): the list says reading / ready / failed, the file name and how many projects use it; detail names them', async () => {
+  const w = await world('src3', {gold: null});
+  Object.assign(w.inst, {examples: knownItems});
+  const {createDataSource, getDataSource, listDataSources} = await import('./sources.ts');
+  const {createProject} = await import('./projects.ts');
+  const {takeExamples} = await import('./dataset.ts');
+  const made = await createDataSource(w.ws, {name: 'Feed', fileName: 'feed.csv', text: Array.from({length: 20}, (_, i) => `i${String(i).padStart(2, '0')}`).join('\n')});
+  assert.deepEqual([made.source!.state, made.source!.fileName, made.source!.usedBy], ['reading', 'feed.csv', 0]);
+  await w.jobs.idle();
+  const p = await createProject(w.ws, 'Tagging');
+  await takeExamples(w.ws, p.id, [{sourceId: made.source!.id, count: 4}]);
+  await w.jobs.idle();
+  const [row] = await listDataSources(w.ws);
+  assert.deepEqual([row.state, row.error, row.usedBy, row.items], ['ready', undefined, 1, 20]);
+  const d = (await getDataSource(w.ws, row.id))!;
+  assert.deepEqual(d.usedByProjects, [{id: p.id, name: 'Tagging'}]);
+  // A file that could not be read: failed, with its reason.
+  const bad = await createDataSource(w.ws, {name: 'Broken', fileName: 'b.csv', text: 'x1\nx2'});
+  await w.catalog.patch('source_files', bad.file!.id, {state: 'failed', error: 'Row 2 has no ID.'});
+  const failed = (await listDataSources(w.ws)).find(s => s.name === 'Broken')!;
+  assert.deepEqual([failed.state, failed.error], ['failed', 'Row 2 has no ID.']);
+});
+
+test('data sources: rename checks the name like create; delete hides the source, frees its name and stops new takes; examples taken keep its name', async () => {
+  const w = await world('src4', {gold: null});
+  Object.assign(w.inst, {examples: knownItems});
+  const {createDataSource, deleteDataSource, getDataSource, listDataSources, renameDataSource, datasetSources} = await import('./sources.ts');
+  const {createProject} = await import('./projects.ts');
+  const {takeExamples} = await import('./dataset.ts');
+  const ids = Array.from({length: 20}, (_, i) => `i${String(i).padStart(2, '0')}`);
+  const a = (await createDataSource(w.ws, {name: 'Feed', fileName: 'feed.csv', text: ids.join('\n')})).source!;
+  await createDataSource(w.ws, {name: 'Other', fileName: 'o.csv', text: 'o1'});
+  await w.jobs.idle();
+  assert.match((await renameDataSource(w.ws, {sourceId: a.id, name: '  '})).error ?? '', /name/);
+  assert.match((await renameDataSource(w.ws, {sourceId: a.id, name: 'OTHER'})).error ?? '', /already exists/);
+  assert.deepEqual(await renameDataSource(w.ws, {sourceId: a.id, name: ' Weekly feed '}), {name: 'Weekly feed'});
+  assert.equal((await getDataSource(w.ws, a.id))!.source.name, 'Weekly feed');
+  const p = await createProject(w.ws, 'Tagging');
+  await takeExamples(w.ws, p.id, [{sourceId: a.id, count: 3}]);
+  await w.jobs.idle();
+  await deleteDataSource(w.ws, {sourceId: a.id});
+  assert.deepEqual((await listDataSources(w.ws)).map(s => s.name), ['Other']);
+  assert.equal(await getDataSource(w.ws, a.id), null);
+  await assert.rejects(takeExamples(w.ws, p.id, [{sourceId: a.id, count: 1}]), /does not exist/);
+  await assert.rejects(renameDataSource(w.ws, {sourceId: a.id, name: 'x'}), /does not exist/);
+  // Its name is free again; the examples already taken stay and keep its name.
+  assert.ok((await createDataSource(w.ws, {name: 'Weekly feed', fileName: 'w.csv', text: 'z1'})).source);
+  const state = (await loadProjectState(w.ws, p.id))!;
+  const lines = await datasetSources(w.ws, p.id, state.examples);
+  assert.deepEqual(lines.map(l => [l.name, l.examples]), [['Weekly feed', 3]]);
+  // Another tenant cannot rename or delete it.
+  const other = w.inst.scope({...w.ws.ctx, tenantId: 't2'});
+  const b = (await listDataSources(w.ws)).find(s => s.name === 'Other')!;
+  await assert.rejects(deleteDataSource(other, {sourceId: b.id}), /does not exist/);
+});
+
+test('data sources: an import whose source was deleted meanwhile stops, failed with that reason, and is not tried again', async () => {
+  const w = await world('src6', {gold: null});
+  const {createDataSource, deleteDataSource, runIngest} = await import('./sources.ts');
+  const made = await createDataSource(w.ws, {name: 'Feed', fileName: 'feed.csv', text: 'a1\na2\na3'});
+  await w.jobs.idle();
+  await deleteDataSource(w.ws, {sourceId: made.source!.id});
+  // As if its job ran only now: the file is still being read when its runner looks.
+  await w.catalog.patch('source_files', made.file!.id, {state: 'importing'});
+  const ctl = {signal: new AbortController().signal, progress: async () => {}, cancelled: () => false} as unknown as Parameters<typeof runIngest>[2];
+  const out = await runIngest(w.ws, {args: {fileId: made.file!.id}, attempts: 1} as unknown as Parameters<typeof runIngest>[1], ctl);
+  assert.equal(out.state, 'done');
+  const file = (await w.catalog.get('source_files', made.file!.id))!;
+  assert.deepEqual([file.state, file.error], ['failed', 'The data source was deleted.']);
+});
+
+test('data sources: the built-in sample data cannot be renamed or deleted', async () => {
+  const w = await world('src5', {gold: null});
+  const {deleteDataSource, listDataSources, renameDataSource} = await import('./sources.ts');
+  Object.assign(w.inst, {examples: {...knownItems, builtIn: async () => ({name: 'Sample data', ids: ['s1', 's2']})}});
+  const [s] = await listDataSources(w.ws);
+  assert.match((await renameDataSource(w.ws, {sourceId: s.id, name: 'Mine'})).error ?? '', /built-in/);
+  await assert.rejects(deleteDataSource(w.ws, {sourceId: s.id}), /built-in/);
+});
+
 test('cuts (#30): continuous segments of an order shuffled once; two datasets never share an item; too many is refused with the counts; a deleted project is never reissued; a new file does not move earlier cuts', async () => {
   const w = await world('cut1', {gold: null});
   Object.assign(w.inst, {examples: knownItems});

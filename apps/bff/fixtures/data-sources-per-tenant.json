@@ -37,14 +37,18 @@
       "expect": [
         {
           "builtIn": true,
+          "createdAt": "$time",
           "createdBy": "Sprint",
+          "fileName": "Sample videos",
           "files": 1,
           "id": "$id:1",
           "importing": null,
           "items": 3,
           "name": "Sample videos",
           "notUsed": 3,
-          "updatedAt": "$time"
+          "state": "ready",
+          "updatedAt": "$time",
+          "usedBy": 0
         }
       ]
     },
@@ -75,7 +79,9 @@
         },
         "source": {
           "builtIn": false,
+          "createdAt": "$time",
           "createdBy": "Tester",
+          "fileName": "feed.csv",
           "files": 1,
           "id": "$id:4",
           "importing": {
@@ -85,7 +91,9 @@
           "items": 0,
           "name": "Weekly feed",
           "notUsed": 0,
-          "updatedAt": "$time"
+          "state": "reading",
+          "updatedAt": "$time",
+          "usedBy": 0
         }
       }
     },
@@ -147,7 +155,9 @@
         },
         "source": {
           "builtIn": false,
+          "createdAt": "$time",
           "createdBy": "Tester",
+          "fileName": "feed.csv",
           "files": 2,
           "id": "$id:4",
           "importing": {
@@ -157,7 +167,9 @@
           "items": 3,
           "name": "Weekly feed",
           "notUsed": 3,
-          "updatedAt": "$time"
+          "state": "reading",
+          "updatedAt": "$time",
+          "usedBy": 0
         }
       }
     },
