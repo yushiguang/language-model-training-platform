@@ -55,6 +55,9 @@ export async function runNotify(w: Scope, job: Job): Promise<JobOutcome> {
   const parentId = job.idempotencyKey?.startsWith('finally:') ? job.idempotencyKey.slice('finally:'.length) : null;
   const parent = parentId ? await w.jobs.get(w.ctx, parentId) : null;
   if (!parent || (parent.state !== 'done' && parent.state !== 'failed')) return {state: 'done'};
+  // How the job ended decides what is said; a record that has moved on since (a Retry that
+  // already finished) says nothing, so a late notice never reports another try's outcome.
+  const finished = parent.state === 'done';
   const state = await loadProjectState(w, projectId);
   if (!state) return {state: 'done'};
   const project = state.project.name;
@@ -69,8 +72,7 @@ export async function runNotify(w: Scope, job: Job): Promise<JobOutcome> {
   if (job.args.about === 'labeling') {
     const task = await w.labeling.getTask(String(job.args.taskId));
     if (!task || task.projectId !== projectId) return {state: 'done'};
-    const finished = task.state === 'done';
-    if (!finished && task.state !== 'failed' && task.state !== 'needs_attention') return {state: 'done'};
+    if (finished ? task.state !== 'done' : task.state !== 'failed' && task.state !== 'needs_attention') return {state: 'done'};
     const v = state.versions.find(x => x.id === task.promptVersionId);
     const params = {version: v ? versionLabel(v) : '?', model: modelName(state, task.endpoint), project};
     await notify(w, {
@@ -83,8 +85,7 @@ export async function runNotify(w: Scope, job: Job): Promise<JobOutcome> {
     });
   } else if (job.args.about === 'optimiser') {
     const run = state.optimisation.find(o => o.id === String(job.args.runId));
-    if (!run || (run.state !== 'done' && run.state !== 'failed')) return {state: 'done'};
-    const finished = run.state === 'done';
+    if (!run || run.state !== (finished ? 'done' : 'failed')) return {state: 'done'};
     await notify(w, {
       userIds: to,
       kind: finished ? 'optimiser_finished' : 'optimiser_failed',

@@ -2218,3 +2218,36 @@ test("notifications (#71): work Sprint started goes to the creator only while th
   assert.equal((await w.state()).runs.filter(r => r.state === 'done').length, 2);
   assert.equal(n.port.sent().length, 1, 'a creator who left is not told');
 });
+
+test('notifications (#71): a late notice of a failed try says nothing once a Retry finished; a caller who lost read access is not told', async () => {
+  const n = notifications();
+  const readers = new Set(['u_1']);
+  let failing = true;
+  const w = await world('nt8', {notifications: n.port, authorization: {allowed: async ctx => readers.has(ctx.user.id)}, answer: () => {
+    if (failing) throw new Error('the model is down');
+    return '{"format": "Vlog"}';
+  }});
+  const v = await w.newVersion();
+  const {runIds} = await scoreVersion(w.ws, w.projectId, v);
+  await w.jobs.idle();
+  const [failedNotice] = await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['notify.send']});
+  failing = false;
+  await scoreVersion(w.ws, w.projectId, v);
+  await w.jobs.idle();
+  assert.equal((await w.labeling.getTask(runIds[0]))!.state, 'done');
+  assert.deepEqual(n.port.sent().map(x => x.kind), ['scoring_failed', 'scoring_finished']);
+  // The failed try's notice, run again late (as a full compute queue would), says nothing now.
+  const {runNotify} = await import('./notify.ts');
+  await runNotify(w.ws, failedNotice);
+  assert.equal(n.port.sent().length, 2);
+  // A caller who lost read access while scoring ran hears nothing, and the notice ends done.
+  readers.delete('u_1');
+  const other = await w.newVersion('another');
+  readers.add('u_1');
+  await scoreVersion(w.ws, w.projectId, other);
+  readers.delete('u_1');
+  await w.jobs.idle();
+  assert.equal(n.port.sent().length, 2);
+  const notices = await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['notify.send']});
+  assert.ok(notices.length === 3 && notices.every(j => j.state === 'done'));
+});
