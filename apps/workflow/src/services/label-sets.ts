@@ -92,15 +92,18 @@ async function cut(w: Scope, projectId: string, sizesOf: (free: number) => numbe
       if (want > free.length) throw new Error(`Only ${free.length} samples are left without a label set.`);
       await grantLabelers(w, project.tenantId, projectId, labelers);
       const made: LabelSet[] = [];
+      const top = sets.reduce((n, s) => Math.max(n, s.number), 0);
       let at = 0;
       let first = sets.reduce((n, s) => Math.max(n, s.last), 0) + 1;
       for (const size of sizes) {
         const last = free[at + size - 1];
-        made.push({id: newId('ls'), projectId, snapshotId: snap.id, number: sets.length + made.length + 1, name: cleanName(extra.name), first, last, labelerIds: labelers, createdAt: now(), createdBy: user.id});
+        made.push({id: newId('ls'), projectId, snapshotId: snap.id, number: top + made.length + 1, name: cleanName(extra.name), first, last, labelerIds: labelers, createdAt: now(), createdBy: user.id});
         at += size;
         first = last + 1;
       }
-      await w.catalog.insertMany('label_sets', made);
+      // One after another, in order: a write that fails leaves the sets before it and none after,
+      // so no range is skipped and trying again cuts what is left.
+      for (const set of made) await w.catalog.insert('label_sets', set);
       await w.catalog.audit(projectId, user.name, 'label_sets.create', {count: made.length, samples: want});
       w.emitChange(projectId);
       return made;
