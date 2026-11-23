@@ -11,7 +11,7 @@ import {SignedIn} from './session';
 import {ActionErrorBanner, clearActionError, Icon} from '@/ui';
 import {t} from '@/i18n';
 import {AskAi} from './AskAi';
-import {ProjectProvider, useProject} from './ProjectContext';
+import {ProjectProvider, tenantHref, useProject} from './ProjectContext';
 import {SettingsProvider} from './ProjectSettings';
 import {TopBar, type Where} from './shell/TopBar';
 import {NoAccessHost} from './shell/NoAccess';
@@ -100,7 +100,7 @@ function AppFrame({
  */
 export function ProjectShell({children}: {children: ReactNode}) {
   return (
-    <SignedIn>
+    <SignedIn inTenant>
       <Suspense fallback={<Loading />}>
         <ProjectProvider>
           <ShellInner>{children}</ShellInner>
@@ -229,7 +229,7 @@ function PageBody({head, fadeKey, children}: {head: ReactNode; fadeKey?: string;
  */
 export function TenantPage({head, children}: {head: ReactNode; children: ReactNode}) {
   return (
-    <SignedIn>
+    <SignedIn inTenant>
       <AppFrame where={{tenant: true}}>
         <PageBody head={head}>{children}</PageBody>
       </AppFrame>
@@ -251,7 +251,7 @@ function Missing({text}: {text: string}) {
     <div className="k sp-missing">
       <h2>{text}</h2>
       <p>
-        <Link href="/tenant/">{t('Back to all projects')}</Link>
+        <Link href={tenantHref()}>{t('Back to all projects')}</Link>
       </p>
     </div>
   );

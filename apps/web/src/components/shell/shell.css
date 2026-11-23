@@ -20,6 +20,10 @@ body { background: var(--color-background-surface, #fff); }
 .sp-crumb-name { display: inline-block; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sp-chev { display: inline-flex; width: 14px; opacity: 0; transition: opacity .12s; }
 .sp-crumb:hover .sp-chev, .sp-crumb:focus-visible .sp-chev, .sp-crumb[aria-expanded=true] .sp-chev { opacity: 1; }
+/* The tenant: its name links to the tenant page, the arrow beside it opens the switch menu (#94). */
+.sp-crumb-wrap { display: inline-flex; align-items: center; min-width: 0; }
+.sp-crumb-wrap:hover .sp-chev, .sp-chev-only:focus-visible .sp-chev, .sp-chev-only[aria-expanded=true] .sp-chev { opacity: 1; }
+.sp-chev-only { padding-inline: 2px; }
 
 /* Centre: the four steps, arrows between them. Right: Ask AI, language, the avatar. */
 .sp-steps { display: flex; align-items: center; gap: 4px; }
@@ -46,6 +50,9 @@ body { background: var(--color-background-surface, #fff); }
 .sp-loading svg.i { width: 24px; height: 24px; animation: k-spin 1s linear infinite; }
 .sp-missing { padding: 120px 24px; text-align: center; display: flex; flex-direction: column; gap: 12px; }
 .sp-hero { text-align: center; padding-top: 24px; }
+.sp-anchor { display: block; scroll-margin-top: calc(var(--sp-top) + 24px); }
+.sp-one { display: block; flex: 1; min-width: 0; }
+.sp-one > * { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
 /* Dialogs: a header, a body, buttons on the right; settings with their sections on the left. */
 .sp-dlg-head { padding: 20px 24px 0; }

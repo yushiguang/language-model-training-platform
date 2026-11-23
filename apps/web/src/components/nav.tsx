@@ -2,6 +2,7 @@
 
 import {usePathname, useRouter, useSearchParams} from 'next/navigation';
 import {useEffect} from 'react';
+import {pageMoved} from './session';
 
 /**
  * Navigation that a button can wait on (R3-5): `go(href)` resolves once the new page is on screen,
@@ -29,6 +30,7 @@ export function NavWatcher() {
   const path = usePathname();
   const q = useSearchParams();
   useEffect(() => {
+    pageMoved();
     for (const r of waiting.splice(0)) r();
   }, [path, q]);
   return null;
