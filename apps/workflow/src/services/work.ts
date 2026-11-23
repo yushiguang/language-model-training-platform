@@ -163,12 +163,24 @@ export async function drive(w: Scope, state: ProjectState) {
     const fresh = await optimiser.getRun(o.id);
     if (fresh?.state !== 'running' || (await optimiser.isRunning(o.id))) continue;
     const step = OPTIMISER_LABELING_STEPS.find(s => s === fresh.step);
-    if (step) await w.jobs.enqueue(w.ctx, goOnAfter(w, projectId, o.id, {round: fresh.round, step}));
-    else {
-      const last = fresh.history.at(-1);
-      const history = last?.outcome === 'running' ? [...fresh.history.slice(0, -1), {...last, outcome: 'failed' as const, step: last.step ?? fresh.step ?? undefined}] : fresh.history;
-      await catalog.patch('optimisation_runs', o.id, {state: 'failed', error: 'The Optimiser stopped unexpectedly. Retry goes on from where it stopped.', finishedAt: now(), step: null, stepStartedAt: null, stepVersionId: null, history});
+    if (step) {
+      // Its own key: the follow-up the labeling job's end queues (as the person who started the
+      // run) is never taken over by this one; the second of the two to run finds nothing to do.
+      const at = {round: fresh.round, step};
+      await w.jobs.enqueue(w.ctx, {...goOnAfter(w, projectId, o.id, at), idempotencyKey: `optimiser:${o.id}:${at.round}:${at.step}:sweep`});
+      continue;
     }
+    // Under the run's lock, everything read again: a job queued or a runner started meanwhile keeps it.
+    await w.locks.run(optimiserLock(projectId, o.endpoint), async () => {
+      if (await optimiser.isRunning(o.id)) return;
+      const live = await activeJobs(w, projectId, ['optimiser.run', 'labeling.runTask']);
+      if (live.some(j => (j.kind === 'optimiser.run' ? j.args.runId : j.args.optimiserRunId) === o.id)) return;
+      const run = await optimiser.getRun(o.id);
+      if (run?.state !== 'running' || OPTIMISER_LABELING_STEPS.some(s => s === run.step)) return;
+      const last = run.history.at(-1);
+      const history = last?.outcome === 'running' ? [...run.history.slice(0, -1), {...last, outcome: 'failed' as const, step: last.step ?? run.step ?? undefined}] : run.history;
+      await catalog.patch('optimisation_runs', o.id, {state: 'failed', error: 'The Optimiser stopped unexpectedly. Retry goes on from where it stopped.', finishedAt: now(), step: null, stepStartedAt: null, stepVersionId: null, history});
+    });
   }
   // A task left running by a closed page shows as paused (listTasks marks it).
   await labeling.listTasks(projectId);
@@ -248,28 +260,47 @@ export async function queueOptimiserLabeling(w: Scope, setup: SetupVersion, vers
   // pass 2: the confirmation of a pass, a fresh labeling of the same examples.
   const settings = pass && pass > 1 ? {...settingsFor(setup, endpoint), pass} : settingsFor(setup, endpoint);
   const hash = settingsHash(settings);
-  let task = await findTask(w, projectId, version, endpoint, hash, exampleIds, ['eval', 'optimiser']);
-  if (task?.state === 'done') return {state: 'done', task};
   const jobs = await activeJobs(w, projectId, ['labeling.runTask']);
-  const jobOf = (t: LabelingTask | null) => (t ? jobs.find(j => j.args.taskId === t.id) : undefined);
-  if (jobOf(task) && jobOf(task)!.args.optimiserRunId !== runId) {
-    // Other work (scoring the same version) labels these examples now: the run queues a task of its
-    // own behind it on the model's key, which reuses those answers and then goes on with the run.
-    task = await findTask(w, projectId, version, endpoint, hash, exampleIds, ['optimiser']);
-    if (task?.state === 'done') return {state: 'done', task};
+  const jobOf = (t: LabelingTask) => jobs.find(j => j.args.taskId === t.id);
+  // A task this run may use: done, labeled by this run's own job, or idle with no Stop pending.
+  // One another job labels now (scoring of the same version, a run stopped a moment ago) is never
+  // waited on: its job does not go on with this run. The run then uses a task of its own, queued
+  // behind that job on the model's key, which reuses those answers.
+  const usable = (t: LabelingTask | null): t is LabelingTask => !!t && (t.state === 'done' || (jobOf(t) ? jobOf(t)!.args.optimiserRunId === runId : !t.stopRequested));
+  const shared = await findTask(w, projectId, version, endpoint, hash, exampleIds, ['eval', 'optimiser']);
+  let task = usable(shared) ? shared : null;
+  if (!task) {
+    const own = (await w.labeling.listTasks(projectId)).filter(t => t.purpose === 'optimiser' && t.promptVersionId === version.id && t.endpoint === endpoint && t.settingsHash === hash && t.exampleIds.length === exampleIds.length && exampleIds.every(id => t.exampleIds.includes(id)));
+    task = own.find(usable) ?? null;
   }
+  if (task?.state === 'done') return {state: 'done', task};
   if (task && jobOf(task)) return {state: 'queued', taskId: task.id};
-  if (!req.start) return {state: 'unfinished', task, error: task ? (task.error ?? `the labeling ended as ${task.state}`) : 'the labeling was never started'};
-  task ??= await w.labeling.createTask({projectId, tenantId: tenantOf(w), purpose: 'optimiser', promptVersionId: version.id, setupVersionId: setup.id, endpoint, settings, exampleIds, createdBy: 'optimiser'});
-  await w.jobs.enqueue(w.ctx, {
-    kind: 'labeling.runTask',
-    projectId,
-    concurrencyKey: modelKey(w, endpoint),
-    // A task that failed or was stopped labels what it lacks again (Retry failed clears its failed list).
-    args: {taskId: task.id, promptVersionId: version.id, endpoint, trigger: 'system', auto: false, retry: task.state !== 'queued', optimiserRunId: runId, round: at.round, step: at.step},
-    idempotencyKey: `label:${task.id}`,
-    finally: goOnAfter(w, projectId, runId, at),
-  });
+  if (!req.start) return {state: 'unfinished', task: task ?? shared, error: task ? (task.error ?? `the labeling ended as ${task.state}`) : 'the labeling was never started'};
+  const queue = async (t: LabelingTask) =>
+    w.jobs.enqueue(w.ctx, {
+      kind: 'labeling.runTask',
+      projectId,
+      concurrencyKey: modelKey(w, endpoint),
+      // A task that failed or was stopped labels what it lacks again (Retry failed clears its failed list).
+      args: {taskId: t.id, promptVersionId: version.id, endpoint, trigger: 'system', auto: false, retry: t.state !== 'queued', optimiserRunId: runId, round: at.round, step: at.step},
+      idempotencyKey: `label:${t.id}`,
+      finally: goOnAfter(w, projectId, runId, at),
+    });
+  const create = () => w.labeling.createTask({projectId, tenantId: tenantOf(w), purpose: 'optimiser', promptVersionId: version.id, setupVersionId: setup.id, endpoint, settings, exampleIds, createdBy: 'optimiser'});
+  task ??= await create();
+  // Another start queued a job for the same task just now (the same idempotency key): that job does
+  // not go on with this run, so the run labels in a task of its own.
+  let job = await queue(task);
+  if (job.args.optimiserRunId !== runId) {
+    task = await create();
+    job = await queue(task);
+  }
+  // A Stop saved meanwhile may have listed the run's jobs before this one: cancelled here, so no
+  // labeling of a stopped run is paid for (Stop saves first, then cancels what it finds).
+  if ((await w.optimiser?.getRun(runId))?.state === 'stopped') {
+    await w.jobs.cancel(w.ctx, job.id);
+    await w.labeling.stopTask(task.id);
+  }
   w.emitChange(projectId);
   return {state: 'queued', taskId: task.id};
 }
@@ -282,51 +313,47 @@ async function runOf(w: Scope, projectId: string, runId: string) {
 }
 
 /**
- * The user's Stop on a run (docs/design/server.md, 4.4): cancels its queued and running
- * `optimiser.run` jobs and labeling jobs, stops those tasks (a running one stops calling the
- * model), and saves the run as stopped, without relying on any runner's memory. A loop still
- * running in a job ends the run as stopped itself (its job's cancel reaches it).
+ * The user's Stop on a run (docs/design/server.md, 4.4): saves the run as stopped on its record,
+ * without relying on any runner's memory, then cancels its queued and running `optimiser.run`
+ * jobs and labeling jobs and stops those tasks (a running one stops calling the model). A runner
+ * still working on the run reads the Stop before its next save and ends the run as stopped; the
+ * follow-up a cancelled labeling job queues finds it stopped and does nothing.
  */
 export async function stopOptimiser(w: Scope, projectId: string, runId: string): Promise<void> {
-  await runOf(w, projectId, runId);
-  const jobs = (await activeJobs(w, projectId, ['optimiser.run', 'labeling.runTask'])).filter(j => (j.kind === 'optimiser.run' ? j.args.runId : j.args.optimiserRunId) === runId);
-  const loops = jobs.filter(j => j.kind === 'optimiser.run');
-  for (const j of loops) await w.jobs.cancel(w.ctx, j.id);
+  const run = await runOf(w, projectId, runId);
   const optimiser = optimiserService(w);
+  const stopped = await saveStopped(w, projectId, runId, run.endpoint);
+  // Read after the Stop is saved: a runner that queues labeling from now on sees it (`queueOptimiserLabeling`).
+  const jobs = (await activeJobs(w, projectId, ['optimiser.run', 'labeling.runTask'])).filter(j => (j.kind === 'optimiser.run' ? j.args.runId : j.args.optimiserRunId) === runId);
+  for (const j of jobs) await w.jobs.cancel(w.ctx, j.id);
   await optimiser.stopRun(w.ctx, runId);
-  // The run is saved as stopped before its labeling is cancelled, so the follow-up that a
-  // cancelled labeling job queues finds it stopped and does nothing.
-  const stopped = await saveStopped(w, projectId, runId, loops);
-  for (const j of jobs.filter(j => j.kind === 'labeling.runTask')) {
-    await w.jobs.cancel(w.ctx, j.id);
-    await w.labeling.stopTask(String(j.args.taskId));
-  }
-  if (stopped) w.emitChange(projectId);
+  for (const j of jobs.filter(j => j.kind === 'labeling.runTask')) await w.labeling.stopTask(String(j.args.taskId));
+  if (!stopped) return;
+  // Once, here: the action line and the run's end in metrics (a runner that ends it as stopped later adds its own).
+  const fresh = await optimiser.getRun(runId);
+  w.tm.event('optimiser_stopped_by_user', {slot: run.endpoint, candidates: fresh?.candidates ?? run.candidates, cost_usd: fresh?.costUsd ?? run.costUsd});
+  // The action line is best effort: the run has stopped either way, even if it cannot be written.
+  await postEvent(w, projectId, 'stop', 'user', msg('stopped the Optimiser'), {path: '/prompt'}).catch(() => undefined);
+  w.emitChange(projectId);
 }
 
 /**
- * Saves a run as stopped unless a runner still holds it: one whose job is running ends the run as
- * stopped itself once the cancel reaches it, and its own save would write over one made here.
+ * Saves a run as stopped. Under the run's lock when it is free, reading the run again inside (a
+ * runner may have ended it just before); when a runner holds the lock, saved anyway after a fresh
+ * read, and that runner reads it before its next save. Says whether this call stopped it.
  */
-async function saveStopped(w: Scope, projectId: string, runId: string, loops: Job[]): Promise<boolean> {
+async function saveStopped(w: Scope, projectId: string, runId: string, endpoint: EndpointId): Promise<boolean> {
   const optimiser = optimiserService(w);
-  const after = await Promise.all(loops.map(j => w.jobs.get(w.ctx, j.id)));
-  if (after.some(j => j?.state === 'running')) return false;
-  const first = await optimiser.getRun(runId);
-  if (!first || !['running', 'paused', 'failed'].includes(first.state)) return false;
-  // Under the run's lock, so no runner saves (or starts) meanwhile; a busy lock means a runner
-  // holds the run. Everything is read again inside: it may have ended just before.
-  const saved = await w.locks.run(optimiserLock(projectId, first.endpoint), async () => {
-    if (await optimiser.isRunning(runId)) return false;
-    if ((await activeJobs(w, projectId, ['optimiser.run'])).some(j => j.args.runId === runId)) return false;
+  const write = async () => {
     const run = await optimiser.getRun(runId);
     if (!run || !['running', 'paused', 'failed'].includes(run.state)) return false;
     const last = run.history.at(-1);
     const history = last?.outcome === 'running' ? [...run.history.slice(0, -1), {...last, outcome: 'stopped' as const}] : run.history;
     await w.catalog.patch('optimisation_runs', runId, {state: 'stopped', stopReason: 'user', error: null, finishedAt: now(), step: null, stepStartedAt: null, stepVersionId: null, history});
     return true;
-  });
-  return !!saved;
+  };
+  const locked = await w.locks.run(optimiserLock(projectId, endpoint), write);
+  return locked ?? (await write());
 }
 
 /** Retry on a Failed run, or Resume on a paused one: queues it again; it goes on from the step it stopped at. */

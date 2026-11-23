@@ -232,8 +232,24 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
     const entry = {ctrl: new AbortController(), projectId};
     active.set(run.id, entry);
     const signal = entry.ctrl.signal;
+    /**
+     * A Stop saved on the record while this runner worked (the workflow saves it from any process,
+     * docs/design/server.md, 4.4): never written over. Read before every save.
+     */
+    const stopSaved = async () => run.state !== 'stopped' && (await catalog.get('optimisation_runs', run.id))?.state === 'stopped';
+    const endAsStopped = () => {
+      run.state = 'stopped';
+      run.stopReason = 'user';
+      run.error = null;
+      const last = run.history.at(-1);
+      if (last?.outcome === 'running') run.history[run.history.length - 1] = {...last, outcome: 'stopped', step: last.step ?? run.step ?? undefined};
+    };
     const save = async (extra: Partial<OptimisationRun> = {}) => {
       Object.assign(run, extra);
+      if (await stopSaved()) {
+        entry.ctrl.abort();
+        throw aborted();
+      }
       const {id: _id, ...rest} = run;
       await catalog.patch('optimisation_runs', run.id, rest);
       onChange(run.projectId);
@@ -544,9 +560,15 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
     }
     // Waiting: the position (round and step) is saved; the labeling job's `finally` goes on from it.
     if (waiting) {
-      await save();
-      return run;
+      try {
+        await save();
+        return run;
+      } catch (e) {
+        if (!isAbort(e)) throw e;
+        endAsStopped();
+      }
     }
+    if (await stopSaved()) endAsStopped();
     await save({finishedAt: nowIso(), step: null, stepStartedAt: null, stepVersionId: null});
     const outcome = run.state === 'done' ? (run.stopReason ?? 'max_rounds') : run.state;
     const kept = run.history.filter(h => h.outcome === 'kept');
@@ -605,9 +627,6 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
       const run = await catalog.get('optimisation_runs', runId);
       if (!run) return;
       for (const t of await labeling.listTasks(run.projectId)) if (t.purpose === 'optimiser' && t.state === 'running') await labeling.stopTask(t.id);
-      // The action line is best effort: the run has stopped either way, even if it cannot be
-      // written (the run's caller may have lost access since it started).
-      await deps.host.postEvent(ctx, {projectId: run.projectId, event: 'stop', actor: 'user', what: msg('stopped the Optimiser'), link: {path: '/prompt'}}).catch(() => undefined);
     },
 
     getRun: runId => catalog.get('optimisation_runs', runId),

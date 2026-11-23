@@ -33,8 +33,8 @@ example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts
   - `listTasks` reports a `running` task as `paused` / `closed` only when no runner holds it
     anywhere: not through the locks (shared across processes when the composition wires
     `leaseLocks` over `Platform.lockStore`, #46), and not as live job work where the composition
-    supplies `liveElsewhere` (a queued or running `labeling.runTask` job, or the project's
-    `optimiser.run` job for an optimiser task). A reader in another process never falsifies a live run.
+    supplies `liveElsewhere` (a queued or running `labeling.runTask` job for the task; an
+    Optimiser run's labeling is such a job too). A reader in another process never falsifies a live run.
   - `relabelInvalid` (the final run): an example whose only saved answer is invalid when the task
     first starts is labeled once more. The first run stores which ones in `relabelExampleIds`, so
     a resumed task never relabels its own answers (no clock comparison). `predictions` returns the

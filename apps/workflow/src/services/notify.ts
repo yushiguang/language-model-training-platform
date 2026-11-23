@@ -86,8 +86,6 @@ export async function runNotify(w: Scope, job: Job): Promise<JobOutcome> {
   } else if (job.args.about === 'optimiser') {
     const run = state.optimisation.find(o => o.id === String(job.args.runId));
     if (!run || run.state !== (finished ? 'done' : 'failed')) return {state: 'done'};
-    // Every job of a run's chain carries this notice: only the one that ended the run sends it.
-    if (!run.finishedAt || !parent.endedAt || parent.endedAt < run.finishedAt) return {state: 'done'};
     await notify(w, {
       userIds: to,
       kind: finished ? 'optimiser_finished' : 'optimiser_failed',

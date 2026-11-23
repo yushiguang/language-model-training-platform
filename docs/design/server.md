@@ -118,12 +118,12 @@
 
 - **只做计算**：`optimiser.run` 是常规任务（`compute:<tenantId>`），只做生成候选、比较分数、决定下一步。启动、Retry、Resume 入队的幂等键还是 `optimiser:<projectId>`。
 - **位置**：运行按 `(runId, round, step)` 推进，位置就是运行记录上已经保存的 `round` 和 `step`。要打标的步骤（`OptimiserLabelingStep`）是 `parent`、`dry_run`、`full`、`confirm`。每个步骤开始时先保存 `step`，再请求打标，所以入队时位置已经在库里。试跑挑的样本存在这一轮的 `dryRunIds` 上，接着跑时比的是同一批。
-- **入队打标**（`apps/workflow/src/services/work.ts` 的 `queueOptimiserLabeling`，`OptimiserHost.label` 调它）：按版本、模型、设置和样本找到或新建打标任务（已有答案照样复用）。任务已经完成就直接往下走；否则入队一个 `labeling.runTask`（模型任务的键 `model:<tenantId>:<endpointId>`），`args` 带 `optimiserRunId`、`round`、`step`，幂等键 `label:<taskId>`，`finally` 是接着跑的 `optimiser.run`（幂等键 `optimiser:<runId>:<round>:<step>`）。然后这次 `optimiser.run` 保存位置并以 done 结束，不等待，运行状态仍是 `running`。这些样本正被别的任务打标（比如同一版本的评分）时，运行另建一个自己的任务排在它后面；它在同一个键上按先后执行，复用前面的答案，再接着跑运行。
+- **入队打标**（`apps/workflow/src/services/work.ts` 的 `queueOptimiserLabeling`，`OptimiserHost.label` 调它）：按版本、模型、设置和样本找到或新建打标任务（已有答案照样复用）。任务已经完成就直接往下走；否则入队一个 `labeling.runTask`（模型任务的键 `model:<tenantId>:<endpointId>`），`args` 带 `optimiserRunId`、`round`、`step`，幂等键 `label:<taskId>`，`finally` 是接着跑的 `optimiser.run`（幂等键 `optimiser:<runId>:<round>:<step>`）。然后这次 `optimiser.run` 保存位置并以 `paused` 结束（不算终态，不触发 `finally`），不等待，运行状态仍是 `running`。运行只用这几种任务：已完成的、正由它自己的打标任务在打的、空闲且没有待处理停止请求的。别的任务正在打标这些样本时（同一版本的评分、刚停止的上一次运行），运行不等它（它的 `finally` 不会接着跑这次运行），而是另建一个自己的任务排在它后面；同一个键按先后执行，复用前面的答案。入队时幂等键撞上别人刚入队的同一任务，也改用新任务。
 - **接着跑**：`OptimiserContract.execute(ctx, runId, at)`。运行已经不在 `at`（已经往下走了、已结束、已停止）时什么都不做。在 `at` 时只读打标结果，不重新入队（`start: false`）：答案齐了就往下走；任务失败、被停止或任务丢了（没有活跃任务又没打完）就把运行标为 Failed，错误写明哪一步。Retry 从同一步开始，重新入队打标（失败的样本重打，已完成的保留）。运行的锁还被上一个任务占着时，接着跑的任务抛错，由任务模块延迟重试（最多 3 次）；巡检兜底。
-- **巡检**（`drive`）：运行是 `running`，没有活跃的 `optimiser.run`，也没有 `args.optimiserRunId` 是它的活跃打标任务，本进程没在跑，锁也没人拿着，才算孤儿。停在打标步骤的，按它的位置入队接着跑的任务，由它按打标结果推进或标为 Failed（打标任务失联 3 次被标为失败也走这条路）；停在其它步骤的（比如生成候选时 worker 丢了、页面关了），直接标为 Failed，这一轮记为失败，可以 Retry。巡检以 `SYSTEM_CALLER` 运行，所以它入队的后续任务和通知按系统任务处理（第 8 节）。
-- **停止**（`stopOptimiser`）：先取消这次运行排队中和运行中的 `optimiser.run`，再在运行的锁下直接把运行存为“已停止”（这一轮也记为已停止），不依赖进程内存；还有 `optimiser.run` 在执行时由它自己收到取消后以“已停止”结束。然后取消这次运行的打标任务（`args.optimiserRunId`），并停止对应的打标任务，运行中的打标不再调用模型。因为运行先存为已停止，被取消的打标任务的 `finally` 入队的接着跑任务什么都不做。打标任务被停止时，任务以 `cancelled` 结束（以前是 `paused`），所以它的 `finally` 一定会执行。
+- **巡检**（`drive`）：运行是 `running`，没有活跃的 `optimiser.run`，也没有 `args.optimiserRunId` 是它的活跃打标任务，本进程没在跑，锁也没人拿着，才算孤儿。停在打标步骤的，按它的位置入队接着跑的任务（幂等键另加 `:sweep`，不会顶掉打标任务结束时以发起人身份入队的那个；两个都跑时，后跑的发现位置已变，什么都不做），由它按打标结果推进或标为 Failed（打标任务失联 3 次被标为失败也走这条路）；停在其它步骤的（比如生成候选时 worker 丢了、页面关了），在运行的锁下重新读任务和运行，确认仍是孤儿才标为 Failed，这一轮记为失败，可以 Retry。巡检以 `SYSTEM_CALLER` 运行，所以它入队的后续任务和通知按系统任务处理（第 8 节）。
+- **停止**（`stopOptimiser`）：先把运行存为“已停止”（这一轮也记为已停止），不依赖进程内存：锁空闲时在锁下重读再写；有执行者拿着锁时也照写。执行者每次保存前都先读记录，读到已停止就不再覆盖，以“已停止”结束这次运行。然后取消这次运行排队中和运行中的 `optimiser.run` 和打标任务（`args.optimiserRunId`），并停止对应的打标任务，运行中的打标不再调用模型。入队打标的一方在入队后再读一次运行，已停止就取消刚入队的任务，所以停止和入队同时发生时也不会有付费打标漏网。因为运行先存为已停止，被取消的打标任务的 `finally` 入队的接着跑任务什么都不做。Ask AI 的“停止了优化器”和 `optimiser_stopped_by_user` 在这里记一次。打标任务被停止时，任务以 `cancelled` 结束（以前是 `paused`），所以它的 `finally` 一定会执行。
 - **页面**：运行在等自己的打标任务时，优化器面板显示那个打标任务的排队位置（`withQueue`）。
-- **通知**：每个 `optimiser.run` 都带 `finally: notifyWhenEnded(..., {about: 'optimiser', runId})`；只有结束运行的那个任务（任务结束时间不早于运行的 `finishedAt`）才发，中间各环不发（第 8.2 节）。
+- **通知**：每个 `optimiser.run` 都带 `finally: notifyWhenEnded(..., {about: 'optimiser', runId})`；让运行等打标的任务以 `paused` 结束，不触发 `finally`，所以只有结束运行的那个任务入队通知（第 8.2 节）。
 
 ## 5. 异步任务
 
@@ -308,7 +308,7 @@ export interface ConfigReader {
 - **挂在任务的 `finally` 上**：`labeling.runTask` 和 `optimiser.run` 入队时带 `finally: notify.send`（`apps/workflow/src/services/notify.ts` 的 `notifyWhenEnded`），这是一个常规任务（`compute:<tenantId>`）。任务以任何终态结束都会入队一次（第 5.4 节）。执行器先看前一个任务（幂等键 `finally:<jobId>`）：只有它以完成或失败结束才发，被取消的（用户停止、发现别的执行者已在做）不发，即使记录上还留着上一次的失败。说“完成”还是“失败”由前一个任务的结果决定，记录的当前状态必须和它一致，否则不发（比如失败的通知排队时 Retry 已经成功）。记录：打标任务 `done` 发“完成”，`failed` / `needs_attention` 发“失败”，`stopped` 等其它状态不发；优化器运行 `done` / `failed` 同理。Retry 是新的任务，结束时再发一次。
 - **收件人**：任务的调用方，也就是入队的人。Sprint 自己入队的任务（保存版本后页面检查自动开始的评分、服务端巡检）以 `SYSTEM_CALLER` 运行，发给项目创建人（`Project.createdById`），发之前用创建人的身份再查一次读权限，已经没有读权限（比如被移出租户）就不发；没有记录创建人的老项目不发。
 - **尽力而为**：工作流的 `notify(w, n)` 捕获发送错误，记 `sprint_notifications_total{notification, outcome="error"}` 和一行日志；成功记 `outcome="ok"`。`notify.send` 执行器总是以 done 结束、不重试；调用方已经没有读权限或项目已不在租户里时直接丢弃（done），不算失败。没有配置端口时什么都不发。第 8 步的标注集通知直接调 `notify`。
-- **链式的优化器**（#79）：一次运行是一串 `optimiser.run`，每个都带这个 `finally`，因为入队时不知道哪一个会结束运行。执行器只在前一个任务结束时间不早于运行的 `finishedAt` 时发，也就是结束运行的那一个；中间各环结束时运行还是 `running`，或者结束得更早，都不发。巡检把丢失的运行标为 Failed 时没有任务结束它，不发通知。
+- **链式的优化器**（#79）：一次运行是一串 `optimiser.run`，每个都带这个 `finally`，因为入队时不知道哪一个会结束运行。中间各环让运行去等打标，以 `paused` 结束，`paused` 不是终态，不触发 `finally`；只有结束运行的那个任务（`done` / `failed`）入队通知。被取消的（停止、已无事可做）入队了也不发。巡检把丢失的运行标为 Failed 时没有任务结束它，不发通知。
 
 ## 9. 租户和模型
 

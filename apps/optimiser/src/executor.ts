@@ -12,7 +12,7 @@ function positionOf(args: Record<string, unknown>): OptimiserPosition | undefine
  * ends or waits for a labeling job of its own. It only computes (a `compute:<tenantId>` job):
  * each labeling step is queued as a `labeling.runTask` job whose `finally` queues the
  * `optimiser.run` that goes on from that step (args `runId`, `round`, `step`). A run that waits
- * ends this job done; a cancel is the user's Stop. A lost lease leaves the run alone: the runner
+ * ends this job paused (not an end: its `finally` notice waits for the job that ends the run); a cancel is the user's Stop. A lost lease leaves the run alone: the runner
  * that took the job over resumes it from the saved record, and the run's own lock keeps it off
  * the work until this one ends. Across processes that holds only when the composition root wires
  * the Optimiser with shared locks (`leaseLocks` over `Platform.lockStore`, docs/integration.md;
@@ -40,8 +40,9 @@ export function optimiserExecutor(optimiser: OptimiserContract): JobExecutor {
         }
         if (run.state === 'done') return {state: 'done'};
         if (run.state === 'failed') return {state: 'failed', error: run.error ?? 'The run failed.'};
-        // Waiting for its labeling job, which goes on with it.
-        if (run.state === 'running') return {state: 'done'};
+        // Waiting for its labeling job, which goes on with it: paused is no end, so the notice
+        // (this job's `finally`) is queued only by the job that ends the run.
+        if (run.state === 'running') return {state: 'paused', error: 'Waiting for its labeling.'};
         return {state: 'cancelled', error: 'Stopped.'};
       } finally {
         ctl.signal.removeEventListener('abort', stop);

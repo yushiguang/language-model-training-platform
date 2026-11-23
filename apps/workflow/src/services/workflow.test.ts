@@ -533,24 +533,77 @@ test('an Optimiser run whose labeling waits for its model shows its place, and S
   assert.equal((await w.state()).optimisation.find(o => o.id === runId)?.state, 'stopped');
 });
 
-test('Stop on an Optimiser run whose queued job is cancelled leaves it to a runner that still holds its lock (#66)', async () => {
+test('Stop on an Optimiser run whose runner holds its lock saves the Stop; the runner reads it and ends the run as stopped (#66, #79)', async () => {
   const w = await world('b5e', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf, delayMs: 30});
-  const v = await w.newVersion();
-  const s0 = await w.state();
-  const task = await w.labeling.createTask({projectId: w.projectId, tenantId: 'default', purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: s0.examples.map(e => e.id), createdBy: 'Tester'});
-  await new DocRepo(w.db).patch('labeling_tasks', task.id, {state: 'paused', stopReason: 'closed'});
-  await tick(w.ws, await w.state());
-  await until(async () => (await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask'], states: ['running']})).length === 1, 'the labeling job');
-  const {startOptimiser, stopOptimiser} = await import('./work.ts');
-  const {runId} = await startOptimiser(w.ws, w.projectId, 10);
-  await w.catalog.patch('optimisation_runs', runId, {state: 'running'});
-  // A runner whose lease lapsed (its job queued again) still holds the run's lock: its own loop
-  // and save decide how the run ends, so the Stop here writes nothing over it.
+  await w.newVersion();
+  const {stopOptimiser} = await import('./work.ts');
+  const {id: runId} = await w.ws.optimiser!.startRun(w.ws.ctx, {projectId: w.projectId, endpoint: 'A', maxRounds: 10});
+  // A runner in another process holds the run's lock: the Stop is saved on the record anyway.
   await w.ws.locks.run(`optimiser:${w.projectId}:A`, async () => {
     await stopOptimiser(w.ws, w.projectId, runId);
+    assert.equal((await w.state()).optimisation.find(o => o.id === runId)?.state, 'stopped');
   });
-  assert.equal((await w.state()).optimisation.find(o => o.id === runId)?.state, 'running');
+  // A runner that then works on it (here: a Retry's job, as a stand-in for that runner) never writes over the Stop.
+  const run = await w.ws.optimiser!.execute(w.ws.ctx, runId);
+  assert.equal(run, null, 'a stopped run is not run again');
+  assert.equal((await w.state()).optimisation.find(o => o.id === runId)?.state, 'stopped');
   await w.jobs.idle();
+});
+
+test('a runner that reads a Stop saved meanwhile ends the run as stopped and labels nothing more (#79)', async () => {
+  const w = await world('b5g', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf});
+  await w.newVersion();
+  const {id: runId} = await w.ws.optimiser!.startRun(w.ws.ctx, {projectId: w.projectId, endpoint: 'A', maxRounds: 10});
+  // The Stop lands while the runner works (after it started, before its next save).
+  const host = optimiserHost(w.inst);
+  const labeling = (w.inst as unknown as {labeling: Parameters<typeof createOptimiser>[0]['labeling']}).labeling;
+  const loadState = host.loadState;
+  host.loadState = async (ctx, projectId) => {
+    await w.catalog.patch('optimisation_runs', runId, {state: 'stopped', stopReason: 'user'});
+    return loadState(ctx, projectId);
+  };
+  const opt = createOptimiser({catalog: w.catalog, labeling, agents: ruleAgent(), host, onChange: w.inst.emitChange, random: () => optimiserRandom()});
+  const run = await opt.execute(w.ws.ctx, runId);
+  assert.deepEqual([run?.state, run?.stopReason], ['stopped', 'user']);
+  assert.equal((await w.state()).optimisation[0].state, 'stopped');
+  await w.jobs.idle();
+  assert.equal(w.calls.n, 0, 'no labeling of a stopped run');
+});
+
+test('a run never waits on labeling another job does: it queues a task of its own, which goes on with it (#79)', async () => {
+  const w = await world('b5h', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf, delayMs: 20});
+  const v = await w.newVersion();
+  // Scoring of the start version is labeling it now; its job does not go on with any run.
+  const {runIds} = await scoreVersion(w.ws, w.projectId, v);
+  await until(async () => (await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask'], states: ['running']})).length === 1, 'the scoring job');
+  const {startOptimiser} = await import('./work.ts');
+  const {runId} = await startOptimiser(w.ws, w.projectId, 10, v.id);
+  await w.jobs.idle();
+  const run = (await w.state()).optimisation[0];
+  assert.deepEqual([run.state, run.stopReason], ['done', 'passes']);
+  const parent = (await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask']})).find(j => j.args.optimiserRunId === runId && j.args.step === 'parent')!;
+  assert.notEqual(parent.args.taskId, runIds[0], "the run's own task, behind the scoring job");
+  assert.equal((await w.labeling.getTask(String(parent.args.taskId)))?.purpose, 'optimiser');
+});
+
+test('Stop on a run whose labeling waits, then a new run on the same version, runs to the end (#79)', async () => {
+  const w = await world('b5i', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf, delayMs: 30});
+  const v = await w.newVersion();
+  const s0 = await w.state();
+  // A labeling task holds the model, so the first run's labeling waits in the queue.
+  const task = await w.labeling.createTask({projectId: w.projectId, tenantId: 'default', purpose: 'eval', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: s0.examples.map(e => e.id).slice(0, 2), createdBy: 'Tester'});
+  await new DocRepo(w.db).patch('labeling_tasks', task.id, {state: 'paused', stopReason: 'closed'});
+  await tick(w.ws, await w.state());
+  const {startOptimiser, stopOptimiser} = await import('./work.ts');
+  const first = await startOptimiser(w.ws, w.projectId, 10, v.id);
+  await until(async () => (await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask'], states: ['queued']})).some(j => j.args.optimiserRunId === first.runId), "the first run's labeling");
+  await stopOptimiser(w.ws, w.projectId, first.runId);
+  await w.jobs.idle();
+  assert.equal((await w.state()).optimisation.find(o => o.id === first.runId)?.state, 'stopped');
+  const second = await startOptimiser(w.ws, w.projectId, 10, v.id);
+  await w.jobs.idle();
+  const run = (await w.state()).optimisation.find(o => o.id === second.runId)!;
+  assert.deepEqual([run.state, run.stopReason, run.error], ['done', 'passes', null], 'the stopped task of the first run never stops the second');
 });
 
 test('Stop on an Optimiser run never writes over a run its runner ended just before (#66)', async () => {
@@ -564,13 +617,13 @@ test('Stop on an Optimiser run never writes over a run its runner ended just bef
   const {stopOptimiser} = await import('./work.ts');
   // A run with no job (as one whose runner holds it between jobs).
   const {id: runId} = await w.ws.optimiser!.startRun(w.ws.ctx, {projectId: w.projectId, endpoint: 'A', maxRounds: 10});
-  // The runner saves its last round and ends the run right after Stop's first read.
+  // The runner saves its last round and ends the run right after Stop's first read (which still saw it running).
   const optimiser = w.ws.optimiser!;
   const getRun = optimiser.getRun.bind(optimiser);
   let reads = 0;
   optimiser.getRun = async id => {
     const r = await getRun(id);
-    if (id === runId && ++reads === 2) await w.catalog.patch('optimisation_runs', runId, {state: 'done', stopReason: 'passes'});
+    if (id === runId && ++reads === 1) await w.catalog.patch('optimisation_runs', runId, {state: 'done', stopReason: 'passes'});
     return r;
   };
   try {
@@ -648,7 +701,10 @@ test('Auto Optimise as chained jobs (#79): each labeling step is a labeling job 
   assert.ok(loops.every(j => j.concurrencyKey === 'compute:default'));
   assert.equal(loops.length, labeling.length + 1, 'one start, then one follow-up after each labeling job');
   assert.ok(loops.filter(j => j.args.step).every(j => j.idempotencyKey === `optimiser:${runId}:${j.args.round}:${j.args.step}`));
-  assert.ok(all.every(j => j.state === 'done' || j.kind === 'notify.send'), 'no job of the chain failed or waits');
+  assert.ok(all.every(j => j.state === 'done' || (j.kind === 'optimiser.run' && j.state === 'paused')), 'no job of the chain failed');
+  // A job that leaves the run waiting ends paused (no end), so only the job that ended the run queues the notice.
+  assert.equal(loops.filter(j => j.state === 'done').length, 1, 'one job ended the run');
+  assert.equal(all.filter(j => j.kind === 'notify.send').length, 1, 'one notice is queued for the whole chain');
   assert.ok(run.history.every(h => h.dryRunIds?.length === 2), 'the dry run examples are saved on the round');
 });
 
@@ -661,7 +717,8 @@ test('Auto Optimise as chained jobs (#79): the sweep goes on with a run left at 
   await w.catalog.patch('optimisation_runs', runId, {step: 'parent', stepStartedAt: new Date().toISOString()});
   await tick(w.ws, await w.state());
   const followUp = (await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['optimiser.run']}))[0];
-  assert.deepEqual([followUp.args.round, followUp.args.step, followUp.idempotencyKey], [0, 'parent', `optimiser:${runId}:0:parent`]);
+  // Its own key, so the follow-up a labeling job's end queues as the run's starter is never taken over.
+  assert.deepEqual([followUp.args.round, followUp.args.step, followUp.idempotencyKey], [0, 'parent', `optimiser:${runId}:0:parent:sweep`]);
   await w.jobs.idle();
   const failed = (await w.state()).optimisation[0];
   assert.equal(failed.state, 'failed');
