@@ -1,6 +1,6 @@
 import type {AgentRuntimeContract, RequestContext, Answer, CatalogContract, EndpointId, Example, ExampleBrief, ExampleWithFeatures, LabelingContract, LockPort, OptimisationRun, OptimiserContract, OptimiserHost, OptimiserLabelingStep, OptimiserPosition, OptimiserRound, OptimiserStep, Prediction, ProjectState, PromptVersion, Schema, TelemetryPort} from '@yushiguang/sprint-contracts';
 import {NO_TELEMETRY} from '@yushiguang/sprint-contracts';
-import {checkStructured, msg, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withComments, pickWrong, wrongExamples, type PoolEntry} from '@yushiguang/sprint-domain';
+import {checkStructured, msg, compilePrompt, compareDryRun, rewordOnly, sameSignature, signatureOf, tidyStructured, answersForHelpers, exampleBrief, dryRunSize, exampleScore, mergePair, newId, paretoFront, pickDryRun, pickParent, promptKeys, settingsHash, systemConfig, toMap, versionLabel, withComments, pickWrong, scoredExamples, wrongExamples, type PoolEntry} from '@yushiguang/sprint-domain';
 
 /**
  * The Optimiser (GEPA, ported to TypeScript; docs/design/optimiser.md). Runs from
@@ -416,7 +416,8 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
         const pool = [start, ...state.versions.filter(v => kept.includes(v.id)), ...state.versions.filter(v => v.id !== start.id && !kept.includes(v.id) && scored.has(v.id))];
         const settings = setup.models.find(m => m.endpoint === endpoint);
         if (!settings) throw new StepFailed('parent', `The model is not chosen in Setup any more.`);
-        const half = state.examples.filter(e => e.split === 'eval' && e.optimiserHalf && !!state.gold[e.id]).map(e => e.id);
+        // The samples scores are made on (docs/design/server.md 4.3): inside label sets.
+        const half = scoredExamples(state).filter(e => e.optimiserHalf && !!state.gold[e.id]).map(e => e.id);
         if (!half.length) throw new StepFailed('parent', 'No version can be compared yet: the optimiser half of the eval set has no gold labels.');
         const answers = new Map<string, Map<string, Prediction>>();
         for (const v of pool) answers.set(v.id, toMap(await labeling.predictions(v.id, endpoint, settingsHash(settings))));
@@ -570,7 +571,10 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
           await putRound(round);
           confirm = await step('confirm', cand, async () => {
             const fresh = (await host.loadState(projectId))!;
-            await label(cand, fresh.examples.filter(e => e.split === 'eval' && !e.optimiserHalf).map(e => e.id), 'confirm', 2);
+            // A label set added since leaves nothing to confirm on: stop rather than label nothing.
+            const held = scoredExamples(fresh).filter(e => !e.optimiserHalf && !!fresh.gold[e.id]).map(e => e.id);
+            if (held.length < 2) throw new StepFailed('confirm', 'Scores are made once every label set is finished.');
+            await label(cand, held, 'confirm', 2);
             return host.confirmScore({projectId, promptVersionId: cand.id, endpoint});
           });
         }

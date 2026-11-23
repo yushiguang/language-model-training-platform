@@ -68,6 +68,7 @@ export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: Acti
   mismatches: read('arg'),
   reviewGold: write('request'),
   rebuildReports: write('arg'),
+  rescore: write('arg'),
 
   createVersion: write('request'),
   scoreVersion: write('request'),

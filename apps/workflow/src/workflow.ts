@@ -10,6 +10,7 @@ import * as governance from './services/governance.ts';
 import * as projects from './services/projects.ts';
 import * as prompts from './services/prompts.ts';
 import * as settings from './services/settings.ts';
+import * as scores from './services/scores.ts';
 import * as sources from './services/sources.ts';
 import * as models from './services/models.ts';
 import * as samples from './services/samples.ts';
@@ -185,7 +186,8 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
       if (r.outcome === 'changed') await checkGold(w, r.projectId, r.exampleId, r.answer);
       return mismatch.reviewGold(w, r.projectId, r.exampleId, r.promptVersionId, r.outcome, r.answer, r.note);
     },
-    rebuildReports: (ctx, projectId) => mismatch.rebuildReports(at(ctx), projectId),
+    rebuildReports: (ctx, projectId) => scores.rebuildReports(at(ctx), projectId),
+    rescore: (ctx, projectId) => scores.rescore(at(ctx), projectId),
 
     async createVersion(ctx, r) {
       const w = at(ctx);

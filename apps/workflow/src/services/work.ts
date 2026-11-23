@@ -4,7 +4,7 @@ import {autoSpendUsd, dueStarts, settingsHash, versionLabel, type DueStart, syst
 import {now, type Scope} from './app.ts';
 import {tenantOf} from './sources.ts';
 import {postEvent} from './chat-events.ts';
-import {buildReport, findTask, settingsFor} from './evaluation.ts';
+import {cannotBuildOn, findTask, scoreFromState, settingsFor} from './evaluation.ts';
 import {modelName} from './page-views.ts';
 import {loadProjectState} from './projects.ts';
 import {lockHoldout} from './governance.ts';
@@ -80,7 +80,7 @@ export async function runReport(w: Scope, job: Job): Promise<JobOutcome> {
   const v = state?.versions.find(x => x.id === job.args.promptVersionId);
   if (!state?.setup || !v) return {state: 'cancelled', error: 'The project or the version no longer exists.'};
   const endpoint = String(job.args.endpoint) as EndpointId;
-  const report = await buildReport(w, projectId, state.setup, v, endpoint, state.examples, state.gold, state.contextId);
+  const report = await scoreFromState(w, state, v, endpoint);
   if (report && job.args.taskId) {
     const task = await w.labeling.getTask(String(job.args.taskId));
     const passed = (await loadProjectState(w, projectId))?.reports.some(r => r.id === report.id && r.passed) ?? false;
@@ -193,11 +193,17 @@ export async function drive(w: Scope, state: ProjectState) {
   await labeling.listTasks(projectId);
 
   // Reports for scoring that finished while no page built them cost nothing: always built.
-  if (state.setup?.schema) {
-    for (const r of state.runs.filter(r => r.state === 'done')) {
-      // Only a first report: one a gold edit archived is rebuilt by the next reader of scores (lazy).
+  // None while a label set is unfinished: no score can be made then (docs/design/server.md 4.3).
+  // Nor with fewer than 2 gold-labeled samples in a half, nor for a version whose answers do not
+  // cover today's samples: building would end with nothing, and be queued again at every check.
+  const {goldHalves} = state.facts;
+  if (state.setup?.schema && state.scoring.ready && goldHalves.optimiser >= 2 && goldHalves.heldOut >= 2) {
+    const models = new Set(state.setup.models.map(m => m.endpoint));
+    const skipped = await cannotBuildOn(w, projectId, state.setup, state.scoring.basis.samples, state.runs.map(r => `${r.promptVersionId}|${r.endpoint}`));
+    for (const r of state.runs.filter(r => r.state === 'done' && models.has(r.endpoint) && !skipped.has(`${r.promptVersionId}|${r.endpoint}`))) {
+      // Only a first report: one on an older basis is worked out again by Rescore only.
       if (state.reports.some(x => x.promptVersionId === r.promptVersionId && x.endpoint === r.endpoint)) continue;
-      const v = state.versions.find(v => v.id === r.promptVersionId);
+      const v = state.versions.find(v => v.id === r.promptVersionId && v.schemaVersion === state.setup!.schemaVersion);
       if (v) await w.jobs.enqueue(w.ctx, reportJob(w, projectId, v, r.endpoint));
     }
   }

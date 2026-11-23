@@ -1,10 +1,10 @@
-import {DEFAULT_TENANT, DocFieldValue, type GateApproval, type Job, type JobOutcome, type LabelComment, type NodeId, type Project, type ProjectState, type ProjectStatus, type WorkflowFacts} from '@yushiguang/sprint-contracts';
-import {asAnswerOrNull, compareVersions, contextIdFor, gate, judge, newId, scoresUpdating, systemConfig} from '@yushiguang/sprint-domain';
+import {DEFAULT_TENANT, DocFieldValue, type GateApproval, type Job, type JobOutcome, type LabelComment, type NodeId, type Project, type ProjectState, type ProjectStatus, type ScoringState, type WorkflowFacts} from '@yushiguang/sprint-contracts';
+import {asAnswerOrNull, compareVersions, gate, inRanges, judge, labelSetProgress, newId, scoreBasis, staleScores, systemConfig} from '@yushiguang/sprint-domain';
 import {now, type Instance, type Scope} from './app.ts';
 import {withRetries} from './access.ts';
 import {getSamplingTask} from './dataset.ts';
 import {datasetSources, retireCuts, tenantOf} from './sources.ts';
-import {latestGold} from './evaluation.ts';
+import {cannotBuildOn, latestGold, rescoresLeft} from './evaluation.ts';
 import {runView} from './views.ts';
 import {initSettings} from './settings.ts';
 import {indexOnly} from './features.ts';
@@ -130,7 +130,7 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
   // A dataset made before sample numbers gets them on its first read (docs/design/server.md 4.2).
   if (snapshot && !snapshot.numbered) await ensureNumbered(w, snapshot);
   const schemaVersion = setup?.schemaVersion ?? 0;
-  const [allExamples, {current: gold, stale: staleGold}, rawVersions, rawReports, tasks, optimisation, autoSpend, rawRemovals, rawComments] = await Promise.all([
+  const [allExamples, {current: gold, stale: staleGold}, rawVersions, rawReports, tasks, optimisation, autoSpend, rawRemovals, rawComments, labelSets, rescoreJobs] = await Promise.all([
     snapshot ? catalog.find('examples', {snapshotId: snapshot.id}, 'externalId') : [],
     latestGold(w, projectId, schemaVersion),
     catalog.find('prompt_versions', {projectId}),
@@ -140,6 +140,8 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
     catalog.find('audit_log', {projectId, action: 'auto_spend'}),
     catalog.find('dataset_removals', {projectId}, 'removedAt desc'),
     catalog.find('label_comments', {projectId}, 'createdAt'),
+    snapshot ? catalog.find('label_sets', {projectId, snapshotId: snapshot.id}) : [],
+    w.jobs.list(w.ctx, {projectId, kinds: ['report.rescore'], states: ['queued', 'running']}),
   ]);
   // Removed examples stay in the store with their trail (spec 1.0.0, 4.4) and leave every count.
   // Project state carries the index only: features kept on records saved before #32 are left out.
@@ -149,10 +151,14 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
   for (const c of rawComments) (comments[c.exampleId] ??= []).push(c);
   const versions = rawVersions.sort((a, b) => compareVersions(b, a));
   const evalExamples = examples.filter(e => e.split === 'eval');
-  const contextId = contextIdFor(schemaVersion, evalExamples, gold);
+  // Scores rest on the eval samples inside label sets, once every set is finished (server.md 4.3).
+  const progress = labelSetProgress(evalExamples, gold, labelSets);
+  const inSets = evalExamples.filter(e => inRanges(e, progress.ranges));
+  const labeled = inSets.filter(e => !!gold[e.id]);
   const t = setup?.thresholds;
-  const labeled = evalExamples.filter(e => !!gold[e.id]);
-  // A report replaced by Rebuild scores is kept for the record but never shown.
+  const {basis, contextId} = scoreBasis(schemaVersion, progress.ready ? labeled : [], gold, t);
+  // A report replaced by Rescore is kept for the record but never shown; one on an older basis is
+  // out of date (`archivedNow`) and never passes.
   const reports = rawReports.filter(r => !r.archived).map(r => ({
     ...r,
     archivedNow: r.contextId !== contextId,
@@ -166,6 +172,7 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
     examples: evalExamples.length,
     goldEvalDone: labeled.length,
     goldHalves: {optimiser: labeled.filter(e => e.optimiserHalf).length, heldOut: labeled.filter(e => !e.optimiserHalf).length},
+    scoringReady: progress.ready,
     versions: versions.length,
     passing: reports.filter(r => r.passed && setup?.models.some(m => m.endpoint === r.endpoint)).map(r => ({promptVersionId: r.promptVersionId, endpoint: r.endpoint})),
     settingsConfirmed: !!project.settingsConfirmed,
@@ -192,7 +199,22 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
     otherAutoSpendUsd: autoSpend.reduce((n, a) => n + Number((a.data as {costUsd?: number}).costUsd ?? 0), 0),
     revision,
   };
-  return {...out, scoresUpdating: scoresUpdating(out, w.local.cannotBuild)};
+  // A score needs 2 gold-labeled samples in each half: below that a Rescore could build nothing.
+  const scorable = progress.ready && facts.goldHalves.optimiser >= 2 && facts.goldHalves.heldOut >= 2;
+  const older = reports.filter(r => r.contextId !== contextId).map(r => `${r.promptVersionId}|${r.endpoint}`);
+  const stale = staleScores({...out, ready: scorable, basis}, scorable && setup ? await cannotBuildOn(w, projectId, setup, basis.samples, older) : new Set());
+  const scoring: ScoringState = {
+    ready: progress.ready,
+    ranges: progress.ranges,
+    labelSets: progress.labelSets,
+    labelSetsDone: progress.labelSetsDone,
+    samples: progress.samples,
+    labeled: progress.labeled,
+    basis,
+    ...stale,
+    rescoring: (await rescoresLeft(w, rescoreJobs)) > 0,
+  };
+  return {...out, scoring, scoresUpdating: stale.staleVersionIds.length > 0};
 }
 
 /**

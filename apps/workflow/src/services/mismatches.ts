@@ -2,7 +2,7 @@ import type {Answer, Example, ExampleBrief, MismatchList, MismatchReview, Predic
 import {withComments, isRight, versionLabel, visibleToAgents, systemConfig, sameAnswer} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {saveGold} from './dataset.ts';
-import {buildReport, predictionsFor} from './evaluation.ts';
+import {predictionsFor} from './evaluation.ts';
 import {addComment} from './governance.ts';
 import {loadProjectState} from './projects.ts';
 
@@ -79,33 +79,6 @@ async function answersOnEval(w: Scope, versionId: string, model: NonNullable<Pro
   if (!evalIds.every(id => p.has(id))) return null;
   w.local.fullAnswers.set(key, p);
   return p;
-}
-
-/**
- * Rebuild scores (Evelyn, 2026-11-12): only when the user presses the button on Prompt versions.
- * Nothing starts it by itself, since gold edits, Setup changes (thresholds) and code changes all
- * move scores and are hard to sense one by one. Every version of the current schema with saved
- * answers on the whole eval set gets a fresh report for today's gold labels and settings, from
- * saved answers only: nothing is labeled. Returns how many reports it built.
- */
-export async function rebuildReports(w: Scope, projectId: string): Promise<number> {
-  return (
-    (await w.once(`rebuild:${projectId}`, async () => {
-      const state = await loadProjectState(w, projectId);
-      if (!state?.setup?.schema) return 0;
-      let built = 0;
-      const seen = new Set<string>();
-      for (const r of state.runs.filter(x => x.state === 'done')) {
-        const key = `${r.promptVersionId}|${r.endpoint}`;
-        const v = state.versions.find(x => x.id === r.promptVersionId && x.schemaVersion === state.setup!.schemaVersion);
-        if (!v || seen.has(key)) continue;
-        seen.add(key);
-        if (await buildReport(w, projectId, state.setup, v, r.endpoint, state.examples, state.gold, state.contextId, {replace: true})) built++;
-      }
-      w.emitChange(projectId);
-      return built;
-    })) ?? 0
-  );
 }
 
 /**

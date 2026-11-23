@@ -482,8 +482,17 @@ export interface BffContract {
   pruneDataset(req: PruneDatasetRequest): Promise<number>;
   /** Adds a comment to an example (append-only). */
   addComment(req: AddCommentRequest): Promise<LabelComment>;
-  /** Rebuild scores: works every archived score out again from the saved answers. Returns how many. */
+  /**
+   * Rebuild scores: works every archived score out again from the saved answers, in the request.
+   * Returns how many. @deprecated Use `rescore`; kept for the current Prompt versions page.
+   */
   rebuildReports(projectId: string): Promise<number>;
+  /**
+   * Rescore (docs/design/server.md 4.3): queues one job that works the out-of-date scores out
+   * again on today's basis from the saved answers; nothing is labeled. Refused while a label set
+   * is unfinished. A second click while it is queued or running adds nothing.
+   */
+  rescore(projectId: string): Promise<void>;
 
   // Prompts, evaluation & optimiser
   /**

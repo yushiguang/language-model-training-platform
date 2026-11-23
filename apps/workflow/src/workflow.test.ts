@@ -319,6 +319,10 @@ test('label sets (#82): members read them; changing them needs project write', a
   for (const call of [api.createLabelSet(bobs, {projectId: p.id, count: 1}), api.createLabelSets(bobs, {projectId: p.id, sets: 1}), api.updateLabelSet(bobs, {projectId: p.id, labelSetId: 'ls_1', name: 'x'})]) await assert.rejects(call, {code: 'forbidden'});
   await assert.rejects(api.createLabelSet(inTenant(alice, 't1'), {projectId: p.id, count: 1}), /Add samples to the dataset first/, 'the writer passes the check');
   await assert.rejects(api.listLabelSets(inTenant(eve, 't2'), p.id), /does not exist/, 'another tenant cannot see them');
+  // Rescore (#86) needs project write too; the writer passes and is told why nothing can be scored.
+  await assert.rejects(api.rescore(bobs, p.id), {code: 'forbidden'});
+  await assert.rejects(api.rescore(inTenant(eve, 't2'), p.id), {code: 'forbidden'}, 'another tenant cannot either');
+  await assert.rejects(api.rescore(inTenant(alice, 't1'), p.id), /every label set is finished/);
 });
 
 test('permissions (#63): the creator gets project write; a member only reads; a removed member is stopped, helper reads included', async () => {

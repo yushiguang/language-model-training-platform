@@ -343,14 +343,30 @@ normalized. `apps/bff/src/fixtures.test.ts` replays them on the bff over the ref
 
 ## Scores, gold labels and what starts by itself
 
-**Rebuild scores** (Evelyn, 2026-11-12: by hand only). A gold edit changes the evaluation context,
-so reports are archived and `ProjectState.scoresUpdating` is set ("Scores out of date" on Gold
-Labels and Prompt Tuning). Nothing rebuilds by itself: gold edits, changed settings and new code all
-move scores, and sensing each one is fragile. The button is on only while scores are out of date,
-and while they are, Edit prompt, Improve with AI and Auto Optimise ask "Rebuild scores first?";
-the AI Suggestion reads each version's newest score (`withNewestReports`). The button calls
-`rebuildReports`, which gives every version of the current schema with a finished scoring a fresh
-report from saved answers (nothing labeled); a report it replaces is marked `archived` and hidden.
+**Scores and Rescore** (Evelyn, 2026-11-12: worked out again by hand only; docs/design/server.md
+4.3). A score rests on a basis (`ScoreBasis`, `packages/domain/src/scoring.ts`): the samples scored
+on with their halves, their gold labels, and the thresholds, each a hash; `contextId` is all of it
+with the label's schema version, and every report carries both. The samples are the eval samples
+inside label sets and not removed, and scores are made only once every label set is finished (every
+live sample in each range has a gold label). A project with no label set yet keeps the rule from before
+label sets (scores on the samples with a gold label), until the label set pages ship. `ProjectState.scoring` (`ScoringState`) carries
+that for the pages: whether scoring is ready, the ranges and counts, today's basis, the versions
+whose scores are out of date (`staleVersionIds`, so Prompt Tuning shows the Rescore banner), what
+changed (gold labels, samples or thresholds), and whether a Rescore is queued or running.
+
+Nothing is worked out again by itself: gold edits, changed thresholds, new samples and new code all
+move scores, and sensing each one is fragile. A report whose basis is not today's is `archivedNow`:
+shown, never passing. A new report replaces the one on the same basis (`archived`, hidden); reports
+on other bases stay, and an out-of-date one never hides a current one. One build per version and
+model runs at a time (shared lock `report:<projectId>:<versionId>:<endpoint>`). Rescore (`rescore`)
+queues one `report.rescore` job on the tenant's compute key, keyed by today's `contextId`, so a
+second press adds nothing. One Rescore per project runs at a time (shared lock), and it goes again
+if the basis moved while it ran. It gives every version of the current label on the project's
+model, with saved answers for today's samples, a fresh report (nothing labeled); a version missing
+answers is skipped and recorded in shared state for that basis, so no process lists it as out of
+date again (scoring it again fills in the answers). The old in-request `rebuildReports` stays for
+the current Prompt versions page, where Edit prompt, Improve with AI and Auto Optimise ask "Rebuild
+scores first?" and the AI Suggestion reads each version's newest score (`withNewestReports`).
 `tick` builds only a version's first report. Saved answers on the whole eval set are kept in memory
 per version for the Mismatches list.
 

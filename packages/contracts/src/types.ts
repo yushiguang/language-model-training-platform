@@ -626,8 +626,9 @@ export interface ScoringState {
   /** Every label set is finished, so versions get scores. False: no new scores and no Rescore. */
   ready: boolean;
   /**
-   * The label sets' sample number ranges, in order. null: the project has no label set yet, so
-   * the whole dataset counts as one (a transition until the label set pages ship).
+   * The label sets' sample number ranges, in order. null: the project has no label set yet, so the
+   * rule from before label sets holds (scores on the samples with a gold label; ready once one
+   * has), a transition until the label set pages ship.
    */
   ranges: {first: number; last: number}[] | null;
   labelSets: number;
@@ -1103,6 +1104,8 @@ export interface WorkflowFacts {
   goldEvalDone: number;
   /** Gold-labeled examples per half: scoring needs 2 in each. */
   goldHalves: {optimiser: number; heldOut: number};
+  /** Every label set is finished (`ScoringState.ready`): the Gold step is done and scores are made. */
+  scoringReady: boolean;
   versions: number;
   /** Versions with a report that passes the current thresholds, per model. */
   passing: {promptVersionId: string; endpoint: EndpointId}[];
@@ -1126,8 +1129,10 @@ export interface ProjectState {
   runs: LabelingRun[];
   optimisation: OptimisationRun[];
   facts: WorkflowFacts;
+  /** Today's scoring basis as one id (`ScoringState.basis` hashed with the schema version). */
   contextId: string;
-  /** A gold edit archived some reports and they are being rebuilt from saved answers (acceptance R5-4, R5-5). */
+  scoring: ScoringState;
+  /** Some versions' scores are out of date (`scoring.staleVersionIds` is not empty). */
   scoresUpdating: boolean;
   /** Available preset endpoints from the model runtime. */
   endpoints: EndpointInfo[];

@@ -1,9 +1,9 @@
 import type {OptimiserHost, PermissionPoint, ProjectState, PromptVersion, RequestContext} from '@yushiguang/sprint-contracts';
-import {visibleToAgents} from '@yushiguang/sprint-domain';
+import {scoredExamples, visibleToAgents} from '@yushiguang/sprint-domain';
 import type {Instance, Scope} from './app.ts';
 import {authorize} from './access.ts';
 import {postEvent} from './chat-events.ts';
-import {buildReport, confirmScore, scoreOnOptimiserHalf} from './evaluation.ts';
+import {confirmScore, scoreFromState, scoreOnOptimiserHalf} from './evaluation.ts';
 import {queueOptimiserLabeling} from './work.ts';
 import {labelComments} from './mismatches.ts';
 
@@ -77,8 +77,8 @@ function hostCalls(inst: Instance): OptimiserHost {
     },
     async score(ctx, {projectId, promptVersionId, endpoint}) {
       const w = at(ctx);
-      const {state, setup} = await loaded(w, projectId);
-      const report = await buildReport(w, projectId, setup, version(state, promptVersionId), endpoint, state.examples, state.gold, state.contextId);
+      const {state} = await loaded(w, projectId);
+      const report = await scoreFromState(w, state, version(state, promptVersionId), endpoint);
       if (!report) return null;
       const after = (await loadProjectState(w, projectId))!;
       return {report, passed: after.reports.some(r => r.id === report.id && r.passed)};
@@ -86,12 +86,12 @@ function hostCalls(inst: Instance): OptimiserHost {
     async confirmScore(ctx, {projectId, promptVersionId, endpoint}) {
       const w = at(ctx);
       const {state, setup} = await loaded(w, projectId);
-      return confirmScore(w, setup, version(state, promptVersionId), endpoint, state.examples, state.gold);
+      return confirmScore(w, setup, version(state, promptVersionId), endpoint, scoredExamples(state), state.gold);
     },
     async halfScore(ctx, {projectId, promptVersionId, endpoint}) {
       const w = at(ctx);
       const {state, setup} = await loaded(w, projectId);
-      const m = await scoreOnOptimiserHalf(w, setup, version(state, promptVersionId), endpoint, state.examples, state.gold);
+      const m = await scoreOnOptimiserHalf(w, setup, version(state, promptVersionId), endpoint, scoredExamples(state), state.gold);
       return {mixUps: m.mixUps, macroF1: m.macroF1, lowestValue: m.lowestValue};
     },
     async createVersion(ctx, {projectId, structured, parentId, change, inMajor}) {

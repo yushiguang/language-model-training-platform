@@ -1009,7 +1009,7 @@ test('Mismatches: versions with answers on the whole eval set, wrong in the most
   const {getPageView} = await import('./page-views.ts');
   await getPageView(w.ws, w.projectId, {page: 'prompt', params: {}});
   assert.equal((await w.state()).scoresUpdating, true, 'neither the workflow check nor a reader rebuilds');
-  const {rebuildReports} = await import('./mismatches.ts');
+  const {rebuildReports} = await import('./scores.ts');
   assert.equal(await rebuildReports(w.ws, w.projectId), 2);
   st = await w.state();
   assert.equal(st.scoresUpdating, false);
@@ -1123,6 +1123,8 @@ test("Auto Optimise: the pool holds the user's other scored versions too, and th
 
 test('appending examples keeps every score current: new ones are pending, and existing halves and gold labels stay', async () => {
   const w = await world('g1', {macroF1: 0.5});
+  const {createLabelSets} = await import('./label-sets.ts');
+  await createLabelSets(w.ws, {projectId: w.projectId, sets: 1});
   await w.newVersion();
   await tick(w.ws, await w.state());
   await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
@@ -1137,12 +1139,158 @@ test('appending examples keeps every score current: new ones are pending, and ex
   assert.equal(s.examples.length, EVAL + 6);
   for (const e of before.examples) assert.equal(s.examples.find(x => x.id === e.id)?.optimiserHalf, halves[e.id], 'no existing example moves');
   assert.equal(s.examples.filter(e => e.externalId.startsWith('new-') && e.optimiserHalf).length, 3, 'new examples split evenly');
-  assert.equal(s.reports[0].archivedNow, false, 'unlabeled examples do not make a score stale');
+  assert.equal(s.reports[0].archivedNow, false, 'samples outside every label set do not make a score stale');
   assert.equal(s.examples.filter(e => !s.gold[e.id]).length, 6, 'six examples wait for gold labels');
-  // A gold label on a new example does make the score stale (Rebuild scores brings it back).
+  // A gold label outside every label set is not scored on either (docs/design/server.md 4.3).
   const {saveGold} = await import('./dataset.ts');
-  await saveGold(w.ws, w.projectId, s.examples.find(e => e.externalId === 'new-0')!.id, 1, ['Vlog'], false);
-  assert.equal((await w.state()).reports[0].archivedNow, true);
+  const newOnes = s.examples.filter(e => e.externalId.startsWith('new-'));
+  await saveGold(w.ws, w.projectId, newOnes[0].id, 1, ['Vlog'], false);
+  assert.equal((await w.state()).reports[0].archivedNow, false);
+  assert.equal((await w.state()).scoring.samples, EVAL);
+});
+
+test('scores wait for every label set; a new basis leaves old scores out of date until Rescore, and new scoring uses it', async () => {
+  const w = await world('sc1', {macroF1: 0.5});
+  const {createLabelSet} = await import('./label-sets.ts');
+  const {saveGold} = await import('./dataset.ts');
+  const {appendExamples} = await import('./governance.ts');
+  const {rescore} = await import('./scores.ts');
+  const v1 = await w.newVersion();
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'v1 scored on the labeled samples (no label set yet)');
+  let s = await w.state();
+  assert.deepEqual({ready: s.scoring.ready, ranges: s.scoring.ranges, sets: s.scoring.labelSets}, {ready: true, ranges: null, sets: 0});
+  // The first label set: only its samples count, so the first score is out of date.
+  await createLabelSet(w.ws, {projectId: w.projectId, count: 8});
+  s = await w.state();
+  assert.deepEqual({ready: s.scoring.ready, ranges: s.scoring.ranges, done: s.scoring.labelSetsDone, samples: s.scoring.samples}, {ready: true, ranges: [{first: 1, last: 8}], done: 1, samples: 8});
+  assert.deepEqual(s.scoring.staleVersionIds, [v1.id]);
+  assert.deepEqual(s.scoring.changed, ['samples']);
+  assert.equal(s.scoresUpdating, true);
+  assert.equal(s.reports[0].archivedNow, true, 'not worked out again by itself');
+  // Rescore: one job however often it is pressed, from saved answers only.
+  const runsBefore = s.runs.length;
+  await rescore(w.ws, w.projectId);
+  await rescore(w.ws, w.projectId);
+  assert.equal((await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['report.rescore']})).length, 1);
+  await until(async () => !(await w.state()).scoresUpdating, 'rescored');
+  await w.jobs.idle();
+  s = await w.state();
+  assert.equal(s.scoring.rescoring, false, 'the flag comes down when the job ends');
+  const current = s.reports.filter(r => !r.archivedNow);
+  assert.equal(current.length, 1);
+  assert.equal(s.runs.length, runsBefore, 'nothing is labeled again');
+  assert.deepEqual(current[0].basis, s.scoring.basis);
+  assert.equal(s.facts.goldEvalDone, 8);
+  assert.equal(s.scoring.rescoring, false);
+
+  // A gold label changed inside a set: out of date for its gold labels.
+  const first = s.examples.find(e => e.number === 1)!;
+  await saveGold(w.ws, w.projectId, first.id, 1, ['Tutorial'], false);
+  s = await w.state();
+  assert.deepEqual({stale: s.scoring.staleVersionIds, changed: s.scoring.changed}, {stale: [v1.id], changed: ['gold']});
+  assert.equal(s.facts.passing.length, 0, 'an out-of-date score never passes');
+  await rescore(w.ws, w.projectId);
+  await until(async () => !(await w.state()).scoresUpdating, 'rescored after the gold change');
+
+  // New thresholds: the score is not judged again by itself.
+  // (Written straight to the setup: Project Settings would also change the model's settings.)
+  await w.catalog.patch('setup_versions', s.setup!.id, {thresholds: {...s.setup!.thresholds!, macroF1: 0.2, precision: null}});
+  s = await w.state();
+  assert.deepEqual(s.scoring.changed, ['thresholds']);
+  await rescore(w.ws, w.projectId);
+  await until(async () => !(await w.state()).scoresUpdating, 'rescored after the thresholds');
+
+  // A second label set, unfinished: no scores at all, no Rescore, and the Gold step is not done.
+  await appendExamples(w.ws, w.projectId, [{externalId: 'more', type: 'video', title: '', features: {}}], 'upload');
+  await createLabelSet(w.ws, {projectId: w.projectId, count: 3});
+  s = await w.state();
+  assert.deepEqual({ready: s.scoring.ready, sets: s.scoring.labelSets, done: s.scoring.labelSetsDone, stale: s.scoring.staleVersionIds}, {ready: false, sets: 2, done: 1, stale: []});
+  assert.equal(s.reports.filter(r => !r.archivedNow).length, 0);
+  assert.equal(s.facts.scoringReady, false);
+  await assert.rejects(rescore(w.ws, w.projectId), /every label set is finished/);
+  const {gate} = await import('@yushiguang/sprint-domain');
+  assert.equal(gate('gold', s.facts).reason, 'Finish every label set to continue.');
+
+  // Finished: v1 has no answer for the new sample, so Rescore cannot score it; scoring it again
+  // labels only what is missing and scores on the new basis.
+  const added = s.examples.find(e => e.externalId === 'more')!;
+  await saveGold(w.ws, w.projectId, added.id, 1, ['Vlog'], false);
+  s = await w.state();
+  assert.deepEqual({ready: s.scoring.ready, stale: s.scoring.staleVersionIds, changed: s.scoring.changed}, {ready: true, stale: [v1.id], changed: ['samples']});
+  await rescore(w.ws, w.projectId);
+  await until(async () => !(await w.state()).scoring.rescoring, 'Rescore ended');
+  assert.equal((await w.state()).reports.filter(r => !r.archivedNow).length, 0, 'no score without answers for every sample');
+  assert.deepEqual((await w.state()).scoring.staleVersionIds, [], 'skipped: kept in shared state, so any process reading the page knows');
+  // Scored again under other thresholds, then the thresholds go back: the answers cover the
+  // samples now, so the skip no longer hides v1.
+  s = await w.state();
+  const before = s.setup!.thresholds!;
+  await w.catalog.patch('setup_versions', s.setup!.id, {thresholds: {...before, macroF1: 0.3}});
+  await scoreVersion(w.ws, w.projectId, v1);
+  await until(async () => (await w.state()).reports.some(r => !r.archivedNow), 'v1 scored on the new basis');
+  s = await w.state();
+  assert.equal(s.scoresUpdating, false);
+  assert.equal(s.facts.goldEvalDone, 11);
+  await w.catalog.patch('setup_versions', s.setup!.id, {thresholds: before});
+  s = await w.state();
+  assert.deepEqual({stale: s.scoring.staleVersionIds, changed: s.scoring.changed}, {stale: [v1.id], changed: ['thresholds']});
+});
+
+test('Rescore after a removal: out of date for its samples, worked out again without labeling; a model no longer used is left alone', async () => {
+  const w = await world('sc2', {macroF1: 0.5});
+  const {createLabelSets} = await import('./label-sets.ts');
+  const {removeExamples} = await import('./governance.ts');
+  const {rescore, rebuildReports} = await import('./scores.ts');
+  await createLabelSets(w.ws, {projectId: w.projectId, sets: 2});
+  const v1 = await w.newVersion();
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.state()).reports.some(r => !r.archivedNow), 'v1 scored');
+  let s = await w.state();
+  const runs = s.runs.length;
+  const gone = s.examples.find(e => e.number === 3)!;
+  await removeExamples(w.ws, w.projectId, [gone.id], 'broken');
+  s = await w.state();
+  assert.deepEqual({ready: s.scoring.ready, samples: s.scoring.samples, stale: s.scoring.staleVersionIds, changed: s.scoring.changed}, {ready: true, samples: EVAL - 1, stale: [v1.id], changed: ['samples']});
+  assert.equal(s.reports.filter(r => !r.archivedNow).length, 0, 'not worked out again by itself');
+  await rescore(w.ws, w.projectId);
+  await until(async () => !(await w.state()).scoresUpdating, 'rescored');
+  s = await w.state();
+  assert.equal(s.runs.length, runs, 'nothing labeled');
+  assert.equal(s.facts.goldEvalDone, EVAL - 1, 'the removed sample counts nowhere');
+
+  // The project's model changes to one v1 was never scored on: v1's old report stays as it was,
+  // is not listed as out of date, and a Rescore does not fail on it.
+  const setup = s.setup!;
+  await w.catalog.patch('setup_versions', setup.id, {models: [{endpoint: 'B', maxOutputTokens: 150, temperature: null}]});
+  await w.catalog.patch('setup_versions', setup.id, {thresholds: {...setup.thresholds!, macroF1: 0.3}});
+  s = await w.state();
+  assert.deepEqual(s.scoring.staleVersionIds, []);
+  assert.equal(await rebuildReports(w.ws, w.projectId), 0);
+
+  // Two Rescores at once wait for each other; both end, and the second finds nothing left to do.
+  await w.catalog.patch('setup_versions', setup.id, {models: setup.models});
+  s = await w.state();
+  assert.deepEqual(s.scoring.staleVersionIds, [v1.id], 'back on its model, v1 is out of date for the new thresholds');
+  const [a, b] = await Promise.all([rebuildReports(w.ws, w.projectId), rebuildReports(w.ws, w.projectId)]);
+  assert.equal(a + b, 2, 'each run rebuilds v1 once; neither is dropped');
+  s = await w.state();
+  assert.equal(s.scoresUpdating, false);
+  assert.equal(s.reports.filter(r => !r.archivedNow && r.promptVersionId === v1.id).length, 1, 'one current report: the second replaced the first');
+});
+
+test('a finished label set too small to score (fewer than 2 per half) lists nothing as out of date and refuses Rescore', async () => {
+  const w = await world('sc3', {macroF1: 0.5});
+  const {createLabelSet} = await import('./label-sets.ts');
+  const {rescore} = await import('./scores.ts');
+  await w.newVersion();
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'scored on the labeled samples (no label set yet)');
+  await createLabelSet(w.ws, {projectId: w.projectId, count: 3});
+  const s = await w.state();
+  assert.equal(s.scoring.ready, true);
+  assert.deepEqual(s.scoring.staleVersionIds, []);
+  await assert.rejects(rescore(w.ws, w.projectId), /more gold-labeled samples/);
 });
 
 test('removing examples leaves a trail with half and gold label, moves no other example, and can be undone', async () => {

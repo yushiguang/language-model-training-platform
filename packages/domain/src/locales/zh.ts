@@ -587,6 +587,7 @@ export const ZH: Readonly<Record<string, string>> = {
   "Add examples to continue.": "添加样本后才能继续。",
   "The eval dataset needs at least {n} examples.": "评测数据集至少需要 {n} 个样本。",
   "Label at least {n} examples to continue ({done} so far).": "至少标注 {n} 个样本才能继续（已标注 {done} 个）。",
+  "Finish every label set to continue.": "所有标注集都标完才能继续。",
   "Create the first prompt version.": "请创建第一个提示词版本。",
   "No version passes the threshold yet.": "还没有版本达到阈值。",
   "{names} and {more} more": "{names} 等另外 {more} 个",
