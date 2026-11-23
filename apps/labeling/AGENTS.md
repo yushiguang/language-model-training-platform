@@ -26,7 +26,7 @@ example. Contract: `LabelingContract` in `packages/contracts/src/labeling-api.ts
     that pause) grows the budget by the share still to label. The bff no longer sets a budget
     (every task runs with no cost limit), so this applies only to tasks saved before that.
   - Stop: aborts locally, or sets `stopRequested` and `stopRequestedAt`; the runner reads them on
-    a 2 s timer and aborts calls in flight. A Stop pressed before the run started is ignored.
+    a 2 s timer and aborts calls in flight. A request saved while the run was starting (its job claimed, the task not yet taken) ends the run before any model call; every end clears the request, so an old one never stops a later run. A Stop also reaches a stopped or failed task whose Resume or Retry failed is starting (its job is live, the record not yet running); on such a task left idle it changes nothing and clears any request.
     The run's model calls share one request id; aborting the run calls the gateway's
     `cancel(runId)`, so no signal crosses the gateway contract. `tryTemplate` passes the caller's
     `requestId`, and `cancel(requestId)` stops it.

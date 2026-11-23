@@ -36,6 +36,8 @@ function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) =
   } as unknown as LlmGatewayContract;
   const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks()});
   const tickets: TicketSubmission[] = [];
+  // No executors: queued work stays queued.
+  const jobs = createJobs({store: memoryJobStore()}).api;
   const wf = createWorkflow({
     catalog,
     labeling,
@@ -44,14 +46,14 @@ function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) =
     examples: {} as ExampleSource,
     standIns: [],
     sharedState: memorySharedState(),
-    jobs: createJobs({store: memoryJobStore()}).api,
+    jobs,
     ...(documents ? {documents} : {}),
     tickets: {submit: async t => (tickets.push(t), {ticketId: `T-${tickets.length}`})},
     grantRetryMs: 0,
     ...access,
   });
   wf.connect({agents: agents(wf)});
-  return {wf, api: loopback(wf.api) as WorkflowContract, catalog, tickets};
+  return {wf, api: loopback(wf.api) as WorkflowContract, catalog, tickets, jobs, labeling};
 }
 
 /** The tools as the runtime binds them for one turn: every call carries the turn's project, id and context. */
@@ -366,4 +368,19 @@ test('creating a project (#63): a grant that keeps failing removes the new proje
   failures = 3;
   const p = await api.createProject(inTenant(alice, 't1'), 'Kept');
   assert.deepEqual(await admin.listProjectWriters('t1', p.id), [alice.id], 'three failed tries, then the fourth works');
+});
+
+test('page views carry the place of waiting work in its queue (#66)', async () => {
+  const {api, catalog, jobs, labeling} = world('wf-queue', noHelpers);
+  const ctx = inTenant(alice, 't1');
+  const p = await api.createProject(ctx, 'Queued');
+  const task = (n: number) => labeling.createTask({projectId: p.id, purpose: 'eval', promptVersionId: `pv_${n}`, setupVersionId: 'sv_1', endpoint: 'A', settings: {endpoint: 'A', maxOutputTokens: 150, temperature: null}, exampleIds: ['ex_1'], createdBy: 'Ann'});
+  const [a, b] = [await task(1), await task(2)];
+  await catalog.insert('optimisation_runs', {id: 'or_1', projectId: p.id, endpoint: 'A', startVersionId: 'pv_1', major: 2, maxRounds: 10, round: 0, state: 'running', step: null, stepStartedAt: null, stepVersionId: null, history: [], calls: 0, candidates: 0, costUsd: 0, stopReason: null, error: null, startedAt: '', finishedAt: null});
+  const key = 'model:t1:A';
+  for (const [kind, args] of [['labeling.runTask', {taskId: a.id}], ['labeling.runTask', {taskId: b.id}], ['optimiser.run', {runId: 'or_1'}]] as const) await jobs.enqueue(ctx, {kind, projectId: p.id, concurrencyKey: key, args});
+  for (const view of [await api.loadProjectState(ctx, p.id), await api.projectStatus(ctx, p.id)]) {
+    assert.deepEqual([a.id, b.id].map(id => view!.runs.find(r => r.id === id)?.queue), [{ahead: 0}, {ahead: 1}]);
+    assert.deepEqual(view!.optimisation.find(o => o.id === 'or_1')?.queue, {ahead: 2});
+  }
 });

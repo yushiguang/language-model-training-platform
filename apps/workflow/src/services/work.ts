@@ -1,6 +1,6 @@
 import type {EndpointId, Job, JobOutcome, JobRequest, LabelingTask, ProjectState, PromptVersion, StartedRuns} from '@yushiguang/sprint-contracts';
 import {autoSpendUsd, dueStarts, settingsHash, versionLabel, type DueStart, systemConfig, msg} from '@yushiguang/sprint-domain';
-import type {Scope} from './app.ts';
+import {now, type Scope} from './app.ts';
 import {postEvent} from './chat-events.ts';
 import {buildReport, findTask, settingsFor} from './evaluation.ts';
 import {modelName} from './page-views.ts';
@@ -220,7 +220,33 @@ export async function stopOptimiser(w: Scope, projectId: string, runId: string):
   await runOf(w, projectId, runId);
   const jobs = (await activeJobs(w, projectId, ['optimiser.run'])).filter(j => j.args.runId === runId);
   for (const j of jobs) await w.jobs.cancel(w.ctx, j.id);
-  if (!jobs.length) await optimiserService(w).stopRun(w.ctx, runId);
+  if (!jobs.length) return optimiserService(w).stopRun(w.ctx, runId);
+  // A run whose job the cancel ended before it started never ran its loop, so nothing else
+  // ends it: it is stopped here, as a Stop on a running one ends (its round in progress too).
+  // Read again after the cancel: a job another runner took meanwhile stops through its loop.
+  const after = await Promise.all(jobs.map(j => w.jobs.get(w.ctx, j.id)));
+  if (!after.every(j => j?.state === 'cancelled')) return;
+  // A loop may still hold the run though its job was cancelled while queued: one whose lease
+  // lapsed (the sweep queued the job again) keeps running. Here it is stopped and ends the run
+  // itself; one in another process holds the run's lock, and its own save would write over a
+  // stop written here, so the run is left to it, as `drive` leaves it.
+  const optimiser = optimiserService(w);
+  await optimiser.stopRun(w.ctx, runId);
+  const first = await optimiser.getRun(runId);
+  if (!first || !['running', 'paused', 'failed'].includes(first.state)) return;
+  // Under the run's lock, so no runner saves (or starts) meanwhile; a busy lock means a runner
+  // holds the run. Everything is read again inside: the runner may have ended it just before.
+  const stopped = await w.locks.run(optimiserLock(projectId, first.endpoint), async () => {
+    if (await optimiser.isRunning(runId)) return false;
+    if ((await activeJobs(w, projectId, ['optimiser.run'])).some(j => j.args.runId === runId)) return false;
+    const run = await optimiser.getRun(runId);
+    if (!run || !['running', 'paused', 'failed'].includes(run.state)) return false;
+    const last = run.history.at(-1);
+    const history = last?.outcome === 'running' ? [...run.history.slice(0, -1), {...last, outcome: 'stopped' as const}] : run.history;
+    await w.catalog.patch('optimisation_runs', runId, {state: 'stopped', stopReason: 'user', error: null, finishedAt: now(), step: null, stepStartedAt: null, stepVersionId: null, history});
+    return true;
+  });
+  if (stopped) w.emitChange(projectId);
 }
 
 /** Retry on a Failed run, or Resume on a paused one: queues it again; it goes on from the step it stopped at. */

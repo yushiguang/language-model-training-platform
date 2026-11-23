@@ -73,7 +73,8 @@ export function ProjectProvider({children}: {children: ReactNode}) {
 
   // While anything runs, read again every few seconds: a run in another tab, or one whose tab
   // closed, changes state without an event in this tab.
-  const running = !!state && (state.runs.some(r => r.state === 'running') || state.optimisation.some(o => o.state === 'running'));
+  // Waiting work counts too: its place in the queue changes without an event here.
+  const running = !!state && (state.runs.some(r => r.state === 'running' || !!r.queue) || state.optimisation.some(o => o.state === 'running' || !!o.queue));
   useEffect(() => {
     if (!running) return;
     const id = setInterval(() => void refresh(), systemConfig().ui.activePollMs);

@@ -1,6 +1,6 @@
 # 服务端设计：提示词优化项目
 
-> 描述的版本：计划中，按 #59 的交付计划分 PR 实现，每个 PR 合并时把对应章节改成已实现的样子。已实现：第 2 节（权限，#63）、第 7 节（配置，#61）。
+> 描述的版本：计划中，按 #59 的交付计划分 PR 实现，每个 PR 合并时把对应章节改成已实现的样子。已实现：第 2 节（权限，#63）、第 5 节（异步任务，#66）、第 7 节（配置，#61）。
 
 本文把前端整体评审（2026-11-22）里定下的规则落到服务端：权限、项目类型、数据源与特征、工作流规则、异步任务、批量数据存储、配置和通知。页面的设计见 [ui.md](ui.md)，现有架构见 [../architecture.md](../architecture.md)。
 
@@ -181,14 +181,14 @@ COMMIT;
 
 常规任务：存储或接口的偶发错误自动重试 3 次；数据本身的问题不重试，直接 Failed 并写明原因。页面统一显示 Failed、一句原因和 Retry。
 
-### 5.4 代码改动
+### 5.4 实现（#66 已完成）
 
-- `JobRequest` 加 `concurrencyKey`，由入队方按第 5.1 节算出。
-- `JobRequest` 加 `finally?: JobRequest`：任务以任何终态（完成、失败、取消）结束时都入队它；现有的 `then` 仍然只在完成时触发。优化器的链式推进（第 4.4 节）靠它，这样没有定时巡检的浏览器端和测试里，打标失败或被取消后优化器也能转入 Failed / 已停止。打标任务被停止时的终态统一为 `cancelled`（现在返回 `paused`），在第 5 步对齐。
-- `JobStorePort.claimNext` 改为按键限并发：参数加上限查询函数，MySQL 实现用上面的 SQL；内存替身按同样的规则实现，并补一致性测试。
-- `JobStorePort` 加 `countAhead(concurrencyKey, createdAt): Promise<number>`，用 `jobs(concurrency_key, state, created_at)` 索引直接查排队位置，不用 `find` 扫。
-- 现在的打标状态 `needs_attention` 在页面上统一显示为 Failed。
-- `apps/jobs` 的进程总并发（默认 16）保留，作为单个进程的上限。
+- **并发键**：`JobRequest.concurrencyKey` / `Job.concurrencyKey` 必填，类型是 `ConcurrencyKey`（`packages/contracts/src/jobs-api.ts`）。`packages/domain` 的 `jobConcurrencyKey(tenantId, target)` 拼键、`parseConcurrencyKey(key)` 反解；租户 ID 不能含 `:`，endpoint ID 是第二个 `:` 之后的全部。入队方在 `apps/workflow/src/services/queue.ts` 用 `modelKey` / `computeKey` 算，租户取调用方的（`authorize` 已经校验过它就是项目的租户）。`labeling.runTask` 和 `optimiser.run` 是模型任务（第 5 步之前优化器在自己的任务里直接打标，所以先占它的 endpoint），其余是常规任务。endpoint ID 现在是项目设置里的 `EndpointId`，第 4 步换成按租户的模型配置 ID。任务模块拒绝入队格式不对的键。
+- **按键限并发**：`JobStorePort.claimNext(kinds, owner, leaseMs, now, limitOf)`。任务模块的 `limitOf` 反解键，调 `config.forTenant(tenantId).jobLimit(target)`，每次取任务都现读，调大上限立刻生效。内存替身按 5.2 的两段实现：先列出候选键并读好上限（不加锁），再逐个键在不 `await` 的一段里数运行数、取最早的任务（这一段相当于持有键行锁的短事务）。键按上次被取的时间轮流（从没取过的排最前），键内按 `createdAt`、再按 `id`。任务 ID 按时间可排序，同一个 worker 同一毫秒入队的任务也按先后执行。进程总并发（默认 16）保留。
+- **排队位置**：`JobStorePort.countAhead(concurrencyKey, createdAt, id)`（比设计多一个 `id`，同一毫秒创建的任务按取任务的顺序算），`JobsContract.ahead(ctx, jobId)`（不在排队时是 null）。工作流的 `loadProjectState` / `projectStatus` 给排队中的打标任务（`LabelingRun.queue`）和优化器运行（`OptimisationRun.queue`）加上 `{ahead}`，只出现在页面视图里，记录和工作流自己的规则看不到。Prompt Tuning 页面显示 “Queued” 或 “Queued · 2 ahead”（排队中 · 前面还有 2 个），优化器面板显示“在等模型空出来”。
+- **`finally`**：`JobRequest.finally` 在任务以完成、失败、取消结束时入队一次，幂等键默认 `finally:<jobId>`；`paused` 不是终态，不触发。巡检判失败或取消、排队中直接取消的任务也会触发，所以 `recoverExpired` 返回它结束的任务（`ended`），`requestCancel` 返回 `{job, ended}`。`then` 仍然只在完成时入队。
+- **失败状态统一**：打标的 `needs_attention` 在页面视图里显示为 Failed（`apps/workflow/src/services/views.ts` 的 `jobState`），打标执行器也按失败结束任务，有测试锁住。打标任务被停止时的终态统一为 `cancelled` 在第 5 步做。
+- **一致性测试**：`packages/platform/src/standins/job-store.test.ts` 的 `jobStoreCases(name, make)` 只依赖 `JobStorePort`，部署方的 MySQL 实现可以复制过去跑同一组用例。
 
 ## 6. 批量数据存储
 
@@ -312,7 +312,7 @@ export interface ConfigReader {
 | --- | --- |
 | `Project.tenantId` | 破坏性：现有记录要迁移（第 2 步，#63 已完成） |
 | `PermissionAdminPort`；`AuthorizationRequest.permission` | 新增（第 2 步，#63 已完成） |
-| `JobRequest.concurrencyKey` 和 `finally`、`claimNext` 按键限并发、`countAhead` | 破坏性：部署方的 `JobStorePort` 要改 |
+| `JobRequest.concurrencyKey` 和 `finally`、`claimNext` 按键限并发、`countAhead`、`requestCancel` / `recoverExpired` 返回结束的任务、`JobsContract.ahead` | 破坏性：部署方的 `JobStorePort` 要改（第 3 步，#66 已完成） |
 | `ConfigPort`（`get`，可选 `getMany` / `subscribe`），移除 `TenantConfigPort` | 破坏性（第 1 步，#61 已完成） |
 | `NotificationPort`（尽力而为） | 新增 |
 | `OptimiserContract.startRun` / `execute` / `stopRun`、`OptimiserHost` 每次调用和 `reflectPrompt` 带调用方上下文 | 破坏性（第 2 步，#63 已完成） |
@@ -327,7 +327,7 @@ export interface ConfigReader {
 
 1. 配置模块：`ConfigPort` 和替身，进程级刷新、`config.forTenant`。
 2. 权限和租户隔离：`Project.tenantId`、`createWorkflow` 读写都接入 `AuthorizationPort`、按租户过滤和校验、系统调用方规则、接口权限点表、`PermissionAdminPort`。同一步把调用方上下文传给优化器（`OptimiserContract.startRun` / `execute` / `stopRun`、`OptimiserHost`、`reflectPrompt`），否则这一步合并后优化器会被权限校验拒绝。放在任务队列前面，因为并发键要用到项目的租户。
-3. 任务队列：`concurrencyKey`、`finally`（任何终态都续链）、按键限并发的 `claimNext`、排队位置、失败状态统一。
+3. 任务队列：`concurrencyKey`、`finally`（任何终态都续链）、按键限并发的 `claimNext`、排队位置、失败状态统一。（#66 已完成）
 4. 模型和网关：模型按租户读取、请求带 `tenantId`、限流键改为“租户 + endpoint”。
 5. 优化器改为按 `(runId, round, step)` 推进的链式任务：每个打标阶段入队，巡检识别等打标的运行，Stop 取消排队中和运行中的打标。
 6. 通知端口。

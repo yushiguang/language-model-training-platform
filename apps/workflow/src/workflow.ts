@@ -16,6 +16,7 @@ import {answerProblem, projectIdOf, WORKFLOW_PERMISSIONS} from '@yushiguang/spri
 import {agentToolHost} from './services/page-views.ts';
 import {optimiserHost} from './services/optimiser-host.ts';
 import {workflowExecutors} from './services/executors.ts';
+import {withQueue} from './services/queue.ts';
 
 /**
  * The application module (`@yushiguang/sprint-workflow`, deployment readiness spec, 2): everything a channel
@@ -100,8 +101,15 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     listProjects: ctx => projects.listProjects(at(ctx)),
     createProject: (ctx, name) => projects.createProject(at(ctx), name),
     getProject: (ctx, id) => projects.getProject(at(ctx), id),
-    loadProjectState: (ctx, projectId) => projects.loadProjectState(at(ctx), projectId),
-    projectStatus: (ctx, projectId) => projects.projectStatus(at(ctx), projectId),
+    // Pages see where waiting work stands in its queue (docs/design/server.md, 5.2).
+    async loadProjectState(ctx, projectId) {
+      const w = at(ctx);
+      return withQueue(w, projectId, await projects.loadProjectState(w, projectId));
+    },
+    async projectStatus(ctx, projectId) {
+      const w = at(ctx);
+      return withQueue(w, projectId, await projects.projectStatus(w, projectId));
+    },
     approveNode: (ctx, projectId, node) => projects.approveNode(at(ctx), projectId, node),
     deleteProject: (ctx, r) => projects.deleteProject(at(ctx), r.projectId),
     renameProject: (ctx, r) => projects.renameProject(at(ctx), r.projectId, r.name),

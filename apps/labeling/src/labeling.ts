@@ -171,11 +171,57 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     return out;
   }
 
+  /** States a task has not ended in: a Stop still applies. */
+  const OPEN: readonly LabelingTask['state'][] = ['queued', 'paused', 'running'];
+
+  /**
+   * A Stop for a task no runner in this process is labeling. Under the task's lock, so no
+   * runner that shares the locks starts (or finishes) meanwhile: a task no runner holds anywhere
+   * (waiting in the queue, paused, or left running by a runner `liveElsewhere` says is gone)
+   * ends as stopped by the user, or the next check would start it again. A running record
+   * counts as left behind only when `liveElsewhere` can say so: without it, a runner this
+   * process's locks cannot see may still hold it. Otherwise (the lock is held, or a runner
+   * elsewhere has it, starting or running) the request is saved and its runner sees it. A task
+   * that has ended is left as it is. Returns the task as last read.
+   */
+  async function stopIfIdle(taskId: string, save = true): Promise<LabelingTask | null> {
+    const request = async (t: LabelingTask | null) => {
+      if (save && t && !FINISHED.includes(t.state)) await repo.patch<LabelingTask>(TASKS, taskId, {stopRequested: true, stopRequestedAt: now()});
+      return t;
+    };
+    const held = await locks.run(lockName(taskId), async () => {
+      const t = await getTask(taskId);
+      if (!t || FINISHED.includes(t.state)) return {t};
+      // A stopped or failed task may be starting again (Resume, Retry failed): its job is live
+      // elsewhere while the record still shows the old state, so it is asked about too.
+      const elsewhere = deps.liveElsewhere ? await deps.liveElsewhere(t).catch(() => true) : false;
+      // Read again after asking: the runner elsewhere may have ended it meanwhile.
+      const latest = await getTask(taskId);
+      if (!latest || FINISHED.includes(latest.state)) return {t: latest};
+      // A read only ends what an earlier Stop left: never a new request, nor one on work since begun.
+      if (!save && (elsewhere || !latest.stopRequested)) return {t: latest};
+      if (!elsewhere && !OPEN.includes(latest.state)) {
+        // Ended and idle: nothing to stop, and no request may wait for a later run.
+        if (latest.stopRequested) await repo.patch<LabelingTask>(TASKS, taskId, {stopRequested: false});
+        return {t: await getTask(taskId)};
+      }
+      if (!elsewhere && (latest.state !== 'running' || !!deps.liveElsewhere)) {
+        await repo.patch<LabelingTask>(TASKS, taskId, {state: 'stopped', stopReason: 'user', stopRequested: false, finishedAt: now()});
+        return {t: latest};
+      }
+      return {t: await request(latest)};
+    });
+    return held ? held.t : request(await getTask(taskId));
+  }
+
   async function isRunning(taskId: string) {
     return active.has(taskId) || (await locks.isHeld(lockName(taskId)));
   }
 
   async function execute(taskId: string, trigger: 'system' | 'user' | undefined, opts: ExecOptions): Promise<LabelingTask | null> {
+    // Taken before the first read: a Stop saved before that read is seen by the check below, one
+    // saved after it is newer than this moment, so the stop timer sees it.
+    const runStartedIso = now();
     // Retry failed clears the failed examples here, under the lock: a second tab asking while
     // this task runs gets null and changes nothing.
     let found = await getTask(taskId);
@@ -184,14 +230,20 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       found = await getTask(taskId);
     }
     if (!found || FINISHED.includes(found.state)) return found;
+    // A Stop saved while this run was starting (no runner held the task yet): ended here, before
+    // any model call. Every end clears the request, so one still set is never an old one.
+    if (found.stopRequested) {
+      await repo.patch<LabelingTask>(TASKS, taskId, {state: 'stopped', stopReason: 'user', stopRequested: false, finishedAt: now()});
+      stopPressed.delete(taskId);
+      emit(found.projectId);
+      return getTask(taskId);
+    }
     const task = found;
     const purpose = task.purpose;
     const how = trigger ?? defaultTrigger(task);
     tm.counter('sprint_labeling_tasks_started_total', {task_purpose: purpose, trigger: how});
     if (task.startedAt) tm.counter('sprint_labeling_resumes_total', {task_purpose: purpose, trigger: how});
     const runStarted = Date.now();
-    // A Stop pressed in another tab after this moment is for this run (older ones are ignored).
-    const runStartedIso = now();
     const [version, setup] = await Promise.all([deps.catalog.get('prompt_versions', task.promptVersionId), deps.catalog.get('setup_versions', task.setupVersionId)]);
     if (!version || !setup?.schema) {
       await repo.patch<LabelingTask>(TASKS, taskId, {state: 'failed', error: 'The prompt version or schema of this task no longer exists.', finishedAt: now()});
@@ -249,14 +301,14 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
 
     // A Stop from another tab: read on a timer, so it is seen even while calls wait in the
     // limiter, in retry sleeps or in a long model call (the abort cancels them).
-    const stopTimer = setInterval(() => {
-      void getTask(taskId).then(fresh => {
+    const checkStop = () =>
+      getTask(taskId).then(fresh => {
         if (fresh?.stopRequested && (fresh.stopRequestedAt ?? '') >= runStartedIso) {
           if (!stopPressed.has(taskId)) stopPressed.set(taskId, Date.parse(fresh.stopRequestedAt!));
           ctrl.abort();
         }
       });
-    }, systemConfig().labeling.stopCheckMs);
+    const stopTimer = setInterval(() => void checkStop(), systemConfig().labeling.stopCheckMs);
     (stopTimer as {unref?: () => void}).unref?.();
 
     /**
@@ -372,6 +424,8 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     };
 
     try {
+      // A Stop saved while this run was preparing (before `active` held it): seen before any call.
+      await checkStop();
       await Promise.all(Array.from({length: Math.max(1, task.parallel)}, worker));
     } finally {
       clearInterval(stopTimer);
@@ -446,8 +500,10 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
     async stopTask(taskId: string) {
       stopPressed.set(taskId, Date.now());
       active.get(taskId)?.abort();
-      if (!active.has(taskId)) await repo.patch<LabelingTask>(TASKS, taskId, {stopRequested: true, stopRequestedAt: now()});
-      emit();
+      if (active.has(taskId)) return emit();
+      const t = await stopIfIdle(taskId);
+      if (t) emit(t.projectId);
+      else emit();
     },
 
     retryFailed: (taskId: string, trigger?: 'system' | 'user', opts: RunOptions = {}) => run(taskId, trigger, {...opts, retry: true}),
@@ -463,6 +519,15 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
       const tasks = await repo.find<LabelingTask>(TASKS, {projectId}, 'createdAt desc');
       let changed = false;
       for (const t of tasks) {
+        // A Stop asked while its runner was starting, whose runner then went away: ended now.
+        if (t.state !== 'running' && !FINISHED.includes(t.state) && t.stopRequested && !(await isRunning(t.id))) {
+          const before = t.state;
+          Object.assign(t, (await stopIfIdle(t.id, false)) ?? {});
+          const after = await getTask(t.id);
+          if (after) Object.assign(t, after);
+          if (t.state !== before) changed = true;
+          continue;
+        }
         if (t.state !== 'running' || (await isRunning(t.id))) continue;
         // The runner may have finished between the read above and the lock check: read again,
         // so a task that just ended is never marked as left behind.
@@ -487,9 +552,16 @@ export function createLabeling(deps: LabelingDeps): LabelingContract {
             continue;
           }
         }
-        t.state = 'paused';
-        t.stopReason = 'closed';
-        await repo.patch<LabelingTask>(TASKS, t.id, {state: 'paused', stopReason: 'closed'});
+        // A Stop asked while no runner held it ends it; otherwise it shows as paused. The latest
+        // read says whether one was asked.
+        const latest = await getTask(t.id);
+        if (!latest || latest.state !== 'running') {
+          if (latest) Object.assign(t, latest);
+          continue;
+        }
+        const end = latest.stopRequested ? {state: 'stopped' as const, stopReason: 'user' as const, stopRequested: false, finishedAt: now()} : {state: 'paused' as const, stopReason: 'closed' as const};
+        Object.assign(t, end);
+        await repo.patch<LabelingTask>(TASKS, t.id, end);
         changed = true;
       }
       if (changed) emit(projectId);

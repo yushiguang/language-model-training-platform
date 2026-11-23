@@ -82,7 +82,7 @@ export function AskAi({
   const active = new Set<string>();
   if (state) {
     const busy: Record<string, boolean> = {
-      '/prompt': state.runs.some(r => r.state === 'running') || state.optimisation.some(o => o.state === 'running'),
+      '/prompt': state.runs.some(r => r.state === 'running' || !!r.queue) || state.optimisation.some(o => o.state === 'running' || !!o.queue),
     };
     const done = new Set<string>();
     for (const m of [...messages].reverse()) {

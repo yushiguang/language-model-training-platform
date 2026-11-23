@@ -576,3 +576,164 @@ test('an answer saved by another runner while this call was in flight is not sav
   const docs = await new DocRepo(db).find('predictions', {promptVersionId: v.id});
   assert.equal(docs.length, 1, 'one saved prediction, though two runners labeled the example');
 });
+
+test('Stop on a task no runner holds ends it as stopped; a Stop asked of a live one is kept until no runner holds it (#66)', async () => {
+  const {db, catalog, v, ids} = await setup(4, 'lab-stop-idle');
+  let live = true;
+  const {DocRepo} = await import('@yushiguang/sprint-platform');
+  const lab = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": "Vlog"}'), locks: memoryLocks(), liveElsewhere: async () => live});
+  // Its job is starting (live elsewhere), though the record still says queued: the request waits.
+  const starting = await lab.createTask(input(ids, v));
+  await lab.stopTask(starting.id);
+  assert.deepEqual([(await lab.getTask(starting.id))?.state, (await lab.getTask(starting.id))?.stopRequested], ['queued', true]);
+  // Waiting in the queue with no runner anywhere (its job cancelled): stopped at once.
+  live = false;
+  const queued = await lab.createTask(input(ids, v));
+  await lab.stopTask(queued.id);
+  assert.deepEqual([(await lab.getTask(queued.id))?.state, (await lab.getTask(queued.id))?.stopReason], ['stopped', 'user']);
+  // A task that already ended gets no request left over.
+  await new DocRepo(db).patch('labeling_tasks', queued.id, {state: 'needs_attention'});
+  await lab.stopTask(queued.id);
+  assert.deepEqual([(await lab.getTask(queued.id))?.state, (await lab.getTask(queued.id))?.stopRequested], ['needs_attention', false]);
+  live = true;
+  // Running in another unit: the request waits for that runner.
+  const elsewhere = await lab.createTask(input(ids, v));
+  await new DocRepo(db).patch('labeling_tasks', elsewhere.id, {state: 'running'});
+  await lab.stopTask(elsewhere.id);
+  assert.deepEqual([(await lab.getTask(elsewhere.id))?.state, (await lab.getTask(elsewhere.id))?.stopRequested], ['running', true]);
+  // That runner went away: the read that finds it left behind ends it as stopped, not paused.
+  live = false;
+  const listed = (await lab.listTasks('pr_1')).find(x => x.id === elsewhere.id);
+  assert.deepEqual([listed?.state, listed?.stopReason], ['stopped', 'user']);
+});
+
+test('a Stop never writes over a task that ends while liveElsewhere is asked; a request left by a runner that never started ends at the next read (#66)', async () => {
+  const {db, catalog, v, ids} = await setup(4, 'lab-stop-race');
+  const {DocRepo} = await import('@yushiguang/sprint-platform');
+  const repo = new DocRepo(db);
+  let during: (() => Promise<void>) | null = null;
+  let live = true;
+  const lab = createLabeling({
+    db,
+    catalog,
+    gateway: fakeGateway(async () => '{"format": "Vlog"}'),
+    locks: memoryLocks(),
+    liveElsewhere: async () => {
+      if (during) await during();
+      return live;
+    },
+  });
+  // The runner elsewhere finishes while the Stop asks whether it is live.
+  const t = await lab.createTask(input(ids, v));
+  await repo.patch('labeling_tasks', t.id, {state: 'running'});
+  during = async () => {
+    await repo.patch('labeling_tasks', t.id, {state: 'done'});
+    live = false;
+  };
+  await lab.stopTask(t.id);
+  assert.deepEqual([(await lab.getTask(t.id))?.state, (await lab.getTask(t.id))?.stopRequested], ['done', false]);
+  // A Stop while the task's runner was starting is kept; that runner went away: the next read ends it.
+  during = null;
+  live = true;
+  const s = await lab.createTask(input(ids, v));
+  await lab.stopTask(s.id);
+  assert.equal((await lab.getTask(s.id))?.stopRequested, true);
+  live = false;
+  const listed = (await lab.listTasks('pr_1')).find(x => x.id === s.id);
+  assert.deepEqual([listed?.state, listed?.stopReason], ['stopped', 'user']);
+});
+
+test('a Stop saved while the runner was starting ends the run before any model call (#66)', async () => {
+  const {db, catalog, v, ids} = await setup(4, 'lab-stop-starting');
+  const stats = {inFlight: 0, maxInFlight: 0, calls: 0};
+  // Its job has been claimed (live elsewhere) but the runner has not taken the task yet.
+  const lab = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": "Vlog"}', stats), locks: memoryLocks(), liveElsewhere: async () => true});
+  const t = await lab.createTask(input(ids, v));
+  await lab.stopTask(t.id);
+  assert.equal((await lab.getTask(t.id))?.stopRequested, true);
+  const r = await lab.runTask(t.id);
+  assert.deepEqual([r?.state, r?.stopReason, r?.stopRequested], ['stopped', 'user', false]);
+  assert.equal(stats.calls, 0, 'nothing paid');
+});
+
+test('a Stop while a stopped or failed task is starting again is kept and ends that run; on an idle one it leaves nothing behind (#66)', async () => {
+  const {db, catalog, v, ids} = await setup(4, 'lab-stop-resume');
+  const {DocRepo} = await import('@yushiguang/sprint-platform');
+  const repo = new DocRepo(db);
+  const stats = {inFlight: 0, maxInFlight: 0, calls: 0};
+  let live = true;
+  const locks = memoryLocks();
+  const lab = createLabeling({db, catalog, gateway: fakeGateway(async () => '{"format": "Vlog"}', stats), locks, liveElsewhere: async () => live});
+  // Resume of a stopped task: its job is claimed, the record still says stopped.
+  const resumed = await lab.createTask(input(ids, v));
+  await repo.patch('labeling_tasks', resumed.id, {state: 'stopped', stopReason: 'user'});
+  await lab.stopTask(resumed.id);
+  assert.equal((await lab.getTask(resumed.id))?.stopRequested, true);
+  const r1 = await lab.runTask(resumed.id);
+  assert.deepEqual([r1?.state, r1?.stopRequested], ['stopped', false]);
+  // Retry failed of a task that needs attention: the same.
+  const retried = await lab.createTask(input(ids, v));
+  await repo.patch('labeling_tasks', retried.id, {state: 'needs_attention', failed: 1, failedExampleIds: [ids[0]]});
+  await lab.stopTask(retried.id);
+  const r2 = await lab.retryFailed(retried.id);
+  assert.deepEqual([r2?.state, r2?.stopReason], ['stopped', 'user']);
+  // Pressed while this process's runner holds the lock and is still preparing: saved, then seen.
+  live = false;
+  const preparing = await lab.createTask(input(ids, v));
+  await locks.run(`labeling:${preparing.id}`, async () => {
+    await lab.stopTask(preparing.id);
+  });
+  assert.equal((await lab.getTask(preparing.id))?.stopRequested, true);
+  const r3 = await lab.runTask(preparing.id);
+  assert.equal(r3?.state, 'stopped');
+  assert.equal(stats.calls, 0, 'nothing paid');
+  // An idle stopped task: nothing changes and no request waits for a later Resume.
+  await repo.patch('labeling_tasks', resumed.id, {stopRequested: true});
+  await lab.stopTask(resumed.id);
+  assert.deepEqual([(await lab.getTask(resumed.id))?.state, (await lab.getTask(resumed.id))?.stopRequested], ['stopped', false]);
+  // A request left on one is cleared at the next read too.
+  await repo.patch('labeling_tasks', retried.id, {stopRequested: true});
+  const listed = (await lab.listTasks('pr_1')).find(x => x.id === retried.id);
+  assert.deepEqual([listed?.state, listed?.stopRequested], ['stopped', false]);
+  const r4 = await lab.runTask(resumed.id);
+  assert.equal(r4?.state, 'done', 'a later Resume runs');
+});
+
+test('a Stop pressed while this process prepares the run is seen before any model call; a read never saves a request (#66)', async () => {
+  const {db, catalog, v, ids} = await setup(4, 'lab-stop-preparing');
+  const {DocRepo} = await import('@yushiguang/sprint-platform');
+  const repo = new DocRepo(db);
+  const stats = {inFlight: 0, maxInFlight: 0, calls: 0};
+  let onPrepare: (() => Promise<void>) | null = null;
+  // The run reads its prompt version while preparing: the Stop comes then (the lock is held,
+  // nothing in `active` yet).
+  const slow = {
+    ...catalog,
+    get: (async (collection: string, id: string) => {
+      if (collection === 'prompt_versions' && onPrepare) await onPrepare();
+      return (catalog.get as (c: string, i: string) => Promise<unknown>)(collection, id);
+    }) as typeof catalog.get,
+  };
+  let live = false;
+  const lab = createLabeling({db, catalog: slow, gateway: fakeGateway(async () => '{"format": "Vlog"}', stats), locks: memoryLocks(), liveElsewhere: async () => live});
+  const t = await lab.createTask(input(ids, v));
+  onPrepare = async () => {
+    onPrepare = null;
+    await lab.stopTask(t.id);
+  };
+  const r = await lab.runTask(t.id);
+  assert.deepEqual([r?.state, r?.stopReason], ['stopped', 'user']);
+  assert.equal(stats.calls, 0, 'nothing paid');
+  // A read finds a request while the task's job is live: it saves nothing (the runner ends it).
+  live = true;
+  const q = await lab.createTask(input(ids, v));
+  await lab.stopTask(q.id);
+  const saved = (await lab.getTask(q.id))?.stopRequestedAt;
+  await new Promise(r => setTimeout(r, 5));
+  await lab.listTasks('pr_1');
+  assert.deepEqual([(await lab.getTask(q.id))?.state, (await lab.getTask(q.id))?.stopRequestedAt], ['queued', saved]);
+  // The request was cleared meanwhile and a new run's job is live: the read adds none.
+  await repo.patch('labeling_tasks', q.id, {stopRequested: false});
+  await lab.listTasks('pr_1');
+  assert.equal((await lab.getTask(q.id))?.stopRequested, false);
+});
