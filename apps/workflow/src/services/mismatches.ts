@@ -89,15 +89,28 @@ async function answersOnEval(w: Scope, versionId: string, model: NonNullable<Pro
  * leaves the picked version's To review list once it is kept or changed for that version, and
  * goes back when the review is reopened. Answers the safety filter stopped are not mismatches.
  */
-export async function mismatches(w: Scope, projectId: string, versionId?: string | null): Promise<MismatchList> {
-  const state = await loadProjectState(w, projectId);
-  const empty: MismatchList = {versions: [], versionId: null, items: [], wrongEverywhere: 0, reviewed: 0, reviewedItems: [], reviewedAll: 0};
-  const setup = state?.setup;
+interface VersionAnswers {
+  /** The gold-labeled eval examples. */
+  evalEx: Example[];
+  /** By version, its answer on each of `evalEx`; only versions of the current label with all of them. */
+  answers: Map<string, Map<string, Prediction>>;
+  /** Those versions, newest first, with their Macro-F1 on the first model. */
+  versions: {id: string; label: string; score: number | null}[];
+  /** The best-scored of them (the newest when none has a score). */
+  best: {id: string; label: string; score: number | null};
+}
+
+/**
+ * The versions whose saved answers cover every gold-labeled eval example, and the best-scored of
+ * them: what the Mismatches review and the Dataset page compare gold labels with. Null before a
+ * version has answers on all of them. Nothing is labeled: it reads saved answers only.
+ */
+export async function versionAnswers(w: Scope, state: ProjectState): Promise<VersionAnswers | null> {
+  const setup = state.setup;
   const model = setup?.models[0];
-  if (!state || !setup?.schema || !model) return empty;
+  if (!setup?.schema || !model) return null;
   const evalEx = state.examples.filter(e => e.split === 'eval' && !!state.gold[e.id]);
-  if (!evalEx.length) return empty;
-  const standing = await standingReviews(w, projectId, state);
+  if (!evalEx.length) return null;
   // Versions of the current schema with an answer for every eval example, newest first.
   const answers = new Map<string, Map<string, Prediction>>();
   const evalIds = evalEx.map(e => e.id);
@@ -105,15 +118,26 @@ export async function mismatches(w: Scope, projectId: string, versionId?: string
     const p = await answersOnEval(w, v.id, model, evalIds);
     if (p) answers.set(v.id, new Map(evalEx.map(e => [e.id, p.get(e.id)!])));
   }
-  if (!answers.size) return {...empty, reviewedAll: standing.size};
+  if (!answers.size) return null;
   const score = (id: string) => state.reports.find(r => r.promptVersionId === id && r.endpoint === model.endpoint && !r.archivedNow)?.metrics.macroF1 ?? null;
   const versions = state.versions.filter(v => answers.has(v.id)).map(v => ({id: v.id, label: versionLabel(v), score: score(v.id)}));
   const best = [...versions].filter(v => v.score != null).sort((a, b) => b.score! - a.score!)[0] ?? versions[0];
+  return {evalEx, answers, versions, best};
+}
+
+/** A saved answer that does not match the gold label (an answer the safety filter stopped is not a mismatch). */
+export const isMismatch = (gold: Answer, p: Prediction | undefined) => !!p && !p.filtered && !isRight(gold, p.answer);
+
+export async function mismatches(w: Scope, projectId: string, versionId?: string | null): Promise<MismatchList> {
+  const state = await loadProjectState(w, projectId);
+  const empty: MismatchList = {versions: [], versionId: null, items: [], wrongEverywhere: 0, reviewed: 0, reviewedItems: [], reviewedAll: 0};
+  if (!state?.setup?.schema || !state.setup.models[0] || !state.examples.some(e => e.split === 'eval' && !!state.gold[e.id])) return empty;
+  const standing = await standingReviews(w, projectId, state);
+  const found = await versionAnswers(w, state);
+  if (!found) return {...empty, reviewedAll: standing.size};
+  const {evalEx, answers, versions, best} = found;
   const picked = versionId && answers.has(versionId) ? versionId : best.id;
-  const wrong = (vid: string, exId: string) => {
-    const p = answers.get(vid)!.get(exId)!;
-    return !p.filtered && !isRight(state.gold[exId]!.answer, p.answer);
-  };
+  const wrong = (vid: string, exId: string) => isMismatch(state.gold[exId]!.answer, answers.get(vid)!.get(exId));
   const of = answers.size;
   const reviewedHere = (e: Example) => standing.has(`${e.id}|${picked}`);
   const wrongIn = new Map(evalEx.map(e => [e.id, [...answers.keys()].filter(vid => wrong(vid, e.id)).length]));

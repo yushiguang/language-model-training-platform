@@ -347,7 +347,7 @@ test('label sets (#82): members read them; changing them needs project write', a
   const p = await api.createProject(inTenant(alice, 't1'), 'Sets');
   const bobs = inTenant(bob, 't1');
   assert.deepEqual(await api.listLabelSets(bobs, p.id), {sets: [], unassigned: 0}, 'a member reads');
-  assert.deepEqual(await api.listSamples(bobs, {projectId: p.id}), {items: [], total: 0});
+  assert.deepEqual(await api.listSamples(bobs, {projectId: p.id}), {items: [], total: 0, model: null, counts: {live: 0, no_label: 0, mismatch: 0, removed: 0}});
   const structured = {taskSummary: '', features: {video: [], photo_text: [], metadata: []}, label: {name: 'x', kind: 'single' as const, values: []}, ruleGroups: [], images: []};
   assert.equal(await api.goldLabelsCleared(bobs, {projectId: p.id, structured}), 0);
   for (const call of [api.createLabelSet(bobs, {projectId: p.id, count: 1}), api.createLabelSets(bobs, {projectId: p.id, sets: 1}), api.updateLabelSet(bobs, {projectId: p.id, labelSetId: 'ls_1', name: 'x'})]) await assert.rejects(call, {code: 'forbidden'});

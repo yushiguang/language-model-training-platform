@@ -277,19 +277,32 @@ export interface RemoveExamplesRequest {
   projectId: string;
   exampleIds: string[];
   reason: RemovalReason;
+  /** Why, in the person's words (optional; kept with the removal, cut to the comment length). */
+  note?: string;
 }
 
 /**
- * One page of the dataset's samples (docs/design/server.md 4.2), in number order. `filter`:
- * 'live' (default) the samples in the dataset, 'removed' the removed ones. `query`: a sample ID,
- * or a sample number. `limit` defaults to 50, at most 500.
+ * The Dataset page's tabs (wireframe W-EvalDataset, #100): 'live' every sample in the dataset,
+ * 'no_label' those without a gold label, 'mismatch' those whose gold label the model's answer
+ * (`SamplePage.model`) does not match, 'removed' the removed ones.
+ */
+export type SampleFilter = 'live' | 'no_label' | 'mismatch' | 'removed';
+
+/**
+ * One page of the dataset's samples (docs/design/server.md 4.2). `filter` defaults to 'live'.
+ * `query`: a sample ID, or a sample number. `sourceId` and `gold` narrow to one data source or to
+ * samples whose gold label has that value. `sort`: by number (default) or sample ID, '-' first for
+ * descending. `limit` defaults to 50, at most 500.
  */
 export interface ListSamplesRequest {
   projectId: string;
-  filter?: 'live' | 'removed';
+  filter?: SampleFilter;
   /** Only the samples of this label set. */
   labelSetId?: string;
   query?: string;
+  sourceId?: string;
+  gold?: string;
+  sort?: 'number' | '-number' | 'externalId' | '-externalId';
   offset?: number;
   limit?: number;
 }
@@ -305,14 +318,28 @@ export interface SampleRow {
   source: {id: string; name: string} | null;
   /** Has a gold label for the current label. */
   labeled: boolean;
-  /** Set on removed samples: the removal to pass to `restoreExamples`, and why. */
-  removal: {id: string; reason: RemovalReason; removedBy: string; removedAt: string} | null;
+  /** The gold label for the current label, or null. */
+  gold: Answer | null;
+  /** The answer of `SamplePage.model` on this sample; null with no such version or when its answer was stopped by the safety filter. */
+  model: Answer | null;
+  /** Has a gold label that `model` does not match. */
+  mismatch: boolean;
+  /** Set on removed samples: the removal to pass to `restoreExamples`, why, and the person's note. */
+  removal: {id: string; reason: RemovalReason; note: string | null; removedBy: string; removedAt: string} | null;
 }
 
 export interface SamplePage {
   items: SampleRow[];
-  /** How many samples match the filter and query in all. */
+  /** How many samples match the filter, query and column filters in all. */
   total: number;
+  /**
+   * The version whose answers the page shows and mismatches are counted against: the best-scored
+   * version of the current label with an answer on every gold-labeled sample (as the Mismatches
+   * review picks it); null before there is one.
+   */
+  model: {versionId: string; label: string} | null;
+  /** The tab counts, for the dataset as a whole (or the label set), before the query and column filters. */
+  counts: Record<SampleFilter, number>;
 }
 
 /** A label set with its counts: samples in its range that are not removed, and how many of them have a gold label. */

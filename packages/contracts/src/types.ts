@@ -275,8 +275,11 @@ export interface ItemCheckCounts {
   noFeatures?: number;
 }
 
-/** Why an example left the eval dataset (spec 1.0.0, 4.4). */
-export type RemovalReason = 'broken' | 'out_of_scope' | 'downsample' | 'excess_unlabeled';
+/**
+ * Why an example left the eval dataset (spec 1.0.0, 4.4). 'other': a person's own reason, said in
+ * the removal's note (wireframe W-EvalDataset-Remove, #100).
+ */
+export type RemovalReason = 'broken' | 'out_of_scope' | 'other' | 'downsample' | 'excess_unlabeled';
 
 /**
  * The trail of one removal from the eval dataset (spec 1.0.0, 4.4): what was removed, from which
@@ -292,6 +295,8 @@ export interface DatasetRemoval {
   /** The gold label when it was removed; null when it had none. */
   gold: Answer | null;
   reason: RemovalReason;
+  /** The person's note on why, if they wrote one (#100). */
+  note?: string | null;
   removedBy: string;
   removedAt: string;
   /** Set when the example was put back. */

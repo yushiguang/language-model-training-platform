@@ -170,7 +170,7 @@ export interface EventProps {
   dataset_appended: {source: 'sources' | 'sample' | 'upload'; added: Num; duplicates: Num};
   /** Examples whose save failed twice and were skipped (resilience spec, 3.2). */
   examples_not_saved: {count: Num};
-  dataset_examples_removed: {reason: 'broken' | 'out_of_scope' | 'downsample' | 'excess_unlabeled'; count: Num; with_gold: Num};
+  dataset_examples_removed: {reason: 'broken' | 'out_of_scope' | 'other' | 'downsample' | 'excess_unlabeled'; count: Num; with_gold: Num; with_note: boolean};
   dataset_examples_restored: {count: Num};
   eval_halves_balanced: {moved: Num; locked: boolean};
   // Gold Labels
@@ -240,7 +240,7 @@ export const EVENT_PROP_KEYS: {[E in EventName]: readonly (keyof EventProps[E] &
   source_file_uploaded: ['rows', 'bad', 'repeats'],
   dataset_appended: ['source', 'added', 'duplicates'],
   examples_not_saved: ['count'],
-  dataset_examples_removed: ['reason', 'count', 'with_gold'],
+  dataset_examples_removed: ['reason', 'count', 'with_gold', 'with_note'],
   dataset_examples_restored: ['count'],
   eval_halves_balanced: ['moved', 'locked'],
   // Gold Labels
