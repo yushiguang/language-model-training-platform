@@ -20,7 +20,7 @@ export default function DatasetPage() {
   );
 }
 
-const PAGE: PageContext = {label: 'Eval Dataset', agent: 'front_desk', intent: 'answer', hint: 'Ask how many examples the eval dataset needs.', context: {}};
+const PAGE: PageContext = {label: 'Dataset', agent: 'front_desk', intent: 'answer', hint: 'Ask how many examples the eval dataset needs.', context: {}};
 
 function Dataset({state}: {state: ProjectState}) {
   const snap = state.snapshot;
@@ -28,7 +28,7 @@ function Dataset({state}: {state: ProjectState}) {
   // The last take failed: why, until the next take (design: V-Dataset-Take-Failed).
   const failed = state.samplingTask?.state === 'failed' ? state.samplingTask : null;
   const failedBanner = failed ? <TakeFailed error={failed.error} /> : null;
-  const head = <PageHead title={t('Eval Dataset')} actions={snap && !task ? <NextButton state={state} /> : undefined} />;
+  const head = <PageHead title={t('Dataset')} actions={snap && !task ? <NextButton state={state} /> : undefined} />;
   if (task)
     return (
       <Frame head={head}>

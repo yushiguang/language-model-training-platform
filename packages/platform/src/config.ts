@@ -5,7 +5,7 @@ import {sampleFeatureInfo} from './standins/feature-info.ts';
 import {noDocuments} from './standins/documents.ts';
 import {simulatedModels} from './standins/simulated-models.ts';
 import {scriptedAgent} from './standins/scripted-agent.ts';
-import {allowAll, memoryAccessRequests, memoryPermissionAdmin} from './standins/enterprise.ts';
+import {standInAuthorization, memoryAccessRequests, memoryPermissionAdmin} from './standins/enterprise.ts';
 import {memoryConfig} from './standins/config-store.ts';
 import {browserFiles, localIdentity, localTelemetrySink} from './standins/local.ts';
 import {localTickets} from './standins/tickets.ts';
@@ -34,7 +34,7 @@ export function createPlatform(): Platform {
     documents: noDocuments(),
     telemetry: localTelemetrySink(),
     configStore: memoryConfig(),
-    authorization: allowAll(),
+    authorization: standInAuthorization(),
     permissionAdmin: memoryPermissionAdmin(),
     accessRequests: memoryAccessRequests(),
     tickets: localTickets(),

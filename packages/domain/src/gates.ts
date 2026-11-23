@@ -5,7 +5,7 @@ import {msg, msgText} from './i18n.ts';
 /** The four steps of a Prompt Tuning project (spec 1.0.0, 2.1), in order. */
 export const NODES: {id: NodeId; label: string; path: string}[] = [
   {id: 'prompt_design', label: 'Prompt Design', path: '/prompt-design'},
-  {id: 'dataset', label: 'Eval Dataset', path: '/dataset'},
+  {id: 'dataset', label: 'Dataset', path: '/dataset'},
   {id: 'gold', label: 'Gold Labels', path: '/gold'},
   {id: 'prompt', label: 'Prompt Tuning', path: '/prompt'},
 ];

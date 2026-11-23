@@ -298,7 +298,7 @@ test('a new project starts with default settings, unconfirmed; v1 sets the label
   // The text the model reads is compiled from the parts: features, the label's values, the output key.
   assert.match(v1.template, /<feature name="Description">\{\{Description\}\}<\/feature>[\s\S]*<output_labels name="format"[\s\S]*Vlog[\s\S]*Return one JSON object only/);
   const chat = await w.catalog.find('chat_messages', {projectId: p.id}, 'createdAt');
-  assert.match(chat.at(-1)!.text, /v1 is saved\. Next, click "Next: Eval Dataset" at the top right/);
+  assert.match(chat.at(-1)!.text, /v1 is saved\. Next, click "Next: Dataset" at the top right/);
   assert.equal(chat.at(-1)!.agent, 'prompt_agent');
 
   // New wording: a new version, the same labels, gold labels stand.

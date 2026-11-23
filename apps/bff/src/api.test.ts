@@ -165,6 +165,18 @@ test('contract: the runtime names the caller\'s tenant, by its organization\'s n
   assert.equal('tenantRole' in info, false, 'the workflow\'s field stays inside');
 });
 
+test('contract: a workflow that names no role makes the caller a member; requests for access pass through with the caller (#91)', async () => {
+  const seen: unknown[] = [];
+  const workflow = {
+    runtimeInfo: async () => ({appVersion: '9.9.9', standIns: []}),
+    requestAccess: async (ctx: RequestContext, req: unknown) => (seen.push([ctx.user.id, ctx.tenantId, req]), {trackUrl: 'https://perm.example/r/1'}),
+  } as unknown as WorkflowContract;
+  const api = createBffApi({workflow, identity: {currentUser: async () => ({id: 'u_b', name: 'Bo', organization: 'org_acme'})}, appVersion: '9.9.9'});
+  assert.deepEqual((await api.getRuntimeInfo()).tenant, {id: 'org_acme', name: 'org_acme', role: 'member'});
+  assert.deepEqual(await api.requestAccess({permission: 'project_write', projectId: 'pr_1', reason: 'Food'}), {trackUrl: 'https://perm.example/r/1'});
+  assert.deepEqual(seen, [['u_b', 'org_acme', {permission: 'project_write', projectId: 'pr_1', reason: 'Food'}]]);
+});
+
 test('contract: the signed-in organization is the tenant; one organization never sees another one\'s data sources (#29)', async () => {
   const acme: Identity = {currentUser: async () => ({id: 'u_a', name: 'Ann', organization: 'org_acme'})};
   const globex: Identity = {currentUser: async () => ({id: 'u_g', name: 'Gus', organization: 'org_globex'})};

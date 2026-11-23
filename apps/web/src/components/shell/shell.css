@@ -1,0 +1,66 @@
+/*
+ * The app shell on Astryx (wireframes v346): one taller top bar with a full-width line under it,
+ * a white centred page, and Ask AI as a full-height panel on the right under the top bar.
+ * Not in a layer, so these few rules win over Astryx's defaults where they meet (the top bar's padding).
+ */
+:root { --sp-top: 57px; }
+body { background: var(--color-background-surface, #fff); }
+
+.sp-app { min-height: 100vh; display: flex; flex-direction: column; background: var(--color-background-surface, #fff); }
+.sp-top { position: sticky; top: 0; z-index: 20; background: var(--color-background-surface, #fff); border-bottom: 1px solid var(--color-border, #e5e5e5); }
+.sp-top .sp-topnav { padding-block: 12px; padding-inline: 20px; min-height: 56px; box-sizing: border-box; }
+.sp-body { flex: 1; display: flex; align-items: flex-start; min-width: 0; }
+.sp-main { flex: 1; min-width: 0; }
+
+/* Left of the top bar: 「Sprint / tenant / project」; the switch arrow shows on hover only. */
+.sp-crumbs { display: flex; align-items: center; min-width: 0; margin-inline-end: 24px; }
+.sp-sep { color: var(--color-text-secondary, #a3a3a3); padding: 0 6px; user-select: none; font-size: 14px; }
+.sp-crumb { display: inline-flex; align-items: center; gap: 2px; padding: 4px 0; border: 0; background: none; font: inherit; font-size: 14px; line-height: 20px; font-weight: 500; color: var(--color-text-primary, #111); text-decoration: none; cursor: pointer; min-width: 0; }
+.sp-crumb:hover .sp-crumb-name, a.sp-crumb:hover { text-decoration: underline; text-underline-offset: 3px; }
+.sp-crumb-name { display: inline-block; max-width: 160px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-chev { display: inline-flex; width: 14px; opacity: 0; transition: opacity .12s; }
+.sp-crumb:hover .sp-chev, .sp-crumb:focus-visible .sp-chev, .sp-crumb[aria-expanded=true] .sp-chev { opacity: 1; }
+
+/* Centre: the four steps, arrows between them. Right: Ask AI, language, the avatar. */
+.sp-steps { display: flex; align-items: center; gap: 4px; }
+.sp-step-arrow { display: inline-flex; color: var(--color-text-secondary, #a3a3a3); }
+.sp-end { display: flex; align-items: center; gap: 8px; }
+.sp-avatar { display: inline-flex; padding: 0; border: 0; background: none; border-radius: 999px; cursor: pointer; }
+
+/* Ask AI: the right-hand panel, under the top bar and as tall as the window. */
+.sp-side { width: 400px; flex: none; position: sticky; top: var(--sp-top); height: calc(100vh - var(--sp-top)); border-left: 1px solid var(--color-border, #e5e5e5); background: var(--color-background-surface, #fff); }
+.sp-side[hidden] { display: none; }
+.sp-side .chat { width: 100%; height: 100%; margin: 0; position: static; border: 0; border-radius: 0; box-shadow: none; }
+
+/* The page: centred, at most 1200 wide, white. */
+.sp-page { width: 100%; max-width: 1200px; margin: 0 auto; padding: 40px 48px 64px; box-sizing: border-box; }
+.sp-page > .container { max-width: none; }
+.sp-head { margin-bottom: 32px; }
+.sp-back { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; line-height: 20px; color: var(--color-text-secondary, #737373); text-decoration: none; }
+.sp-back:hover { color: var(--color-text-primary, #111); }
+.sp-title { min-width: 0; }
+.sp-side-card { flex: none; }
+.sp-side-card.sticky { position: sticky; top: calc(var(--sp-top) + 24px); }
+.sp-error { color: var(--color-text-error, #b42318); }
+.sp-loading { display: flex; justify-content: center; padding: 120px 0; color: var(--color-text-secondary, #737373); }
+.sp-loading svg.i { width: 24px; height: 24px; animation: k-spin 1s linear infinite; }
+.sp-missing { padding: 120px 24px; text-align: center; display: flex; flex-direction: column; gap: 12px; }
+.sp-hero { text-align: center; padding-top: 24px; }
+
+/* Dialogs: a header, a body, buttons on the right; settings with their sections on the left. */
+.sp-dlg-head { padding: 20px 24px 0; }
+.sp-dlg-body { padding: 16px 24px 24px; }
+.sp-dlg-foot { padding: 0 24px 24px; }
+.sp-settings { height: min(640px, calc(100vh - 64px)); display: flex; }
+.sp-settings > * { flex: 1; min-width: 0; }
+.sp-settings-main { display: flex; flex-direction: column; min-height: 100%; }
+.sp-settings-body { flex: 1; padding: 24px; }
+.sp-settings-foot { position: sticky; bottom: 0; padding: 16px 24px; background: var(--color-background-surface, #fff); border-top: 1px solid var(--color-border, #e5e5e5); }
+.sp-danger-card { border-color: var(--color-border-error, #f3b4ae); }
+
+@media (max-width: 720px) {
+  .sp-page { padding: 24px 16px 48px; }
+  .sp-steps .sp-step-arrow { display: none; }
+  .sp-side { position: fixed; inset: var(--sp-top) 0 0 auto; width: min(400px, 100vw); z-index: 15; }
+}
+.sp-dlg-title { min-width: 0; }

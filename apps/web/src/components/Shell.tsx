@@ -2,27 +2,31 @@
 
 import Link from 'next/link';
 import {usePathname} from 'next/navigation';
-import {createContext, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+import {createContext, Suspense, useCallback, useContext, useEffect, useMemo, useState, type ReactNode} from 'react';
 import {createPortal} from 'react-dom';
-import {LOCALES, NODES} from '@yushiguang/sprint-domain';
+import {NODES} from '@yushiguang/sprint-domain';
 import type {NodeId, PageContext} from '@yushiguang/sprint-contracts';
-import {signOut, type ProjectState} from '@/backend-api';
-import {SignedIn, useRuntime} from './session';
-import {ActionErrorBanner, Button, clearActionError, Icon} from '@/ui';
-import {t, useLocale} from '@/i18n';
+import type {ProjectState} from '@/backend-api';
+import {SignedIn} from './session';
+import {ActionErrorBanner, clearActionError, Icon} from '@/ui';
+import {t} from '@/i18n';
 import {AskAi} from './AskAi';
 import {ProjectProvider, useProject} from './ProjectContext';
-import {SettingsProvider, useSettings} from './ProjectSettings';
-import {stepStates} from './steps';
+import {SettingsProvider} from './ProjectSettings';
+import {TopBar, type Where} from './shell/TopBar';
+import {NoAccessHost} from './shell/NoAccess';
 
 type Ctx = ReturnType<typeof useProject> & {state: ProjectState};
 
+/** Where in a project a page is: a step, or the project overview. */
+export type ProjectPlace = NodeId | 'overview';
+
 interface Props {
   /** The step (the shell reads it from the address; kept for readers of the page). */
-  node: NodeId;
+  node?: ProjectPlace;
   /** What Ask AI reads on this page. */
   page: PageContext;
-  /** Ask AI starts open (Prompt Design, before the first prompt). */
+  /** Ask AI starts open (Prompt Design, whose chat is part of the page). */
   chatOpen?: boolean;
   /** Renders the page: its content is a `<Frame>`. */
   children: (ctx: Ctx) => ReactNode;
@@ -38,34 +42,61 @@ interface ChatSlot {
 interface Shell {
   open: boolean;
   setOpen: (o: boolean) => void;
-  /** Ask AI is rendered here, beside the main column. */
+  /** Ask AI is rendered here: the right-hand panel under the top bar. */
   side: HTMLElement | null;
   /** Ask AI was just opened by the user: it slides in (motion M5). A page change keeps it still. */
   entering: boolean;
+  /** Prompt Design: the chat is part of the page, open, with no close button. */
+  pinned: boolean;
 }
-const ShellCtx = createContext<Shell>({
-  open: false,
-  setOpen: () => undefined,
-  side: null,
-  entering: false,
-});
+const ShellCtx = createContext<Shell>({open: false, setOpen: () => undefined, side: null, entering: false, pinned: false});
 /** Opens Ask AI: every action that starts or continues a helper's work opens it, so the user lands where the helper works (R3-6). */
 export function useOpenAskAi(): () => void {
   const {setOpen} = useContext(ShellCtx);
   return () => setOpen(true);
 }
-const PageCtx = createContext<PageContext>({
-  label: '',
-  agent: 'front_desk',
-  intent: 'answer',
-  context: {},
-});
+const PageCtx = createContext<PageContext>({label: '', agent: 'front_desk', intent: 'answer', context: {}});
 
 /**
- * The shell of every project page (design: "Shell"), mounted once for all steps: a grey page with
- * the top island (project, steps, user; as wide as the content, and moving left with it when Ask
- * AI opens) and Ask AI at the bottom right. The project state and the open state of Ask AI stay
- * as they are across step changes; until the project has loaded, the panel shows a spinner.
+ * The frame of every page (wireframes v346): the one top bar with a full-width line under it, a
+ * white page, and in a project the Ask AI panel on the right, under the top bar and full height.
+ * The "insufficient access" dialog is mounted here once for the page.
+ */
+function AppFrame({
+  where,
+  askAi,
+  side,
+  setSide,
+  sideShown,
+  project,
+  children,
+}: {
+  where: Where;
+  askAi?: {open: boolean; toggle: () => void};
+  side?: boolean;
+  setSide?: (el: HTMLElement | null) => void;
+  sideShown?: boolean;
+  project?: {id: string; name: string};
+  children: ReactNode;
+}) {
+  return (
+    <div className="sp-app">
+      <header className="sp-top">
+        <TopBar where={where} askAi={askAi} />
+      </header>
+      <div className="sp-body">
+        <main className="sp-main k">{children}</main>
+        {side && <div className="sp-side k" ref={setSide} hidden={!sideShown} />}
+      </div>
+      <NoAccessHost project={project} />
+    </div>
+  );
+}
+
+/**
+ * The shell of every project page, mounted once for all of them: the project state, the top bar
+ * and the open state of Ask AI stay as they are while the user moves between steps, so a step
+ * change never blanks the page. Until the project has loaded, the page shows a spinner.
  */
 export function ProjectShell({children}: {children: ReactNode}) {
   return (
@@ -81,6 +112,8 @@ export function ProjectShell({children}: {children: ReactNode}) {
 
 function ShellInner({children}: {children: ReactNode}) {
   const ctx = useProject();
+  const place = placeFromPath(usePathname());
+  const pinned = place === 'prompt_design';
   const [open, setOpenState] = useState(false);
   const [entering, setEntering] = useState(false);
   const [side, setSide] = useState<HTMLElement | null>(null);
@@ -95,54 +128,49 @@ function ShellInner({children}: {children: ReactNode}) {
     const id = setTimeout(() => setEntering(false), 260);
     return () => clearTimeout(id);
   }, [entering]);
-  const shell = useMemo(() => ({open, setOpen, side, entering}), [open, setOpen, side, entering]);
-  const node = nodeFromPath(usePathname());
+  const shell = useMemo(() => ({open: open || pinned, setOpen, side, entering, pinned}), [open, pinned, setOpen, side, entering]);
   if (!ctx.projectId) return <Missing text={t('No project was chosen.')} />;
   if (ctx.error) return <Missing text={t(ctx.error)} />;
   const state = ctx.state?.project.id === ctx.projectId ? ctx.state : null;
+  if (!state) return <Loading />;
   return (
     <ShellCtx.Provider value={shell}>
-     <SettingsProvider state={state}>
-      <div className="k app b">
-        <div className="b-body" ref={setSide}>
-          <main className="b-main">
-            {state ? <TopNav state={state} current={node} /> : <header className="topnav" />}
-            {state ? children : <Loading panel />}
-          </main>
-        </div>
-        {!open && (
-          <button type="button" className="ask" onClick={() => setOpen(true)}>
-            <Icon name="spark" />
-            {t('Ask AI')}
-          </button>
-        )}
-      </div>
-     </SettingsProvider>
+      <SettingsProvider state={state}>
+        <AppFrame
+          where={{project: state, current: place}}
+          askAi={pinned ? undefined : {open, toggle: () => setOpen(!open)}}
+          side
+          setSide={setSide}
+          sideShown={open || pinned}
+          project={{id: state.project.id, name: state.project.name}}
+        >
+          {children}
+        </AppFrame>
+      </SettingsProvider>
     </ShellCtx.Provider>
   );
 }
 
-const nodeFromPath = (path: string): NodeId => {
+/** The step or overview a path belongs to; a step's sub-pages (a label set) belong to the step. */
+const placeFromPath = (path: string): ProjectPlace => {
   const p = path.replace(/\/+$/, '');
-  // A step's sub-pages (the prompt editor at /prompt/edit) belong to the step.
+  if (/\/overview$/.test(p)) return 'overview';
   return (NODES.find(n => p.endsWith(n.path) || p.includes(`${n.path}/`)) ?? NODES[0]).id;
 };
 
-/** The spinner shown in the panel while a step's data loads (design: "Step-Loading"). */
-export function Loading({panel}: {panel?: boolean}) {
-  const spinner = (
-    <div className="loading" role="status" aria-label={t('Loading')}>
+/** The spinner shown while a page's data loads (design: "Step-Loading"). */
+export function Loading() {
+  return (
+    <div className="k sp-loading" role="status" aria-label={t('Loading')}>
       <Icon name="ring" />
     </div>
   );
-  return panel ? <div className="container">{spinner}</div> : <div className="k app b">{spinner}</div>;
 }
 
-/** A step page: what Ask AI reads on it, and its content (a `<Frame>`). */
+/** A project page: what Ask AI reads on it, and its content (a `<Frame>`). */
 export function ProjectPage({page, chatOpen = false, children}: Props) {
   const ctx = useProject();
   const {setOpen} = useContext(ShellCtx);
-  // A page that starts with Ask AI open (Prompt Design) opens it; other pages keep it as it was.
   useEffect(() => {
     if (chatOpen) setOpen(true);
   }, [chatOpen, setOpen]);
@@ -165,218 +193,66 @@ function usePresence(on: boolean, ms: number): boolean {
   return on || shown;
 }
 
-/** A page's header and content, with Ask AI beside them when it is open. */
+/** A project page's header and content, centred (wireframes `Page`), with Ask AI in the right-hand panel when it is open. */
 export function Frame({head, children, chat}: {head: ReactNode; children: ReactNode; chat?: ChatSlot}) {
-  const {open, setOpen, side, entering} = useContext(ShellCtx);
+  const {open, setOpen, side, entering, pinned} = useContext(ShellCtx);
   const page = useContext(PageCtx);
-  // Motion M3: each step's body fades in when the route changes (the top island stays put).
+  // Motion M3: each page's body fades in when the route changes (the top bar stays put).
   const pathname = usePathname();
-  // Motion M5: Ask AI stays mounted while it slides out, so the page widens smoothly.
   const chatShown = usePresence(open, CHAT_OUT_MS);
-  const [scrolled, setScrolled] = useState(false);
-  useEffect(() => {
-    const on = () => setScrolled(window.scrollY > 0);
-    on();
-    window.addEventListener('scroll', on, {passive: true});
-    return () => {
-      window.removeEventListener('scroll', on);
-      clearActionError();
-    };
-  }, []);
+  useEffect(() => () => clearActionError(), []);
   return (
     <>
-      <div className={`b-head${scrolled ? ' scrolled' : ''}`}>
-        <div className="container">{head}</div>
-      </div>
-      <div key={pathname} className="container page-in">
-        <ActionErrorBanner />
+      <PageBody head={head} fadeKey={pathname}>
         {children}
-      </div>
-      {chatShown && side && createPortal(<AskAi page={page} entering={entering} leaving={!open} onClose={() => setOpen(false)} {...chat} />, side)}
+      </PageBody>
+      {chatShown && side && createPortal(<AskAi page={page} entering={entering} leaving={!open} onClose={pinned ? undefined : () => setOpen(false)} {...chat} />, side)}
     </>
   );
 }
 
-/**
- * The top island of the tenant pages (#29): Sprint, then Projects and Data Source, then the user.
- * Projects and Data Source are the two places above any one project.
- */
-export function TenantIsland({current}: {current: 'projects' | 'sources'}) {
-  const links = [
-    {id: 'projects', label: t('Projects'), href: '/'},
-    {id: 'sources', label: t('Data Source'), href: '/sources/'},
-  ] as const;
+function PageBody({head, fadeKey, children}: {head: ReactNode; fadeKey?: string; children: ReactNode}) {
   return (
-    <header className="topnav">
-      <div className="island">
-        <span className="proj">
-          <span className="proj-ic" aria-hidden="true">
-            S
-          </span>
-          <b>Sprint</b>
-        </span>
-        <nav className="stepper" aria-label="Sprint">
-          {links.map((l, i) => (
-            <span key={l.id} style={{display: 'contents'}}>
-              {i > 0 && <span className="step-sep" aria-hidden="true" />}
-              <Link className="step plain" aria-current={l.id === current ? 'page' : undefined} href={l.href}>
-                {l.label}
-              </Link>
-            </span>
-          ))}
-        </nav>
-        <UserEnd />
+    <div className="sp-page">
+      <div className="sp-head">{head}</div>
+      <div key={fadeKey} className="container page-in">
+        <ActionErrorBanner />
+        {children}
       </div>
-    </header>
-  );
-}
-
-function TopNav({state, current}: {state: ProjectState; current: NodeId}) {
-  const {href} = useProject();
-  const st = stepStates(state);
-  return (
-    <header className="topnav">
-      <div className="island">
-        <Link className="proj" href="/" title={t('All projects')}>
-          <span className="proj-ic" aria-hidden="true">
-            {state.project.name.trim().slice(0, 1).toUpperCase()}
-          </span>
-          <b title={state.project.name}>{state.project.name}</b>
-        </Link>
-        <nav className="stepper" aria-label={t('Workflow')}>
-          {NODES.map((n, i) => {
-            const s = st[n.id];
-            return (
-              <span key={n.id} style={{display: 'contents'}}>
-                {i > 0 && <span className="step-sep" aria-hidden="true" />}
-                <Link className={`step${s === 'todo' ? '' : ` ${s}`}`} aria-current={n.id === current ? 'page' : undefined} href={href(n.path)}>
-                  <span className="step-ic">{s === 'done' ? <Icon name="check" /> : s === 'running' ? <Icon name="ring" /> : s === 'attention' ? '!' : i + 1}</span>
-                  {t(n.label)}
-                </Link>
-              </span>
-            );
-          })}
-        </nav>
-        <UserEnd settings />
-      </div>
-    </header>
-  );
-}
-
-/** The right end of the top island: the stand-in tag (while stand-ins run), Settings inside a project, and the user's avatar. */
-export function UserEnd({settings}: {settings?: boolean}) {
-  const {open} = useSettings();
-  const {info} = useRuntime();
-  const user = info?.user.name ?? '';
-  const standIns = info?.standIns ?? [];
-  return (
-    <div className="topbar-end">
-      {standIns.length > 0 && (
-        <span className="standin" title={t('Stand-ins: {list}', {list: standIns.map(x => t(x)).join(', ')})}>
-          {t('Stand-in services')}
-        </span>
-      )}
-      {settings && <Button label={t('Settings')} kind="ghost" size="sm" icon="settings" title={t('Project Settings: the name, the pass rule and the labeling model')} onClick={open} />}
-      <UserMenu user={user} canSignOut={!!info?.canSignOut} />
     </div>
   );
 }
 
 /**
- * The user's avatar: a small menu with the user's name, the language choice (spec 1.1.0, 2.2) and,
- * when the platform can end the session, Sign out (2026-11-16 refinements, 1.2).
+ * A page of the tenant, outside any project (the tenant page, data sources): the top bar without
+ * steps, and the page body. Nothing renders until the signed-in user is known.
  */
-function UserMenu({user, canSignOut}: {user: string; canSignOut: boolean}) {
-  const {locale, setLocale} = useLocale();
-  const [at, setAt] = useState<{top: number; right: number} | null>(null);
-  const btn = useRef<HTMLButtonElement>(null);
-  const pop = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!at) return;
-    pop.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
-    const away = (e: MouseEvent) => !pop.current?.contains(e.target as Node) && !btn.current?.contains(e.target as Node) && setAt(null);
-    const key = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      setAt(null);
-      btn.current?.focus();
-    };
-    window.addEventListener('mousedown', away);
-    window.addEventListener('keydown', key);
-    return () => {
-      window.removeEventListener('mousedown', away);
-      window.removeEventListener('keydown', key);
-    };
-  }, [at]);
-  const toggle = () => {
-    const r = btn.current?.getBoundingClientRect();
-    setAt(at || !r ? null : {top: r.bottom + 8, right: Math.max(8, window.innerWidth - r.right)});
-  };
+export function TenantPage({head, children}: {head: ReactNode; children: ReactNode}) {
   return (
-    <>
-      <button ref={btn} type="button" className="avatar avatar-btn" aria-label={user ? t('{name}: account and language', {name: user}) : t('Account and language')} aria-haspopup="menu" aria-expanded={!!at} title={user} onClick={toggle}>
-        {user.slice(0, 1).toUpperCase()}
-      </button>
-      {at &&
-        createPortal(
-          <div ref={pop} className="k menu-pop" role="menu" style={at}>
-            <div className="menu-name one" title={user}>
-              {user}
-            </div>
-            <div className="menu-l">{t('Language')}</div>
-            {LOCALES.map(l => (
-              <button
-                key={l.id}
-                type="button"
-                role="menuitemradio"
-                aria-checked={l.id === locale}
-                lang={l.id === 'zh' ? 'zh-CN' : 'en'}
-                className="menu-i"
-                onClick={() => {
-                  setAt(null);
-                  if (l.id !== locale) setLocale(l.id);
-                }}
-              >
-                {l.name}
-                {l.id === locale && <Icon name="check" />}
-              </button>
-            ))}
-            {canSignOut && (
-              <>
-                <div className="menu-sep" role="separator" />
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="menu-i"
-                  onClick={async () => {
-                    setAt(null);
-                    try {
-                      await signOut();
-                    } finally {
-                      window.location.reload();
-                    }
-                  }}
-                >
-                  {t('Sign out')}
-                  <Icon name="back" />
-                </button>
-              </>
-            )}
-          </div>,
-          document.body,
-        )}
-    </>
+    <SignedIn>
+      <AppFrame where={{tenant: true}}>
+        <PageBody head={head}>{children}</PageBody>
+      </AppFrame>
+    </SignedIn>
+  );
+}
+
+/** The home page's frame: the top bar names only Sprint. */
+export function HomeFrame({children}: {children: ReactNode}) {
+  return (
+    <SignedIn>
+      <AppFrame where={{home: true}}>{children}</AppFrame>
+    </SignedIn>
   );
 }
 
 function Missing({text}: {text: string}) {
   return (
-    <div className="k app b">
-      <div className="empty">
-        <h2>{text}</h2>
-        <p>
-          <Link href="/">{t('Back to all projects')}</Link>
-        </p>
-      </div>
+    <div className="k sp-missing">
+      <h2>{text}</h2>
+      <p>
+        <Link href="/tenant/">{t('Back to all projects')}</Link>
+      </p>
     </div>
   );
 }

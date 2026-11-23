@@ -154,8 +154,8 @@ A deployment supplies three optional ports in `Platform`:
 - `accessRequests` (`AccessRequestPort`): `request(ctx, {tenantId, permission, projectId?,
   reason?})` sends a request from the "insufficient access" dialog to the platform, where
   approvers handle it; return `trackUrl` when the platform has a page to follow it on. Sprint
-  stores and approves nothing (#91). Without it requests are kept in memory
-  (`memoryAccessRequests`).
+  stores and approves nothing (#91). The stand-ins keep requests in memory
+  (`memoryAccessRequests`); a deployment without it refuses requests for access.
 
 Pass them to `createWorkflow` (`authorization`, `permissionAdmin`, `accessRequests`), as the
 in-process root does. The top bar names the tenant by `Identity.currentUser().organizationName`

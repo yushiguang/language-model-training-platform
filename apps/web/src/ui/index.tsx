@@ -10,6 +10,11 @@ import {createPortal} from 'react-dom';
 import {createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode} from 'react';
 import {systemConfig} from '@yushiguang/sprint-domain';
 import {t} from '@/i18n';
+import {isAccessDenied, reportAccessDenied} from './access';
+import {PageTitle} from './page-title';
+
+export {PageTitle} from './page-title';
+export {clearAccessDenied, isAccessDenied, reportAccessDenied, useAccessDenied} from './access';
 
 /** Mounted once around the app. The kit needs no theme provider; this only sets the root class. */
 export function UiProvider({children}: {children: ReactNode}) {
@@ -326,6 +331,8 @@ export function Button({
   };
   const failed = (e: unknown) => {
     console.warn(e);
+    // A missing permission is not a failure to retry: the shell asks whether to request access.
+    if (isAccessDenied(e)) return reportAccessDenied(e.permission);
     // A plain sentence from the backend ("Fix 2 errors in Checks first.") says why; anything else is a connection problem.
     const msg = e instanceof Error ? e.message : '';
     const why = /^[A-Z][^{}<>\n]{0,160}\.$/.test(msg) ? t(msg) : t('Check your connection and try again.');
@@ -919,23 +926,12 @@ export function LinkChip({text}: {text: string}) {
   );
 }
 
-/** One header structure on every page: title at the content edge, back arrow in the margin, actions on the right. */
+/**
+ * One header structure on every page (wireframes v346, `Page`): an optional back link above the
+ * title, the title at the content edge, actions on the right.
+ */
 export function PageHead({title, actions, back}: {title: string; actions?: ReactNode; back?: {label: string; href: string}}) {
-  return (
-    <div className="phb">
-      {back && (
-        <Link className="ph-back" href={back.href} title={back.label} aria-label={back.label}>
-          <Icon name="back" />
-        </Link>
-      )}
-      <h1 title={title}>{title}</h1>
-      {actions && (
-        <div className="ph-actions">
-          <ActionGroup>{actions}</ActionGroup>
-        </div>
-      )}
-    </div>
-  );
+  return <PageTitle title={title} back={back} actions={actions && <ActionGroup>{actions}</ActionGroup>} />;
 }
 
 /** A task in progress, centred on the page: title, progress, start time, Stop. */

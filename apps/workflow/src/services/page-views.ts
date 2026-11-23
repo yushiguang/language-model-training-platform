@@ -23,7 +23,7 @@ const TITLES: Record<PageId, string> = {
   sources: 'Data Source',
   source: 'Data Source · one data source',
   prompt_design: 'Prompt Design',
-  dataset: 'Eval Dataset',
+  dataset: 'Dataset',
   gold: 'Gold Labels',
   prompt: 'Prompt Tuning · prompt versions',
   prompt_edit: 'Prompt editor',

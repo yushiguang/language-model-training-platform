@@ -2,7 +2,7 @@
 
 import {useSearchParams} from 'next/navigation';
 import {Suspense, useEffect, useState} from 'react';
-import {TenantIsland} from '@/components/Shell';
+import {TenantPage} from '@/components/Shell';
 import {SignedIn} from '@/components/session';
 import {SOURCE_ACCEPT, sourceHint, sourceName} from '@/components/sources';
 import {addSourceFileFile, getDataSource, subscribeChanges, type DataSourceDetail, type SourceFile} from '@/backend-api';
@@ -45,32 +45,20 @@ function Source() {
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
   const title = d ? sourceName(d.source) : t('Data Source');
   return (
-    <div className="k app b">
-      <div className="b-body">
-        <main className="b-main">
-          <TenantIsland current="sources" />
-          <div className="b-head">
-            <div className="container">
-              <PageHead title={title} back={{label: t('Data Source'), href: '/sources/'}} />
-            </div>
+    <TenantPage head={<PageHead title={title} back={{label: t('Data Source'), href: '/sources/'}} />}>
+      {failed ? (
+        <Banner tone="err" text={failed} style={{margin: 0, width: 706}} action={<Button label={t('Retry')} size="sm" onClick={load} />} />
+      ) : d === null ? (
+        <Banner tone="err" text={t('This data source does not exist.')} style={{margin: 0, width: 706}} />
+      ) : (
+        d && (
+          <div className="row" style={{gap: 32, alignItems: 'flex-start'}}>
+            <Files d={d} />
+            {!d.source.builtIn && <AddFile sourceId={d.source.id} />}
           </div>
-          <div className="container">
-            {failed ? (
-              <Banner tone="err" text={failed} style={{margin: 0, width: 706}} action={<Button label={t('Retry')} size="sm" onClick={load} />} />
-            ) : d === null ? (
-              <Banner tone="err" text={t('This data source does not exist.')} style={{margin: 0, width: 706}} />
-            ) : (
-              d && (
-                <div className="row" style={{gap: 32, alignItems: 'flex-start'}}>
-                  <Files d={d} />
-                  {!d.source.builtIn && <AddFile sourceId={d.source.id} />}
-                </div>
-              )
-            )}
-          </div>
-        </main>
-      </div>
-    </div>
+        )
+      )}
+    </TenantPage>
   );
 }
 
@@ -84,11 +72,27 @@ function Files({d}: {d: DataSourceDetail}) {
         <Metric label={t('Projects')} value={num(d.projects)} />
       </Metrics>
       <Table
-        cols={[{label: t('File')}, {label: t('Items')}, {label: <Hov text={t('Bad rows')} tip={t('Rows with no usable item ID.')} />}, {label: <Hov text={t('Repeats')} tip={t('Item IDs already in this file or this data source, left out.')} />}, {label: t('Uploaded by')}, {label: t('Uploaded')}]}
+        cols={[
+          {label: t('File')},
+          {label: t('Items')},
+          {label: <Hov text={t('Bad rows')} tip={t('Rows with no usable item ID.')} />},
+          {label: <Hov text={t('Repeats')} tip={t('Item IDs already in this file or this data source, left out.')} />},
+          {label: t('Uploaded by')},
+          {label: t('Uploaded')},
+        ]}
         widths={WIDTHS}
         rows={d.files.map(f => ({
           key: f.id,
-          cells: [<One key="n" text={f.name} />, <FileItems key="i" f={f} />, num(f.bad), num(f.repeats), <One key="b" text={f.uploadedBy} />, <span key="u" className="t-3">{dateTime(f.uploadedAt)}</span>],
+          cells: [
+            <One key="n" text={f.name} />,
+            <FileItems key="i" f={f} />,
+            num(f.bad),
+            num(f.repeats),
+            <One key="b" text={f.uploadedBy} />,
+            <span key="u" className="t-3">
+              {dateTime(f.uploadedAt)}
+            </span>,
+          ],
         }))}
       />
     </Card>
@@ -123,7 +127,7 @@ function AddFile({sourceId}: {sourceId: string}) {
     }
   };
   return (
-    <Card title={t('Add a file')} className="form" style={{width: 542, flex: 'none'}}>
+    <Card title={t('Add a file')} className="form" style={{flex: '1 1 0', minWidth: 320, maxWidth: 542}}>
       <FileInput label={t('File')} hint={sourceHint()} accept={SOURCE_ACCEPT} file={file} onFile={f => (setErr(null), setFile(f))} />
       {err && (
         <p className="t-err" style={{margin: 0}} role="alert">

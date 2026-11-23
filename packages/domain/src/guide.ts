@@ -18,7 +18,7 @@ export function productGuide(): Record<string, GuideTopic> {
     steps: {
       title: 'The four steps',
       aliases: ['workflow', 'next step', 'approve', 'step bar'],
-      text: `A project goes through four steps, shown in the step bar: Prompt Design, Eval Dataset, Gold Labels and Prompt Tuning. Each step has an Approve button at the top right; it is unavailable until the step's condition is met, and the line under it says what is missing. Approving a step opens the next one. Earlier steps stay open for changes.`,
+      text: `A project goes through four steps, shown in the step bar: Prompt Design, Dataset, Gold Labels and Prompt Tuning. Each step has an Approve button at the top right; it is unavailable until the step's condition is met, and the line under it says what is missing. Approving a step opens the next one. Earlier steps stay open for changes.`,
     },
     prompt_design: {
       title: 'Prompt Design',
@@ -31,9 +31,9 @@ export function productGuide(): Record<string, GuideTopic> {
       text: `Data Source lists the item-id files of the user's organization. A file is a CSV, JSONL or TXT file of item ids; blank, unreadable and repeated rows are counted and skipped. Each source keeps its items in one order, shuffled once when a file is added, and a dataset takes the next unused items, so two datasets never share an item. The sample data that ships with the site is a built-in source every organization has.`,
     },
     eval_dataset: {
-      title: 'Eval Dataset',
+      title: 'Dataset',
       aliases: ['dataset', 'add examples', 'take examples', 'examples', 'feature missingness', 'missing features'],
-      text: `Eval Dataset holds the examples the prompt is scored on. Add examples takes them from one or more data sources. Before an item's features are fetched, the site checks it: an item that no longer exists, whose creator is a minor, or that cannot be publicly recommended is left out, and items with no non-empty features are left out too; the "items left out" line counts them by reason. Feature missingness is recorded for the dataset and shown per feature so empty inputs are visible before tuning. The dataset needs at least ${minEvalHard} examples to continue; about ${minEvalRecommended} or more gold-labeled ones give a score worth reading. Examples can be removed with a reason and restored.`,
+      text: `Dataset holds the examples the prompt is scored on. Add examples takes them from one or more data sources. Before an item's features are fetched, the site checks it: an item that no longer exists, whose creator is a minor, or that cannot be publicly recommended is left out, and items with no non-empty features are left out too; the "items left out" line counts them by reason. Feature missingness is recorded for the dataset and shown per feature so empty inputs are visible before tuning. The dataset needs at least ${minEvalHard} examples to continue; about ${minEvalRecommended} or more gold-labeled ones give a score worth reading. Examples can be removed with a reason and restored.`,
     },
     gold_labels: {
       title: 'Gold Labels',

@@ -1,49 +1,19 @@
 'use client';
 
-import {useGo} from '@/components/nav';
-import {useSearchParams} from 'next/navigation';
-import {Suspense, useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useState} from 'react';
 import type {PageContext, PromptVersion, StructuredPrompt} from '@yushiguang/sprint-contracts';
 import {ALL_KEYS, canScore, checkStructured, MADE_BY, nextVersion, sameSignature, signatureOf, structuredChangeSummary, structuredEquals, versionLabel} from '@yushiguang/sprint-domain';
-import {Frame, ProjectPage} from '@/components/Shell';
+import {useGo} from '@/components/nav';
+import {Frame} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
-import {FullPromptButton, StructuredEditor} from '@/components/prompt/StructuredEditor';
-import {closeDraft, useAgentDrafts} from '@/components/prompt/useAgentDrafts';
+import {FullPromptButton, StructuredEditor} from './StructuredEditor';
+import {closeDraft, useAgentDrafts} from './useAgentDrafts';
 import {createVersion, featureInfo, scoreVersion, track, type ProjectState} from '@/backend-api';
-import {Badge, Banner, Button, Empty, num, PageHead} from '@/ui';
+import {Badge, Banner, Button, num, PageHead} from '@/ui';
 import {t, tm} from '@/i18n';
 
-export default function EditPage() {
-  return (
-    <Suspense fallback={null}>
-      <EditRouter />
-    </Suspense>
-  );
-}
-
-function EditRouter() {
-  const q = useSearchParams();
-  const vId = q.get('v');
-  const view = q.get('view') === '1';
-  const [page, setPage] = useState<PageContext>({label: 'Prompt', agent: 'prompt_agent', intent: 'revise_prompt', context: {}});
-  return (
-    <ProjectPage node="prompt" page={page}>
-      {({state}) => {
-        const v = state.versions.find(x => x.id === vId) ?? state.versions[0];
-        return v ? (
-          <Edit key={`${v.id}${view}`} state={state} version={v} readOnly={view} setPage={setPage} />
-        ) : (
-          <Frame head={<PageHead title={t('Prompt')} />}>
-            <Empty title={t('No prompt version yet')} text={t('Write the first prompt on Prompt Design.')} />
-          </Frame>
-        );
-      }}
-    </ProjectPage>
-  );
-}
-
 /** View or edit a version. Saving makes the next number (Save: minor, Save as vN: major) and never overwrites one. */
-function Edit({state, version, readOnly, setPage}: {state: ProjectState; version: PromptVersion; readOnly: boolean; setPage: (p: PageContext) => void}) {
+export function VersionEditor({state, version, readOnly, setPage}: {state: ProjectState; version: PromptVersion; readOnly: boolean; setPage: (p: PageContext) => void}) {
   const go = useGo();
   const {href} = useProject();
   const base = version.structured;
@@ -119,7 +89,7 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
   const actions = readOnly ? (
     <>
       {full}
-      <Button label={t('Edit prompt')} kind="primary" href={href('/prompt/edit', {v: version.id})} />
+      <Button label={t('Edit prompt')} kind="primary" href={href('/prompt-design', {v: version.id})} />
     </>
   ) : (
     <>
@@ -136,19 +106,45 @@ function Edit({state, version, readOnly, setPage}: {state: ProjectState; version
       )}
       {full}
       {dirty && <Button label={t('Discard')} kind="ghost" onClick={discard} />}
-      <Button label={t('Save as {version}', {version: nextMajor})} disabled={blocked} title={issues[0] ? tm(issues[0].msg) : t('New major version {version}', {version: nextMajor})} onClick={() => save('major')} />
-      <Button label={t('Save')} kind="primary" className={fromHelper && !blocked ? 'btn-cue' : undefined} disabled={blocked} title={issues[0] ? tm(issues[0].msg) : t('Saves as {version}', {version: nextMinor})} onClick={() => save('minor')} />
+      <Button
+        label={t('Save as {version}', {version: nextMajor})}
+        disabled={blocked}
+        title={issues[0] ? tm(issues[0].msg) : t('New major version {version}', {version: nextMajor})}
+        onClick={() => save('major')}
+      />
+      <Button
+        label={t('Save')}
+        kind="primary"
+        className={fromHelper && !blocked ? 'btn-cue' : undefined}
+        disabled={blocked}
+        title={issues[0] ? tm(issues[0].msg) : t('Saves as {version}', {version: nextMinor})}
+        onClick={() => save('minor')}
+      />
     </>
   );
   return (
     <Frame head={<PageHead title={t('Prompt {version}', {version: versionLabel(version)})} back={{label: t('Prompt Tuning'), href: href('/prompt')}} actions={actions} />}>
       {signatureChanged && (
         <Banner
-          text={goldCount === 1 ? t('This changes the label or its values. After you save, 1 gold label needs a re-check and earlier scores no longer count.') : goldCount ? t('This changes the label or its values. After you save, {n} gold labels need a re-check and earlier scores no longer count.', {n: num(goldCount)}) : t('This changes the label or its values. Earlier scores no longer count after you save.')}
+          text={
+            goldCount === 1
+              ? t('This changes the label or its values. After you save, 1 gold label needs a re-check and earlier scores no longer count.')
+              : goldCount
+                ? t('This changes the label or its values. After you save, {n} gold labels need a re-check and earlier scores no longer count.', {n: num(goldCount)})
+                : t('This changes the label or its values. Earlier scores no longer count after you save.')
+          }
           style={{margin: '0 0 16px'}}
         />
       )}
-      <StructuredEditor value={draft} onChange={setDraft} readOnly={readOnly} base={against} reasons={reasons} reasonPrefix={!dirty && fromParent ? (round ? t('Optimiser, round {n}: ', {n: round.round}) : t('Optimiser: ')) : ''} featureTips={tips} />
+      <StructuredEditor
+        value={draft}
+        onChange={setDraft}
+        readOnly={readOnly}
+        base={against}
+        reasons={reasons}
+        reasonPrefix={!dirty && fromParent ? (round ? t('Optimiser, round {n}: ', {n: round.round}) : t('Optimiser: ')) : ''}
+        featureTips={tips}
+      />
     </Frame>
   );
 }

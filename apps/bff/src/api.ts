@@ -37,9 +37,9 @@ export function createBffApi(deps: BffDeps): BffContract {
   };
 
   /** The context of one call: a new request id, the caller, and what the channel knows. */
-  const context = async (locale?: Locale): Promise<RequestContext> => {
+  const context = async (locale?: Locale, known?: Awaited<ReturnType<typeof currentUser>>): Promise<RequestContext> => {
     const timeZone = deps.timeZone?.();
-    const who = await currentUser();
+    const who = known ?? (await currentUser());
     return {
       requestId: newId('rq'),
       user: who.user,
@@ -75,11 +75,13 @@ export function createBffApi(deps: BffDeps): BffContract {
 
   return {
     async getRuntimeInfo() {
-      const ctx = await context();
+      // One read of the caller, so a sign-out during the call can't mix two users in the answer.
+      const who = await currentUser();
+      const ctx = await context(undefined, who);
       const {tenantRole, ...info} = await workflow.runtimeInfo(ctx);
       // The tenant as the top bar names it: the organization's name, else its id.
       const tenantId = ctx.tenantId ?? DEFAULT_TENANT;
-      const tenantName = (await currentUser()).tenantName ?? tenantId;
+      const tenantName = who.tenantName ?? tenantId;
       return {...info, user: {id: ctx.user.id, name: ctx.user.name}, canSignOut: typeof identity.signOut === 'function', tenant: {id: tenantId, name: tenantName, role: tenantRole ?? 'member'}};
     },
     async signOut() {

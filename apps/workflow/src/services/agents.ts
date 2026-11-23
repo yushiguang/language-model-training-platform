@@ -314,10 +314,10 @@ function recordTurn(w: Scope, out: AgentTurnOutput, entry: string, started: numb
   t.event('agent_replied', {agent: last, seconds: (Date.now() - started) / 1000, handoff_to: handoff?.to ?? null, tool_calls: out.toolCalls.length, proposal_kind: out.proposal?.kind ?? null});
 }
 
-/** Where a draft lands: Prompt Design before the first version, the editor after. */
+/** Where a draft lands: Prompt Design, with the version it changes once there is one. */
 function draftLink(page: PageContext, newestId: string | null, baseVersionId: string | null) {
   if (!newestId) return {path: '/prompt-design'};
-  return {path: '/prompt/edit', params: {v: baseVersionId ?? newestId}};
+  return {path: '/prompt-design', params: {v: baseVersionId ?? newestId}};
 }
 
 export async function openProposals(w: Scope, projectId: string): Promise<AgentProposal[]> {

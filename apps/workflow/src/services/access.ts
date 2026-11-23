@@ -52,8 +52,11 @@ const POINTS: PermissionPoint[] = ['read', 'project_write', 'tenant_write'];
 export async function requestAccess(w: Scope, req: RequestAccessRequest): Promise<RequestAccessResult> {
   if (!w.accessRequests) throw new Error('Requests for access are not set up here.');
   if (!POINTS.includes(req.permission)) throw new Error('There is no such permission.');
+  const projectId = req.projectId?.trim();
+  // Edit access is for one project, so the request must name it.
+  if (req.permission === 'project_write' && !projectId) throw new Error('Name the project to ask for edit access to.');
   const reason = req.reason?.trim().slice(0, 1000);
-  const r = await w.accessRequests.request(w.ctx, {tenantId: tenantOf(w), permission: req.permission, ...(req.projectId ? {projectId: req.projectId} : {}), ...(reason ? {reason} : {})});
+  const r = await w.accessRequests.request(w.ctx, {tenantId: tenantOf(w), permission: req.permission, ...(projectId ? {projectId} : {}), ...(reason ? {reason} : {})});
   return r.trackUrl ? {trackUrl: r.trackUrl} : {};
 }
 

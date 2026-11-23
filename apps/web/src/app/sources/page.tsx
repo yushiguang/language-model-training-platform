@@ -2,8 +2,7 @@
 
 import Link from 'next/link';
 import {useState} from 'react';
-import {TenantIsland} from '@/components/Shell';
-import {SignedIn} from '@/components/session';
+import {TenantPage} from '@/components/Shell';
 import {useGo} from '@/components/nav';
 import {createDataSourceFile, type DataSourceSummary} from '@/backend-api';
 import {SOURCE_ACCEPT, sourceHint, sourceName, useDataSources} from '@/components/sources';
@@ -17,9 +16,9 @@ import {t} from '@/i18n';
  */
 export default function SourcesPage() {
   return (
-    <SignedIn>
+    <TenantPage head={<PageHead title={t('Data Source')} back={{label: t('Projects'), href: '/tenant/'}} />}>
       <Sources />
-    </SignedIn>
+    </TenantPage>
   );
 }
 
@@ -29,29 +28,11 @@ const WIDTHS: (number | 'auto')[] = ['auto', 64, 120, 96, 110, 140];
 function Sources() {
   const [list, failed, load] = useDataSources();
   return (
-    <div className="k app b">
-      <div className="b-body">
-        <main className="b-main">
-          <TenantIsland current="sources" />
-          <div className="b-head">
-            <div className="container">
-              <PageHead title={t('Data Source')} />
-            </div>
-          </div>
-          <div className="container">
-            <div className="row" style={{gap: 32, alignItems: 'flex-start'}}>
-              <Card title={t('Data sources')} style={{width: 706, flex: 'none'}}>
-                {failed ? (
-                  <Banner tone="err" text={failed} style={{margin: 0}} action={<Button label={t('Retry')} size="sm" onClick={load} />} />
-                ) : (
-                  <SourceTable list={list} />
-                )}
-              </Card>
-              <NewSource />
-            </div>
-          </div>
-        </main>
-      </div>
+    <div className="row" style={{gap: 32, alignItems: 'flex-start'}}>
+      <Card title={t('Data sources')} style={{width: 706, flex: 'none'}}>
+        {failed ? <Banner tone="err" text={failed} style={{margin: 0}} action={<Button label={t('Retry')} size="sm" onClick={load} />} /> : <SourceTable list={list} />}
+      </Card>
+      <NewSource />
     </div>
   );
 }
@@ -63,7 +44,10 @@ function SourceTable({list}: {list: DataSourceSummary[] | null}) {
       <Table
         cols={cols}
         widths={WIDTHS}
-        rows={[160, 120, 180].map((w, i) => ({key: String(i), cells: [<span key="a" className="skel" style={{width: w}} />, null, <span key="c" className="skel" style={{width: 60}} />, null, null, null]}))}
+        rows={[160, 120, 180].map((w, i) => ({
+          key: String(i),
+          cells: [<span key="a" className="skel" style={{width: w}} />, null, <span key="c" className="skel" style={{width: 60}} />, null, null, null],
+        }))}
       />
     );
   return (
@@ -111,7 +95,7 @@ function NewSource() {
     }
   };
   return (
-    <Card title={t('New data source')} className="form" style={{width: 542, flex: 'none'}}>
+    <Card title={t('New data source')} className="form" style={{flex: '1 1 0', minWidth: 320, maxWidth: 542}}>
       <Field label={t('Name')}>
         <input className="input" value={name} placeholder={t('Weekly feed sample')} onChange={e => setName(e.target.value)} />
       </Field>

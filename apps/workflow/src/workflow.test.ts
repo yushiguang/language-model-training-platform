@@ -322,6 +322,14 @@ test('access (#91): the runtime says whether the caller is an admin; anyone sign
     {tenantId: 't1', permission: 'project_write', projectId: p.id, reason: 'I label the Food examples', userId: bob.id},
   ]);
   await assert.rejects(api.requestAccess(inTenant(bob, 't1'), {permission: 'owner' as never}), /no such permission/);
+  // Edit access names its project; a blank reason is left out and a long one is cut.
+  await assert.rejects(api.requestAccess(inTenant(bob, 't1'), {permission: 'project_write', projectId: '   '}), /Name the project/);
+  await api.requestAccess(inTenant(bob, 't1'), {permission: 'tenant_write', reason: '   '});
+  await api.requestAccess(inTenant(bob, 't1'), {permission: 'tenant_write', reason: 'x'.repeat(1200)});
+  assert.deepEqual(requests.sent.slice(2).map(r => r.reason?.length), [undefined, 1000]);
+  // The platform's page for the request is passed on.
+  const tracked = world('wf-access-track', noHelpers, undefined, {accessRequests: {request: async () => ({trackUrl: 'https://perm.example/r/1'})}});
+  assert.deepEqual(await tracked.api.requestAccess(inTenant(bob, 't1'), {permission: 'read'}), {trackUrl: 'https://perm.example/r/1'});
   // Nothing is granted here: approvers decide on the platform.
   await assert.rejects(api.renameProject(inTenant(bob, 't1'), {projectId: p.id, name: 'x'}), {code: 'forbidden'});
   const bare = world('wf-access-none', noHelpers);

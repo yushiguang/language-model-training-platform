@@ -23,9 +23,9 @@ failed, stopped and similar) are the earlier drawings with the four-step bar.
 | Change marks | A strip under each changed box: added words green, removed words struck through, the reason as hover text | The spec asks for marks inside the text; a plain text box cannot colour words, so they sit under it |
 | View full prompt | A dialog with the compiled text, read-only, and Copy prompt | — |
 | Project Settings | One dialog: pass rule (Default or Custom), the checks with a subtitle each and locked values for Default, the labeling model | — |
-| Settings button | A ghost button in the top island, left of the avatar | Placement |
+| Project settings button | On the project overview, right of the title (wireframe W-Overview) | Was in the old top island |
 | Projects list, Delete | A trash button per row; the dialog asks for the exact name | — |
-| Attention halo | Approve and Save ring twice in the brand colour while a helper's draft waits; Next: Eval Dataset does the same after Approve | — |
+| Attention halo | Approve and Save ring twice in the brand colour while a helper's draft waits; Next: Dataset does the same after Approve | — |
 | AI Suggestion on Prompt Tuning | Six fixed headlines (too few gold labels, add examples, review mismatches, optimise, switch back from a dropped version, use as final prompt) | The "add examples" card appears with append in phase 3 |
 | Dropped badge | Hover says why the version was dropped | — |
 | Finish | The final card shows Copy prompt and Finish, then a Finished badge | — |
@@ -139,7 +139,8 @@ Known limits of the language switch:
 
 ## Tech changes
 
-- Astryx (`@astryxdesign/*`), StyleX and ECharts are gone. The look is the canvas CSS, and the
-  chart is SVG drawn like the canvas chart. This changes the 2026-10-26 decision to use Astryx.
+- Astryx is back (#57, #91): the app shell and reworked pages use Astryx with the Sprint theme, and
+  this list covers only the pages still on the canvas CSS. StyleX and ECharts stay out; the chart
+  is SVG drawn like the canvas chart.
 - The font is Figtree from Google Fonts, as on the canvas. The internal platform may need it
   self-hosted.
