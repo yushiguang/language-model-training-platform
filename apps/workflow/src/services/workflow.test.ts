@@ -575,6 +575,28 @@ test('a runner that reads a Stop saved meanwhile ends the run as stopped and lab
   assert.equal(w.calls.n, 0, 'no labeling of a stopped run');
 });
 
+test('a Stop asked while a round queues its dry run ends the run and the round as stopped, not failed (#79)', async () => {
+  const w = await world('b5j', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf});
+  const v = await w.newVersion();
+  // The start version is scored already, so round 1 begins at once.
+  await scoreVersion(w.ws, w.projectId, v);
+  await w.jobs.idle();
+  const {id: runId} = await w.ws.optimiser!.startRun(w.ws.ctx, {projectId: w.projectId, endpoint: 'A', maxRounds: 10, startVersionId: v.id});
+  const host = optimiserHost(w.inst);
+  const label = host.label;
+  host.label = async (ctx, req) => {
+    // The Stop lands while a runner holds the run, just before the dry run is queued.
+    if (req.at.step === 'dry_run') await w.catalog.patch('optimisation_runs', runId, {stopRequested: true});
+    return label(ctx, req);
+  };
+  const labeling = (w.inst as unknown as {labeling: Parameters<typeof createOptimiser>[0]['labeling']}).labeling;
+  const opt = createOptimiser({catalog: w.catalog, labeling, agents: ruleAgent(), host, onChange: w.inst.emitChange, random: () => optimiserRandom()});
+  const run = await opt.execute(w.ws.ctx, runId);
+  assert.deepEqual([run?.state, run?.round, run?.history.at(-1)?.outcome], ['stopped', 1, 'stopped']);
+  assert.equal((await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask']})).filter(j => j.args.optimiserRunId === runId).length, 0, 'no labeling queued for it');
+  await w.jobs.idle();
+});
+
 test('a run never waits on labeling another job does: it queues a task of its own, which goes on with it (#79)', async () => {
   const w = await world('b5h', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf, delayMs: 20});
   const v = await w.newVersion();

@@ -590,7 +590,8 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
     } catch (e) {
       if (e instanceof Waiting) waiting = true;
       else {
-        const stopped = isAbort(e);
+        // A step that ended because a Stop was asked (labeling refused for a stopped run) counts as the Stop.
+        const stopped = isAbort(e) || (await stopSaved());
         run.state = stopped ? 'stopped' : 'failed';
         run.stopReason = stopped ? 'user' : null;
         run.error = stopped ? null : (e as Error).message;
