@@ -97,6 +97,23 @@ let current = null;
   await page.goto(BASE + '/');
   await page.getByRole('heading', {name: 'Your tenants'}).waitFor();
   await shot(page, '0a-home');
+  // #94: a tenant is made from Home (a blank name is refused in the field) and opens on its tenant
+  // page; the tenant menu in the top bar switches back.
+  await button(page, 'Create a tenant').click();
+  await page.getByLabel('Tenant name').fill('   ');
+  await button(page, 'Create').click();
+  await page.getByText('Enter a name. Spaces alone are not a name.').first().waitFor();
+  await page.getByLabel('Tenant name').fill('Search Ads');
+  await button(page, 'Create').click();
+  await page.waitForURL(/\/tenant\/\?t=tn_/);
+  await page.getByRole('button', {name: 'Switch Search Ads'}).waitFor();
+  await page.goto(BASE + '/');
+  await page.getByRole('link', {name: 'Open Search Ads'}).waitFor();
+  await page.getByRole('heading', {name: 'My team'}).click();
+  await page.waitForURL(/\?t=default/);
+  await page.getByRole('button', {name: 'Switch My team'}).click();
+  await page.getByRole('menuitem', {name: 'Search Ads'}).waitFor();
+  await page.keyboard.press('Escape');
   await page.goto(BASE + '/tenant/');
   await page.getByPlaceholder('Short-video tagging').fill('Scratch project');
   await button(page, 'Create project').click();

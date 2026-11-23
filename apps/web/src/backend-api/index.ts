@@ -26,6 +26,7 @@ import type {
   PromptVersion,
   RuntimeInfo,
   Schema,
+  TenantSummary,
   SetupVersion,
   SourceFile,
   StructuredPrompt,
@@ -42,10 +43,14 @@ import {client as chosen} from '@yushiguang/sprint-client-impl';
  */
 export const client: BffClient = chosen;
 
+export {currentTenant, rememberTenant} from './tenant';
+
 export const {
   getRuntimeInfo,
   signOut,
   requestAccess,
+  listTenants,
+  createTenant,
   listProjects,
   createProject,
   getProject,
@@ -132,4 +137,5 @@ export type {
   Schema,
   SetupVersion,
   SourceFile,
+  TenantSummary,
 };

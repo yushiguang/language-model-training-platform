@@ -14,6 +14,7 @@ import {createWorkflow, systemContext} from '@yushiguang/sprint-workflow';
 import {createBffApi} from '@yushiguang/sprint-bff';
 import type {BffClient} from './client';
 import {webTelemetry} from './web-telemetry';
+import {currentTenant} from './tenant';
 import {callFailed, callId, pageOpened, snapshot} from './diagnostics';
 
 /**
@@ -103,7 +104,8 @@ for (const e of [labelingExecutor(labeling), optimiserExecutor(optimiser), ...wo
  * error go through JSON as they would over RPC, so the browser check proves the workflow can be
  * moved behind RPC without the bff or the pages changing.
  */
-const api = createBffApi({workflow: loopback(workflow.api), identity: platform.identity, appVersion: APP_VERSION, timeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone});
+// Each call works in the page's tenant (#94).
+const api = createBffApi({workflow: loopback(workflow.api), identity: platform.identity, appVersion: APP_VERSION, timeZone: () => Intl.DateTimeFormat().resolvedOptions().timeZone, tenant: currentTenant});
 const events = workflow.events;
 const web = webTelemetry(telemetry);
 void platform.identity.currentUser().then(u => telemetry.setContext({userId: u.id}));

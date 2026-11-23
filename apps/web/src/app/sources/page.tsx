@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import {useState} from 'react';
 import {TenantPage} from '@/components/Shell';
+import {tenantHref} from '@/components/ProjectContext';
 import {useGo} from '@/components/nav';
 import {createDataSourceFile, type DataSourceSummary} from '@/backend-api';
 import {SOURCE_ACCEPT, sourceHint, sourceName, useDataSources} from '@/components/sources';
@@ -16,7 +17,7 @@ import {t} from '@/i18n';
  */
 export default function SourcesPage() {
   return (
-    <TenantPage head={<PageHead title={t('Data Source')} back={{label: t('Projects'), href: '/tenant/'}} />}>
+    <TenantPage head={<PageHead title={t('Data Source')} back={{label: t('Projects'), href: tenantHref()}} />}>
       <Sources />
     </TenantPage>
   );
