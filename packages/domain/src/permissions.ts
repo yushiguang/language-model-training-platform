@@ -51,6 +51,7 @@ export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: Acti
   takeExamples: write('request'),
   stopSampleDataset: write('arg'),
   removeExamples: write('request'),
+  listSamples: read('request'),
   restoreExamples: write('request'),
   pruneDataset: write('request'),
   addComment: write('request'),

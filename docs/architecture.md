@@ -49,7 +49,7 @@ without the bff or the pages changing.
 | App | Owns | Contract |
 |---|---|---|
 | `llm-gateway` | Endpoint registry; one limiter per endpoint; per-call retries; token and cost accounting | `LlmGatewayContract` (`gateway-api.ts`) |
-| `labeling` | Collections `labeling_tasks`, `predictions`. Runs tasks | `LabelingContract` (`labeling-api.ts`) |
+| `labeling` | Tasks and answers through `LabelingStorePort`: collections `labeling_tasks`, `predictions` (`docLabelingStore`), or answers in object-storage segment files with `prediction_segments` pointers (`objectLabelingStore`, #72). Runs tasks | `LabelingContract` (`labeling-api.ts`) |
 | `catalog` | All product collections (`CatalogRecords` in `catalog-api.ts`). Assigns version numbers | `CatalogContract` |
 | `agents` | Agent presets and the turn/handoff logic. Stateless | `AgentRuntimeContract` (`agent-api.ts`) |
 | `optimiser` | The Auto Optimise loop and the `optimisation_runs` records. Asks the workflow (through `OptimiserHost`) to save a version, label examples and build a score | `OptimiserContract` (`optimiser-api.ts`) |
@@ -403,6 +403,10 @@ side is right.
   via batched by-id `featuresOf` reads (best-effort so stats failures never block removal or
   restore). The score line names how many gold-labeled examples were
   removed before the score was worked out.
+- *Numbers.* Every example has a sample number (`Example.number`, from 1, in the order added,
+  never changed; docs/design/server.md 4.2), and an explicit `removed`. Datasets made before
+  numbers are numbered on first read (`DatasetSnapshot.numbered`). `listSamples` reads one page
+  of live or removed samples in number order, filtered in the store (`CatalogContract.page`).
 - *Comments.* `LabelComment` records (`label_comments`), append-only, from Save on either Gold
   Labels tab; a comment on Mismatches keeps the version. Helpers read comments on optimiser-half
   examples only.

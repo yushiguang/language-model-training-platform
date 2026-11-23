@@ -22,6 +22,7 @@ const ID_PREFIX: Record<CatalogKind, string> = {
   audit_log: 'au',
   dataset_removals: 'rm',
   label_comments: 'lc',
+  label_sets: 'ls',
   data_sources: 'src',
   source_files: 'sf',
   source_chunks: 'sc',
@@ -30,7 +31,7 @@ const ID_PREFIX: Record<CatalogKind, string> = {
 };
 
 /** Every kind whose records carry their project's id (all but projects, examples and their features). */
-const OWNED: CatalogKind[] = ['dataset_snapshots', 'setup_versions', 'gold_labels', 'dataset_removals', 'label_comments', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'audit_log'];
+const OWNED: CatalogKind[] = ['dataset_snapshots', 'setup_versions', 'gold_labels', 'dataset_removals', 'label_comments', 'label_sets', 'prompt_versions', 'eval_reports', 'optimisation_runs', 'gate_approvals', 'chat_messages', 'agent_proposals', 'start_requests', 'audit_log'];
 
 /** New record id for a kind, for callers that build the record before inserting it. */
 export const catalogId = (kind: CatalogKind) => newId(ID_PREFIX[kind]);
@@ -59,6 +60,7 @@ export function createCatalog(db: DocRuntime, opts: {telemetry?: TelemetryPort; 
     },
     get: (kind, id) => repo.get(kind, id),
     find: (kind, where = {}, order) => repo.find(kind, where as Record<string, unknown>, orderOf(order)),
+    page: (kind, q) => repo.query(kind, {where: q.where as Record<string, unknown>, order: orderOf(q.order), offset: q.offset, limit: q.limit}),
     async findByIds<K extends CatalogKind>(kind: K, ids: string[]) {
       if (!ids.length) return [];
       const wanted = new Set(ids);
@@ -163,6 +165,7 @@ function instrument(c: CatalogContract, tm: TelemetryPort): CatalogContract {
         const r = await fn(...args);
         tm.counter('sprint_catalog_operations_total', {collection, op, outcome: 'ok'});
         if (Array.isArray(r) && (op === 'find' || op === 'findByIds')) tm.histogram('sprint_catalog_documents_returned', r.length, {collection});
+        else if (op === 'page') tm.histogram('sprint_catalog_documents_returned', (r as {items: unknown[]}).items.length, {collection});
         return r;
       } catch (e) {
         tm.counter('sprint_catalog_operations_total', {collection, op, outcome: 'error'});

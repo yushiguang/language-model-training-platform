@@ -101,6 +101,13 @@
 - 本次每个标注集只有一个标注人。设为标注人时 Sprint 直接给他项目写权限。
 - 创建标注集或添加标注人时发通知（第 8 节）。
 
+#### 4.2.1 实现（#82，进行中）
+
+- **样本序号**：`Example.number`，新数据集按取样顺序从 1 编号，追加的样本接在最大序号后面（同一个项目同时只有一个取样任务）。保存失败、被跳过的样本留下空号，不重排；空号在最后时，下一次追加会用上它（那条样本从没存进去，不会和别的样本串号）。每个新样本都显式写 `removed: false`，数据集记 `DatasetSnapshot.numbered`。
+- **旧数据补号**：没有 `numbered` 的数据集第一次被读（`loadProjectState`、`listSamples`、追加样本）时，在 `samples:<snapshotId>` 锁里按存储里保存的顺序补号、补 `removed`，再标 `numbered`；再执行一次什么都不改。
+- **分页读取**（`listSamples`，读权限）：按序号排列，在存储里筛选和分页（`CatalogContract.page`），不读整个数据集。`filter` 为 `live`（默认）或 `removed`；`query` 是样本 ID 或序号（`12` 或 `#12`，纯数字时两种都匹配）；每页默认 50 条，最多 500 条。每行带序号、样本 ID、类型、数据源、是否有当前标签下的人工标签，被移除的样本还带移除记录（恢复时传它的 ID）、原因、移除人和时间。
+- **软删除和恢复**沿用已有的 `removeExamples` / `restoreExamples`：只改标记和移除记录，序号不变，恢复回原来的一半。
+
 ### 4.3 分数
 
 - 所有标注集都标完才算分，只用标注集里的样本。
@@ -213,22 +220,32 @@ COMMIT;
 | 对话和 AI 动作记录 | MySQL，大的工具结果放对象存储 | 按项目查历史 |
 | 锁、限流计数、短期状态 | Redis | |
 
-所有放对象存储的数据共用一个通用接口 `ObjectStorePort`（`packages/contracts/src/platform-api.ts`，内存替身 `memoryObjectStore()` 放在 `packages/platform`）：
+### 6.1 实现（#72 已完成）
 
-```ts
-export interface ObjectStorePort {
-  put(key: string, body: Uint8Array | string, opts?: {contentType?: string; contentEncoding?: string}): Promise<{key: string; size: number}>;
-  get(key: string): Promise<Uint8Array | null>;
-  /** 按字节范围读，用于打包的特征段和答案段（HTTP Range GET）。 */
-  getRange(key: string, offset: number, length: number): Promise<Uint8Array | null>;
-  delete(key: string): Promise<void>;
-  deleteBatch(keys: string[]): Promise<void>;
-  /** 可选：按需生成带签名的链接，用于图片或预览。 */
-  signUrl?(key: string, expiresSec?: number): Promise<string>;
-}
-```
+- **通用接口** `ObjectStorePort`（`packages/contracts/src/platform-api.ts`，`Platform.objectStore` 可选）：`put` / `get` / `getRange` / `delete` / `deleteBatch`，可选 `signUrl`。字符串按 UTF-8 存，`size` 是字节数；`getRange` 在对象末尾截断，起点在末尾或之后返回空，没有对象返回 null；`delete` 和 `deleteBatch` 遇到不存在的 key 不报错，`deleteBatch` 不返回个数（S3 的批量删除分辨不出哪些 key 原本存在）。Sprint 不列前缀，需要的 key 都记在自己的记录里。
+- **替身和一致性测试**：`memoryObjectStore()`（`packages/platform`）；`packages/platform/src/standins/object-store.test.ts` 的 `objectStoreCases(name, make)` 只依赖端口，部署方的 S3 适配器可以复制过去跑同一组用例。
+- **不配对象存储**（浏览器版本）：特征快照和答案照旧存文档库，行为和以前一样。
 
-数据源的 ID 文件、特征快照段、答案段、大的工具结果和将来的训练集都建在它上面。issue #58 的 `LabelingStorePort`（打标任务和答案）和 `FeatureStorePort`（`putBatch` / `getBatch` / `deleteBatch`）也基于同一个 `ObjectStorePort` 适配器实现。
+**特征快照**（`FeatureStorePort`，`apps/catalog/src/feature-store.ts`）：
+
+- `objectFeatureStore(objectStore, docFeatureStore(db))`：取样时每批（`dataset.featureBatch`，默认 50 个）写一个段文件 `features/<snapshotId>/<段 ID>.jsonl`，每行一个样本的 `ExampleFeatures`。样本记录存这一行的字节范围 `Example.featureRef {key, offset, length}`。
+- 写入顺序：先整批写段文件，再写带 `featureRef` 的样本记录，样本永远不会在特征之前出现。段文件写失败重试一次，再失败这一批跳过（和以前单条跳过的规则一样）；失败时可能留下一个没人引用的段文件，不会被读到。
+- 读：同一个段文件只读一次，范围从第一个要的行到最后一个要的行。没有 `featureRef` 的样本（对象存储之前保存的）按 `featureDocId` 从文档库读。
+- 删项目：按样本索引找到段文件整个删掉，旧的特征文档按 ID 删，最后删样本索引；删到一半中断可以再删一次。
+- 组合根只在配了对象存储时建这个特征存储，同一个实例传给 `createCatalog`（`features`）和 `createWorkflow`（`features`）；不配时两边都不传，特征照旧逐条写、单条失败只跳过自己。
+
+**打标任务和答案**（`LabelingStorePort`，`apps/labeling/src/store.ts`）：
+
+- `createLabeling` 的 `store` 可选，默认 `docLabelingStore(db)`（任务和答案都是文档，行为和以前一样）。`objectLabelingStore(db, objectStore)`：任务和段指针存文档库（部署方是 MySQL），答案存对象存储。
+- 答案按批写：`createLabeling` 的 `answerBatch {size, maxWaitMs}`，组合根配对象存储时用 50 个、10 秒。一批写成一个段文件 `answers/<projectId>/<版本 ID>/<段 ID>.jsonl`，然后写一条段指针 `prediction_segments`（项目、版本、模型、设置、段 key、答案 ID 列表）。先文件后指针：没有指针的文件不会被读到。
+- 一批在满 `size`、第一条答案等了 `maxWaitMs`（随 Stop 检查的计时器）、或者运行结束（跑完、Stop、失败太多）时写出。写成之后才给任务加这一批的计数，所以页面进度按批前进；进程崩溃最多丢一批没写出的答案，下次运行重新打。
+- 一批写失败重试一次，再失败这一批的样本记为失败（错误写进任务），Retry failed 会重新打。
+- 不配 `answerBatch` 时每条答案在它的锁里立刻写（浏览器：多个标签页之间没有队列）。按批写不会让两个任务给同一个样本付两次钱，因为第 3 步的队列对同一个租户 + endpoint 只放一个任务。**约束**：启用 `answerBatch` 时模型任务的并发上限（`jobs.limit.model` 及租户、endpoint 覆盖）要保持 1；调大后两个同版本的任务可能给同一个样本各付一次钱，读答案时同一 ID 只算一次（取最早保存的）。
+- 一批写成但加计数失败（重试一次）时，运行结束前按已存的答案重算任务计数（和新一次运行开始时一样）；连重算也读不到时任务留在暂停，下次运行重算。
+- 读：按“版本 + 模型 + 设置”读出所有段指针，每个段文件整个读一次，和对象存储之前的答案文档合在一起按时间排序。按 ID 找一条答案时用指针的 ID 列表定位段文件。页面级的 Redis 缓存还没有做，读路径已经是整批读，之后加在适配器里即可。
+- 删项目：先删段文件，再删指针，再删旧的答案文档和任务。
+
+**还没有放进对象存储的**：数据源的 ID 文件、大的工具结果、训练集。它们在各自的步骤里建在同一个 `ObjectStorePort` 上。
 
 ## 7. 配置模块
 
@@ -344,7 +361,7 @@ export interface ConfigReader {
 | `LabelCallRequest`、对话请求和 `TryTemplateInput`（Prompt helper 的试跑）带 `tenantId`；模型按租户读取；`LabelingModels` / `AgentModel` 接受动态 endpoint；限流键改为“租户 + endpoint” | 破坏性：部署方的网关适配和限流存储要改（第 4 步，#69 已完成） |
 | 模型管理接口 `listModels` / `addModel` / `updateModel` / `removeModel` / `setDefaultModel`；`CatalogContract.remove('tenant_models', id)` | 新增（第 4 步，#69 已完成） |
 | `ObjectStorePort`（`Platform.objectStore` 可选）；基于它的 `LabelingStorePort`、`FeatureStorePort`；`Example.featureRef` 可选 | 新增（第 7 步，#72） |
-| 样本序号和软删除、标注集 | 新增 |
+| `Example.number`（样本序号，可选，旧样本第一次读时补上）、`DatasetSnapshot.numbered`、`LabelSet` 和 catalog 的 `label_sets` 集合、`CatalogContract.page`（分页读取） | 新增：catalog 在本仓库实现，部署方的文档库适配器不用改（第 8 步，#82） |
 
 ## 11. 交付计划
 
@@ -356,7 +373,7 @@ export interface ConfigReader {
 4. 模型和网关：模型按租户读取、请求带 `tenantId`、限流键改为“租户 + endpoint”。（#69 已完成）
 5. 优化器改为按 `(runId, round, step)` 推进的链式任务：每个打标阶段入队，巡检识别等打标的运行，Stop 取消排队中和运行中的打标。（#79 已完成）
 6. 通知端口：评分和自动优化结束时通知发起人。（#71 已完成）
-7. 存储接口：`ObjectStorePort`，以及基于它的 `LabelingStorePort`、`FeatureStorePort`（issue #58）。
+7. 存储接口：`ObjectStorePort`，以及基于它的 `LabelingStorePort`、`FeatureStorePort`（issue #58）。（#72 已完成）
 8. 数据集和标注集：样本序号、软删除、标注集、清空受影响的人工标签。
 9. 分数和 Rescore：标注集全部完成才算分、Rescore 横幅所需的“分数是否过期”。
 

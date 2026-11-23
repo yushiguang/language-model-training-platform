@@ -108,6 +108,7 @@ export function createBffApi(deps: BffDeps): BffContract {
     takeExamples: pass('takeExamples'),
     stopSampleDataset: pass('stopSampleDataset'),
     removeExamples: pass('removeExamples'),
+    listSamples: pass('listSamples'),
     restoreExamples: pass('restoreExamples'),
     pruneDataset: pass('pruneDataset'),
     addComment: pass('addComment'),
