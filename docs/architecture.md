@@ -226,7 +226,9 @@ prompt saved with several fields reads its first field as the label.
   to every tenant. Each tenant adds its own models (name, Endpoint, QPM, TPM) in tenant settings;
   the gateway reads them per tenant from the catalog's `tenant_models`, keeps them 30 s, and reads
   again at once for a model id it does not hold, so a new model works without a restart
-  (docs/design/server.md, 9). Chat (agents) and labeling use separate endpoints, so they never
+  (docs/design/server.md, 9). Tenant admins manage them through the workflow (`listModels`,
+  `addModel`, `updateModel`, `removeModel`, `setDefaultModel`); new projects use the tenant's
+  default model, and a model a project uses cannot be removed. Chat (agents) and labeling use separate endpoints, so they never
   share a quota. Until the platform supplies registered endpoints, the gateway assumes
   conservative limits per model (`apps/llm-gateway/src/registry.ts`) and marks them `assumed`.
 - **Limiter.** Per tenant and endpoint (key `<tenantId>:<endpointId>`): a 60-second sliding window for requests (QPM) and tokens (TPM), a cap

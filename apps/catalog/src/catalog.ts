@@ -119,6 +119,8 @@ export function createCatalog(db: DocRuntime, opts: {telemetry?: TelemetryPort; 
       await repo.insert('audit_log', {id: catalogId('audit_log'), projectId: null, actor: 'system', action: 'project.delete', data: {projectId}, createdAt: now()});
     },
 
+    remove: (kind, id) => repo.delete(kind, id),
+
     async deleteStagedChunks(fileId) {
       await repo.deleteWhere('source_chunks', {fileId, staged: true});
     },

@@ -10,10 +10,11 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
   per-endpoint limits, bulk storage, a config module and notifications, delivered as the
   numbered pull requests in the issue. The design doc is merged (#60); step 1, the config
   module, is merged (#61); step 2, permissions and tenant isolation, is merged (#63); step 3,
-  the job queue with per-key limits and the queue position on pages, is merged (#66); step 6,
-  notifications when scoring or Auto Optimise ends, is merged (#71). Step 4, models read per
-  tenant and limits per tenant and endpoint in the gateway, is in progress (#69): pull request 1
-  of 2, the contract change and the gateway, is merged. Step 7, the storage ports, is in progress.
+  the job queue with per-key limits and the queue position on pages, is merged (#66); step 4,
+  tenant models (managed by tenant admins, read per tenant by the gateway) and limits per tenant
+  and endpoint, is merged (#69); step 6, notifications when scoring or Auto Optimise ends, is
+  merged (#71). Step 5, the Optimiser as a chain of jobs, is next. Step 7, the storage ports, is
+  in progress.
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
   tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are merged (see Done);
   step 3, action tools, is next, with their cards drawn on the UI design first.
@@ -32,6 +33,9 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Done
 
+- 2026-11-23: tenant models and limits per tenant and endpoint (#59 step 4): tenant admins add,
+  change, remove and pick the default model; new projects use the default; the gateway reads
+  each tenant's models without a restart and counts limits per tenant (#69, #70).
 - 2026-11-22: permissions and tenant isolation (#59 step 2): every project has a tenant; the
   workflow checks the tenant and permission point of every call, agent tool, job and Optimiser
   step; the Optimiser runs as the person who started it (#63, #64, #65).

@@ -92,6 +92,8 @@ export interface CatalogContract {
   findByIds<K extends CatalogKind>(kind: K, ids: string[]): Promise<CatalogRecords[K][]>;
   /** Partial update: only the given fields change. Values may be `DocFieldValue` operators (increment, arrayUnion...). */
   patch<K extends CatalogKind>(kind: K, id: string, patch: DocUpdatePatch<CatalogRecords[K]>): Promise<void>;
+  /** Removes one record. Only for records nothing else keeps a copy of (a tenant's model). */
+  remove(kind: 'tenant_models', id: string): Promise<void>;
   /** Patches many records of one kind in one request. */
   patchMany<K extends CatalogKind>(kind: K, patches: {id: string; patch: Partial<CatalogRecords[K]>}[]): Promise<void>;
   /** Saves a prompt version with the next number in its line (Save) or the next major (Save as). */

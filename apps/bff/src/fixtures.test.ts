@@ -45,6 +45,8 @@ async function build(name: string, w: FixtureWorld) {
   const gateway = {
     endpoints: () => [endpoint],
     labelingEndpoints: () => [endpoint],
+    labelingEndpointsFor: async () => [endpoint],
+    forgetTenant: () => {},
     agentModel: () => ({}),
     cancel: async () => {},
     async label(req: {messages?: unknown}): Promise<LabelCallResult> {
