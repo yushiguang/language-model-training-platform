@@ -161,7 +161,11 @@ recovery of a dead runner's jobs, retries and cancel. A job holds ids only; the 
   task or Optimiser run, and Prompt Tuning shows "Queued · 2 ahead".
 - **`then` and `finally`.** `then` is queued when a job ends done (a labeling task's report);
   `finally` when it ends in any way, done, failed or cancelled, also when the sweep fails it or a
-  cancel ends it before it started.
+  cancel ends it before it started. A labeling job and an Optimiser job each carry a `finally`
+  `notify.send` job (`apps/workflow/src/services/notify.ts`): it reads how the task or run ended
+  and tells the person who started it through `Platform.notifications` (finished or failed; a
+  Stop sends nothing; work Sprint queued itself goes to the project's creator). Best effort: a
+  failed send is counted, never fails anything.
 - **Keys.** While a job with the same idempotency key is queued or running, queueing it again
   returns it (`label:<task>`, `report:<version>:<model>`, `optimiser:<project>`,
   `delete:<project>`), so the page tick, a click and a helper's start tool never start work twice.

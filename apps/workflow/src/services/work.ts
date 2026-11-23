@@ -8,6 +8,7 @@ import {modelName} from './page-views.ts';
 import {loadProjectState} from './projects.ts';
 import {lockHoldout} from './governance.ts';
 import {computeKey, modelKey} from './queue.ts';
+import {notifyWhenEnded} from './notify.ts';
 
 /**
  * Background work (deployment readiness spec, 3). The workflow decides what should run (system
@@ -102,6 +103,8 @@ async function queueTask(w: Scope, projectId: string, version: PromptVersion, ta
       args: {taskId: task.id, promptVersionId: version.id, endpoint: task.endpoint, trigger: opts.auto ? 'system' : 'user', auto: !!opts.auto, retry: task.state === 'needs_attention'},
       idempotencyKey: `label:${task.id}`,
       then: report,
+      // Tells whoever started it how it ended (docs/design/server.md, 8).
+      finally: notifyWhenEnded(w, projectId, {about: 'labeling', taskId: task.id}),
     });
 }
 
@@ -206,7 +209,7 @@ export async function startOptimiser(w: Scope, projectId: string, maxRounds = sy
  * its job, so the job waits for the run's endpoint.
  */
 const queueRun = async (w: Scope, projectId: string, runId: string, endpoint: EndpointId) => {
-  await w.jobs.enqueue(w.ctx, {kind: 'optimiser.run', projectId, concurrencyKey: modelKey(w, endpoint), args: {runId}, idempotencyKey: `optimiser:${projectId}`});
+  await w.jobs.enqueue(w.ctx, {kind: 'optimiser.run', projectId, concurrencyKey: modelKey(w, endpoint), args: {runId}, idempotencyKey: `optimiser:${projectId}`, finally: notifyWhenEnded(w, projectId, {about: 'optimiser', runId})});
   w.emitChange(projectId);
 };
 
