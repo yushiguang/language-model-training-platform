@@ -600,8 +600,53 @@ export interface EvalReport {
   snapshotId?: string;
   settings: ModelSettings;
   metrics: Metrics;
+  /** What the report was scored on, part by part (docs/design/server.md 4.3). Missing on reports made before #86. */
+  basis?: ScoreBasis;
   archived: boolean;
   createdAt: string;
+}
+
+/**
+ * What a score rests on (docs/design/server.md 4.3), each part as a hash. A report whose parts
+ * differ from today's is out of date: it is never worked out again by itself, only by Rescore.
+ */
+export interface ScoreBasis {
+  /** The samples scored on: eval samples inside label sets and not removed, with their half. */
+  samples: string;
+  /** Their gold labels. */
+  gold: string;
+  /** The thresholds the report is judged by. */
+  thresholds: string;
+}
+
+export type ScoreBasisPart = keyof ScoreBasis;
+
+/** Where scoring stands (docs/design/server.md 4.3): what Prompt Tuning shows above the versions. */
+export interface ScoringState {
+  /** Every label set is finished, so versions get scores. False: no new scores and no Rescore. */
+  ready: boolean;
+  /**
+   * The label sets' sample number ranges, in order. null: the project has no label set yet, so
+   * the whole dataset counts as one (a transition until the label set pages ship).
+   */
+  ranges: {first: number; last: number}[] | null;
+  labelSets: number;
+  labelSetsDone: number;
+  /** Samples inside label sets and not removed (all of them when `ranges` is null). */
+  samples: number;
+  /** Of them, those with a gold label for the current label. */
+  labeled: number;
+  /** Today's basis; reports scored on it are current. */
+  basis: ScoreBasis;
+  /**
+   * Versions whose newest score rests on an older basis and that have no current one: Prompt
+   * Tuning shows the Rescore banner. Empty while `ready` is false.
+   */
+  staleVersionIds: string[];
+  /** What changed since those scores were made (empty for scores made before #86). */
+  changed: ScoreBasisPart[];
+  /** A Rescore is queued or running. */
+  rescoring: boolean;
 }
 
 /**
