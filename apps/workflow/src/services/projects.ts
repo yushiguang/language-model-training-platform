@@ -158,7 +158,9 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
     optimisation,
     facts,
     contextId,
-    endpoints: gateway.labelingEndpoints(),
+    // The tenant's own models and the platform's defaults (docs/design/server.md, 9); if the
+    // tenant's models cannot be read yet, the defaults, so the page still opens.
+    endpoints: await gateway.labelingEndpointsFor(project.tenantId).catch(() => gateway.labelingEndpoints()),
     samplingTask: await getSamplingTask(w, projectId),
     datasetSources: await datasetSources(w, projectId, examples),
     removals,

@@ -24,13 +24,13 @@ const BUILT_IN_SEED = 'built-in';
 export const tenantOf = (w: Scope) => w.ctx.tenantId ?? DEFAULT_TENANT;
 
 /** Runs `fn` holding the lock `name`, waiting while someone else holds it. */
-async function withLock<T>(w: Scope, name: string, fn: () => Promise<T>): Promise<T> {
+export async function withLock<T>(w: Scope, name: string, fn: () => Promise<T>, busy = 'The data source is busy. Try again in a minute.'): Promise<T> {
   for (let i = 0; i < 1200; i++) {
     const r = await w.locks.run(name, async () => ({value: await fn()}));
     if (r) return r.value;
     await new Promise(res => setTimeout(res, 50));
   }
-  throw new Error('The data source is busy. Try again in a minute.');
+  throw new Error(busy);
 }
 
 /** The caller's tenant's source, or an error a page can show. */

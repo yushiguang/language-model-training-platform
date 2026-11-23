@@ -11,6 +11,7 @@ import * as projects from './services/projects.ts';
 import * as prompts from './services/prompts.ts';
 import * as settings from './services/settings.ts';
 import * as sources from './services/sources.ts';
+import * as models from './services/models.ts';
 import * as work from './services/work.ts';
 import {answerProblem, projectIdOf, WORKFLOW_PERMISSIONS} from '@yushiguang/sprint-domain';
 import {agentToolHost} from './services/page-views.ts';
@@ -129,6 +130,12 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     getDataSource: (ctx, sourceId) => sources.getDataSource(at(ctx), sourceId),
     createDataSource: (ctx, r) => sources.createDataSource(at(ctx), r),
     addSourceFile: (ctx, r) => sources.addSourceFile(at(ctx), r),
+
+    listModels: ctx => models.listModels(at(ctx)),
+    addModel: (ctx, r) => models.addModel(at(ctx), r),
+    updateModel: (ctx, r) => models.updateModel(at(ctx), r),
+    removeModel: (ctx, r) => models.removeModel(at(ctx), r.modelId),
+    setDefaultModel: (ctx, r) => models.setDefaultModel(at(ctx), r.modelId),
 
     exampleMedia: (ctx, projectId, exampleId) => dataset.exampleMedia(at(ctx), projectId, exampleId),
     async getExampleFeatures(ctx, projectId, exampleIds) {

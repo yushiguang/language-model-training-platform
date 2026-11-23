@@ -39,6 +39,12 @@ export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: Acti
   createDataSource: admin,
   addSourceFile: admin,
 
+  listModels: admin,
+  addModel: admin,
+  updateModel: admin,
+  removeModel: admin,
+  setDefaultModel: admin,
+
   exampleMedia: read('arg'),
   getExampleFeatures: read('arg'),
   takeExamples: write('request'),
