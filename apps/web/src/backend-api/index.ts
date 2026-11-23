@@ -107,6 +107,7 @@ export const {
 } = client;
 
 export type {BffClient, NewVersion, PageContext, ProjectState, RuntimeInfo, StructuredPrompt};
+export {UploadStopped, type UploadOptions} from './client';
 export type {
   AgentLive,
   AgentProposal,

@@ -185,34 +185,34 @@ let current = null;
   await ask(page, 'Tag short videos by what the viewer gets from them: primary value, format and topics.');
   await card.getByText('primary_value · Single selection', {exact: true}).waitFor({timeout: 20000});
   // Output Labels: the label and single or multiple selection, then one card per value; add and remove work.
-  let dlg = await partEdit('Output Labels');
-  const valueNames = () => dlg.getByLabel('Value name', {exact: true}).evaluateAll(els => els.map(e => e.value));
+  let partDlg = await partEdit('Output Labels');
+  const valueNames = () => partDlg.getByLabel('Value name', {exact: true}).evaluateAll(els => els.map(e => e.value));
   const names0 = await valueNames();
   if (names0.length !== 4) throw new Error(`the values are not one card each: ${names0.join(', ')}`);
-  await button(dlg, 'Add value').click();
+  await button(partDlg, 'Add value').click();
   if ((await valueNames()).length !== 5) throw new Error('Add value did not add a card');
-  await dlg.getByRole('button', {name: 'Remove Value name', exact: true}).click();
+  await partDlg.getByRole('button', {name: 'Remove Value name', exact: true}).click();
   if ((await valueNames()).join() !== names0.join()) throw new Error('the values did not come back to the draft');
   // Resilience spec, 1: multiple selection asks how many, and a value can stand on its own (a catch-all such as None).
-  await dlg.getByRole('radio', {name: 'Multiple selection', exact: true}).click();
-  await dlg.getByLabel('At most', {exact: true}).waitFor({timeout: 5000});
-  if ((await dlg.getByRole('checkbox', {name: /Only on its own/}).count()) !== 4) throw new Error('multiple selection has no "Only on its own" per value');
-  await dlg.getByRole('checkbox', {name: /Only on its own/}).last().click();
+  await partDlg.getByRole('radio', {name: 'Multiple selection', exact: true}).click();
+  await partDlg.getByLabel('At most', {exact: true}).waitFor({timeout: 5000});
+  if ((await partDlg.getByRole('checkbox', {name: /Only on its own/}).count()) !== 4) throw new Error('multiple selection has no "Only on its own" per value');
+  await partDlg.getByRole('checkbox', {name: /Only on its own/}).last().click();
   await shot(page, '1b2-multi-select');
-  await button(dlg, 'Save').click();
-  await dlg.waitFor({state: 'detached'});
+  await button(partDlg, 'Save').click();
+  await partDlg.waitFor({state: 'detached'});
   const multiText = await fullPrompt();
   if (!/<output_labels name="primary_value" selection="multi" min="1" max="3">/.test(multiText) || !multiText.includes('exclusive="true"')) throw new Error('the full prompt does not ask for a multi-select answer');
-  dlg = await partEdit('Output Labels');
-  await dlg.getByRole('radio', {name: 'Single selection', exact: true}).click();
-  if (await dlg.getByRole('checkbox', {name: /Only on its own/}).count()) throw new Error('single selection still shows "Only on its own"');
-  await button(dlg, 'Save').click();
-  await dlg.waitFor({state: 'detached'});
+  partDlg = await partEdit('Output Labels');
+  await partDlg.getByRole('radio', {name: 'Single selection', exact: true}).click();
+  if (await partDlg.getByRole('checkbox', {name: /Only on its own/}).count()) throw new Error('single selection still shows "Only on its own"');
+  await button(partDlg, 'Save').click();
+  await partDlg.waitFor({state: 'detached'});
   // Input Features: the fixed catalogue as checkboxes, per example type.
-  dlg = await partEdit('Input Features');
-  if ((await dlg.getByRole('checkbox').count()) < 20) throw new Error('the features dialog does not list the catalogue');
+  partDlg = await partEdit('Input Features');
+  if ((await partDlg.getByRole('checkbox').count()) < 20) throw new Error('the features dialog does not list the catalogue');
   await shot(page, '1b3-features');
-  await button(dlg, 'Cancel').click();
+  await button(partDlg, 'Cancel').click();
   await shot(page, '1b-prompt-design-draft');
   const fullText = await fullPrompt();
   if (!fullText.includes('{{Description}}') || !fullText.includes('Return one JSON object only') || !fullText.includes('<output_labels name="primary_value" selection="single">')) throw new Error('the full prompt is not compiled from the parts');
@@ -813,38 +813,42 @@ let current = null;
     return {events: ev.length, names, leaks, undeclared, metricNames: series.length, sample: series.filter(s => /sprint_(llm_requests|labeling_examples|agent_turns|bff_calls|web_page_views|auto_starts)/.test(s))};
   });
   log('telemetry:', JSON.stringify(tel));
-  // Data Source (#29), after the telemetry read (a page load clears the in-memory metrics): a tenant page next to Projects. A source is a name and its files, with no
-  // versions; bad rows and repeats are counted, and a second file adds only new items.
-  // #91: the tenant page links to them.
+  // Data sources (#29, #95), after the telemetry read (a page load clears the in-memory metrics): one
+  // uploaded file is one data source. Upload goes through a dialog (name from the file name); the
+  // source page counts sample IDs, repeats kept once and rows without an ID. #91: the tenant page links here.
   await page.goto(BASE + '/tenant/');
   await page.locator('main').getByRole('link', {name: 'Data sources'}).click();
   await page.waitForURL(/\/sources\//, {timeout: 10000});
-  await page.getByRole('heading', {name: 'Data Source', level: 1}).waitFor({timeout: 10000});
-  const sampleRow = page.locator('tr', {hasText: 'Sample data'});
-  await sampleRow.getByText('Built in', {exact: true}).waitFor({timeout: 10000});
-  const pickFile = (name, text) => page.locator('main input[type=file]').setInputFiles({name, mimeType: 'text/csv', buffer: Buffer.from(text)});
-  const fileCells = async name => (await page.locator('tr', {hasText: name}).locator('td').allInnerTexts()).map(x => x.trim());
-  const imported = name => page.waitForFunction(n => [...document.querySelectorAll('main tr')].some(r => r.textContent.includes(n) && !r.querySelector('.progress')), name, {timeout: 20000});
-  await page.getByPlaceholder('Weekly feed sample').fill('Creator safety review');
-  await pickFile('safety.csv', 'item_id,creator\nc1,a\nc2,b\nc1,c\nbad id,d\nc3,e\n');
-  await page.locator('.drop-file', {hasText: 'safety.csv'}).waitFor();
-  await shot(page, '6a-data-source-new');
-  await button(page, 'Create data source').click();
-  await page.waitForURL(/\/source\//, {timeout: 10000});
-  await page.getByRole('heading', {name: 'Creator safety review'}).waitFor({timeout: 10000});
-  await imported('safety.csv');
-  if ((await fileCells('safety.csv')).slice(1, 4).join('|') !== '3|1|1') throw new Error(`the first file says ${(await fileCells('safety.csv')).join(' | ')}`);
-  await pickFile('more.txt', 'c3\nc4\n');
-  await button(page, 'Add file').click();
-  await page.locator('tr', {hasText: 'more.txt'}).waitFor({timeout: 10000});
-  await imported('more.txt');
-  if ((await fileCells('more.txt')).slice(1, 4).join('|') !== '1|0|1') throw new Error(`the second file says ${(await fileCells('more.txt')).join(' | ')}`);
-  await shot(page, '6b-data-source-files');
-  await page.goto(BASE + '/sources/');
-  await page.locator('tr', {hasText: 'Creator safety review'}).waitFor({timeout: 10000});
-  if ((await fileCells('Creator safety review')).slice(1, 4).join('|') !== '2|4|4') throw new Error(`the list says ${(await fileCells('Creator safety review')).join(' | ')}`);
-  if ((await fileCells('Sample data'))[3] === (await fileCells('Sample data'))[2]) throw new Error('the sample data shows no items taken');
+  await page.getByRole('heading', {name: 'Data sources', level: 1}).waitFor({timeout: 10000});
+  await page.locator('tr', {hasText: 'Sample data'}).waitFor({timeout: 10000});
+  const cells = async name => (await page.locator('tr', {hasText: name}).locator('td').allInnerTexts()).map(x => x.trim());
+  await page.getByRole('button', {name: 'Upload file'}).click();
+  const dlg = page.locator('dialog[open]');
+  await dlg.locator('input[type=file]').setInputFiles({name: 'safety.csv', mimeType: 'text/csv', buffer: Buffer.from('id,creator\nc1,a\nc2,b\nc1,c\nbad id,d\nc3,e\n')});
+  if ((await dlg.getByRole('textbox', {name: 'Name'}).inputValue()) !== 'safety') throw new Error('the name does not come from the file name');
+  await dlg.getByRole('textbox', {name: 'Name'}).fill('Creator safety review');
+  await shot(page, '6a-data-source-upload');
+  await dlg.getByRole('button', {name: 'Upload', exact: true}).click();
+  await dlg.waitFor({state: 'detached', timeout: 10000});
+  await page
+    .waitForFunction(() => [...document.querySelectorAll('main tr')].some(r => r.textContent.includes('Creator safety review') && [...r.querySelectorAll('td')].some(c => c.textContent.trim() === '3')), null, {timeout: 20000})
+    .catch(async e => {
+      throw new Error(`the new source was not read: ${(await page.locator('main').innerText()).replace(/\s+/g, ' ')} (${e.message})`);
+    });
+  if ((await cells('Sample data'))[2] !== '1 project') throw new Error(`the sample data says it is used by ${(await cells('Sample data'))[2]}`);
   await shot(page, '6c-data-sources');
+  await page.getByRole('link', {name: 'Creator safety review'}).click();
+  await page.waitForURL(/\/source\//, {timeout: 10000});
+  await page.getByText('Rows without an ID').waitFor({timeout: 10000});
+  const counts = (await page.locator('main').innerText()).replace(/\s+/g, ' ');
+  if (!/Sample IDs 3 Repeated, kept once 1 Rows without an ID 1/.test(counts)) throw new Error(`the source page says ${counts}`);
+  await page.getByRole('button', {name: 'Rename'}).click();
+  await page.locator('dialog[open]').getByRole('textbox', {name: 'Name'}).fill('Creator safety');
+  await page.locator('dialog[open]').getByRole('button', {name: 'Save'}).click();
+  await page.getByRole('heading', {name: 'Creator safety', level: 1}).waitFor({timeout: 10000});
+  await shot(page, '6b-data-source');
+  await page.goto(BASE + '/sources/');
+  await page.locator('tr', {hasText: 'Creator safety'}).waitFor({timeout: 10000});
   log('data sources:', (await page.locator('main tbody').innerText()).replace(/\s+/g, ' '));
 
   log('console errors:', errors.length ? errors : 'none');

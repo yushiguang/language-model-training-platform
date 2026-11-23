@@ -2,35 +2,40 @@
 
 import {useSearchParams} from 'next/navigation';
 import {Suspense, useEffect, useState} from 'react';
+import {CalendarIcon} from '@heroicons/react/24/outline';
 import {TenantPage} from '@/components/Shell';
-import {SignedIn} from '@/components/session';
-import {SOURCE_ACCEPT, sourceHint, sourceName} from '@/components/sources';
-import {addSourceFileFile, getDataSource, subscribeChanges, type DataSourceDetail, type SourceFile} from '@/backend-api';
-import {Badge, Banner, Button, Card, dateTime, FileInput, Hov, Icon, Metric, Metrics, num, One, PageHead, Progress, Table} from '@/ui';
+import {useRuntime} from '@/components/session';
+import {useGo} from '@/components/nav';
+import {WithSide, SectionTitle} from '@/components/shell/Page';
+import {hrefFor} from '@/components/ProjectContext';
+import {DeleteDialog, ErrorLine, RenameDialog} from '@/components/sources/dialogs';
+import {fileKind, refuseSourceChange, shortDate, sourceName} from '@/components/sources';
+import {getDataSource, subscribeChanges, type DataSourceDetail} from '@/backend-api';
+import {Avatar, Button, Card, Divider, Grid, Heading, HStack, Icon, Link, MetadataList, MetadataListItem, MoreMenu, Spinner, Text, Token, VStack} from '@/ui/astryx';
+import {PageTitle} from '@/ui';
 import {t} from '@/i18n';
 
 /**
- * One data source (#29; design: V-Source-Files). No versions: every file uploaded to it counts.
- * Its counts on top (items, taken by datasets, not used, projects), its files below, and Add a
- * file beside them; items already in the source are counted as repeats and left out.
+ * One data source (wireframes v346: W-Source, W-Source-Delete): one uploaded file of sample IDs.
+ * Its counts (sample IDs, repeats kept once, rows without an ID), the projects that use it, its
+ * file, and who can change it. Admins rename and delete it; anyone else gets the access dialog.
  */
 export default function SourcePage() {
   return (
-    <SignedIn>
-      <Suspense>
-        <Source />
-      </Suspense>
-    </SignedIn>
+    <Suspense>
+      <Source />
+    </Suspense>
   );
 }
 
-/** File, Items, Bad rows, Repeats, Uploaded by, Uploaded (the card is 706 wide). */
-const WIDTHS: (number | 'auto')[] = ['auto', 96, 84, 84, 110, 140];
-
 function Source() {
   const id = useSearchParams().get('id') ?? '';
+  const go = useGo();
+  const {info} = useRuntime();
+  const admin = info?.tenant?.role === 'admin';
   const [d, setD] = useState<DataSourceDetail | null | undefined>(undefined);
   const [failed, setFailed] = useState<string | null>(null);
+  const [open, setOpen] = useState<'rename' | 'delete' | null>(null);
   const load = async () => {
     try {
       setD(await getDataSource(id));
@@ -43,103 +48,165 @@ function Source() {
     void load();
     return subscribeChanges(() => void load());
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
-  const title = d ? sourceName(d.source) : t('Data Source');
+
+  const back = {label: t('Data sources'), href: '/sources/'};
+  const s = d?.source;
+  const change = (what: 'rename' | 'delete') => (admin ? setOpen(what) : refuseSourceChange('change'));
+  const actions =
+    s && !s.builtIn ? (
+      <>
+        <Button label={t('Rename')} variant="secondary" onClick={() => change('rename')} />
+        <MoreMenu label={t('More actions')} alignment="end" items={[{label: t('Delete data source'), onClick: () => change('delete')}]} />
+      </>
+    ) : undefined;
+
   return (
-    <TenantPage head={<PageHead title={title} back={{label: t('Data Source'), href: '/sources/'}} />}>
+    <TenantPage head={<PageTitle title={s ? sourceName(s) : t('Data source')} back={back} subtitle={s ? <Byline d={d!} /> : undefined} actions={actions} />}>
       {failed ? (
-        <Banner tone="err" text={failed} style={{margin: 0, width: 706}} action={<Button label={t('Retry')} size="sm" onClick={load} />} />
+        <Card padding={6}>
+          <VStack gap={3}>
+            <ErrorLine text={failed} />
+            <HStack>
+              <Button label={t('Retry')} variant="secondary" onClick={() => void load()} />
+            </HStack>
+          </VStack>
+        </Card>
       ) : d === null ? (
-        <Banner tone="err" text={t('This data source does not exist.')} style={{margin: 0, width: 706}} />
+        <Card padding={6}>
+          <Text type="body">{t('This data source does not exist.')}</Text>
+        </Card>
+      ) : !d ? (
+        <HStack hAlign="center" paddingBlock={10}>
+          <Spinner label={t('Loading')} />
+        </HStack>
       ) : (
-        d && (
-          <div className="row" style={{gap: 32, alignItems: 'flex-start'}}>
-            <Files d={d} />
-            {!d.source.builtIn && <AddFile sourceId={d.source.id} />}
-          </div>
-        )
+        <WithSide sideWidth={300} side={<Side d={d} />}>
+          <VStack gap={4}>
+            <SectionTitle title={t('Sample IDs')} />
+            <Counts d={d} />
+          </VStack>
+        </WithSide>
       )}
+      {s && open === 'rename' && <RenameDialog source={s} onClose={() => setOpen(null)} />}
+      {s && open === 'delete' && <DeleteDialog source={s} usedBy={d!.usedByProjects.map(p => p.name)} onClose={() => setOpen(null)} onDeleted={() => void go('/sources/')} />}
     </TenantPage>
   );
 }
 
-function Files({d}: {d: DataSourceDetail}) {
+/** "CSV · 6,500 sample IDs · (avatar) Mei Wang · (calendar) Nov 15, 2026". */
+function Byline({d}: {d: DataSourceDetail}) {
+  const s = d.source;
+  const who = s.builtIn ? 'Sprint' : s.createdBy;
+  const what = s.state === 'ready' ? t('{kind} · {n} sample IDs', {kind: fileKind(s.fileName), n: s.items.toLocaleString('en-US')}) : fileKind(s.fileName);
+  const dot = (
+    <Text type="supporting" color="secondary">
+      ·
+    </Text>
+  );
   return (
-    <Card title={t('Files')} style={{width: 706, flex: 'none'}}>
-      <Metrics>
-        <Metric label={t('Items')} value={num(d.source.items)} />
-        <Metric label={<Hov text={t('Taken by datasets')} tip={t('Items given to datasets, of every project. Each item goes to one dataset only.')} />} value={num(d.taken)} />
-        <Metric label={t('Not used')} value={num(d.source.notUsed)} />
-        <Metric label={t('Projects')} value={num(d.projects)} />
-      </Metrics>
-      <Table
-        cols={[
-          {label: t('File')},
-          {label: t('Items')},
-          {label: <Hov text={t('Bad rows')} tip={t('Rows with no usable item ID.')} />},
-          {label: <Hov text={t('Repeats')} tip={t('Item IDs already in this file or this data source, left out.')} />},
-          {label: t('Uploaded by')},
-          {label: t('Uploaded')},
-        ]}
-        widths={WIDTHS}
-        rows={d.files.map(f => ({
-          key: f.id,
-          cells: [
-            <One key="n" text={f.name} />,
-            <FileItems key="i" f={f} />,
-            num(f.bad),
-            num(f.repeats),
-            <One key="b" text={f.uploadedBy} />,
-            <span key="u" className="t-3">
-              {dateTime(f.uploadedAt)}
-            </span>,
-          ],
-        }))}
-      />
+    <HStack gap={2} vAlign="center" wrap="wrap">
+      <Text type="body">{what}</Text>
+      {dot}
+      <HStack gap={1.5} vAlign="center">
+        <Avatar name={who} size="sm" />
+        <Text type="body">{who}</Text>
+      </HStack>
+      {dot}
+      <HStack gap={1.5} vAlign="center">
+        <Icon icon={CalendarIcon} size="sm" color="secondary" />
+        <Text type="body">{shortDate(s.createdAt)}</Text>
+      </HStack>
+    </HStack>
+  );
+}
+
+/** The file's counts in one card; while it is read, a spinner; when it could not be read, why. */
+function Counts({d}: {d: DataSourceDetail}) {
+  const s = d.source;
+  if (s.state === 'reading')
+    return (
+      <Card padding={6}>
+        <HStack gap={2} vAlign="center">
+          <Spinner size="sm" />
+          <Text type="body">{t('Reading the file…')}</Text>
+        </HStack>
+      </Card>
+    );
+  if (s.state === 'failed')
+    return (
+      <Card padding={6}>
+        <VStack gap={2}>
+          <ErrorLine text={t("Can't read this file.")} />
+          <Text type="body" color="secondary">
+            {s.error ? t(s.error) : t('Fix the file and upload it again.')}
+          </Text>
+        </VStack>
+      </Card>
+    );
+  const repeats = d.files.reduce((n, f) => n + f.repeats, 0);
+  const bad = d.files.reduce((n, f) => n + f.bad, 0);
+  return (
+    <Card padding={6}>
+      <Grid columns={3} gap={6}>
+        <Count label={t('Sample IDs')} value={s.items} />
+        <Count label={t('Repeated, kept once')} value={repeats} />
+        <Count label={t('Rows without an ID')} value={bad} />
+      </Grid>
     </Card>
   );
 }
 
-function FileItems({f}: {f: SourceFile}) {
-  if (f.state === 'importing') return <Progress done={f.done} total={f.start == null ? f.rows - f.bad - f.repeats : f.items} />;
-  if (f.state === 'failed')
-    return (
-      <span title={f.error ? t(f.error) : undefined}>
-        <Badge text={t('Failed')} tone="err" />
-      </span>
-    );
-  return <>{num(f.items)}</>;
+function Count({label, value}: {label: string; value: number}) {
+  return (
+    <VStack gap={1}>
+      <Text type="body" color="secondary">
+        {label}
+      </Text>
+      <Text type="display-3" hasTabularNumbers>
+        {value.toLocaleString('en-US')}
+      </Text>
+    </VStack>
+  );
 }
 
-/** Add a file: its new items join the source, after every item there. */
-function AddFile({sourceId}: {sourceId: string}) {
-  const [file, setFile] = useState<File | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const add = async () => {
-    if (!file) return;
-    setErr(null);
-    try {
-      const res = await addSourceFileFile(sourceId, file);
-      if (res.error) return setErr(res.error);
-      setFile(null);
-    } catch (e) {
-      // A refused call (the service is down, the data source is busy) shows here too.
-      setErr((e as Error).message || 'Something went wrong. Try again.');
-    }
-  };
+/** Used by, the file, and who can change it. */
+function Side({d}: {d: DataSourceDetail}) {
   return (
-    <Card title={t('Add a file')} className="form" style={{flex: '1 1 0', minWidth: 320, maxWidth: 542}}>
-      <FileInput label={t('File')} hint={sourceHint()} accept={SOURCE_ACCEPT} file={file} onFile={f => (setErr(null), setFile(f))} />
-      {err && (
-        <p className="t-err" style={{margin: 0}} role="alert">
-          <Icon name="alert" /> {t(err)}
-        </p>
-      )}
-      <div className="row" style={{justifyContent: 'space-between'}}>
-        <span className="t-3" style={{fontSize: 13}}>
-          {t('Items already in this data source are counted as repeats and left out.')}
-        </span>
-        <Button label={t('Add file')} kind="primary" disabled={!file} onClick={add} />
-      </div>
+    <Card padding={5}>
+      <VStack gap={5}>
+        <VStack gap={2}>
+          <Heading level={4}>{t('Used by')}</Heading>
+          {d.usedByProjects.length ? (
+            d.usedByProjects.map(p => (
+              <Link key={p.id} href={hrefFor(p.id, '/overview')}>
+                {p.name}
+              </Link>
+            ))
+          ) : (
+            <Text type="body" color="secondary">
+              {t('No project yet')}
+            </Text>
+          )}
+        </VStack>
+        <Divider />
+        <VStack gap={2}>
+          <Heading level={4}>{t('File')}</Heading>
+          <MetadataList>
+            <MetadataListItem label={t('Name')}>
+              <Text type="body" maxLines={1}>
+                {d.source.fileName}
+              </Text>
+            </MetadataListItem>
+          </MetadataList>
+        </VStack>
+        <Divider />
+        <VStack gap={2}>
+          <Heading level={4}>{t('Who can change it')}</Heading>
+          <HStack gap={1} wrap="wrap">
+            <Token size="sm" label={d.source.builtIn ? t('Nobody: it ships with Sprint') : t('Admins')} />
+          </HStack>
+        </VStack>
+      </VStack>
     </Card>
   );
 }
