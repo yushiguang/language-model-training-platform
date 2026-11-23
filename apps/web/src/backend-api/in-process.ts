@@ -12,7 +12,7 @@ import {createConfig} from '@yushiguang/sprint-config';
 import {createOptimiser, optimiserExecutor} from '@yushiguang/sprint-optimiser';
 import {createWorkflow, systemContext} from '@yushiguang/sprint-workflow';
 import {createBffApi} from '@yushiguang/sprint-bff';
-import type {BffClient} from './client';
+import {UploadStopped, type BffClient, type UploadOptions} from './client';
 import {webTelemetry} from './web-telemetry';
 import {currentTenant} from './tenant';
 import {callFailed, callId, pageOpened, snapshot} from './diagnostics';
@@ -288,8 +288,10 @@ export const client: BffClient = {
     const text = await file.text();
     return {name: file.name, size: file.size, content: text.slice(0, systemConfig().agent.maxAttachmentChars)};
   },
-  async createDataSourceFile(name, file) {
-    return timedApi.createDataSource({name, fileName: file.name, text: await file.text()});
+  async createDataSourceFile(name, file, opts) {
+    // In the browser build the upload is reading the file into the page.
+    const text = await readWithProgress(file, opts);
+    return timedApi.createDataSource({name, fileName: file.name, text});
   },
   async addSourceFileFile(sourceId, file) {
     return timedApi.addSourceFile({sourceId, fileName: file.name, text: await file.text()});
@@ -303,3 +305,30 @@ export const client: BffClient = {
   },
   track: web.track,
 };
+
+/** Reads a file as text, telling how far it got; a stop or a read error rejects with `UploadStopped`. */
+function readWithProgress(file: File, opts: UploadOptions = {}): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    let share = 0;
+    const stop = () => reader.abort();
+    if (opts.signal?.aborted) return reject(new UploadStopped('stopped', 0));
+    opts.signal?.addEventListener('abort', stop, {once: true});
+    reader.onprogress = e => {
+      if (!e.lengthComputable || !e.total) return;
+      share = e.loaded / e.total;
+      opts.onProgress?.(share);
+    };
+    reader.onload = () => {
+      opts.signal?.removeEventListener('abort', stop);
+      opts.onProgress?.(1);
+      resolve(String(reader.result ?? ''));
+    };
+    reader.onabort = () => reject(new UploadStopped('stopped', share));
+    reader.onerror = () => {
+      opts.signal?.removeEventListener('abort', stop);
+      reject(new UploadStopped('lost', share));
+    };
+    reader.readAsText(file);
+  });
+}

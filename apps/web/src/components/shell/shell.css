@@ -71,3 +71,10 @@ body { background: var(--color-background-surface, #fff); }
   .sp-side { position: fixed; inset: var(--sp-top) 0 0 auto; width: min(400px, 100vw); z-index: 15; }
 }
 .sp-dlg-title { min-width: 0; }
+
+/* Row tables (data sources): the name links to its page; row actions show on hover or focus only. */
+.sp-row-link { color: inherit; text-decoration: none; display: block; min-width: 0; }
+.sp-row-link:hover { text-decoration: underline; }
+.sp-rows .sp-row-actions { display: inline-flex; opacity: 0; }
+.sp-rows tr:hover .sp-row-actions, .sp-rows .sp-row-actions:focus-within, .sp-rows .sp-row-actions:has([aria-expanded='true']) { opacity: 1; }
+@media (hover: none) { .sp-rows .sp-row-actions { opacity: 1; } }
