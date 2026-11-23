@@ -3,6 +3,12 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-23 (Scores from label sets and Rescore, #86)
+
+- **Scores are made only once every label set is finished**, on the eval samples inside label sets (a removed sample counts nowhere, a sample in no set waits for one). A project with no label set yet counts as one set over the whole dataset, until the label set pages ship.
+- **A score says what it rests on**: the samples with their halves, their gold labels, and the thresholds. A changed basis leaves earlier scores as they are, shown but never passing; changing the thresholds no longer re-judges them.
+- **Rescore is a queued job**, one per basis however often it is pressed, and works the out-of-date scores out again from the saved answers; a version missing answers is skipped and needs scoring again. New scoring uses the new basis straight away.
+
 ## 2026-11-23 (Sample numbers and label sets, #82)
 
 - **Samples have numbers that never change**: from 1 in the order taken; a save that failed leaves a gap; removing a sample shifts nothing. Older datasets are numbered once, in saved order, on first read.

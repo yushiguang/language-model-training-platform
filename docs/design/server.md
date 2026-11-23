@@ -91,7 +91,7 @@
 | --- | --- |
 | 提示词设计 | 保存过一个版本。保存至少要有标签名和一个带定义的标签值 |
 | 数据集 | 至少有 1 条样本 |
-| 人工标注 | 所有标注集都标完 |
+| 人工标注 | 所有标注集都标完（见第 4.3 节） |
 | 提示词调优 | 有一个版本达到全部阈值 |
 
 ### 4.2 数据集和标注集
@@ -136,6 +136,29 @@
 - 所有标注集都标完才算分，只用标注集里的样本。
 - 改了标签值，受影响的人工标签会被清空（保留为隐藏的提示）。保存前确认框显示要清空多少条。
 - 算分依据（人工标签、阈值、样本）变了之后，历史版本的分数不会自动重算。提示词调优页显示横幅，用户点 Rescore 重算。新建的任务自动用新依据。
+
+#### 4.3.1 实现（#86 已完成）
+
+**算分依据**（`ScoreBasis`，`packages/domain/src/scoring.ts`）
+
+- 一个分数依赖三样东西，各存一个哈希：`samples`（算分的样本和它们属于哪一半）、`gold`（这些样本当前的人工标签）、`thresholds`（阈值；缺的字段和 `null` 一样，字段顺序不影响）。`contextId` 是这三样加上标签的 `schemaVersion`，每份报告都带（`EvalReport.basis`、`EvalReport.contextId`；#86 之前的报告没有 `basis`）。
+- **算分的样本**：没被移除、落在某个标注集范围里的评测样本。项目还没有标注集时，整个数据集算一个标注集（过渡：前端的标注集页面上线前，现有项目照常能算分）。
+- 标注集没标完时算分依据里样本是空的，所以不会出新分数，也不会显示过期横幅。
+
+**什么时候算分**（`labelSetProgress`）
+
+- 一个标注集算标完 = 范围里每条没被移除的样本都有当前标签下的人工标签（里面的样本全被移除了也算标完）。所有标注集都标完才算分（`ScoringState.ready`、`WorkflowFacts.scoringReady`）。
+- 人工标注这一步的完成条件（第 4.1 节）就是它，加上原来的最少条数（`canScore`）：标够了但还有标注集没标完时，下一步按钮提示“所有标注集都标完才能继续”。自动打分（`dueStarts`）也等它。
+- 标注集之后追加的样本不在任何标注集里，所以不影响分数，也不会让已有分数过期，等新的标注集。
+
+**分数过期和 Rescore**（`staleScores`、`apps/workflow/src/services/scores.ts`）
+
+- 一份报告的 `contextId` 和当前的不一样就是过期（`ProjectState.reports[].archivedNow`），只显示不判定通过。每个版本 + 模型只保留最新的一份报告，更早的标成 `archived`，不再显示。
+- `ScoringState`（`ProjectState.scoring`）给页面：是否可以算分、标注集范围和个数、标完几个、标注集里的样本数和已标数、当前依据、分数过期的版本 `staleVersionIds`、变的是什么 `changed`（`gold` / `samples` / `thresholds`；样本变了就不再单说人工标签变了）、Rescore 是不是在排队或运行 `rescoring`。`#86` 之前的报告没有 `basis`，所以只说过期、不说变了什么。
+- 历史分数永不自动重算：`rescore(projectId)`（项目写）入队一个 `report.rescore`，并发键是常规任务的键（租户 + `compute`），幂等键带当前 `contextId`，所以连点只排一个，依据再变之后点会排新的一个。标注集没标完时拒绝。
+- 执行时按运行那一刻的依据，用已保存的答案重算每个当前标签下打完标的版本，不重新打标；答案不全的版本跳过（重新打分会补打缺的样本，再按新依据算分）。
+- 新建的打分任务直接用当前依据：打标仍覆盖整个评测集，算分只用标注集里的样本。
+- 现在页面上的 “Rebuild scores” 按钮（`rebuildReports`，在请求里同步重算）保留给改版前的页面，前端改版时删除。
 
 ### 4.4 优化器
 
@@ -378,7 +401,7 @@ export interface ConfigReader {
 | 模型管理接口 `listModels` / `addModel` / `updateModel` / `removeModel` / `setDefaultModel`；`CatalogContract.remove('tenant_models', id)` | 新增（第 4 步，#69 已完成） |
 | `ObjectStorePort`（`Platform.objectStore` 可选）；基于它的 `LabelingStorePort`、`FeatureStorePort`；`Example.featureRef` 可选 | 新增（第 7 步，#72） |
 | `Example.number`（样本序号，可选，旧样本第一次读时补上）、`DatasetSnapshot.numbered`、`LabelSet` 和 catalog 的 `label_sets` 集合、`CatalogContract.page`（分页读取） | 新增：catalog 在本仓库实现，部署方的文档库适配器不用改（第 8 步，#82 已完成） |
-| `ScoreBasis`、`EvalReport.basis`（可选，旧报告没有）、`ScoringState`、任务类型 `report.rescore`；第二个 PR 加 `ProjectState.scoring`、`WorkflowFacts.scoringReady`、`rescore` 接口 | 新增：只有工作流产出和读取，部署方的适配器不用改（第 9 步，#86） |
+| `ScoreBasis`、`EvalReport.basis`（可选，旧报告没有）、`ScoringState`、任务类型 `report.rescore`、`ProjectState.scoring`、`WorkflowFacts.scoringReady`、`rescore` 接口 | 新增：只有工作流产出和读取，部署方的适配器不用改（第 9 步，#86 已完成） |
 
 ## 11. 交付计划
 
@@ -392,7 +415,7 @@ export interface ConfigReader {
 6. 通知端口：评分和自动优化结束时通知发起人。（#71 已完成）
 7. 存储接口：`ObjectStorePort`，以及基于它的 `LabelingStorePort`、`FeatureStorePort`（issue #58）。（#72 已完成）
 8. 数据集和标注集：样本序号、软删除、标注集、清空受影响的人工标签。（#82 已完成）
-9. 分数和 Rescore：标注集全部完成才算分、Rescore 横幅所需的“分数是否过期”。
+9. 分数和 Rescore：标注集全部完成才算分、Rescore 横幅所需的“分数是否过期”。（#86 已完成）
 
 前端按 shell / 导航 → 租户和项目 → 数据源 → 第 1 到 4 步的顺序另开 PR，在对应的后端 PR 合并之后做。
 
