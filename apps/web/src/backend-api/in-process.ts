@@ -1,6 +1,6 @@
 import type {AgentLive, BffContract, ChatAttachment, GoldLine} from '@yushiguang/sprint-contracts';
 import {configureSystem, systemConfig} from '@yushiguang/sprint-domain';
-import {createCatalog} from '@yushiguang/sprint-catalog';
+import {createCatalog, docFeatureStore, objectFeatureStore} from '@yushiguang/sprint-catalog';
 import {createTelemetry} from '@yushiguang/sprint-telemetry';
 import {createGateway} from '@yushiguang/sprint-llm-gateway';
 import {browserLocks, createLabeling, labelingExecutor} from '@yushiguang/sprint-labeling';
@@ -38,7 +38,13 @@ const telemetry = createTelemetry({
   appVersion: APP_VERSION,
   env: process.env.NEXT_PUBLIC_SPRINT_ENV ?? 'dev',
 });
-const catalog = createCatalog(platform.db, {telemetry});
+/**
+ * Frozen features (docs/design/server.md 6): packed in segment files in the platform's object
+ * storage when it has one (examples saved before stay readable from `db`). Without it the catalog
+ * and the workflow keep one document per example, each written and skipped on its own, as before.
+ */
+const features = platform.objectStore ? objectFeatureStore(platform.objectStore, docFeatureStore(platform.db)) : undefined;
+const catalog = createCatalog(platform.db, {telemetry, features});
 /**
  * One process: the limits are counted here unless the platform shares a store (spec 5). Each
  * tenant's own models come from the catalog (docs/design/server.md, 9), read per tenant and kept
@@ -80,7 +86,7 @@ const labeling = createLabeling({
   },
 });
 /** The application module, with no state of its own; short-lived shared state goes to the platform's store. */
-const workflow = createWorkflow({jobs: jobs.api, catalog, labeling, gateway, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, tickets: platform.tickets, notifications: platform.notifications, appVersion: APP_VERSION, standIns: platform.standIns, telemetry, locks, sharedState: platform.sharedState ?? memorySharedState(), config: config?.reader, authorization: platform.authorization, permissionAdmin: platform.permissionAdmin});
+const workflow = createWorkflow({jobs: jobs.api, catalog, features, labeling, gateway, files: platform.files, examples: platform.examples, media: platform.media, featureInfo: platform.featureInfo, documents: platform.documents, tickets: platform.tickets, notifications: platform.notifications, appVersion: APP_VERSION, standIns: platform.standIns, telemetry, locks, sharedState: platform.sharedState ?? memorySharedState(), config: config?.reader, authorization: platform.authorization, permissionAdmin: platform.permissionAdmin});
 /** The helpers, built once with their model, the project tools and where live progress goes. */
 const agentRuntime = createAgentRuntime({llm: gateway.agentModel(), tools: workflow.toolHost, progress: workflow.agentProgress});
 const optimiser = createOptimiser({catalog, labeling, agents: agentRuntime, host: workflow.optimiserHost, locks, telemetry, onChange: projectId => workflow.changed(projectId)});

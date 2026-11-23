@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, ClientDiagnostics, RequestContext, SharedStatePort, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission, NotificationPort, TelemetryPort, AuthorizationPort} from '@yushiguang/sprint-contracts';
-import {createCatalog} from '@yushiguang/sprint-catalog';
+import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, ClientDiagnostics, RequestContext, SharedStatePort, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ObjectStorePort, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission, NotificationPort, TelemetryPort, AuthorizationPort} from '@yushiguang/sprint-contracts';
+import {createCatalog, docFeatureStore, objectFeatureStore} from '@yushiguang/sprint-catalog';
 import {createLabeling, labelingExecutor, memoryLocks} from '@yushiguang/sprint-labeling';
 import {createOptimiser, optimiserExecutor} from '@yushiguang/sprint-optimiser';
-import {DocRepo, localDocRuntime, logNotifications, memoryJobStore, memorySharedState} from '@yushiguang/sprint-platform';
+import {DocRepo, localDocRuntime, logNotifications, memoryJobStore, memoryObjectStore, memorySharedState} from '@yushiguang/sprint-platform';
 import {createJobs} from '@yushiguang/sprint-jobs';
 import {createInstance, systemContext} from './app.ts';
 import {optimiserHost} from './optimiser-host.ts';
@@ -50,6 +50,8 @@ interface WorldOpts {
   sharedState?: SharedStatePort;
   /** The job module's wait before a retry (default its own). */
   retryDelayMs?: number;
+  /** Object storage for frozen features (none: one document per example). */
+  objects?: ObjectStorePort;
   notifications?: NotificationPort;
   telemetry?: TelemetryPort;
   authorization?: AuthorizationPort;
@@ -63,7 +65,8 @@ function toolsOf(w: {inst: Parameters<typeof agentToolHost>[0]; projectId: strin
 
 async function world(prefix: string, opts: WorldOpts = {}) {
   const db = localDocRuntime(prefix);
-  const catalog = createCatalog(db);
+  const features = opts.objects ? objectFeatureStore(opts.objects, docFeatureStore(db)) : undefined;
+  const catalog = createCatalog(db, {features});
   const calls = {n: 0};
   const seen = new Map<string, number>();
   const gateway = {
@@ -87,6 +90,7 @@ async function world(prefix: string, opts: WorldOpts = {}) {
   const inst = createInstance({
     jobs: jobs.api,
     catalog,
+    features,
     labeling,
     gateway,
     files: {} as FileStore,
@@ -1538,6 +1542,84 @@ test('frozen snapshots (#32): a take checks each item, counts what is left out p
     const after = (await loadProjectState(w.ws, p.id))!.snapshot!;
     assert.deepEqual([after.counts.valid, after.counts.checks], [17, {missing: 2, minorCreator: 2, notRecommendable: 1, noFeatures: 1}]);
     assert.equal((await w.catalog.find('example_features', {snapshotId: snap.id})).length, 17);
+  } finally {
+    configureSystem();
+  }
+});
+
+test('frozen features in object storage (#72): a take writes one segment file per batch, examples keep where their features are, reads come back by range, and deleting the project leaves no object behind', async () => {
+  const {configureSystem} = await import('@yushiguang/sprint-domain');
+  const objects = memoryObjectStore();
+  const puts: string[] = [];
+  const ranges: string[] = [];
+  const watched: ObjectStorePort = {...objects, put: (k, b, o) => (puts.push(k), objects.put(k, b, o)), getRange: (k, off, len) => (ranges.push(k), objects.getRange(k, off, len))};
+  const w = await world('fzo', {gold: null, objects: watched});
+  let failOnce = 1;
+  const source: ExampleSource = {
+    async lookup(ids) {
+      return ids.map(externalId => ({externalId, type: 'video' as const, title: `t ${externalId}`, features: {Description: {text: `about ${externalId} é`}}}));
+    },
+  };
+  Object.assign(w.inst, {examples: source});
+  // The first segment write fails on the way: tried once more, nothing is lost.
+  const put = watched.put;
+  watched.put = async (k, b, o) => {
+    if (failOnce-- > 0) throw new Error('storage blip');
+    return put(k, b, o);
+  };
+  configureSystem({dataset: {featureBatch: 4}});
+  try {
+    const {createProject, deleteProject} = await import('./projects.ts');
+    const {takeExamples} = await import('./dataset.ts');
+    const {exampleFeatures} = await import('./features.ts');
+    const ids = Array.from({length: 10}, (_, i) => `o${i}`);
+    const sourceId = await sourceOf(w, 'Feed', ids);
+    const p = await createProject(w.ws, 'Objects');
+    await takeExamples(w.ws, p.id, [{sourceId, count: 10}]);
+    await w.jobs.idle();
+    const state = (await loadProjectState(w.ws, p.id))!;
+    assert.equal(state.examples.length, 10);
+    assert.equal(puts.length, 3, `10 examples in batches of 4: 3 segment files (${puts.join(' ')})`);
+    assert.ok(puts.every(k => k.startsWith(`features/${state.snapshot!.id}/`) && k.endsWith('.jsonl')));
+    assert.equal((await w.catalog.find('example_features', {})).length, 0, 'no feature documents');
+    const stored = await w.catalog.find('examples', {snapshotId: state.snapshot!.id});
+    assert.ok(stored.every(e => e.featureRef && puts.includes(e.featureRef.key)), 'every example keeps where its features are');
+    ranges.length = 0;
+    const got = await exampleFeatures(w.ws, p.id, stored.map(e => e.id));
+    assert.equal(Object.keys(got).length, 10);
+    assert.deepEqual(got[stored.find(e => e.externalId === 'o7')!.id], {Description: {text: 'about o7 é'}});
+    assert.equal(ranges.length, 3, 'one range read per segment file');
+    await deleteProject(w.ws, p.id);
+    await w.jobs.idle();
+    assert.deepEqual(objects.keys(), [], 'the segment files are gone');
+  } finally {
+    configureSystem();
+  }
+});
+
+test('frozen features in object storage (#72): a batch whose segment file cannot be written twice is skipped whole; no example of it is saved, the other batches are', async () => {
+  const {configureSystem} = await import('@yushiguang/sprint-domain');
+  const objects = memoryObjectStore();
+  let puts = 0;
+  // The second batch's segment fails both tries.
+  const flaky: ObjectStorePort = {...objects, put: (k, b, o) => (++puts === 2 || puts === 3 ? Promise.reject(new Error('storage down')) : objects.put(k, b, o))};
+  const w = await world('fzo2', {gold: null, objects: flaky});
+  Object.assign(w.inst, {examples: {async lookup(ids: string[]) {
+    return ids.map(externalId => ({externalId, type: 'video' as const, title: '', features: {Description: {text: `about ${externalId}`}}}));
+  }} satisfies ExampleSource});
+  configureSystem({dataset: {featureBatch: 4}});
+  try {
+    const {createProject} = await import('./projects.ts');
+    const {takeExamples} = await import('./dataset.ts');
+    const sourceId = await sourceOf(w, 'Feed', Array.from({length: 10}, (_, i) => `q${i}`));
+    const p = await createProject(w.ws, 'Flaky');
+    await takeExamples(w.ws, p.id, [{sourceId, count: 10}]);
+    await w.jobs.idle();
+    const state = (await loadProjectState(w.ws, p.id))!;
+    assert.equal(state.examples.length, 6, '10 in batches of 4: the second batch (4) is skipped');
+    assert.equal(objects.keys().length, 2);
+    const stored = await w.catalog.find('examples', {snapshotId: state.snapshot!.id});
+    assert.ok(stored.every(e => e.featureRef && objects.keys().includes(e.featureRef.key)), 'no example without its features');
   } finally {
     configureSystem();
   }

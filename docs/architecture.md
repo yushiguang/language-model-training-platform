@@ -450,8 +450,13 @@ used for counters, failed lists and approvals. Writes are partial (`patch`) so a
 and a page action never overwrite each other's fields. `DocRepo` (`packages/platform`) maps the
 application `id` to the store's document id.
 
-Frozen features (#32) live apart from the product records: one `example_features` document per
-example, read by id only (`CatalogContract.exampleFeatures`, a batch at a time). Project state
+Frozen features (#32) live apart from the product records, behind `FeatureStorePort` (#72): with
+object storage (`Platform.objectStore`), each batch of a take (`dataset.featureBatch`) is one
+segment file of JSON lines, `features/<snapshotId>/<segment>.jsonl`, and each example record keeps
+its line's byte range (`Example.featureRef`); a batch read takes one range per segment file.
+Without object storage, and for examples saved before, they are one `example_features` document
+per example, read by id only. Either way they are read a batch at a time
+(`CatalogContract.exampleFeatures`) and deleted with their dataset's index. Project state
 carries the examples' index and no features; the labeling run, Gold Labels, the helpers and the
 Optimiser each read the features of the examples they use. `DatasetSnapshot` stores `featureSizes`
 and exact integer `featureMissingness` counts (#48) over its live examples so estimates, pages and

@@ -1,4 +1,4 @@
-import {NO_TELEMETRY, type AuthorizationPort, type PermissionAdminPort, type ConfigReader, type TicketPort, type NotificationPort, type AgentRuntimeContract, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@yushiguang/sprint-contracts';
+import {NO_TELEMETRY, type AuthorizationPort, type PermissionAdminPort, type ConfigReader, type TicketPort, type NotificationPort, type AgentRuntimeContract, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FeatureStorePort, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@yushiguang/sprint-contracts';
 import {newId, processConfigReader} from '@yushiguang/sprint-domain';
 
 /**
@@ -17,6 +17,14 @@ export interface WorkflowDeps {
   gateway: LlmGatewayContract;
   files: FileStore;
   examples: ExampleSource;
+  /**
+   * Where taken examples' frozen features are written, a batch at a time (docs/design/server.md
+   * 6): the object-storage store the catalog reads them from (`objectFeatureStore` in
+   * `@yushiguang/sprint-catalog`), whose batch is one write that lands whole or not at all. Leave
+   * it out otherwise: features are then written one document each through the catalog, so one
+   * failed write skips only its own example.
+   */
+  features?: FeatureStorePort;
   /** Optional media for people to look at; see `MediaSource`. */
   media?: MediaSource;
   /** Optional feature descriptions (hover text, and the agents' read_feature_info tool). */
