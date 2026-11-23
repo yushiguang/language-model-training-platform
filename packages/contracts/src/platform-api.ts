@@ -828,6 +828,12 @@ export interface TenantMember {
   role: TenantRole;
 }
 
+/** A tenant a user is in, and as what (#94). */
+export interface UserTenant {
+  tenantId: string;
+  role: TenantRole;
+}
+
 /**
  * Writes and lists permissions on the external permission platform (docs/design/server.md, 2.3),
  * for the members pages and for granting labelers. Requests and approvals happen on that platform,
@@ -837,6 +843,8 @@ export interface TenantMember {
  */
 export interface PermissionAdminPort {
   listTenantMembers(tenantId: string): Promise<TenantMember[]>;
+  /** The tenants a user is in (#94): the home page lists them, and the site checks the tenant it opens. */
+  listUserTenants(userId: string): Promise<UserTenant[]>;
   addTenantMember(ctx: RequestContext, tenantId: string, userId: string, role: TenantRole): Promise<void>;
   removeTenantMember(ctx: RequestContext, tenantId: string, userId: string): Promise<void>;
   setTenantRole(ctx: RequestContext, tenantId: string, userId: string, role: TenantRole): Promise<void>;

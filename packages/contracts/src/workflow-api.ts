@@ -20,9 +20,10 @@ export type WithContext<F> = F extends (...args: infer A) => infer R ? (ctx: Req
 /**
  * What the workflow knows of the runtime; the bff adds the signed-in user, Sign out and the
  * tenant's id and name. `tenantRole`: the caller's role in its tenant (`admin` when it holds
- * `tenant_write`).
+ * `tenant_write`); missing when the caller is not in the tenant. `tenantName`: the tenant's
+ * record's name, when it has a record (#94).
  */
-export type WorkflowRuntimeInfo = Omit<RuntimeInfo, 'user' | 'canSignOut' | 'tenant'> & {tenantRole?: TenantRole};
+export type WorkflowRuntimeInfo = Omit<RuntimeInfo, 'user' | 'canSignOut' | 'tenant'> & {tenantRole?: TenantRole; tenantName?: string};
 
 export type WorkflowContract = {
   [K in Exclude<keyof BffContract, 'getRuntimeInfo' | 'signOut'>]: WithContext<BffContract[K]>;

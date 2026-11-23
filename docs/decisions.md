@@ -10,6 +10,11 @@ where it matters, why. The code follows these; change a line here when a decisio
 - **Save asks before it costs something**: over a version that is still labeling it asks to stop the run first ("Stop and save"), and when the label change clears gold labels it says how many first (`goldLabelsCleared`). A save labels the dataset again at once.
 - **Discard** shows while the card holds unsaved edits or a helper's draft, so a draft can be closed without saving (the helper can still recall it, #39).
 
+## 2026-11-23 (Tenants, #94)
+
+- **Tenants are records**: anyone signed in creates one and becomes its first admin. A tenant name is unique across Sprint (compared without case, spaces tidied); a blank or taken name is shown under the name field, as for every named object. Who is in a tenant stays on the permission platform, which now also lists the tenants a person is in.
+- **The page says which tenant a call works in**: one person can be in several tenants, so the channel names the tenant of each call (the page's tenant in the browser, a header over HTTP), and the permission checks make sure the caller is in it. Without one, the identity's organization is the tenant, as before; tenants from before records (the organization, `default`) keep working under their old names.
+
 ## 2026-11-23 (One file is one data source, #95)
 
 - **A data source is the one file it was made from**: pages no longer add files to a source (`addSourceFile` is deprecated and kept for sources made before). The list shows each source's file name, whether its file is still being read or could not be read (with the reason), and how many projects use it.
