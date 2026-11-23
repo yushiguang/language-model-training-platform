@@ -56,7 +56,7 @@ function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) =
     ...access,
   });
   wf.connect({agents: agents(wf)});
-  return {wf, api: loopback(wf.api) as WorkflowContract, catalog, tickets, jobs, labeling, forgotten};
+  return {wf, api: loopback(wf.api) as WorkflowContract, catalog, tickets, jobs, labeling, forgotten, gateway};
 }
 
 /** The tools as the runtime binds them for one turn: every call carries the turn's project, id and context. */
@@ -464,4 +464,26 @@ test('tenant models (#69): no default means the platform default; removing the d
   await api.deleteProject(a, {projectId: uses.id});
   assert.equal((await api.listModels(a)).find(m => m.id === m3.id)!.usedBy, 0, 'a project being deleted no longer holds its model');
   assert.deepEqual(await api.removeModel(a, {modelId: m3.id}), {});
+});
+
+test('tenant models (#69): a project page reads the models again when the gateway\'s cache lacks the one its settings use', async () => {
+  const {api, gateway, forgotten} = world('wf-models-stale', noHelpers);
+  const a = inTenant(alice, 't1');
+  const m = (await api.addModel(a, {name: 'New', endpoint: 'e', qpm: 1, tpm: 1})).model!;
+  const p = await api.createProject(a, 'Uses new');
+  // Another process's gateway: its cache was read before the model was added, until it is told to forget.
+  const fresh = gateway.labelingEndpointsFor.bind(gateway);
+  let stale = true;
+  Object.assign(gateway, {
+    labelingEndpointsFor: async (tenantId: string) => (stale ? gateway.labelingEndpoints() : fresh(tenantId)),
+    forgetTenant: (tenantId: string) => ((stale = false), void forgotten.push(tenantId)),
+  });
+  forgotten.length = 0;
+  const s = (await api.loadProjectState(a, p.id))!;
+  assert.equal(s.setup!.models[0].endpoint, m.id);
+  assert.deepEqual(s.endpoints.map(x => x.id), [m.id, 'A'], 'the page lists the model the project uses');
+  assert.deepEqual(forgotten, ['t1']);
+  // Nothing missing: no second read.
+  await api.loadProjectState(a, p.id);
+  assert.deepEqual(forgotten, ['t1']);
 });

@@ -12,7 +12,9 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
   module, is merged (#61); step 2, permissions and tenant isolation, is merged (#63); step 3,
   the job queue with per-key limits and the queue position on pages, is merged (#66); step 4,
   tenant models (managed by tenant admins, read per tenant by the gateway) and limits per tenant
-  and endpoint, is merged (#69). Step 5, the Optimiser as a chain of jobs, is next.
+  and endpoint, is merged (#69); step 6, notifications when scoring or Auto Optimise ends, is
+  merged (#71). Step 5, the Optimiser as a chain of jobs, is next. Step 7, the storage ports, is
+  in progress.
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
   tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are merged (see Done);
   step 3, action tools, is next, with their cards drawn on the UI design first.

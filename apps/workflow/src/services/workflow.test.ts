@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, ClientDiagnostics, RequestContext, SharedStatePort, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission} from '@yushiguang/sprint-contracts';
+import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, ClientDiagnostics, RequestContext, SharedStatePort, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, ProjectState, Schema, StructuredPrompt, TicketPort, TicketSubmission, NotificationPort, TelemetryPort, AuthorizationPort} from '@yushiguang/sprint-contracts';
 import {createCatalog} from '@yushiguang/sprint-catalog';
 import {createLabeling, labelingExecutor, memoryLocks} from '@yushiguang/sprint-labeling';
 import {createOptimiser, optimiserExecutor} from '@yushiguang/sprint-optimiser';
-import {DocRepo, localDocRuntime, memoryJobStore, memorySharedState} from '@yushiguang/sprint-platform';
+import {DocRepo, localDocRuntime, logNotifications, memoryJobStore, memorySharedState} from '@yushiguang/sprint-platform';
 import {createJobs} from '@yushiguang/sprint-jobs';
 import {createInstance, systemContext} from './app.ts';
 import {optimiserHost} from './optimiser-host.ts';
@@ -50,6 +50,9 @@ interface WorldOpts {
   sharedState?: SharedStatePort;
   /** The job module's wait before a retry (default its own). */
   retryDelayMs?: number;
+  notifications?: NotificationPort;
+  telemetry?: TelemetryPort;
+  authorization?: AuthorizationPort;
 }
 
 /** The helpers' tools on the world's project, with no turn: calls run as the world's caller. */
@@ -92,6 +95,9 @@ async function world(prefix: string, opts: WorldOpts = {}) {
     examples: {} as ExampleSource,
     standIns: [],
     tickets: opts.tickets,
+    notifications: opts.notifications,
+    telemetry: opts.telemetry,
+    authorization: opts.authorization,
     appVersion: '1.1.0-test',
     sharedState: opts.sharedState ?? memorySharedState(),
   });
@@ -2073,4 +2079,177 @@ test('a data source import whose caller lost tenant write (#63) fails at once, w
   assert.equal(jobs[0].state, 'failed');
   assert.equal(jobs[0].attempts, 1, 'not tried again');
   assert.equal((await w.catalog.get('source_files', res.file!.id))?.state, 'failed');
+});
+
+/** Notifications as the stand-in keeps them, and the notification metric's counts by kind and outcome. */
+function notifications() {
+  const port = logNotifications(100, () => {});
+  const counts: string[] = [];
+  const telemetry = {counter: (name: string, labels: Record<string, string>) => name === 'sprint_notifications_total' && counts.push(`${labels.notification}:${labels.outcome}`), event() {}, histogram() {}, gauge() {}, allowLabelValues() {}} as unknown as TelemetryPort;
+  return {port, counts, telemetry};
+}
+
+test('notifications (#71): scoring that finishes tells the person who started it, once, with a link to Prompt Tuning', async () => {
+  const n = notifications();
+  const w = await world('nt1', {notifications: n.port, telemetry: n.telemetry});
+  const v = await w.newVersion();
+  await scoreVersion(w.ws, w.projectId, v);
+  await w.jobs.idle();
+  assert.equal((await w.state()).runs[0].state, 'done');
+  const sent = n.port.sent();
+  assert.equal(sent.length, 1);
+  assert.deepEqual({...sent[0], msg: sent[0].msg?.key}, {
+    userIds: ['u_1'],
+    kind: 'scoring_finished',
+    projectId: w.projectId,
+    text: `Scoring ${versionLabel(v)} on Model A finished in p.`,
+    link: `/prompt/?p=${w.projectId}`,
+    title: 'Scoring finished',
+    msg: 'Scoring {version} on {model} finished in {project}.',
+  });
+  assert.deepEqual(n.counts, ['scoring_finished:ok']);
+  const notifyJobs = await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['notify.send']});
+  assert.deepEqual(notifyJobs.map(j => [j.state, j.concurrencyKey]), [['done', 'compute:default']]);
+});
+
+test('notifications (#71): scoring that fails says so; Retry that fails again says so again', async () => {
+  const n = notifications();
+  const w = await world('nt2', {notifications: n.port, answer: () => {
+    throw new Error('the model is down');
+  }});
+  const v = await w.newVersion();
+  const {runIds} = await scoreVersion(w.ws, w.projectId, v);
+  await w.jobs.idle();
+  assert.ok(['failed', 'needs_attention'].includes((await w.labeling.getTask(runIds[0]))!.state));
+  assert.deepEqual(n.port.sent().map(x => [x.kind, x.title]), [['scoring_failed', 'Scoring failed']]);
+  await scoreVersion(w.ws, w.projectId, v);
+  await w.jobs.idle();
+  assert.deepEqual(n.port.sent().map(x => x.kind), ['scoring_failed', 'scoring_failed'], 'a new run of the task is a new notification');
+});
+
+test("notifications (#71): a Stop sends nothing; work Sprint started on its own goes to the project's creator", async () => {
+  const n = notifications();
+  const w = await world('nt3', {notifications: n.port, delayMs: 20});
+  const v = await w.newVersion();
+  const {runIds} = await scoreVersion(w.ws, w.projectId, v);
+  await until(async () => (await w.state()).runs[0]?.state === 'running', 'scoring starts');
+  const {stopRun} = await import('./evaluation.ts');
+  await stopRun(w.ws, w.projectId, runIds[0]);
+  await w.jobs.idle();
+  assert.equal((await w.labeling.getTask(runIds[0]))!.state, 'stopped');
+  assert.deepEqual(n.port.sent(), [], 'the person who pressed Stop knows');
+  // A page's check and the sweep queue work as Sprint itself: the creator hears, or nobody when
+  // the project has none on record (made before creators were kept).
+  const {systemScope} = await import('./access.ts');
+  await scoreVersion(systemScope(w.inst, 'default'), w.projectId, await w.newVersion('another'));
+  await w.jobs.idle();
+  assert.equal((await w.state()).runs.filter(r => r.state === 'done').length, 1);
+  assert.deepEqual(n.port.sent(), []);
+  await w.catalog.patch('projects', w.projectId, {createdById: 'u_owner'});
+  await scoreVersion(systemScope(w.inst, 'default'), w.projectId, await w.newVersion('a third'));
+  await w.jobs.idle();
+  assert.deepEqual(n.port.sent().map(x => [x.kind, x.userIds]), [['scoring_finished', ['u_owner']]]);
+});
+
+test('notifications (#71): a send that fails is counted and fails nothing', async () => {
+  const n = notifications();
+  const w = await world('nt4', {notifications: {send: async () => {
+    throw new Error('the message tool is down');
+  }}, telemetry: n.telemetry});
+  const warn = console.warn;
+  console.warn = () => {};
+  try {
+    await scoreVersion(w.ws, w.projectId, await w.newVersion());
+    await w.jobs.idle();
+  } finally {
+    console.warn = warn;
+  }
+  const s = await w.state();
+  assert.equal(s.runs[0].state, 'done');
+  assert.equal(s.reports.length, 1, 'the report is built all the same');
+  assert.deepEqual(n.counts, ['scoring_finished:error']);
+  assert.deepEqual((await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['notify.send']})).map(j => j.state), ['done']);
+});
+
+test('notifications (#71): an Optimiser run that ends tells the person who started it', async () => {
+  const n = notifications();
+  const w = await world('nt5', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf, notifications: n.port});
+  await w.newVersion();
+  const {startOptimiser} = await import('./work.ts');
+  await startOptimiser(w.ws, w.projectId, 10);
+  await w.jobs.idle();
+  assert.equal((await w.state()).optimisation[0].state, 'done');
+  const ended = n.port.sent().filter(x => x.kind.startsWith('optimiser'));
+  assert.deepEqual(ended.map(x => [x.kind, x.userIds, x.text, x.link]), [['optimiser_finished', ['u_1'], 'Auto Optimise finished in p.', `/prompt/?p=${w.projectId}`]]);
+});
+
+test('notifications (#71): Stop on a Retry still waiting for its model sends nothing, though the task still shows its earlier failure', async () => {
+  const n = notifications();
+  const w = await world('nt6', {notifications: n.port, delayMs: 40, answer: () => {
+    throw new Error('the model is down');
+  }});
+  const v1 = await w.newVersion();
+  const {runIds} = await scoreVersion(w.ws, w.projectId, v1);
+  await w.jobs.idle();
+  assert.equal(n.port.sent().length, 1);
+  // Another version holds the model; the Retry of the first waits behind it, and is stopped there.
+  const v2 = await w.newVersion('another');
+  await scoreVersion(w.ws, w.projectId, v2);
+  await scoreVersion(w.ws, w.projectId, v1);
+  const retry = (await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask'], states: ['queued']})).find(j => j.args.taskId === runIds[0]);
+  assert.ok(retry, 'the Retry waits');
+  const {stopRun} = await import('./evaluation.ts');
+  await stopRun(w.ws, w.projectId, runIds[0]);
+  await w.jobs.idle();
+  const sent = n.port.sent().map(x => `${x.kind} ${(x.msg?.params as {version: string}).version}`);
+  assert.deepEqual(sent, [`scoring_failed ${versionLabel(v1)}`, `scoring_failed ${versionLabel(v2)}`], 'the stopped Retry adds nothing');
+});
+
+test("notifications (#71): work Sprint started goes to the creator only while they can still read the project", async () => {
+  const n = notifications();
+  const readers = new Set(['u_1', 'u_owner']);
+  const w = await world('nt7', {notifications: n.port, authorization: {allowed: async ctx => readers.has(ctx.user.id)}});
+  await w.catalog.patch('projects', w.projectId, {createdById: 'u_owner'});
+  const {systemScope} = await import('./access.ts');
+  await scoreVersion(systemScope(w.inst, 'default'), w.projectId, await w.newVersion());
+  await w.jobs.idle();
+  assert.deepEqual(n.port.sent().map(x => x.userIds), [['u_owner']]);
+  readers.delete('u_owner');
+  await scoreVersion(systemScope(w.inst, 'default'), w.projectId, await w.newVersion('another'));
+  await w.jobs.idle();
+  assert.equal((await w.state()).runs.filter(r => r.state === 'done').length, 2);
+  assert.equal(n.port.sent().length, 1, 'a creator who left is not told');
+});
+
+test('notifications (#71): a late notice of a failed try says nothing once a Retry finished; a caller who lost read access is not told', async () => {
+  const n = notifications();
+  const readers = new Set(['u_1']);
+  let failing = true;
+  const w = await world('nt8', {notifications: n.port, authorization: {allowed: async ctx => readers.has(ctx.user.id)}, answer: () => {
+    if (failing) throw new Error('the model is down');
+    return '{"format": "Vlog"}';
+  }});
+  const v = await w.newVersion();
+  const {runIds} = await scoreVersion(w.ws, w.projectId, v);
+  await w.jobs.idle();
+  const [failedNotice] = await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['notify.send']});
+  failing = false;
+  await scoreVersion(w.ws, w.projectId, v);
+  await w.jobs.idle();
+  assert.equal((await w.labeling.getTask(runIds[0]))!.state, 'done');
+  assert.deepEqual(n.port.sent().map(x => x.kind), ['scoring_failed', 'scoring_finished']);
+  // The failed try's notice, run again late (as a full compute queue would), says nothing now.
+  const {runNotify} = await import('./notify.ts');
+  await runNotify(w.ws, failedNotice);
+  assert.equal(n.port.sent().length, 2);
+  // A caller who lost read access while scoring ran hears nothing, and the notice ends done.
+  readers.delete('u_1');
+  const other = await w.newVersion('another');
+  readers.add('u_1');
+  await scoreVersion(w.ws, w.projectId, other);
+  readers.delete('u_1');
+  await w.jobs.idle();
+  assert.equal(n.port.sent().length, 2);
+  const notices = await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['notify.send']});
+  assert.ok(notices.length === 3 && notices.every(j => j.state === 'done'));
 });
