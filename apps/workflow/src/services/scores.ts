@@ -1,6 +1,6 @@
 import type {Job, JobOutcome} from '@yushiguang/sprint-contracts';
 import type {Scope} from './app.ts';
-import {scoreFromState, setRescoring} from './evaluation.ts';
+import {markRescoreEnded, scoreFromState} from './evaluation.ts';
 import {loadProjectState} from './projects.ts';
 import {computeKey} from './queue.ts';
 import {withLock} from './sources.ts';
@@ -55,7 +55,6 @@ export async function rescore(w: Scope, projectId: string): Promise<void> {
   if (!state) throw new Error('This project does not exist.');
   if (!state.scoring.ready) throw new Error('Scores are made once every label set is finished.');
   if (state.facts.goldHalves.optimiser < 2 || state.facts.goldHalves.heldOut < 2) throw new Error('Scoring needs more gold-labeled samples.');
-  await setRescoring(w, projectId, true);
   await w.jobs.enqueue(w.ctx, {kind: 'report.rescore', projectId, concurrencyKey: computeKey(w), args: {contextId: state.contextId}, idempotencyKey: `rescore:${projectId}:${state.contextId}`});
   w.emitChange(projectId);
 }
@@ -66,9 +65,8 @@ export async function runRescore(w: Scope, job: Job): Promise<JobOutcome> {
   try {
     await rebuildReports(w, projectId);
   } finally {
-    // Ended, either way: pages stop showing it as running, unless another one still waits.
-    const others = (await w.jobs.list(w.ctx, {projectId, kinds: ['report.rescore'], states: ['queued', 'running']}).catch(() => [])).filter(j => j.id !== job.id);
-    if (!others.length) await setRescoring(w, projectId, false);
+    // Ended, either way: pages stop counting this job as running.
+    await markRescoreEnded(w, job.id);
     w.emitChange(projectId);
   }
   return {state: 'done'};

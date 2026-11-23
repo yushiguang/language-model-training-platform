@@ -3,7 +3,7 @@ import {autoSpendUsd, dueStarts, settingsHash, versionLabel, type DueStart, syst
 import {now, type Scope} from './app.ts';
 import {tenantOf} from './sources.ts';
 import {postEvent} from './chat-events.ts';
-import {findTask, scoreFromState, settingsFor} from './evaluation.ts';
+import {cannotBuildOn, findTask, scoreFromState, settingsFor} from './evaluation.ts';
 import {modelName} from './page-views.ts';
 import {loadProjectState} from './projects.ts';
 import {lockHoldout} from './governance.ts';
@@ -164,12 +164,16 @@ export async function drive(w: Scope, state: ProjectState) {
 
   // Reports for scoring that finished while no page built them cost nothing: always built.
   // None while a label set is unfinished: no score can be made then (docs/design/server.md 4.3).
-  if (state.setup?.schema && state.scoring.ready) {
+  // Nor with fewer than 2 gold-labeled samples in a half, nor for a version whose answers do not
+  // cover today's samples: building would end with nothing, and be queued again at every check.
+  const {goldHalves} = state.facts;
+  if (state.setup?.schema && state.scoring.ready && goldHalves.optimiser >= 2 && goldHalves.heldOut >= 2) {
     const models = new Set(state.setup.models.map(m => m.endpoint));
-    for (const r of state.runs.filter(r => r.state === 'done' && models.has(r.endpoint))) {
-      // Only a first report: one a gold edit archived is rebuilt by the next reader of scores (lazy).
+    const skipped = await cannotBuildOn(w, projectId, state.contextId);
+    for (const r of state.runs.filter(r => r.state === 'done' && models.has(r.endpoint) && !skipped.has(`${r.promptVersionId}|${r.endpoint}`))) {
+      // Only a first report: one on an older basis is worked out again by Rescore only.
       if (state.reports.some(x => x.promptVersionId === r.promptVersionId && x.endpoint === r.endpoint)) continue;
-      const v = state.versions.find(v => v.id === r.promptVersionId);
+      const v = state.versions.find(v => v.id === r.promptVersionId && v.schemaVersion === state.setup!.schemaVersion);
       if (v) await w.jobs.enqueue(w.ctx, reportJob(w, projectId, v, r.endpoint));
     }
   }

@@ -27,21 +27,24 @@ async function markCannotBuild(w: Scope, projectId: string, contextId: string, k
   await w.shared.set(cannotBuildKey(projectId, contextId), [...had, key], CANNOT_BUILD_TTL_MS).catch(() => undefined);
 }
 
-const rescoringKey = (projectId: string) => `rescoring:${projectId}`;
-/** Long enough for any Rescore; a process that died mid-run frees the flag when it ends. */
-const RESCORING_TTL_MS = 30 * 60_000;
+const endedKey = (jobId: string) => `rescore-ended:${jobId}`;
+/** Long enough for the job store to show the job as ended. */
+const ENDED_TTL_MS = 10 * 60_000;
 
 /**
- * A Rescore of the project is waiting or running: set when one is queued, cleared (with a change
- * event) when it ends, so a page that read "rescoring" while the job was still finishing reads
- * again. Pages also need a live `report.rescore` job, so a job that never ran leaves no flag up.
+ * Of a project's waiting or running `report.rescore` jobs, those not finished yet. A job marks
+ * itself finished (in shared state, then a change event) just before it ends, so a page that read
+ * it while the job was still ending reads again and sees it gone. A failed read counts as not
+ * finished.
  */
-export async function rescoreRunning(w: Scope, projectId: string): Promise<boolean> {
-  return !!(await w.shared.get<boolean>(rescoringKey(projectId)).catch(() => null));
+export async function rescoresLeft(w: Scope, jobIds: string[]): Promise<number> {
+  let left = 0;
+  for (const id of jobIds) if (!(await w.shared.get<boolean>(endedKey(id)).catch(() => null))) left++;
+  return left;
 }
 
-export async function setRescoring(w: Scope, projectId: string, on: boolean): Promise<void> {
-  await (on ? w.shared.set(rescoringKey(projectId), true, RESCORING_TTL_MS) : w.shared.delete(rescoringKey(projectId))).catch(() => undefined);
+export async function markRescoreEnded(w: Scope, jobId: string): Promise<void> {
+  await w.shared.set(endedKey(jobId), true, ENDED_TTL_MS).catch(() => undefined);
 }
 
 /** Latest gold label per example for the current schema; older-schema labels are kept as hints. */

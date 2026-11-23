@@ -4,7 +4,7 @@ import {now, type Instance, type Scope} from './app.ts';
 import {withRetries} from './access.ts';
 import {getSamplingTask} from './dataset.ts';
 import {datasetSources, retireCuts, tenantOf} from './sources.ts';
-import {cannotBuildOn, latestGold, rescoreRunning} from './evaluation.ts';
+import {cannotBuildOn, latestGold, rescoresLeft} from './evaluation.ts';
 import {runView} from './views.ts';
 import {initSettings} from './settings.ts';
 import {indexOnly} from './features.ts';
@@ -211,7 +211,7 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
     labeled: progress.labeled,
     basis,
     ...stale,
-    rescoring: rescoreJobs.length > 0 && (await rescoreRunning(w, projectId)),
+    rescoring: (await rescoresLeft(w, rescoreJobs.map(j => j.id))) > 0,
   };
   return {...out, scoring, scoresUpdating: stale.staleVersionIds.length > 0};
 }
