@@ -1224,6 +1224,11 @@ test('take examples (#29): a new dataset from two sources, each example knows it
   assert.equal(new Set(s.examples.map(e => e.externalId)).size, s.examples.length);
   assert.ok(['b1', 'b2', 'b3', 'shared'].every(id => s.examples.some(e => e.externalId === id)));
   assert.equal(s.datasetSources.find(l => l.name === 'Two')!.examples + s.datasetSources.find(l => l.name === 'One')!.examples, s.examples.length);
+  // Sample numbers (docs/design/server.md 4.2): 1..n with no repeat, the added ones after the first take.
+  const numbers = s.examples.map(e => e.number!).sort((a, b) => a - b);
+  assert.deepEqual(numbers, Array.from({length: numbers.length}, (_, i) => i + 1));
+  assert.equal(s.snapshot?.numbered, true);
+  assert.ok(['b1', 'b2', 'b3'].some(id => s.examples.find(e => e.externalId === id)!.number! > 7), 'the second take is numbered after the first');
 });
 
 test('take examples: progress stays on until the dataset is saved; a save that fails twice is skipped and counted apart, the halves stay even; nothing saved fails the job and retires its segment', async () => {
@@ -2334,4 +2339,40 @@ test('notifications (#71): a late notice of a failed try says nothing once a Ret
   assert.equal(n.port.sent().length, 2);
   const notices = await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['notify.send']});
   assert.ok(notices.length === 3 && notices.every(j => j.state === 'done'));
+});
+
+test('sample numbers: an older dataset is numbered once in saved order; added samples follow; removing shifts nothing', async () => {
+  const w = await world('num1');
+  const {listSamples} = await import('./samples.ts');
+  const {appendExamples, removeExamples, restoreExamples} = await import('./governance.ts');
+  const s0 = await w.state();
+  const numberOf = async () => Object.fromEntries((await w.catalog.find('examples', {snapshotId: s0.snapshot!.id})).map(e => [e.externalId, e.number]));
+  assert.deepEqual(await numberOf(), Object.fromEntries(Array.from({length: EVAL}, (_, i) => [String(i), i + 1])), 'numbered in the order saved');
+  assert.equal((await w.catalog.get('dataset_snapshots', s0.snapshot!.id))?.numbered, true);
+  await w.state();
+  assert.equal((await numberOf())['9'], 10, 'a second read changes nothing');
+
+  const r = await appendExamples(w.ws, w.projectId, [{externalId: 'new-a', type: 'video', title: '', features: {}}, {externalId: 'new-b', type: 'video', title: '', features: {}}], 'upload');
+  assert.equal(r.added, 2);
+  assert.deepEqual([(await numberOf())['new-a'], (await numberOf())['new-b']], [11, 12]);
+
+  const third = s0.examples.find(e => e.externalId === '2')!;
+  await removeExamples(w.ws, w.projectId, [third.id], 'broken');
+  const live = await listSamples(w.ws, {projectId: w.projectId});
+  assert.equal(live.total, 11);
+  assert.deepEqual(live.items.slice(0, 3).map(x => x.number), [1, 2, 4], 'no number shifts');
+  assert.equal(live.items[0].labeled, true);
+  assert.equal(live.items.at(-1)?.labeled, false, 'added samples have no gold label yet');
+  const removed = await listSamples(w.ws, {projectId: w.projectId, filter: 'removed'});
+  assert.deepEqual(removed.items.map(x => [x.number, x.externalId, x.removal?.reason]), [[3, '2', 'broken']]);
+  await restoreExamples(w.ws, w.projectId, [removed.items[0].removal!.id]);
+  assert.equal((await listSamples(w.ws, {projectId: w.projectId, filter: 'removed'})).total, 0);
+  assert.equal((await numberOf())['2'], 3, 'restored with its own number');
+
+  // Pages and lookups by number or sample ID.
+  const page2 = await listSamples(w.ws, {projectId: w.projectId, offset: 5, limit: 5});
+  assert.deepEqual([page2.total, page2.items.map(x => x.number)], [12, [6, 7, 8, 9, 10]]);
+  assert.deepEqual((await listSamples(w.ws, {projectId: w.projectId, query: '#11'})).items.map(x => x.externalId), ['new-a']);
+  assert.deepEqual((await listSamples(w.ws, {projectId: w.projectId, query: 'new-b'})).items.map(x => x.number), [12]);
+  assert.deepEqual((await listSamples(w.ws, {projectId: w.projectId, query: '4'})).items.map(x => x.externalId), ['3', '4'], 'number 4, and the sample whose ID is 4');
 });

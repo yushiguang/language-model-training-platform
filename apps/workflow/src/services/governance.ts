@@ -3,6 +3,7 @@ import {addChecks, assignEvalHalves, checksTotal, computeFeatureMissingness, fea
 import {now, type Scope} from './app.ts';
 import {featuresOf} from './features.ts';
 import {loadProjectState} from './projects.ts';
+import {ensureNumbered, nextNumber} from './samples.ts';
 
 /**
  * Eval dataset governance (spec 1.0.0, 4.2 to 4.4): balanced halves and the holdout lock, adding
@@ -162,7 +163,10 @@ export async function appendExamples(
   const project = await catalog.get('projects', projectId);
   const snap = project?.snapshotId ? await catalog.get('dataset_snapshots', project.snapshotId) : null;
   if (!project || !snap) throw new Error('There is no eval dataset to add to yet.');
+  // New examples take the numbers after the last one (docs/design/server.md 4.2); one take runs at a time per project.
+  await ensureNumbered(w, snap);
   const existing = await catalog.find('examples', {snapshotId: snap.id});
+  const first = nextNumber(existing);
   const seen = new Set(existing.map(e => e.externalId));
   const fresh: typeof raws = [];
   for (const r of raws) {
@@ -175,7 +179,7 @@ export async function appendExamples(
   let saved: NewExample[] = [];
   if (fresh.length) {
     const live = existing.filter(e => !e.removed);
-    const added: NewExample[] = fresh.map(r => ({id: newId('ex'), snapshotId: snap.id, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: 'eval', optimiserHalf: false, ...(r.fetchedAt ? {fetchedAt: r.fetchedAt} : {}), ...(r.sourceId ? {sourceId: r.sourceId, sourceFileId: r.sourceFileId} : {})}));
+    const added: NewExample[] = fresh.map((r, i) => ({id: newId('ex'), snapshotId: snap.id, number: first + i, removed: false, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: 'eval', optimiserHalf: false, ...(r.fetchedAt ? {fetchedAt: r.fetchedAt} : {}), ...(r.sourceId ? {sourceId: r.sourceId, sourceFileId: r.sourceFileId} : {})}));
     const {current: gold} = await (await import('./evaluation.ts')).latestGold(w, projectId, (await catalog.get('setup_versions', project.setupVersionId ?? ''))?.schemaVersion ?? 0);
     // The ones there keep their half (as if locked); only the new ones are placed.
     const goldAnswers = Object.fromEntries(Object.entries(gold).map(([id, g]) => [id, g.answer]));

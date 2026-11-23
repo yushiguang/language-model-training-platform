@@ -13,6 +13,7 @@ import type {
   DatasetSnapshot,
   EndpointId,
   EndpointInfo,
+  ExampleType,
   Features,
   GoldLabel,
   LabelComment,
@@ -231,6 +232,40 @@ export interface RemoveExamplesRequest {
   reason: RemovalReason;
 }
 
+/**
+ * One page of the dataset's samples (docs/design/server.md 4.2), in number order. `filter`:
+ * 'live' (default) the samples in the dataset, 'removed' the removed ones. `query`: a sample ID,
+ * or a sample number. `limit` defaults to 50, at most 500.
+ */
+export interface ListSamplesRequest {
+  projectId: string;
+  filter?: 'live' | 'removed';
+  query?: string;
+  offset?: number;
+  limit?: number;
+}
+
+/** One sample as the Dataset page lists it. */
+export interface SampleRow {
+  number: number;
+  exampleId: string;
+  /** The sample ID from the data source. */
+  externalId: string;
+  type: ExampleType;
+  /** The data source it was taken from; null for older datasets. */
+  source: {id: string; name: string} | null;
+  /** Has a gold label for the current label. */
+  labeled: boolean;
+  /** Set on removed samples: the removal to pass to `restoreExamples`, and why. */
+  removal: {id: string; reason: RemovalReason; removedBy: string; removedAt: string} | null;
+}
+
+export interface SamplePage {
+  items: SampleRow[];
+  /** How many samples match the filter and query in all. */
+  total: number;
+}
+
 export interface RestoreExamplesRequest {
   projectId: string;
   removalIds: string[];
@@ -383,6 +418,8 @@ export interface BffContract {
   reviewGold(req: ReviewGoldRequest): Promise<void>;
   /** Removes examples (soft delete, each with a `DatasetRemoval`). */
   removeExamples(req: RemoveExamplesRequest): Promise<void>;
+  /** One page of the dataset's samples, by number (no features). Empty without a dataset. */
+  listSamples(req: ListSamplesRequest): Promise<SamplePage>;
   /** Puts removed examples back, in their old half. */
   restoreExamples(req: RestoreExamplesRequest): Promise<void>;
   /** Batch pruning; returns how many examples it removed. */

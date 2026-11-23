@@ -10,6 +10,7 @@ import {initSettings} from './settings.ts';
 import {indexOnly} from './features.ts';
 import {balanceHalves} from './governance.ts';
 import {computeKey} from './queue.ts';
+import {ensureNumbered} from './samples.ts';
 
 export type {ProjectState};
 
@@ -126,6 +127,8 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
     project.setupVersionId ? catalog.get('setup_versions', project.setupVersionId) : null,
     project.snapshotId ? catalog.get('dataset_snapshots', project.snapshotId) : null,
   ]);
+  // A dataset made before sample numbers gets them on its first read (docs/design/server.md 4.2).
+  if (snapshot && !snapshot.numbered) await ensureNumbered(w, snapshot);
   const schemaVersion = setup?.schemaVersion ?? 0;
   const [allExamples, {current: gold, stale: staleGold}, rawVersions, rawReports, tasks, optimisation, autoSpend, rawRemovals, rawComments] = await Promise.all([
     snapshot ? catalog.find('examples', {snapshotId: snapshot.id}, 'externalId') : [],
