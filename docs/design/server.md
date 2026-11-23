@@ -64,7 +64,7 @@
 
 - `createWorkflow` 的每个 contract 方法，按表校验（`action = workflow.<方法>`）。`listProjects` 另外按调用方租户过滤。
 - AI 工具宿主（`agentToolHost`）每次工具调用，以发起这一轮的用户身份：读工具要读，开始工作的工具（`try_prompt`、`score_version`、`start_optimiser`）要项目写（`action = tool.<工具名>`）。用户在一轮对话中途被移出租户，下一次工具调用就被拦下。
-- 工作流的异步任务执行时，以入队人的 `JobContext` 再查一次（`action = job.<类型>`）：`report.build`、`dataset.sample`、`project.delete` 要项目写，`source.ingest` 要租户写。被拒绝的任务直接失败、不重试；被拒绝的导入会把文件标成失败。`labeling.runTask` 在打标模块里执行，不经过工作流，它的入队入口已经查过。
+- 工作流的异步任务执行时，以入队人的 `JobContext` 再查一次（`action = job.<类型>`）：`report.build`、`dataset.sample`、`project.delete` 要项目写，`source.ingest` 要租户写。`notify.send` 要读，被拒绝时直接丢弃（不算失败）。被拒绝的任务直接失败、不重试；被拒绝的导入会把文件标成失败。`labeling.runTask` 在打标模块里执行，不经过工作流，它的入队入口已经查过。
 - `OptimiserHost` 每次调用，以运行的上下文（`action = optimiser.<方法>`），全部要项目写：只有优化器运行会调它，而运行会改项目、会花钱。启动人中途失去项目写时，下一轮第一次调用（读状态）就被拦下，不会再调付费的 AI。
 
 **系统调用方**：`sweep()` 列出所有租户的项目，每个项目用 `systemScope(项目的 tenantId)` 推进。页面的 `tick` 先按表要求调用方有读权限，再以同样的系统身份在项目的租户里推进，所以只读的成员打开页面也能让自动开始的工作排进队列，这些工作执行时只校验租户。
@@ -288,10 +288,21 @@ export interface ConfigReader {
 
 ## 8. 通知
 
-- 新增 `NotificationPort.send({userIds, kind, projectId, text, link, title?, msg?})`。`title` 是卡片标题；`msg` 是可翻译的消息（`Msg`），即时通讯卡片可以按收件人的语言显示。
-- 发送是尽力而为：失败只记日志和指标，不影响主操作（比如创建标注集照样成功）。
-- 本次的两个通知：创建标注集时通知标注人；添加标注人时通知被添加的人。
-- 默认替身只写日志；具体即时通讯工具的适配器由部署方提供。
+### 8.1 规则
+
+- 平台提供可选的 `NotificationPort`，发送是尽力而为：失败只记日志和指标，不影响主操作，也不重试。
+- 目前的通知：打标（评分）和自动优化结束时，告诉发起这次任务的人结果是完成还是失败。用户自己按了停止的、还没真正结束的（暂停、失联后放回队列）不发。
+- 设计里的两个标注集通知（创建标注集时通知标注人、添加标注人时通知被添加的人）在第 8 步做，contract 里已经留好 `kind`。
+- 默认替身只写日志；具体即时通讯工具的适配器由部署方提供（`docs/integration.md` 的 Notifications 一节）。
+
+### 8.2 实现（#71 已完成）
+
+- **Contract**（`packages/contracts/src/platform-api.ts`，新增）：`Platform.notifications?: NotificationPort`，`send(n)` 发不出去就抛错。`Notification = {userIds, kind, projectId, text, link, title?, msg?}`：`text` 是英文纯文本，`msg` 是同一句话的可翻译消息（`Msg`），卡片可以按收件人的语言显示；`title` 是英文标题（本身也是目录里的 key）；`link` 是站内路径（`/prompt/?p=<projectId>`），适配器在前面拼站点地址。内容只有项目名、版本号、模型名这类站内词，没有提示词、样本和标签。
+- **`NotificationKind`**：`scoring_finished`、`scoring_failed`、`optimiser_finished`、`optimiser_failed`，以及第 8 步用的 `label_set_created`、`labeler_added`。
+- **挂在任务的 `finally` 上**：`labeling.runTask` 和 `optimiser.run` 入队时带 `finally: notify.send`（`apps/workflow/src/services/notify.ts` 的 `notifyWhenEnded`），这是一个常规任务（`compute:<tenantId>`）。任务以任何终态结束都会入队一次（第 5.4 节），所以执行器不看任务状态，而是读记录：打标任务 `done` 发“完成”，`failed` / `needs_attention` 发“失败”，`stopped` 等其它状态不发；优化器运行 `done` / `failed` 同理。Retry 是新的任务，结束时再发一次。
+- **收件人**：任务的调用方，也就是入队的人。Sprint 自己入队的任务（保存版本后页面检查自动开始的评分、服务端巡检）以 `SYSTEM_CALLER` 运行，发给项目创建人（`Project.createdById`）；没有记录创建人的老项目不发。
+- **尽力而为**：工作流的 `notify(w, n)` 捕获发送错误，记 `sprint_notifications_total{notification, outcome="error"}` 和一行日志；成功记 `outcome="ok"`。`notify.send` 执行器总是以 done 结束、不重试；调用方已经没有读权限或项目已不在租户里时直接丢弃（done），不算失败。没有配置端口时什么都不发。第 8 步的标注集通知直接调 `notify`。
+- **交给第 5 步**：优化器改成链式任务后，`optimiser.run` 不再代表整次运行，`finally: notifyWhenEnded(..., {about: 'optimiser', runId})` 要挂在链的最后一个任务上（运行进入 `done` / `failed` 的那一步）；执行器读运行状态，中途结束的任务不会误发。
 
 ## 9. 租户和模型
 
@@ -314,7 +325,7 @@ export interface ConfigReader {
 | `PermissionAdminPort`；`AuthorizationRequest.permission` | 新增（第 2 步，#63 已完成） |
 | `JobRequest.concurrencyKey` 和 `finally`、`claimNext` 按键限并发、`countAhead`、`requestCancel` / `recoverExpired` 返回结束的任务、`JobsContract.ahead` | 破坏性：部署方的 `JobStorePort` 要改（第 3 步，#66 已完成） |
 | `ConfigPort`（`get`，可选 `getMany` / `subscribe`），移除 `TenantConfigPort` | 破坏性（第 1 步，#61 已完成） |
-| `NotificationPort`（尽力而为） | 新增 |
+| `NotificationPort`（尽力而为）、任务类型 `notify.send` | 新增（第 6 步，#71 已完成） |
 | `OptimiserContract.startRun` / `execute` / `stopRun`、`OptimiserHost` 每次调用和 `reflectPrompt` 带调用方上下文 | 破坏性（第 2 步，#63 已完成） |
 | `OptimiserHost.label` 改为入队打标任务，打标任务 `args` 带 `optimiserRunId` / `round` / `step` | 破坏性（第 5 步） |
 | `LabelCallRequest`、对话请求和 `TryTemplateInput`（Prompt helper 的试跑）带 `tenantId`；模型按租户读取；`LabelingModels` / `AgentModel` 接受动态 endpoint；限流键改为“租户 + endpoint” | 破坏性：部署方的网关适配和限流存储要改 |
@@ -330,7 +341,7 @@ export interface ConfigReader {
 3. 任务队列：`concurrencyKey`、`finally`（任何终态都续链）、按键限并发的 `claimNext`、排队位置、失败状态统一。（#66 已完成）
 4. 模型和网关：模型按租户读取、请求带 `tenantId`、限流键改为“租户 + endpoint”。
 5. 优化器改为按 `(runId, round, step)` 推进的链式任务：每个打标阶段入队，巡检识别等打标的运行，Stop 取消排队中和运行中的打标。
-6. 通知端口。
+6. 通知端口：评分和自动优化结束时通知发起人。（#71 已完成）
 7. 存储接口：`ObjectStorePort`，以及基于它的 `LabelingStorePort`、`FeatureStorePort`（issue #58）。
 8. 数据集和标注集：样本序号、软删除、标注集、清空受影响的人工标签。
 9. 分数和 Rescore：标注集全部完成才算分、Rescore 横幅所需的“分数是否过期”。
