@@ -85,10 +85,12 @@ async function world(prefix: string, opts: WorldOpts = {}) {
     },
   } as unknown as LlmGatewayContract;
   // Labeling's writes reach the workflow's change events and revisions, as in the browser build.
-  const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks(), onChange: id => inst.emitChange(id ?? null)});
-  const agents = opts.agents ?? ({} as AgentRuntimeContract);
   // Background work runs through the job module, in this process, as in the browser build.
   const jobs = createJobs({store: memoryJobStore(), ...(opts.retryDelayMs ? {retryDelayMs: opts.retryDelayMs} : {})});
+  // As the composition root wires it: a task live as job work is never read as abandoned.
+  const liveElsewhere = async (task: {id: string; projectId: string}) => (await jobs.api.list(systemContext('labeling'), {projectId: task.projectId, kinds: ['labeling.runTask'], states: ['queued', 'running']})).some(j => j.args.taskId === task.id);
+  const labeling = createLabeling({db, catalog, gateway, locks: memoryLocks(), liveElsewhere, onChange: id => inst.emitChange(id ?? null)});
+  const agents = opts.agents ?? ({} as AgentRuntimeContract);
   const inst = createInstance({
     jobs: jobs.api,
     catalog,
@@ -533,21 +535,24 @@ test('an Optimiser run whose labeling waits for its model shows its place, and S
   assert.equal((await w.state()).optimisation.find(o => o.id === runId)?.state, 'stopped');
 });
 
-test('Stop on an Optimiser run whose runner holds its lock saves the Stop; the runner reads it and ends the run as stopped (#66, #79)', async () => {
+test('Stop on an Optimiser run whose runner holds its lock asks it to stop; the runner ends the run as stopped (#66, #79)', async () => {
   const w = await world('b5e', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf, delayMs: 30});
   await w.newVersion();
   const {stopOptimiser} = await import('./work.ts');
   const {id: runId} = await w.ws.optimiser!.startRun(w.ws.ctx, {projectId: w.projectId, endpoint: 'A', maxRounds: 10});
-  // A runner in another process holds the run's lock: the Stop is saved on the record anyway.
+  // A runner in another process holds the run's lock: the Stop is saved as a request, never as
+  // the state a runner's save could write over.
   await w.ws.locks.run(`optimiser:${w.projectId}:A`, async () => {
     await stopOptimiser(w.ws, w.projectId, runId);
-    assert.equal((await w.state()).optimisation.find(o => o.id === runId)?.state, 'stopped');
+    const asked = (await w.state()).optimisation.find(o => o.id === runId)!;
+    assert.deepEqual([asked.state, asked.stopRequested], ['running', true]);
   });
-  // A runner that then works on it (here: a Retry's job, as a stand-in for that runner) never writes over the Stop.
+  // The runner (here a later run of it) reads the request before its first save and ends the run as stopped.
   const run = await w.ws.optimiser!.execute(w.ws.ctx, runId);
-  assert.equal(run, null, 'a stopped run is not run again');
+  assert.deepEqual([run?.state, run?.stopReason], ['stopped', 'user']);
   assert.equal((await w.state()).optimisation.find(o => o.id === runId)?.state, 'stopped');
   await w.jobs.idle();
+  assert.equal(w.calls.n, 0, 'nothing was labeled for it');
 });
 
 test('a runner that reads a Stop saved meanwhile ends the run as stopped and labels nothing more (#79)', async () => {
@@ -559,7 +564,7 @@ test('a runner that reads a Stop saved meanwhile ends the run as stopped and lab
   const labeling = (w.inst as unknown as {labeling: Parameters<typeof createOptimiser>[0]['labeling']}).labeling;
   const loadState = host.loadState;
   host.loadState = async (ctx, projectId) => {
-    await w.catalog.patch('optimisation_runs', runId, {state: 'stopped', stopReason: 'user'});
+    await w.catalog.patch('optimisation_runs', runId, {stopRequested: true});
     return loadState(ctx, projectId);
   };
   const opt = createOptimiser({catalog: w.catalog, labeling, agents: ruleAgent(), host, onChange: w.inst.emitChange, random: () => optimiserRandom()});
@@ -600,6 +605,8 @@ test('Stop on a run whose labeling waits, then a new run on the same version, ru
   await stopOptimiser(w.ws, w.projectId, first.runId);
   await w.jobs.idle();
   assert.equal((await w.state()).optimisation.find(o => o.id === first.runId)?.state, 'stopped');
+  const firstLabeling = (await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask']})).find(j => j.args.optimiserRunId === first.runId)!;
+  assert.equal((await w.labeling.getTask(String(firstLabeling.args.taskId)))?.state, 'stopped', "the first run's task is stopped, not left with a Stop pending");
   const second = await startOptimiser(w.ws, w.projectId, 10, v.id);
   await w.jobs.idle();
   const run = (await w.state()).optimisation.find(o => o.id === second.runId)!;
@@ -726,6 +733,27 @@ test('Auto Optimise as chained jobs (#79): the sweep goes on with a run left at 
   await retryOptimiser(w.ws, w.projectId, runId);
   await w.jobs.idle();
   assert.equal((await w.state()).optimisation[0].state, 'done', 'Retry queues the labeling again and the run goes on');
+});
+
+test('Auto Optimise as chained jobs (#79): a run lost while its labeling waited is failed, and its task is never resumed as scoring', async () => {
+  const w = await world('b79e', {agents: ruleAgent(), answer: ruled, macroF1: 0.99, gold: goldOf});
+  const v = await w.newVersion();
+  const s0 = await w.state();
+  const {retryOptimiser} = await import('./work.ts');
+  const {id: runId} = await w.ws.optimiser!.startRun(w.ws.ctx, {projectId: w.projectId, endpoint: 'A', maxRounds: 10, startVersionId: v.id});
+  // Its first labeling task exists, but its job was lost (a closed page): left paused.
+  const task = await w.labeling.createTask({projectId: w.projectId, tenantId: 'default', purpose: 'optimiser', promptVersionId: v.id, setupVersionId: s0.setup!.id, endpoint: 'A', settings: s0.setup!.models[0], exampleIds: s0.examples.map(e => e.id), createdBy: 'optimiser'});
+  await new DocRepo(w.db).patch('labeling_tasks', task.id, {state: 'paused', stopReason: 'closed'});
+  await w.catalog.patch('optimisation_runs', runId, {step: 'parent'});
+  // Scoring the version is due too, but never by resuming the run's own task.
+  await tick(w.ws, await w.state());
+  const labeling = await w.jobs.api.list(w.ws.ctx, {projectId: w.projectId, kinds: ['labeling.runTask']});
+  assert.ok(labeling.every(j => j.args.taskId !== task.id), "the run's task is not resumed by the sweep");
+  await w.jobs.idle();
+  assert.equal((await w.state()).optimisation[0].state, 'failed', 'the run waits for Retry');
+  await retryOptimiser(w.ws, w.projectId, runId);
+  await w.jobs.idle();
+  assert.equal((await w.state()).optimisation[0].state, 'done');
 });
 
 test('Auto Optimise as chained jobs (#79): the sweep fails a run lost between labeling steps; Retry goes on', async () => {

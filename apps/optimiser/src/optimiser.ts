@@ -226,17 +226,32 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
    * labeling job (still `running`). `at`: this call goes on after the labeling at that position.
    */
   async function runLoop(given: OptimisationRun, ctx: RequestContext, opts: {resumed?: boolean; at?: OptimiserPosition} = {}): Promise<OptimisationRun> {
+    const entry = {ctrl: new AbortController(), projectId: given.projectId};
+    active.set(given.id, entry);
+    try {
+      return await loop(given, ctx, entry, opts);
+    } finally {
+      active.delete(given.id);
+    }
+  }
+
+  async function loop(given: OptimisationRun, ctx: RequestContext, entry: {ctrl: AbortController; projectId: string}, opts: {resumed?: boolean; at?: OptimiserPosition}): Promise<OptimisationRun> {
     const host = bindHost(deps.host, ctx);
-    const run: OptimisationRun = {...given, state: 'running', error: null, finishedAt: null, history: [...(given.history ?? [])]};
+    // `stopRequested` is the workflow's alone: a runner's save never writes it, so it is never lost.
+    const {stopRequested: _asked, ...fields} = given;
+    const run: OptimisationRun = {...fields, state: 'running', error: null, finishedAt: null, history: [...(given.history ?? [])]};
     const {projectId, endpoint} = run;
-    const entry = {ctrl: new AbortController(), projectId};
-    active.set(run.id, entry);
     const signal = entry.ctrl.signal;
     /**
-     * A Stop saved on the record while this runner worked (the workflow saves it from any process,
-     * docs/design/server.md, 4.4): never written over. Read before every save.
+     * A Stop the workflow asked for while this runner held the run (docs/design/server.md, 4.4):
+     * `stopRequested`, or the run already saved as stopped. Read before every save, so the runner
+     * ends the run as stopped itself, under its lock.
      */
-    const stopSaved = async () => run.state !== 'stopped' && (await catalog.get('optimisation_runs', run.id))?.state === 'stopped';
+    const stopSaved = async () => {
+      if (run.state === 'stopped') return false;
+      const now = await catalog.get('optimisation_runs', run.id);
+      return !!now && (now.stopRequested === true || now.state === 'stopped');
+    };
     const endAsStopped = () => {
       run.state = 'stopped';
       run.stopReason = 'user';
@@ -250,11 +265,41 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
         entry.ctrl.abort();
         throw aborted();
       }
+      await write();
+    };
+    const write = async () => {
       const {id: _id, ...rest} = run;
       await catalog.patch('optimisation_runs', run.id, rest);
       onChange(run.projectId);
     };
-    await save();
+    /** Ends the run: its last save (no Stop check: a Stop asked meanwhile already made it stopped) and its metrics. */
+    const end = async () => {
+      if (await stopSaved()) endAsStopped();
+      Object.assign(run, {finishedAt: nowIso(), step: null, stepStartedAt: null, stepVersionId: null});
+      await write();
+      const outcome = run.state === 'done' ? (run.stopReason ?? 'max_rounds') : run.state;
+      const kept = run.history.filter(h => h.outcome === 'kept');
+      tm.counter('sprint_optimiser_runs_total', {slot: endpoint, outcome});
+      if (run.state === 'stopped') tm.event('optimiser_stopped_by_user', {slot: endpoint, candidates: run.candidates, cost_usd: run.costUsd});
+      tm.event('optimiser_ended', {
+        slot: endpoint,
+        outcome,
+        rounds: run.round,
+        candidates: run.candidates,
+        kept: kept.length,
+        cost_usd: run.costUsd,
+        best_lowest_field_macro_f1: kept.length ? Math.max(...kept.map(h => h.score ?? 0)) : null,
+      });
+      return run;
+    };
+    try {
+      await save();
+    } catch (e) {
+      if (!isAbort(e)) throw e;
+      // Stopped before it began: ended here, as stopped.
+      endAsStopped();
+      return end();
+    }
     // A run that goes on after its labeling is the same run: started once.
     if (!opts.at) tm.event('optimiser_started', {slot: endpoint, trigger: run.auto ? 'auto' : 'user', resumed: !!opts.resumed, max_rounds: run.maxRounds});
 
@@ -555,8 +600,6 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
           run.history[run.history.length - 1] = {...last, outcome: stopped ? 'stopped' : 'failed', step: failedStep};
         }
       }
-    } finally {
-      active.delete(run.id);
     }
     // Waiting: the position (round and step) is saved; the labeling job's `finally` goes on from it.
     if (waiting) {
@@ -568,22 +611,7 @@ export function createOptimiser(deps: OptimiserDeps): OptimiserContract {
         endAsStopped();
       }
     }
-    if (await stopSaved()) endAsStopped();
-    await save({finishedAt: nowIso(), step: null, stepStartedAt: null, stepVersionId: null});
-    const outcome = run.state === 'done' ? (run.stopReason ?? 'max_rounds') : run.state;
-    const kept = run.history.filter(h => h.outcome === 'kept');
-    tm.counter('sprint_optimiser_runs_total', {slot: endpoint, outcome});
-    if (run.state === 'stopped') tm.event('optimiser_stopped_by_user', {slot: endpoint, candidates: run.candidates, cost_usd: run.costUsd});
-    tm.event('optimiser_ended', {
-      slot: endpoint,
-      outcome,
-      rounds: run.round,
-      candidates: run.candidates,
-      kept: kept.length,
-      cost_usd: run.costUsd,
-      best_lowest_field_macro_f1: kept.length ? Math.max(...kept.map(h => h.score ?? 0)) : null,
-    });
-    return run;
+    return end();
   }
 
   return {

@@ -77,6 +77,7 @@ export function dueStarts(state: ProjectState): DueStart[] {
   for (const r of state.runs) {
     if (r.state !== 'paused' || !models.includes(r.endpoint)) continue;
     // Optimiser labeling resumes with its run (Retry), not by itself.
+    if (r.purpose === 'optimiser') continue;
     if (state.optimisation.some(o => (o.history ?? []).some(h => h.versionId === r.promptVersionId))) continue;
     const v = state.versions.find(x => x.id === r.promptVersionId);
     if (!v) continue;

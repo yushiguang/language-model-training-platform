@@ -1,4 +1,4 @@
-import type {EndpointId, Job, JobOutcome, JobRequest, LabelingTask, OptimiserLabelRequest, OptimiserLabeling, OptimiserPosition, ProjectState, PromptVersion, SetupVersion, StartedRuns} from '@yushiguang/sprint-contracts';
+import type {EndpointId, Job, JobOutcome, JobRequest, LabelingTask, OptimisationRun, OptimiserLabelRequest, OptimiserLabeling, OptimiserPosition, ProjectState, PromptVersion, SetupVersion, StartedRuns} from '@yushiguang/sprint-contracts';
 import {OPTIMISER_LABELING_STEPS} from '@yushiguang/sprint-contracts';
 import {autoSpendUsd, dueStarts, settingsHash, versionLabel, type DueStart, systemConfig, msg} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
@@ -163,7 +163,7 @@ export async function drive(w: Scope, state: ProjectState) {
     const fresh = await optimiser.getRun(o.id);
     if (fresh?.state !== 'running' || (await optimiser.isRunning(o.id))) continue;
     const step = OPTIMISER_LABELING_STEPS.find(s => s === fresh.step);
-    if (step) {
+    if (step && !fresh.stopRequested) {
       // Its own key: the follow-up the labeling job's end queues (as the person who started the
       // run) is never taken over by this one; the second of the two to run finds nothing to do.
       const at = {round: fresh.round, step};
@@ -176,7 +176,10 @@ export async function drive(w: Scope, state: ProjectState) {
       const live = await activeJobs(w, projectId, ['optimiser.run', 'labeling.runTask']);
       if (live.some(j => (j.kind === 'optimiser.run' ? j.args.runId : j.args.optimiserRunId) === o.id)) return;
       const run = await optimiser.getRun(o.id);
-      if (run?.state !== 'running' || OPTIMISER_LABELING_STEPS.some(s => s === run.step)) return;
+      if (run?.state !== 'running') return;
+      // A Stop asked of a runner that went away: ended as stopped.
+      if (run.stopRequested) return endStopped(w, run);
+      if (OPTIMISER_LABELING_STEPS.some(s => s === run.step)) return;
       const last = run.history.at(-1);
       const history = last?.outcome === 'running' ? [...run.history.slice(0, -1), {...last, outcome: 'failed' as const, step: last.step ?? run.step ?? undefined}] : run.history;
       await catalog.patch('optimisation_runs', o.id, {state: 'failed', error: 'The Optimiser stopped unexpectedly. Retry goes on from where it stopped.', finishedAt: now(), step: null, stepStartedAt: null, stepVersionId: null, history});
@@ -287,6 +290,12 @@ export async function queueOptimiserLabeling(w: Scope, setup: SetupVersion, vers
       finally: goOnAfter(w, projectId, runId, at),
     });
   const create = () => w.labeling.createTask({projectId, tenantId: tenantOf(w), purpose: 'optimiser', promptVersionId: version.id, setupVersionId: setup.id, endpoint, settings, exampleIds, createdBy: 'optimiser'});
+  const stopped = async () => {
+    const run = await w.optimiser?.getRun(runId);
+    return !!run && (run.state === 'stopped' || run.stopRequested === true);
+  };
+  // A run stopped meanwhile queues nothing (its runner ends it as stopped at its next save).
+  if (await stopped()) return {state: 'unfinished', task, error: 'the run was stopped'};
   task ??= await create();
   // Another start queued a job for the same task just now (the same idempotency key): that job does
   // not go on with this run, so the run labels in a task of its own.
@@ -297,7 +306,7 @@ export async function queueOptimiserLabeling(w: Scope, setup: SetupVersion, vers
   }
   // A Stop saved meanwhile may have listed the run's jobs before this one: cancelled here, so no
   // labeling of a stopped run is paid for (Stop saves first, then cancels what it finds).
-  if ((await w.optimiser?.getRun(runId))?.state === 'stopped') {
+  if (await stopped()) {
     await w.jobs.cancel(w.ctx, job.id);
     await w.labeling.stopTask(task.id);
   }
@@ -313,47 +322,65 @@ async function runOf(w: Scope, projectId: string, runId: string) {
 }
 
 /**
- * The user's Stop on a run (docs/design/server.md, 4.4): saves the run as stopped on its record,
- * without relying on any runner's memory, then cancels its queued and running `optimiser.run`
- * jobs and labeling jobs and stops those tasks (a running one stops calling the model). A runner
- * still working on the run reads the Stop before its next save and ends the run as stopped; the
- * follow-up a cancelled labeling job queues finds it stopped and does nothing.
+ * The user's Stop on a run (docs/design/server.md, 4.4), without relying on any runner's memory:
+ * with the run's lock free, the run is saved as stopped under it; while a runner holds it, the
+ * Stop is saved as `stopRequested`, which the runner reads before its next save and then ends the
+ * run as stopped itself (a runner never writes that field, so the request is never lost). Then
+ * the run's queued and running `optimiser.run` and labeling jobs are cancelled and those tasks
+ * stopped (a running one stops calling the model); the follow-up a cancelled labeling job queues
+ * finds the run stopped, or ends it as stopped.
  */
 export async function stopOptimiser(w: Scope, projectId: string, runId: string): Promise<void> {
   const run = await runOf(w, projectId, runId);
   const optimiser = optimiserService(w);
-  const stopped = await saveStopped(w, projectId, runId, run.endpoint);
-  // Read after the Stop is saved: a runner that queues labeling from now on sees it (`queueOptimiserLabeling`).
+  const how = await saveStop(w, projectId, runId, run.endpoint);
+  // Read after the Stop is saved: whoever queues labeling from now on sees it (`queueOptimiserLabeling`).
   const jobs = (await activeJobs(w, projectId, ['optimiser.run', 'labeling.runTask'])).filter(j => (j.kind === 'optimiser.run' ? j.args.runId : j.args.optimiserRunId) === runId);
   for (const j of jobs) await w.jobs.cancel(w.ctx, j.id);
   await optimiser.stopRun(w.ctx, runId);
   for (const j of jobs.filter(j => j.kind === 'labeling.runTask')) await w.labeling.stopTask(String(j.args.taskId));
-  if (!stopped) return;
-  // Once, here: the action line and the run's end in metrics (a runner that ends it as stopped later adds its own).
-  const fresh = await optimiser.getRun(runId);
-  w.tm.event('optimiser_stopped_by_user', {slot: run.endpoint, candidates: fresh?.candidates ?? run.candidates, cost_usd: fresh?.costUsd ?? run.costUsd});
+  if (!how) return;
   // The action line is best effort: the run has stopped either way, even if it cannot be written.
   await postEvent(w, projectId, 'stop', 'user', msg('stopped the Optimiser'), {path: '/prompt'}).catch(() => undefined);
   w.emitChange(projectId);
 }
 
+/** What ending a stopped run records when no runner does: the same metrics a runner records. */
+function stoppedMetrics(w: Scope, run: OptimisationRun) {
+  const kept = run.history.filter(h => h.outcome === 'kept');
+  w.tm.counter('sprint_optimiser_runs_total', {slot: run.endpoint, outcome: 'stopped'});
+  w.tm.event('optimiser_stopped_by_user', {slot: run.endpoint, candidates: run.candidates, cost_usd: run.costUsd});
+  w.tm.event('optimiser_ended', {slot: run.endpoint, outcome: 'stopped', rounds: run.round, candidates: run.candidates, kept: kept.length, cost_usd: run.costUsd, best_lowest_field_macro_f1: kept.length ? Math.max(...kept.map(h => h.score ?? 0)) : null});
+}
+
 /**
- * Saves a run as stopped. Under the run's lock when it is free, reading the run again inside (a
- * runner may have ended it just before); when a runner holds the lock, saved anyway after a fresh
- * read, and that runner reads it before its next save. Says whether this call stopped it.
+ * Saves the Stop: `saved` (stopped here, under the run's lock, everything read again inside),
+ * `asked` (a runner holds the lock: `stopRequested` for it to act on), or null (already ended).
  */
-async function saveStopped(w: Scope, projectId: string, runId: string, endpoint: EndpointId): Promise<boolean> {
+async function saveStop(w: Scope, projectId: string, runId: string, endpoint: EndpointId): Promise<'saved' | 'asked' | null> {
   const optimiser = optimiserService(w);
-  const write = async () => {
+  const open = (r: OptimisationRun | null): r is OptimisationRun => !!r && ['running', 'paused', 'failed'].includes(r.state);
+  const locked = await w.locks.run(optimiserLock(projectId, endpoint), async () => {
     const run = await optimiser.getRun(runId);
-    if (!run || !['running', 'paused', 'failed'].includes(run.state)) return false;
-    const last = run.history.at(-1);
-    const history = last?.outcome === 'running' ? [...run.history.slice(0, -1), {...last, outcome: 'stopped' as const}] : run.history;
-    await w.catalog.patch('optimisation_runs', runId, {state: 'stopped', stopReason: 'user', error: null, finishedAt: now(), step: null, stepStartedAt: null, stepVersionId: null, history});
-    return true;
-  };
-  const locked = await w.locks.run(optimiserLock(projectId, endpoint), write);
-  return locked ?? (await write());
+    if (!open(run)) return 'ended' as const;
+    if (await optimiser.isRunning(runId)) return 'busy' as const;
+    await endStopped(w, run);
+    return 'saved' as const;
+  });
+  if (locked === 'saved') return 'saved';
+  if (locked === 'ended') return null;
+  // A runner holds the run (the lock is busy): it reads the request before its next save.
+  if (!open(await optimiser.getRun(runId))) return null;
+  await w.catalog.patch('optimisation_runs', runId, {stopRequested: true});
+  return 'asked';
+}
+
+/** Saves a run with no runner as stopped (its round in progress too) and records its end. */
+async function endStopped(w: Scope, run: OptimisationRun) {
+  const last = run.history.at(-1);
+  const history = last?.outcome === 'running' ? [...run.history.slice(0, -1), {...last, outcome: 'stopped' as const}] : run.history;
+  await w.catalog.patch('optimisation_runs', run.id, {state: 'stopped', stopReason: 'user', error: null, finishedAt: now(), step: null, stepStartedAt: null, stepVersionId: null, history});
+  stoppedMetrics(w, run);
 }
 
 /** Retry on a Failed run, or Resume on a paused one: queues it again; it goes on from the step it stopped at. */
