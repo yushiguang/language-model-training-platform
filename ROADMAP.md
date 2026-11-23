@@ -6,17 +6,6 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Now
 
-- **Server design for the reworked Prompt Tuning project** (#59). Permissions, a job queue with
-  per-endpoint limits, bulk storage, a config module and notifications, delivered as the
-  numbered pull requests in the issue. The design doc is merged (#60); step 1, the config
-  module, is merged (#61); step 2, permissions and tenant isolation, is merged (#63); step 3,
-  the job queue with per-key limits and the queue position on pages, is merged (#66); step 4,
-  tenant models (managed by tenant admins, read per tenant by the gateway) and limits per tenant
-  and endpoint, is merged (#69); step 6, notifications when scoring or Auto Optimise ends, is
-  merged (#71); step 7, object storage for feature snapshots and model answers, is merged (#72);
-  step 8, sample numbers and label sets, is merged (#82); step 5, the Optimiser as a chain of
-  jobs, is merged (#79); step 9, scores from label sets and Rescore, is merged (#86). Every step
-  of the plan is merged.
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
   tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are merged (see Done);
   step 3, action tools, is next, with their cards drawn on the UI design first.
@@ -35,6 +24,14 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Done
 
+- 2026-11-23: the server design for the reworked Prompt Tuning project (#59) is fully delivered:
+  the design doc (#60) and steps 1 to 9, each listed below.
+- 2026-11-23: notifications (#59 step 6): when scoring or Auto Optimise ends, the person who
+  started it gets a "finished" or "failed" notice; work Sprint starts itself goes to the
+  project's creator; sending is best effort (#71, #73, #76).
+- 2026-11-23: the job queue with per-key limits (#59 step 3): one model job at a time per tenant
+  and endpoint, ten compute jobs per tenant, the queue position on pages, Stop for queued and
+  running work (#66, #67, #68).
 - 2026-11-23: scores from label sets and Rescore (#59 step 9): scores are made only once every
   label set is finished and only on their samples, a score records the basis it rests on, and
   out-of-date scores are worked out again by a queued Rescore (#86, #87).
