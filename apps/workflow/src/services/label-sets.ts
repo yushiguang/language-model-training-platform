@@ -1,10 +1,10 @@
-import type {CreateLabelSetRequest, CreateLabelSetsRequest, DocFilterExpression, LabelSet, LabelSetList, UpdateLabelSetRequest} from '@yushiguang/sprint-contracts';
+import type {CreateLabelSetRequest, CreateLabelSetsRequest, LabelSet, LabelSetList, UpdateLabelSetRequest} from '@yushiguang/sprint-contracts';
 import {msg, newId} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {withRetries} from './access.ts';
 import {latestGold} from './evaluation.ts';
 import {notify} from './notify.ts';
-import {ensureNumbered} from './samples.ts';
+import {ensureNumbered, withSamplesLock} from './samples.ts';
 import {withLock} from './sources.ts';
 
 /**
@@ -24,7 +24,6 @@ const NAME_MAX = 80;
 
 const goldPage = (projectId: string, setId: string) => `/gold/?p=${encodeURIComponent(projectId)}&set=${encodeURIComponent(setId)}`;
 const setName = (s: Pick<LabelSet, 'name' | 'number'>) => s.name || `#${s.number}`;
-const field = (name: string, op: '==' | '>=', value: unknown): DocFilterExpression => ({type: 'field', field: name, op, value});
 
 async function datasetOf(w: Scope, projectId: string) {
   const project = await w.catalog.get('projects', projectId);
@@ -37,12 +36,14 @@ async function datasetOf(w: Scope, projectId: string) {
 
 const setsOf = async (w: Scope, projectId: string) => (await w.catalog.find('label_sets', {projectId})).sort((a, b) => a.number - b.number);
 
-/** The numbers of the samples not removed and in no set yet, in order: what new sets take from. */
+/**
+ * The numbers of the samples not removed and in no set yet, in order: what new sets take from.
+ * Read whole (the store pages through them), never one page of them.
+ */
 async function unassignedNumbers(w: Scope, snapshotId: string, sets: LabelSet[]): Promise<number[]> {
   const start = sets.reduce((n, s) => Math.max(n, s.last), 0) + 1;
-  const where: DocFilterExpression = {type: 'and', filters: [field('snapshotId', '==', snapshotId), field('removed', '==', false), field('number', '>=', start)]};
-  const {items} = await w.catalog.page('examples', {where, order: 'number'});
-  return items.map(e => e.number!);
+  const live = await w.catalog.find('examples', {snapshotId, removed: false}, 'number');
+  return live.map(e => e.number!).filter(n => n >= start);
 }
 
 /** Checks the labelers asked for: at most one, each a member of the tenant (when the platform lists members). */
@@ -71,32 +72,40 @@ async function grantLabelers(w: Scope, tenantId: string, projectId: string, user
 
 const cleanName = (name: string | undefined) => (name ?? '').trim().replace(/\s+/g, ' ').slice(0, NAME_MAX);
 
-/** Saves sets cut from the unassigned samples, `sizes` samples each in order; under the sets lock. */
-async function cut(w: Scope, projectId: string, sizes: number[], extra: {name?: string; labelerIds?: string[]} = {}): Promise<LabelSet[]> {
+/**
+ * Saves sets cut from the unassigned samples, in order; `sizesOf` gets how many there are and
+ * gives each set's size (or throws). Under the project's sets lock, and inside it the dataset's
+ * samples lock, so a take still saving examples is waited for: a range is never cut while a
+ * sample inside it is still being written. Locks are always taken in that order.
+ */
+async function cut(w: Scope, projectId: string, sizesOf: (free: number) => number[], extra: {name?: string; labelerIds?: string[]} = {}): Promise<LabelSet[]> {
   const {project, snap} = await datasetOf(w, projectId);
   const user = await w.user();
   const labelers = await checkLabelers(w, project.tenantId, extra.labelerIds ?? []);
-  return withSetsLock(w, projectId, async () => {
-    const sets = await setsOf(w, projectId);
-    const free = await unassignedNumbers(w, snap.id, sets);
-    const want = sizes.reduce((n, k) => n + k, 0);
-    if (!free.length) throw new Error('Every sample is already in a label set.');
-    if (want > free.length) throw new Error(`Only ${free.length} samples are left without a label set.`);
-    await grantLabelers(w, project.tenantId, projectId, labelers);
-    const made: LabelSet[] = [];
-    let at = 0;
-    let first = sets.reduce((n, s) => Math.max(n, s.last), 0) + 1;
-    for (const size of sizes) {
-      const last = free[at + size - 1];
-      made.push({id: newId('ls'), projectId, snapshotId: snap.id, number: sets.length + made.length + 1, name: cleanName(extra.name), first, last, labelerIds: labelers, createdAt: now(), createdBy: user.id});
-      at += size;
-      first = last + 1;
-    }
-    await w.catalog.insertMany('label_sets', made);
-    await w.catalog.audit(projectId, user.name, 'label_sets.create', {count: made.length, samples: want});
-    w.emitChange(projectId);
-    return made;
-  });
+  return withSetsLock(w, projectId, () =>
+    withSamplesLock(w, snap.id, async () => {
+      const sets = await setsOf(w, projectId);
+      const free = await unassignedNumbers(w, snap.id, sets);
+      if (!free.length) throw new Error('Every sample is already in a label set.');
+      const sizes = sizesOf(free.length);
+      const want = sizes.reduce((n, k) => n + k, 0);
+      if (want > free.length) throw new Error(`Only ${free.length} samples are left without a label set.`);
+      await grantLabelers(w, project.tenantId, projectId, labelers);
+      const made: LabelSet[] = [];
+      let at = 0;
+      let first = sets.reduce((n, s) => Math.max(n, s.last), 0) + 1;
+      for (const size of sizes) {
+        const last = free[at + size - 1];
+        made.push({id: newId('ls'), projectId, snapshotId: snap.id, number: sets.length + made.length + 1, name: cleanName(extra.name), first, last, labelerIds: labelers, createdAt: now(), createdBy: user.id});
+        at += size;
+        first = last + 1;
+      }
+      await w.catalog.insertMany('label_sets', made);
+      await w.catalog.audit(projectId, user.name, 'label_sets.create', {count: made.length, samples: want});
+      w.emitChange(projectId);
+      return made;
+    }),
+  );
 }
 
 /** Tells the labelers of a set (not the person who made the change) that they label it. */
@@ -117,7 +126,7 @@ async function tellLabelers(w: Scope, set: LabelSet, userIds: string[], kind: 'l
 
 export async function createLabelSet(w: Scope, req: CreateLabelSetRequest): Promise<LabelSet> {
   if (!Number.isInteger(req.count) || req.count < 1) throw new Error('A label set needs at least 1 sample.');
-  const [set] = await cut(w, req.projectId, [req.count], {name: req.name, labelerIds: req.labelerIds});
+  const [set] = await cut(w, req.projectId, () => [req.count], {name: req.name, labelerIds: req.labelerIds});
   await tellLabelers(w, set, set.labelerIds, 'label_set_created');
   return set;
 }
@@ -128,18 +137,12 @@ export async function createLabelSets(w: Scope, req: CreateLabelSetsRequest): Pr
   const n = req.sets ?? req.perSet;
   if ((req.sets != null) === (req.perSet != null)) throw new Error('Give the number of sets or the samples per set.');
   if (!Number.isInteger(n) || n! < 1) throw new Error(by === 'sets' ? 'Make at least 1 label set.' : 'A label set needs at least 1 sample.');
-  const {snap} = await datasetOf(w, req.projectId);
-  // Sizes come from the count read now; `cut` checks again under the lock.
-  const free = (await unassignedNumbers(w, snap.id, await setsOf(w, req.projectId))).length;
-  if (!free) throw new Error('Every sample is already in a label set.');
-  let sizes: number[];
-  if (by === 'sets') {
+  // Sizes come from the samples left when the sets lock is held, so a set made meanwhile is counted.
+  return cut(w, req.projectId, free => {
+    if (by === 'perSet') return Array.from({length: Math.ceil(free / n!)}, (_, i) => Math.min(n!, free - i * n!));
     if (n! > free) throw new Error(`Only ${free} samples are left without a label set.`);
-    sizes = Array.from({length: n!}, (_, i) => Math.floor(free / n!) + (i < free % n! ? 1 : 0));
-  } else {
-    sizes = Array.from({length: Math.ceil(free / n!)}, (_, i) => Math.min(n!, free - i * n!));
-  }
-  return cut(w, req.projectId, sizes);
+    return Array.from({length: n!}, (_, i) => Math.floor(free / n!) + (i < free % n! ? 1 : 0));
+  });
 }
 
 export async function updateLabelSet(w: Scope, req: UpdateLabelSetRequest): Promise<LabelSet> {

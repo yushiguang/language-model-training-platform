@@ -2469,4 +2469,26 @@ test('a label change clears only the gold labels it makes wrong; the rest carry 
   assert.equal(Object.keys(s.gold).length, 6, 'the Vlog labels carry over');
   assert.ok(Object.values(s.gold).every(g => g.answer[0] === 'Vlog'));
   assert.equal(Object.keys(s.staleGold).length, 4, 'the Tutorial labels stay as hidden hints');
+  // Spaces a save tidies away change nothing; a removed sample's label is not counted.
+  const spaced = sp();
+  spaced.label.values = [{name: 'Vlog ', definition: ''}, {name: ' Guide', definition: ''}];
+  assert.equal(await goldLabelsCleared(w.ws, w.projectId, spaced), 0);
+  const {removeExamples} = await import('./governance.ts');
+  await removeExamples(w.ws, w.projectId, [s.examples.find(e => s.gold[e.id])!.id], 'broken');
+  const other = sp();
+  other.label.values = [{name: 'Clip', definition: ''}, {name: 'Guide', definition: ''}];
+  assert.equal(await goldLabelsCleared(w.ws, w.projectId, other), 5, 'the 5 Vlog labels left, not the removed one');
+});
+
+test('a label change after a save that failed half way never reuses its schema version', async () => {
+  const w = await world('ls4', {macroF1: 0.5});
+  const {createVersion} = await import('./prompts.ts');
+  await createVersion(w.ws, w.projectId, {structured: sp(), parent: null, madeBy: 'user', change: '', kind: 'minor'});
+  // A gold label left under version 2 by a save whose setup write failed.
+  await w.catalog.insert('gold_labels', {id: 'gl_orphan', projectId: w.projectId, exampleId: 'ex_ls4_0', schemaVersion: 2, answer: ['Vlog'], source: 'labeled', revealed: false, createdAt: '', createdBy: 'Tester'});
+  const next = sp();
+  next.label.values = [{name: 'Clip', definition: ''}, {name: 'Tutorial', definition: ''}];
+  const v = await createVersion(w.ws, w.projectId, {structured: next, parent: null, madeBy: 'user', change: '', kind: 'minor'});
+  assert.equal(v.schemaVersion, 3);
+  assert.equal(Object.keys((await w.state()).gold).length, 0, 'no Vlog label answers the new label');
 });

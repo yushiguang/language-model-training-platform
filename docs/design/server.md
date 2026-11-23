@@ -115,7 +115,7 @@
 - 记录：项目内的编号 `number`（1、2、3……，没起名时页面显示 `#1`）、名称（可空，最多 80 字）、样本序号闭区间 `first`–`last`、标注人 `labelerIds`、创建人和时间。
 - `createLabelSet({projectId, count, name?, labelerIds?})`：从上一个标注集之后开始，取接下来 `count` 条没被移除的样本，`last` 是第 `count` 条的序号，所以范围里可能夹着被移除的样本（看不到、不计数，恢复后回到这个标注集）。剩下的不够时报“只剩 N 条样本没有标注集”。
 - `createLabelSets({projectId, sets} | {projectId, perSet})`：把剩下的样本全部切开。按个数切时各标注集的样本数尽量平均（多出来的从前往后各加一条）；按每个的样本数切时最后一个可以少一些。两个参数必须且只能给一个。
-- 创建和修改都在 `label-sets:<projectId>` 锁里，所以两个人同时创建也不会重叠，编号连续。范围创建后不能改，也不能删除（只随项目一起删除）。在一个标注集之后追加的样本不属于任何标注集，等新的标注集。
+- 创建和修改都在 `label-sets:<projectId>` 锁里，所以两个人同时创建也不会重叠，编号连续。切分时在里面再拿数据集的 `samples:<snapshotId>` 锁（加锁顺序固定），所以不会在取样任务还在写样本时切出范围；批量切分的各标注集大小在锁里按当时剩下的样本数计算。范围创建后不能改，也不能删除（只随项目一起删除）。在一个标注集之后追加的样本不属于任何标注集，等新的标注集。
 - `updateLabelSet({projectId, labelSetId, name?, labelerIds?})`：只改名称和标注人，没给的字段不变。
 - `listLabelSets(projectId)`（读权限）：按编号排列，每个带样本数（不含被移除的）和已有人工标签的条数，另给出还没分配的样本数。
 - 创建、修改都要项目写权限。
@@ -128,8 +128,8 @@
 
 **受影响的人工标签**（第 4.3 节第二条，`apps/workflow/src/services/settings.ts`）
 
-- 标签签名变化、`schemaVersion` 加一时，当前的人工标签里答案在新标签下仍然成立的（`readGoldAnswer` 能读出来）复制一份到新的 `schemaVersion`，在新的设置版本生效前写好；不成立的（值被删除或改名、多选改单选后有两个值等）留在旧的 `schemaVersion`，作为隐藏的提示（`staleGold`）。
-- `goldLabelsCleared({projectId, structured})`（读权限）：保存前的确认框用，返回会被清空的条数（只算没被移除的样本）；签名不变时是 0。
+- 标签签名变化时，`schemaVersion` 取“当前值和已有人工标签里最大的值”再加一（一次中途失败的保存留下的标签不会落到下一次保存的版本号上）；当前的人工标签里答案在新标签下仍然成立的（`readGoldAnswer` 能读出来）复制一份到新的 `schemaVersion`，在新的设置版本生效前写好；不成立的（值被删除或改名、多选改单选后有两个值等）留在旧的 `schemaVersion`，作为隐藏的提示（`staleGold`）。
+- `goldLabelsCleared({projectId, structured})`（读权限）：保存前的确认框用，返回会被清空的条数（只算没被移除的样本，标签先按保存时的规则整理首尾空格）；签名不变时是 0。
 
 ### 4.3 分数
 

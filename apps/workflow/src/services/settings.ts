@@ -1,5 +1,5 @@
 import type {GoldLabel, ModelSettings, ProjectSettings, Schema, SetupVersion, StructuredPrompt, Thresholds} from '@yushiguang/sprint-contracts';
-import {DEFAULT_THRESHOLDS, newId, readGoldAnswer, sameSignature, schemaOf, signatureOf} from '@yushiguang/sprint-domain';
+import {DEFAULT_THRESHOLDS, newId, readGoldAnswer, sameSignature, schemaOf, signatureOf, tidyStructured} from '@yushiguang/sprint-domain';
 import {latestGold} from './evaluation.ts';
 import type {Scope} from './app.ts';
 import {getProject} from './projects.ts';
@@ -101,7 +101,10 @@ async function syncLabelsLocked(w: Scope, projectId: string, labels: Schema, opt
   const before = prev?.schema ?? null;
   const changed = !before || !sameSignature(signatureOf({label: before}), signatureOf({label: labels}));
   if (prev && !changed && (!opts.wording || JSON.stringify(before) === JSON.stringify(labels))) return prev;
-  const schemaVersion = (prev?.schemaVersion ?? 0) + (changed ? 1 : 0);
+  // A new signature takes a schema version no gold label has yet: a save that failed after
+  // copying labels never leaves them under the number the next save uses.
+  const used = changed ? (await catalog.find('gold_labels', {projectId})).reduce((n, g) => Math.max(n, g.schemaVersion), 0) : 0;
+  const schemaVersion = changed ? Math.max(prev?.schemaVersion ?? 0, used) + 1 : (prev?.schemaVersion ?? 0);
   let stale = 0;
   if (changed && before) {
     // Gold labels whose answer still answers the new label carry over (docs/design/server.md 4.3);
@@ -133,7 +136,8 @@ async function sortGold(w: Scope, projectId: string, schemaVersion: number, labe
 /** For the confirm dialog: how many gold labels saving `structured` would clear (0 when the signature stays). */
 export async function goldLabelsCleared(w: Scope, projectId: string, structured: StructuredPrompt): Promise<number> {
   const {prev} = await currentSetup(w, projectId);
-  const labels = schemaOf(structured);
+  // Tidied as a save tidies it, so the count is the one the save clears.
+  const labels = schemaOf(tidyStructured(structured));
   if (!prev?.schema || sameSignature(signatureOf({label: prev.schema}), signatureOf({label: labels}))) return 0;
   return (await sortGold(w, projectId, prev.schemaVersion, labels)).clear;
 }
