@@ -165,6 +165,7 @@ function instrument(c: CatalogContract, tm: TelemetryPort): CatalogContract {
         const r = await fn(...args);
         tm.counter('sprint_catalog_operations_total', {collection, op, outcome: 'ok'});
         if (Array.isArray(r) && (op === 'find' || op === 'findByIds')) tm.histogram('sprint_catalog_documents_returned', r.length, {collection});
+        else if (op === 'page') tm.histogram('sprint_catalog_documents_returned', (r as {items: unknown[]}).items.length, {collection});
         return r;
       } catch (e) {
         tm.counter('sprint_catalog_operations_total', {collection, op, outcome: 'error'});

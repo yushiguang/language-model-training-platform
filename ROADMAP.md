@@ -14,7 +14,8 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
   tenant models (managed by tenant admins, read per tenant by the gateway) and limits per tenant
   and endpoint, is merged (#69); step 6, notifications when scoring or Auto Optimise ends, is
   merged (#71); step 7, object storage for feature snapshots and model answers, is merged (#72).
-  Step 5, the Optimiser as a chain of jobs, is next.
+  Step 5, the Optimiser as a chain of jobs, and step 8, sample numbers and label sets (#82), are
+  in progress.
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
   tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are merged (see Done);
   step 3, action tools, is next, with their cards drawn on the UI design first.

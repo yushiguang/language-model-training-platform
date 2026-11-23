@@ -403,6 +403,10 @@ side is right.
   via batched by-id `featuresOf` reads (best-effort so stats failures never block removal or
   restore). The score line names how many gold-labeled examples were
   removed before the score was worked out.
+- *Numbers.* Every example has a sample number (`Example.number`, from 1, in the order added,
+  never changed; docs/design/server.md 4.2), and an explicit `removed`. Datasets made before
+  numbers are numbered on first read (`DatasetSnapshot.numbered`). `listSamples` reads one page
+  of live or removed samples in number order, filtered in the store (`CatalogContract.page`).
 - *Comments.* `LabelComment` records (`label_comments`), append-only, from Save on either Gold
   Labels tab; a comment on Mismatches keeps the version. Helpers read comments on optimiser-half
   examples only.

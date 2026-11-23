@@ -67,7 +67,8 @@ async function saveSnapshot(
   // way. One half is for the Optimiser and the helpers to learn from; scores use the other.
   const halves = (rs: {externalId: string}[]) => new Map([...rs].sort((a, b) => hashString(a.externalId).localeCompare(hashString(b.externalId))).map((r, i) => [r.externalId, i % 2 === 0]));
   const first = halves(all);
-  const examples = all.map((r): NewExample => ({id: newId('ex'), snapshotId, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: 'eval', optimiserHalf: first.get(r.externalId)!, ...(r.fetchedAt ? {fetchedAt: r.fetchedAt} : {}), ...(r.sourceId ? {sourceId: r.sourceId, sourceFileId: r.sourceFileId} : {})}));
+  // Numbers from 1 in the order taken (docs/design/server.md 4.2); one that fails to save leaves its number unused.
+  const examples = all.map((r, i): NewExample => ({id: newId('ex'), snapshotId, number: i + 1, removed: false, externalId: r.externalId, type: r.type, title: r.title, features: r.features, split: 'eval', optimiserHalf: first.get(r.externalId)!, ...(r.fetchedAt ? {fetchedAt: r.fetchedAt} : {}), ...(r.sourceId ? {sourceId: r.sourceId, sourceFileId: r.sourceFileId} : {})}));
   // Each example is saved on its own; one that fails twice is skipped (resilience spec, 3.2).
   const saved = await insertExamplesSettled(w, examples);
   if (!saved.length) throw new Error('None of the examples could be saved. Try again.');
@@ -87,6 +88,7 @@ async function saveSnapshot(
     source,
     sourceName,
     createdAt: now(),
+    numbered: true,
     counts: {
       rows: raws.length + invalid,
       valid: raws.length,
