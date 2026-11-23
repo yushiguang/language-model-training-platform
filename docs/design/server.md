@@ -110,7 +110,7 @@
 - `Example.number`：新数据集按取样顺序从 1 编号，追加的样本接在最大序号后面（同一个项目同时只有一个取样任务）。保存失败、被跳过的样本留下空号，不重排；空号在最后时，下一次追加会用上它（那条样本从没存进去，不会和别的样本串号）。新样本都显式写 `removed: false`，数据集记 `DatasetSnapshot.numbered`。
 - 旧数据补号：没有 `numbered` 的数据集第一次被读（`loadProjectState`、`listSamples`、`listLabelSets`、追加样本、建标注集）时，在 `samples:<snapshotId>` 锁里按存储里保存的顺序补号、补 `removed`，再标 `numbered`；再执行一次什么都不改。
 - 软删除和恢复沿用 `removeExamples` / `restoreExamples`（`apps/workflow/src/services/governance.ts`）：只改标记、写移除记录，序号不变，恢复回原来的一半。被移除的样本不在 `ProjectState.examples` 里，所以不进任何指标。
-- **分页读取** `listSamples`（读权限，`apps/workflow/src/services/samples.ts`）：按序号排列，在存储里筛选和分页（`CatalogContract.page`），不读整个数据集。`filter` 为 `live`（默认）或 `removed`；`labelSetId` 只看一个标注集；`query` 是样本 ID 或序号（`12` 或 `#12`，纯数字时两种都匹配）；每页默认 50 条，最多 500 条。每行带序号、样本 ID、类型、数据源、是否有当前标签下的人工标签；被移除的样本还带移除记录（恢复时传它的 ID）、原因、移除人和时间。
+- **分页读取** `listSamples`（读权限，`apps/workflow/src/services/samples.ts`）：按序号排列，在存储里筛选和分页（`CatalogContract.page`），不读整个数据集。`filter` 为 `live`（默认）、`no_label`（没有人工标签）、`mismatch`（人工标签和模型答案不一致）或 `removed`；`labelSetId` 只看一个标注集；`query` 是样本 ID 或序号（`12` 或 `#12`，纯数字时两种都匹配）；`sourceId`、`gold` 只看一个数据源、只看人工标签含某个值的样本；`sort` 按序号或样本 ID，加 `-` 倒序；每页默认 50 条，最多 500 条。每行带序号、样本 ID、类型、数据源、当前标签下的人工标签和模型答案、是否不一致；被移除的样本还带移除记录（恢复时传它的 ID）、原因、备注、移除人和时间。每页还带比较用的版本（当前标签下、在全部有人工标签的样本上都有答案、分数最高的版本，和不一致复核用同一个规则）和四个标签页的数量（整个数据集或标注集，不受搜索和列筛选影响）。人工标签和模型答案按项目整体读，筛选、排序和分页仍在存储里做（`in` / `not-in` 样本 ID）。（#100）
 
 **标注集**（`LabelSet`，catalog 的 `label_sets`，`apps/workflow/src/services/label-sets.ts`）
 

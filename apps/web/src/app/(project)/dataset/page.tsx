@@ -460,7 +460,7 @@ function BalanceCard({state, schema}: {state: ProjectState; schema: Schema}) {
   );
 }
 
-const REASON: Record<RemovalReason, string> = {broken: 'Broken', out_of_scope: 'Out of scope', downsample: 'Downsampled', excess_unlabeled: 'Unlabeled extra'};
+const REASON: Record<RemovalReason, string> = {broken: 'Broken', out_of_scope: 'Out of scope', other: 'Other', downsample: 'Downsampled', excess_unlabeled: 'Unlabeled extra'};
 
 /** Removed (N): every removal with why, who and when, and Restore (spec 4.4). */
 function RemovedCard({state}: {state: ProjectState}) {

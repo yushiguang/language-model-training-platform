@@ -157,8 +157,8 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     },
     takeExamples: (ctx, r) => dataset.takeExamples(at(ctx), r.projectId, r.picks),
     stopSampleDataset: (ctx, projectId) => dataset.stopSampleDataset(at(ctx), projectId),
-    async removeExamples(ctx, {projectId, exampleIds, reason}) {
-      await governance.removeExamples(at(ctx), projectId, exampleIds, reason);
+    async removeExamples(ctx, {projectId, exampleIds, reason, note}) {
+      await governance.removeExamples(at(ctx), projectId, exampleIds, reason, note);
     },
     listSamples: (ctx, r) => samples.listSamples(at(ctx), r),
     listLabelSets: (ctx, projectId) => labelSets.listLabelSets(at(ctx), projectId),
