@@ -1,4 +1,4 @@
-import type {Platform} from '@yushiguang/sprint-contracts';
+import {DEFAULT_TENANT, type Platform} from '@yushiguang/sprint-contracts';
 import {localDocRuntime} from './standins/local-db.ts';
 import {sampleExamples, sampleMedia} from './standins/sample-examples.ts';
 import {sampleFeatureInfo} from './standins/feature-info.ts';
@@ -7,7 +7,7 @@ import {simulatedModels} from './standins/simulated-models.ts';
 import {scriptedAgent} from './standins/scripted-agent.ts';
 import {standInAuthorization, memoryAccessRequests, memoryPermissionAdmin} from './standins/enterprise.ts';
 import {memoryConfig} from './standins/config-store.ts';
-import {browserFiles, localIdentity, localTelemetrySink} from './standins/local.ts';
+import {browserFiles, LOCAL_USER, localIdentity, localTelemetrySink} from './standins/local.ts';
 import {localTickets} from './standins/tickets.ts';
 import {logNotifications} from './standins/notifications.ts';
 import {memorySharedState} from './standins/shared-state.ts';
@@ -35,7 +35,9 @@ export function createPlatform(): Platform {
     telemetry: localTelemetrySink(),
     configStore: memoryConfig(),
     authorization: standInAuthorization(),
-    permissionAdmin: memoryPermissionAdmin(),
+    // The local user is an admin of the tenant the sample data lives in; tenants made here are kept
+    // in this browser.
+    permissionAdmin: memoryPermissionAdmin({seed: [{tenantId: DEFAULT_TENANT, userId: LOCAL_USER, role: 'admin'}], storageKey: 'sprint-permissions'}),
     accessRequests: memoryAccessRequests(),
     tickets: localTickets(),
     notifications: logNotifications(),
