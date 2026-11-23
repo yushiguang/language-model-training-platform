@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {LlmCallError, NO_TELEMETRY, type ChatRequest, type ChatResult, type EndpointInfo, type Platform, type TenantModel} from '@yushiguang/sprint-contracts';
 import {memoryLimiterStore, STAND_IN_MODELS} from '@yushiguang/sprint-platform';
+import {configureSystem} from '@yushiguang/sprint-domain';
 import {createGateway} from './gateway.ts';
 import {EndpointLimiter} from './limiter.ts';
 import {buildRegistry} from './registry.ts';
@@ -531,7 +532,7 @@ test('tenants: a model added after start is called at once, on the endpoint the 
   assert.equal(reads, before, 'a known model is served from the cache');
 });
 
-test('tenants: changed limits apply once the cache is dropped; a failed read keeps the models read before', async () => {
+test('tenants: changed limits apply once the cache is dropped; a failed read with nothing cached fails the call', async () => {
   const p = fakePlatform(async () => ({text: 'ok', inputTokens: 1, outputTokens: 1}));
   let models = [tenantModel({qpm: 1})];
   let down = false;
@@ -561,4 +562,71 @@ test('tenants: chat counts under the caller\'s tenant; a tenant model named as t
   // Another tenant naming it gets the fallback model, not t1's endpoint.
   await agent.complete(msg, {model: 'model_1', tenantId: 't2'});
   assert.equal(opts.at(-1)?.endpoint, undefined);
+});
+
+test('tenants: a read started before forgetTenant neither fills the cache nor answers calls after it', async () => {
+  const p = fakePlatform(async () => ({text: 'ok', inputTokens: 1, outputTokens: 1}));
+  let models: TenantModel[] = [];
+  let release: () => void = () => {};
+  let slow = true;
+  const gw = createGateway(p, {
+    sleep: noWait,
+    tenantModels: {
+      list: async () => {
+        const snapshot = models;
+        if (slow) await new Promise<void>(r => (release = r));
+        return snapshot;
+      },
+    },
+  });
+  // A read is under way with the list as it was (no models).
+  const before = gw.labelingEndpointsFor('t1');
+  models = [tenantModel()];
+  gw.forgetTenant('t1');
+  slow = false;
+  const r = await gw.label(call('t1', 'model_1'));
+  assert.equal(r.endpointId, 'model_1', 'the call after the change read the new list');
+  release();
+  await before;
+  assert.deepEqual((await gw.labelingEndpointsFor('t1')).map(e => e.id), ['model_1', 'A', 'B'], 'the older answer did not overwrite the cache');
+});
+
+test('tenants: once the cache has expired a failed read keeps the models read before; platform defaults never wait on the tenant read', async () => {
+  configureSystem({gateway: {tenantModelsTtlMs: 20}});
+  try {
+    const p = fakePlatform(async () => ({text: 'ok', inputTokens: 1, outputTokens: 1}));
+    let down = false;
+    const gw = createGateway(p, {sleep: noWait, tenantModels: {list: async () => (down ? Promise.reject(new Error('down')) : [tenantModel()])}});
+    await gw.label(call('t1', 'model_1'));
+    down = true;
+    await new Promise(r => setTimeout(r, 30));
+    assert.equal((await gw.label(call('t1', 'model_1'))).endpointId, 'model_1');
+    assert.equal((await gw.label(call('t2', 'A'))).endpointId, 'labeling-A', 'a default works while the tenant has never been read');
+  } finally {
+    configureSystem();
+  }
+});
+
+test('tenants: a tenant model is never a metric label: its calls count as tenant_model', async () => {
+  const labels: Record<string, string>[] = [];
+  const telemetry = {...NO_TELEMETRY, counter: (_n: string, l: Record<string, unknown>) => void labels.push(l as Record<string, string>)};
+  const p = fakePlatform(async () => ({text: 'ok', inputTokens: 1, outputTokens: 1}));
+  const gw = createGateway(p, {sleep: noWait, telemetry: telemetry as typeof NO_TELEMETRY, tenantModels: {list: async () => [tenantModel()]}});
+  await gw.label(call('t1', 'model_1'));
+  const seen = labels.flatMap(l => [l.endpoint, l.model]).filter(Boolean);
+  assert.ok(seen.length > 0);
+  assert.ok(seen.every(v => v === 'tenant_model'), seen.join());
+});
+
+test('tenants: a chat call naming a tenant model added since the last read finds it at once', async () => {
+  const p = fakePlatform(async () => ({text: '', inputTokens: 0, outputTokens: 0}));
+  const endpoints: (string | undefined)[] = [];
+  p.agent.complete = async (_m, o) => (endpoints.push(o?.endpoint), {text: 'ok', model: String(o?.model), usage: {inputTokens: 1, outputTokens: 1}});
+  let models: TenantModel[] = [];
+  const gw = createGateway(p, {sleep: noWait, tenantModels: {list: async () => models}});
+  await gw.agentModel().complete(msg, {tenantId: 't1'});
+  models = [tenantModel()];
+  await new Promise(r => setTimeout(r, 1010));
+  await gw.agentModel().complete(msg, {model: 'model_1', tenantId: 't1'});
+  assert.equal(endpoints.at(-1), 'https://models.example/v1/team');
 });

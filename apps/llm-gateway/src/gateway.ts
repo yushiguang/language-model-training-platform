@@ -182,27 +182,35 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
   /**
    * Each tenant's models, read through the source and kept for `gateway.tenantModelsTtlMs`. One
    * read at a time per tenant; a failed read keeps what was read before (or fails the call when
-   * nothing was).
+   * nothing was). `forgetTenant` moves the tenant to a new generation: a read started before it
+   * neither fills the cache nor is shared with calls after it, so a change is never undone by an
+   * older answer.
    */
-  const tenantCache = new Map<string, {at: number; models: EndpointConfig[]; infos: EndpointInfo[]}>();
-  const reading = new Map<string, Promise<{at: number; models: EndpointConfig[]; infos: EndpointInfo[]}>>();
+  type TenantEntry = {at: number; models: EndpointConfig[]; infos: EndpointInfo[]};
+  const tenantCache = new Map<string, TenantEntry>();
+  const reading = new Map<string, Promise<TenantEntry>>();
+  const generation = new Map<string, number>();
   const readTenant = (tenantId: string) => {
     let r = reading.get(tenantId);
     if (!r) {
-      r = (async () => {
+      const gen = generation.get(tenantId) ?? 0;
+      const read: Promise<TenantEntry> = (async () => {
         const list = opts.tenantModels ? await opts.tenantModels.list(tenantId) : [];
         const own = list.filter(m => m.tenantId === tenantId).sort((a, b) => Number(b.default) - Number(a.default) || a.createdAt.localeCompare(b.createdAt));
         const entry = {at: Date.now(), models: own.map(tenantEndpoint), infos: own.map(tenantInfo)};
-        tenantCache.set(tenantId, entry);
+        if ((generation.get(tenantId) ?? 0) === gen) tenantCache.set(tenantId, entry);
         return entry;
-      })().finally(() => reading.delete(tenantId));
-      reading.set(tenantId, r);
+      })().finally(() => {
+        if (reading.get(tenantId) === read) reading.delete(tenantId);
+      });
+      reading.set(tenantId, read);
+      r = read;
     }
     return r;
   };
   /** `fresh`: read again unless the last read is under a second old (an id it did not hold). */
   async function tenantModelsOf(tenantId: string, fresh = false) {
-    if (!opts.tenantModels) return {at: 0, models: [], infos: []};
+    if (!opts.tenantModels) return {at: 0, models: [], infos: []} as TenantEntry;
     const hit = tenantCache.get(tenantId);
     const age = hit ? Date.now() - hit.at : Infinity;
     if (hit && age < (fresh ? 1000 : systemConfig().gateway.tenantModelsTtlMs)) return hit;
@@ -214,12 +222,22 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
     }
   }
 
-  /** A labeling model the tenant may call: its own, then a platform default. */
+  /**
+   * A model of the tenant's own, found in the cache or, for an id the cache lacks, in a read made
+   * at once (a model added since the last read works without waiting).
+   */
+  async function ownModel(tenantId: string, id: string): Promise<EndpointConfig | undefined> {
+    if (!opts.tenantModels) return undefined;
+    return (await tenantModelsOf(tenantId)).models.find(e => e.id === id) ?? (await tenantModelsOf(tenantId, true)).models.find(e => e.id === id);
+  }
+
+  /**
+   * A labeling model the tenant may call: a platform default, else its own. The defaults are looked
+   * up first, so they keep working while the tenant's models cannot be read; tenant model ids are
+   * generated (`model_…`) and never take a default's id.
+   */
   async function labelingEndpointFor(tenantId: string, id: string): Promise<EndpointConfig> {
-    const find = (own: EndpointConfig[]) => own.find(e => e.id === id) ?? registry.find(e => e.purpose === 'labeling' && e.slot === id);
-    let ep = find((await tenantModelsOf(tenantId)).models);
-    // A model added since the last read works at once.
-    if (!ep && opts.tenantModels) ep = find((await tenantModelsOf(tenantId, true)).models);
+    const ep = registry.find(e => e.purpose === 'labeling' && e.slot === id) ?? (await ownModel(tenantId, id));
     if (!ep) throw new LlmCallError('rejected', `Model ${id} is not one of this tenant's models.`);
     return ep;
   }
@@ -331,8 +349,8 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
 
   /** A chat call's endpoint: one of the tenant's models when `model` names one, else the registry's. */
   const chatEndpointFor = async (tenantId: string, model?: string): Promise<EndpointConfig> => {
-    if (model && opts.tenantModels && !registry.some(e => e.purpose === 'chat' && e.model === model)) {
-      const own = (await tenantModelsOf(tenantId)).models.find(e => e.id === model);
+    if (model && !registry.some(e => e.purpose === 'chat' && e.model === model)) {
+      const own = await ownModel(tenantId, model);
       if (own?.active) return {...own, purpose: 'chat'};
     }
     const chat = registry.filter(e => e.purpose === 'chat');
@@ -431,7 +449,9 @@ export function createGateway(platform: Pick<Platform, 'models' | 'agent' | 'end
     },
 
     forgetTenant(tenantId) {
+      generation.set(tenantId, (generation.get(tenantId) ?? 0) + 1);
       tenantCache.delete(tenantId);
+      reading.delete(tenantId);
     },
 
     async label(req: LabelCallRequest): Promise<LabelCallResult> {
