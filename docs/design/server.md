@@ -1,6 +1,6 @@
 # 服务端设计：提示词优化项目
 
-> 描述的版本：计划中，按 #59 的交付计划分 PR 实现，每个 PR 合并时把对应章节改成已实现的样子。已实现：第 2 节（权限，#63）、第 5 节（异步任务，#66）、第 7 节（配置，#61）。
+> 描述的版本：计划中，按 #59 的交付计划分 PR 实现，每个 PR 合并时把对应章节改成已实现的样子。已实现：第 2 节（权限，#63）、第 5 节（异步任务，#66）、第 7 节（配置，#61）、第 4.2 节（数据集和标注集，#82）。
 
 本文把前端整体评审（2026-11-22）里定下的规则落到服务端：权限、项目类型、数据源与特征、工作流规则、异步任务、批量数据存储、配置和通知。页面的设计见 [ui.md](ui.md)，现有架构见 [../architecture.md](../architecture.md)。
 
@@ -101,12 +101,35 @@
 - 本次每个标注集只有一个标注人。设为标注人时 Sprint 直接给他项目写权限。
 - 创建标注集或添加标注人时发通知（第 8 节）。
 
-#### 4.2.1 实现（#82，进行中）
+#### 4.2.1 实现（#82 已完成）
 
-- **样本序号**：`Example.number`，新数据集按取样顺序从 1 编号，追加的样本接在最大序号后面（同一个项目同时只有一个取样任务）。保存失败、被跳过的样本留下空号，不重排；空号在最后时，下一次追加会用上它（那条样本从没存进去，不会和别的样本串号）。每个新样本都显式写 `removed: false`，数据集记 `DatasetSnapshot.numbered`。
-- **旧数据补号**：没有 `numbered` 的数据集第一次被读（`loadProjectState`、`listSamples`、追加样本）时，在 `samples:<snapshotId>` 锁里按存储里保存的顺序补号、补 `removed`，再标 `numbered`；再执行一次什么都不改。
-- **分页读取**（`listSamples`，读权限）：按序号排列，在存储里筛选和分页（`CatalogContract.page`），不读整个数据集。`filter` 为 `live`（默认）或 `removed`；`query` 是样本 ID 或序号（`12` 或 `#12`，纯数字时两种都匹配）；每页默认 50 条，最多 500 条。每行带序号、样本 ID、类型、数据源、是否有当前标签下的人工标签，被移除的样本还带移除记录（恢复时传它的 ID）、原因、移除人和时间。
-- **软删除和恢复**沿用已有的 `removeExamples` / `restoreExamples`：只改标记和移除记录，序号不变，恢复回原来的一半。
+**样本序号和软删除**
+
+- `Example.number`：新数据集按取样顺序从 1 编号，追加的样本接在最大序号后面（同一个项目同时只有一个取样任务）。保存失败、被跳过的样本留下空号，不重排；空号在最后时，下一次追加会用上它（那条样本从没存进去，不会和别的样本串号）。新样本都显式写 `removed: false`，数据集记 `DatasetSnapshot.numbered`。
+- 旧数据补号：没有 `numbered` 的数据集第一次被读（`loadProjectState`、`listSamples`、`listLabelSets`、追加样本、建标注集）时，在 `samples:<snapshotId>` 锁里按存储里保存的顺序补号、补 `removed`，再标 `numbered`；再执行一次什么都不改。
+- 软删除和恢复沿用 `removeExamples` / `restoreExamples`（`apps/workflow/src/services/governance.ts`）：只改标记、写移除记录，序号不变，恢复回原来的一半。被移除的样本不在 `ProjectState.examples` 里，所以不进任何指标。
+- **分页读取** `listSamples`（读权限，`apps/workflow/src/services/samples.ts`）：按序号排列，在存储里筛选和分页（`CatalogContract.page`），不读整个数据集。`filter` 为 `live`（默认）或 `removed`；`labelSetId` 只看一个标注集；`query` 是样本 ID 或序号（`12` 或 `#12`，纯数字时两种都匹配）；每页默认 50 条，最多 500 条。每行带序号、样本 ID、类型、数据源、是否有当前标签下的人工标签；被移除的样本还带移除记录（恢复时传它的 ID）、原因、移除人和时间。
+
+**标注集**（`LabelSet`，catalog 的 `label_sets`，`apps/workflow/src/services/label-sets.ts`）
+
+- 记录：项目内的编号 `number`（1、2、3……，没起名时页面显示 `#1`）、名称（可空，最多 80 字）、样本序号闭区间 `first`–`last`、标注人 `labelerIds`、创建人和时间。
+- `createLabelSet({projectId, count, name?, labelerIds?})`：从上一个标注集之后开始，取接下来 `count` 条没被移除的样本，`last` 是第 `count` 条的序号，所以范围里可能夹着被移除的样本（看不到、不计数，恢复后回到这个标注集）。剩下的不够时报“只剩 N 条样本没有标注集”。
+- `createLabelSets({projectId, sets} | {projectId, perSet})`：把剩下的样本全部切开。按个数切时各标注集的样本数尽量平均（多出来的从前往后各加一条）；按每个的样本数切时最后一个可以少一些。两个参数必须且只能给一个。
+- 创建和修改都在 `label-sets:<projectId>` 锁里，所以两个人同时创建也不会重叠，编号连续。切分时在里面再拿数据集的 `samples:<snapshotId>` 锁（加锁顺序固定），所以不会在取样任务还在写样本时切出范围；批量切分的各标注集大小在锁里按当时剩下的样本数计算。范围创建后不能改，也不能删除（只随项目一起删除）。在一个标注集之后追加的样本不属于任何标注集，等新的标注集。
+- `updateLabelSet({projectId, labelSetId, name?, labelerIds?})`：只改名称和标注人，没给的字段不变。
+- `listLabelSets(projectId)`（读权限）：按编号排列，每个带样本数（不含被移除的）和已有人工标签的条数，另给出还没分配的样本数。
+- 创建、修改都要项目写权限。
+
+**标注人**
+
+- 本次每个标注集最多一个标注人（`labelerIds` 是列表，以后可以放多个）。有 `PermissionAdminPort` 时，标注人必须在 `listTenantMembers` 里，否则报错。
+- 新加的标注人先通过 `grantProjectWrite` 授予项目写权限（`withRetries`，最多重试 3 次）；授权失败时整个操作报错，什么都不保存。被换下的标注人保留项目写权限，因为不知道这个权限是不是因为别的原因给的。
+- 通知（第 8 节，尽力而为）：创建带标注人的标注集时发 `label_set_created` 给标注人；修改时只发 `labeler_added` 给新加的人。操作人自己不收。链接到 `/gold/?p=<projectId>&set=<labelSetId>`（以后的标注集详情页），内容只有标注集名称、样本序号范围和项目名。
+
+**受影响的人工标签**（第 4.3 节第二条，`apps/workflow/src/services/settings.ts`）
+
+- 标签签名变化时，`schemaVersion` 取“当前值和已有人工标签里最大的值”再加一（一次中途失败的保存留下的标签不会落到下一次保存的版本号上）；当前的人工标签里答案在新标签下仍然成立的（`readGoldAnswer` 能读出来）复制一份到新的 `schemaVersion`，在新的设置版本生效前写好；不成立的（值被删除或改名、多选改单选后有两个值等）留在旧的 `schemaVersion`，作为隐藏的提示（`staleGold`）。
+- `goldLabelsCleared({projectId, structured})`（读权限）：保存前的确认框用，返回会被清空的条数（只算没被移除的样本，标签先按保存时的规则整理首尾空格）；签名不变时是 0。
 
 ### 4.3 分数
 
@@ -309,7 +332,7 @@ export interface ConfigReader {
 
 - 平台提供可选的 `NotificationPort`，发送是尽力而为：失败只记日志和指标，不影响主操作，也不重试。
 - 目前的通知：打标（评分）和自动优化结束时，告诉发起这次任务的人结果是完成还是失败。用户自己按了停止的、还没真正结束的（暂停、失联后放回队列）不发。
-- 设计里的两个标注集通知（创建标注集时通知标注人、添加标注人时通知被添加的人）在第 8 步做，contract 里已经留好 `kind`。
+- 标注集通知：创建标注集时通知标注人、添加标注人时通知被添加的人（第 8 步已完成，见第 4.2.1 节）。
 - 默认替身只写日志；具体即时通讯工具的适配器由部署方提供（`docs/integration.md` 的 Notifications 一节）。
 
 ### 8.2 实现（#71 已完成）
@@ -354,7 +377,7 @@ export interface ConfigReader {
 | `LabelCallRequest`、对话请求和 `TryTemplateInput`（Prompt helper 的试跑）带 `tenantId`；模型按租户读取；`LabelingModels` / `AgentModel` 接受动态 endpoint；限流键改为“租户 + endpoint” | 破坏性：部署方的网关适配和限流存储要改（第 4 步，#69 已完成） |
 | 模型管理接口 `listModels` / `addModel` / `updateModel` / `removeModel` / `setDefaultModel`；`CatalogContract.remove('tenant_models', id)` | 新增（第 4 步，#69 已完成） |
 | `ObjectStorePort`（`Platform.objectStore` 可选）；基于它的 `LabelingStorePort`、`FeatureStorePort`；`Example.featureRef` 可选 | 新增（第 7 步，#72） |
-| `Example.number`（样本序号，可选，旧样本第一次读时补上）、`DatasetSnapshot.numbered`、`LabelSet` 和 catalog 的 `label_sets` 集合、`CatalogContract.page`（分页读取） | 新增：catalog 在本仓库实现，部署方的文档库适配器不用改（第 8 步，#82） |
+| `Example.number`（样本序号，可选，旧样本第一次读时补上）、`DatasetSnapshot.numbered`、`LabelSet` 和 catalog 的 `label_sets` 集合、`CatalogContract.page`（分页读取） | 新增：catalog 在本仓库实现，部署方的文档库适配器不用改（第 8 步，#82 已完成） |
 
 ## 11. 交付计划
 
@@ -367,7 +390,7 @@ export interface ConfigReader {
 5. 优化器改为按 `(runId, round, step)` 推进的链式任务：每个打标阶段入队，巡检识别等打标的运行，Stop 取消排队中和运行中的打标。
 6. 通知端口：评分和自动优化结束时通知发起人。（#71 已完成）
 7. 存储接口：`ObjectStorePort`，以及基于它的 `LabelingStorePort`、`FeatureStorePort`（issue #58）。（#72 已完成）
-8. 数据集和标注集：样本序号、软删除、标注集、清空受影响的人工标签。
+8. 数据集和标注集：样本序号、软删除、标注集、清空受影响的人工标签。（#82 已完成）
 9. 分数和 Rescore：标注集全部完成才算分、Rescore 横幅所需的“分数是否过期”。
 
 前端按 shell / 导航 → 租户和项目 → 数据源 → 第 1 到 4 步的顺序另开 PR，在对应的后端 PR 合并之后做。

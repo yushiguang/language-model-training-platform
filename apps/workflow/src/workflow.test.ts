@@ -303,6 +303,24 @@ test('tenant isolation (#63): another tenant cannot list, read, change or point 
   for (const [name, call] of calls) assert.deepEqual(await answer(call(mine.id)), await answer(call('pr_missing')), name);
 });
 
+test('label sets (#82): members read them; changing them needs project write', async () => {
+  const perms = checking();
+  const sys = {requestId: 'rq_setup', user: {id: 'u_admin', name: 'Admin'}};
+  await perms.admin.addTenantMember(sys, 't1', alice.id, 'member');
+  await perms.admin.addTenantMember(sys, 't1', bob.id, 'member');
+  await perms.admin.addTenantMember(sys, 't2', eve.id, 'member');
+  const {api} = world('wf-sets', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
+  const p = await api.createProject(inTenant(alice, 't1'), 'Sets');
+  const bobs = inTenant(bob, 't1');
+  assert.deepEqual(await api.listLabelSets(bobs, p.id), {sets: [], unassigned: 0}, 'a member reads');
+  assert.deepEqual(await api.listSamples(bobs, {projectId: p.id}), {items: [], total: 0});
+  const structured = {taskSummary: '', features: {video: [], photo_text: [], metadata: []}, label: {name: 'x', kind: 'single' as const, values: []}, ruleGroups: [], images: []};
+  assert.equal(await api.goldLabelsCleared(bobs, {projectId: p.id, structured}), 0);
+  for (const call of [api.createLabelSet(bobs, {projectId: p.id, count: 1}), api.createLabelSets(bobs, {projectId: p.id, sets: 1}), api.updateLabelSet(bobs, {projectId: p.id, labelSetId: 'ls_1', name: 'x'})]) await assert.rejects(call, {code: 'forbidden'});
+  await assert.rejects(api.createLabelSet(inTenant(alice, 't1'), {projectId: p.id, count: 1}), /Add samples to the dataset first/, 'the writer passes the check');
+  await assert.rejects(api.listLabelSets(inTenant(eve, 't2'), p.id), /does not exist/, 'another tenant cannot see them');
+});
+
 test('permissions (#63): the creator gets project write; a member only reads; a removed member is stopped, helper reads included', async () => {
   const perms = checking();
   const sys = {requestId: 'rq_setup', user: {id: 'u_admin', name: 'Admin'}};
