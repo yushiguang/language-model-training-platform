@@ -588,6 +588,18 @@ export interface DryRunResult {
 /** What an Optimiser run is doing now (the panel's "Now" line). */
 export type OptimiserStep = 'parent' | 'reflect' | 'merge' | 'check' | 'dry_run' | 'full' | 'report' | 'confirm';
 
+/**
+ * The steps of a round that label examples (docs/design/server.md, 4.4): each is queued as a
+ * labeling job of its own, and the run goes on in a new `optimiser.run` job once it ends.
+ */
+export type OptimiserLabelingStep = 'parent' | 'dry_run' | 'full' | 'confirm';
+
+/** Where a run waits for its labeling: its round count and the labeling step. */
+export interface OptimiserPosition {
+  round: number;
+  step: OptimiserLabelingStep;
+}
+
 /** One change the Optimiser tried: a row of the panel's history, newest first in the UI. */
 export interface OptimiserRound {
   round: number;
@@ -602,6 +614,11 @@ export interface OptimiserRound {
   score: number | null;
   passed: boolean;
   dryRun: DryRunResult | null;
+  /**
+   * The examples the dry run labels, picked once and saved, so the run that goes on after the
+   * dry run's labeling job compares the same ones. Missing on rounds made before.
+   */
+  dryRunIds?: string[];
   /**
    * The dry run tied with the parent: the same dry-run score. Since the resilience spec (6) a tie
    * goes on to the full labeling like a better change, and `gain` says whether it was progress.

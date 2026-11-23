@@ -1,6 +1,6 @@
 import type {LabelingTask} from './labeling-api.ts';
 import type {RequestContext} from './platform-api.ts';
-import type {ChatEvent, ChatLink, EndpointId, EvalReport, Features, MixUp, Msg, OptimisationRun, ProjectState, PromptVersion, StructuredPrompt} from './types.ts';
+import type {ChatEvent, ChatLink, EndpointId, EvalReport, Features, MixUp, Msg, OptimisationRun, OptimiserLabelingStep, OptimiserPosition, ProjectState, PromptVersion, StructuredPrompt} from './types.ts';
 
 /**
  * Contract: the Optimiser service (`@yushiguang/sprint-optimiser`, spec 1.0.0 section 7.2). It owns the
@@ -25,12 +25,19 @@ export interface OptimiserContract {
    */
   startRun(ctx: RequestContext, req: StartRunRequest): Promise<OptimisationRun>;
   /**
-   * Runs a saved run, or goes on from the step a failed or paused run stopped at. Resolves when the
-   * run ends; null when another runner already works on it. `ctx` is the `optimiser.run` job's
-   * (the person who started or resumed the run, and the tenant): every `OptimiserHost` call and
-   * the helper's `reflectPrompt` run as it, so the workflow's permission checks see a real caller.
+   * Runs a saved run, or goes on from the step a failed or paused run stopped at, until the run
+   * ends or waits for a labeling job (docs/design/server.md, 4.4): a waiting run is returned with
+   * state `running`, and the labeling job's `finally` queues the next `optimiser.run`. Null when
+   * another runner already works on it. `ctx` is the `optimiser.run` job's (the person who started
+   * or resumed the run, and the tenant): every `OptimiserHost` call and the helper's
+   * `reflectPrompt` run as it, so the workflow's permission checks see a real caller.
+   *
+   * `at`: this call goes on after the labeling at that position ended. Its labeling is read, not
+   * queued again: answers in go on, labeling that ended without them fails the run (Retry queues
+   * it again). A run that is no longer at `at` (it went on, or ended) is returned unchanged.
+   * Without `at` (a start, Retry or Resume) the labeling of the run's step is queued if needed.
    */
-  execute(ctx: RequestContext, runId: string): Promise<OptimisationRun | null>;
+  execute(ctx: RequestContext, runId: string, at?: OptimiserPosition): Promise<OptimisationRun | null>;
   /** The user's Stop: ends the run and the labeling it is doing. */
   stopRun(ctx: RequestContext, runId: string): Promise<void>;
   getRun(runId: string): Promise<OptimisationRun | null>;
@@ -48,6 +55,29 @@ export interface LockPort {
   run<T>(name: string, fn: () => Promise<T>): Promise<T | null>;
   isHeld(name: string): Promise<boolean>;
 }
+
+/** What the Optimiser asks to label: see `OptimiserHost.label`. */
+export interface OptimiserLabelRequest {
+  projectId: string;
+  promptVersionId: string;
+  endpoint: EndpointId;
+  exampleIds?: string[];
+  pass?: number;
+  /** The run and where it is: carried on the labeling job's args and its follow-up. */
+  runId: string;
+  at: OptimiserPosition;
+  /** Queue the labeling when it is not done and has no job; false: only read how it ended. */
+  start: boolean;
+}
+
+/** How the labeling of one step stands (`OptimiserHost.label`). */
+export type OptimiserLabeling =
+  | {state: 'done'; task: LabelingTask}
+  | {state: 'queued'; taskId: string}
+  | {state: 'unfinished'; task: LabelingTask | null; error: string};
+
+/** The labeling steps, for callers that check a job's args. */
+export const OPTIMISER_LABELING_STEPS: readonly OptimiserLabelingStep[] = ['parent', 'dry_run', 'full', 'confirm'];
 
 /** A version's score on the optimiser half: what the helper is told to fix. */
 export interface HalfScore {
@@ -67,11 +97,18 @@ export interface OptimiserHost {
   /** Examples' frozen features by example id (#32): the state carries examples without them. */
   exampleFeatures(ctx: RequestContext, projectId: string, exampleIds: string[]): Promise<Record<string, Features>>;
   /**
-   * Labels examples with a version (saved answers are reused) and resolves when the task ends;
-   * null when another runner holds it. `exampleIds` left out: the whole eval set. `pass` 2: a
-   * second, fresh labeling (the confirmation of a pass).
+   * Labels examples with a version as a labeling task (saved answers are reused). `exampleIds`
+   * left out: the whole eval set. `pass` 2: a second, fresh labeling (the confirmation of a pass).
+   * The task's labeling runs as a `labeling.runTask` job of its own on the model's key, whose
+   * args carry `optimiserRunId`, `round` and `step` (`at`), and whose `finally` queues the
+   * `optimiser.run` that goes on from `at` (docs/design/server.md, 4.4). Answers:
+   * - `done`: the task has every answer (it may have been done already).
+   * - `queued`: its labeling job is queued or running; the run waits for it.
+   * - `unfinished`: the task has no job and is not done (its labeling failed, was stopped or was
+   *   lost). Only when `start` is false: with `start` true such a task is queued again (Retry
+   *   labels its failed examples again).
    */
-  label(ctx: RequestContext, req: {projectId: string; promptVersionId: string; endpoint: EndpointId; exampleIds?: string[]; pass?: number}): Promise<LabelingTask | null>;
+  label(ctx: RequestContext, req: OptimiserLabelRequest): Promise<OptimiserLabeling>;
   /** Builds the version's score from its saved answers; null when it cannot be built. */
   score(ctx: RequestContext, req: {projectId: string; promptVersionId: string; endpoint: EndpointId}): Promise<{report: EvalReport; passed: boolean} | null>;
   /** The held-out half's score from the second labeling, and whether it passes. */
