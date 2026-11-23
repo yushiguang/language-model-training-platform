@@ -16,6 +16,22 @@ import type {AgentLive, BffContract, ChatAttachment, EventName, EventProps, Gold
  * this same interface; `index.ts` takes it through `@yushiguang/sprint-client-impl`. No page changes, and no
  * backend app is bundled into the browser.
  */
+export interface UploadOptions {
+  onProgress?: (share: number) => void;
+  signal?: AbortSignal;
+}
+
+/** An upload that did not reach the server: `stopped` by the user, or `lost` (the connection broke). Nothing was saved. */
+export class UploadStopped extends Error {
+  constructor(
+    readonly why: 'stopped' | 'lost',
+    /** How much had gone up, 0 to 1. */
+    readonly share: number,
+  ) {
+    super(why === 'stopped' ? 'The upload was stopped.' : 'The connection was lost.');
+  }
+}
+
 export interface BffClient extends BffContract {
   /** Some record changed (also in another tab): read again. */
   subscribeChanges(listener: () => void): () => void;
@@ -30,9 +46,13 @@ export interface BffClient extends BffContract {
   uploadAsset(file: File): Promise<{url: string}>;
   /** An image is uploaded; a text file's start is read into the attachment. */
   prepareChatAttachment(file: File): Promise<ChatAttachment>;
-  /** Creates a data source of the caller's tenant from a file of item ids (#29). */
-  createDataSourceFile(name: string, file: File): Promise<SourceUploadResult>;
-  /** Adds a file of item ids to a data source. */
+  /**
+   * Creates a data source of the caller's tenant from a file of sample ids (#29). `onProgress`
+   * hears how much of the file has gone up (0 to 1); `signal` stops the upload, and then nothing
+   * is saved. A stopped or broken upload rejects with an `UploadStopped`.
+   */
+  createDataSourceFile(name: string, file: File, opts?: UploadOptions): Promise<SourceUploadResult>;
+  /** Adds a file of item ids to a data source. @deprecated One file is one data source. */
   addSourceFileFile(sourceId: string, file: File): Promise<SourceUploadResult>;
   /** Upload labels: a CSV or JSONL file of item ids and answers (`uploadGoldText`). */
   uploadGoldFile(projectId: string, file: File): Promise<GoldUploadResult>;
