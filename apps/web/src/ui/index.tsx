@@ -14,7 +14,7 @@ import {isAccessDenied, reportAccessDenied} from './access';
 import {PageTitle} from './page-title';
 
 export {PageTitle} from './page-title';
-export {accessDeniedProject, accessDeniedText, clearAccessDenied, isAccessDenied, reportAccessDenied, useAccessDenied, type AccessDeniedText} from './access';
+export {accessDeniedText, clearAccessDenied, isAccessDenied, reportAccessDenied, useAccessDenied, type AccessDeniedText} from './access';
 
 /** Mounted once around the app. The kit needs no theme provider; this only sets the root class. */
 export function UiProvider({children}: {children: ReactNode}) {

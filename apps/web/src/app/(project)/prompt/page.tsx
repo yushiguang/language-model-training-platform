@@ -872,7 +872,7 @@ function Advice({state, selId, onStarted, onSwitch}: {state: ProjectState; selId
       case 'add_examples':
         return <Button key={act} label={t('Add examples')} kind={kind} onClick={() => go(href('/dataset'))} />;
       case 'review_labels':
-        return <Button key={act} label={t('Review labels')} kind={kind} onClick={() => go(href('/gold', {tab: 'mismatches'}))} />;
+        return <Button key={act} label={t('Review labels')} kind={kind} onClick={() => go(href('/gold/set', {tab: 'mismatches'}))} />;
       case 'auto_optimise':
         return <Button key={act} label={t('Auto Optimise')} kind={kind} onClick={() => rebuildFirst.ask(auto)} />;
       case 'improve':

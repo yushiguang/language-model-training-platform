@@ -5,7 +5,7 @@ import {Button, Heading, HStack, Icon, Link, Text, TextArea, VStack} from '@/ui/
 import {ArrowTopRightOnSquareIcon, CheckCircleIcon, LockClosedIcon} from '@heroicons/react/24/outline';
 import type {PermissionPoint} from '@yushiguang/sprint-contracts';
 import {requestAccess} from '@/backend-api';
-import {accessDeniedProject, accessDeniedText, clearAccessDenied, useAccessDenied} from '@/ui';
+import {accessDeniedText, clearAccessDenied, useAccessDenied} from '@/ui';
 import {t} from '@/i18n';
 import {useRuntime} from '../session';
 import {FormDialog} from './dialogs';
@@ -21,7 +21,7 @@ export function NoAccessHost({project}: {project?: {id: string; name: string}}) 
   // Leaving the page that was refused closes the dialog.
   useEffect(() => clearAccessDenied, []);
   if (!denied) return null;
-  return <NoAccessDialog key={denied} permission={denied} project={accessDeniedProject() ?? project} onClose={clearAccessDenied} />;
+  return <NoAccessDialog key={denied} permission={denied} project={project} onClose={clearAccessDenied} />;
 }
 
 function NoAccessDialog({permission, project, onClose}: {permission: PermissionPoint; project?: {id: string; name: string}; onClose: () => void}) {
