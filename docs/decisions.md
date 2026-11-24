@@ -8,6 +8,7 @@ where it matters, why. The code follows these; change a line here when a decisio
 - **Admins manage the tenant in one settings dialog**: rename it (same rules as a new name), add people from the company directory by name or email, change roles, remove members, delete the tenant. Only admins change anything; members only read.
 - **A tenant always keeps an admin**: the last admin can't be made a member or removed; the page says to make someone else an admin first.
 - **Deleting a tenant takes everything in it**: its projects, data sources, models and members, once its name is typed. Tenants that come with the organization (no record here) can't be deleted.
+- **The dialog keeps name and member changes until Save; models save at once**: adds, role changes and removals show in the list first (Save applies them, promotions before demotions, so an admin is always left). Each model has its own Add or Save button. Delete tenant asks for the name in its own dialog.
 
 ## 2026-11-23 (Label sets page, #107)
 

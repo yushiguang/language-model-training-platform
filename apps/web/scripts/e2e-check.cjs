@@ -1,7 +1,8 @@
 /**
  * End-to-end check of the static build on the stand-ins, on the 1.0.0 four-step flow: the tenant
  * page (#103: New project with its model and thresholds, the project rows, Delete with the
- * exact-name confirmation), Prompt Design (an existing prompt
+ * exact-name confirmation), tenant settings (#111: a member added, the last admin kept, the tenant
+ * deleted), Prompt Design (an existing prompt
  * pasted into Ask AI is imported with its "Not carried over" list; a prompt drafted from a
  * description is approved as v1 with the page's Approve button, never in the chat), Dataset
  * (auto sampling, no split), Gold Labels (labeled on the page with the answers bundled with the
@@ -113,9 +114,33 @@ let current = null;
   await page.getByRole('heading', {name: 'My team'}).click();
   await page.waitForURL(/\?t=default/);
   await page.getByRole('button', {name: 'Switch My team'}).click();
-  await page.getByRole('menuitem', {name: 'Search Ads'}).waitFor();
-  await page.keyboard.press('Escape');
-  await page.goto(BASE + '/tenant/');
+  await page.getByRole('menuitem', {name: 'Search Ads'}).click();
+  await page.waitForURL(/\?t=tn_/);
+  // #111: tenant settings. Someone is added from the directory and kept with Save; the last admin
+  // can't be changed; the tenant is deleted once its name is typed and leaves Home.
+  await page.getByRole('heading', {name: 'Members', level: 4}).click();
+  const ts = page.getByRole('dialog');
+  await ts.getByRole('combobox', {name: "Evelyn's role"}).waitFor();
+  if ((await ts.getByRole('combobox', {name: "Evelyn's role"}).getAttribute('aria-disabled')) !== 'true') throw new Error("the last admin's role can be changed");
+  await ts.getByRole('combobox', {name: 'Add members'}).fill('ben');
+  await page.getByRole('option', {name: /Ben Carter/}).click();
+  await button(ts, 'Add').click();
+  await ts.getByRole('combobox', {name: "Ben Carter's role"}).waitFor();
+  await shot(page, '0d-tenant-members');
+  await button(ts, 'Save').click();
+  await ts.waitFor({state: 'detached'});
+  await page.getByText('2 members').waitFor();
+  await page.getByRole('heading', {name: 'Tenant settings', level: 4}).click();
+  await page.getByRole('dialog').getByRole('button', {name: 'Delete tenant'}).first().click();
+  await page.getByRole('dialog').getByRole('button', {name: 'Delete tenant'}).last().click();
+  const dt = page.getByRole('dialog').last();
+  await dt.getByLabel('Type the tenant name to confirm').fill('Search Ads');
+  await button(dt, 'Delete tenant').click();
+  await page.waitForURL(u => new URL(u).pathname === '/');
+  await page.getByRole('link', {name: 'Open My team'}).waitFor();
+  if (await page.getByRole('link', {name: 'Open Search Ads'}).count()) throw new Error('the deleted tenant is still on Home');
+  log('tenant settings: a member added, the last admin kept, the tenant deleted');
+  await page.goto(BASE + '/tenant/?t=default');
   // #103: New project is a dialog: a name (a blank one is refused in the field), the labeling
   // model and the three thresholds; the project opens on Prompt Design.
   await button(page, 'New project').click();
