@@ -3,6 +3,11 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-24 (Label set detail, #115)
+
+- **Comments can be edited and deleted by their author only** (wireframe round 9): `editComment` and `deleteComment` refuse anyone else's. A delete is soft, kept in the audit log with the earlier text of every edit, and a deleted comment no longer reaches the helpers.
+- **A label set's Mismatch tab lists that set's samples only**: `mismatches(projectId, version, labelSetId)`. The versions and the default "Compare with" version are still picked on the whole dataset, so every set compares with the same version.
+
 ## 2026-11-23 (Label sets page, #107)
 
 - **One members read for every page**: `listTenantMembers()` gives the page's tenant's members with a name, an email where known, and a role. The label set labeler picker uses it now; the tenant settings Members tab builds add and remove on top of it. The platform's `TenantMember` carries an optional `name` and `email`.

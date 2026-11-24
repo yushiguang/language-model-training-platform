@@ -348,7 +348,7 @@ export async function pruneDataset(w: Scope, projectId: string, mode: 'unlabeled
   return removeExamples(w, projectId, ids, mode === 'unlabeled' ? 'excess_unlabeled' : 'downsample');
 }
 
-/** Adds a person's comment to an example (spec 1.0.0, 5.4); comments are never edited or deleted. */
+/** Adds a person's comment to an example (spec 1.0.0, 5.4). Its author can edit or delete it later (#115). */
 export async function addComment(w: Scope, projectId: string, exampleId: string, text: string, promptVersionId: string | null = null): Promise<LabelComment> {
   const {catalog, user} = w;
   const body = text.trim().slice(0, systemConfig().labeling.commentMaxChars);
@@ -362,4 +362,35 @@ export async function addComment(w: Scope, projectId: string, exampleId: string,
   w.tm.event('label_comment_added', {where: promptVersionId ? 'mismatch' : 'eval', chars: body.length});
   w.emitChange(projectId);
   return c;
+}
+
+/** The caller's own live comment in the project, or an error: nobody changes another person's comment. */
+async function ownComment(w: Scope, projectId: string, commentId: string): Promise<LabelComment> {
+  const c = await w.catalog.get('label_comments', commentId);
+  if (!c || c.projectId !== projectId || c.deletedAt) throw new Error('This comment does not exist.');
+  if (c.authorId !== (await w.user()).id) throw new Error('You can only change your own comments.');
+  return c;
+}
+
+/** Changes the text of the caller's own comment (#115); the earlier text is kept in the audit log. */
+export async function editComment(w: Scope, projectId: string, commentId: string, text: string): Promise<LabelComment> {
+  const body = text.trim().slice(0, systemConfig().labeling.commentMaxChars);
+  if (!body) throw new Error('The comment is empty.');
+  const c = await ownComment(w, projectId, commentId);
+  if (body === c.text) return c;
+  const patch = {text: body, editedAt: now()};
+  await w.catalog.patch('label_comments', c.id, patch);
+  await w.catalog.audit(projectId, c.authorName, 'label_comments.edit', {commentId: c.id, exampleId: c.exampleId, previousText: c.text});
+  w.tm.event('label_comment_edited', {chars: body.length});
+  w.emitChange(projectId);
+  return {...c, ...patch};
+}
+
+/** Deletes the caller's own comment (#115): it is marked deleted, kept for the audit, and left out of every read. */
+export async function deleteComment(w: Scope, projectId: string, commentId: string): Promise<void> {
+  const c = await ownComment(w, projectId, commentId);
+  await w.catalog.patch('label_comments', c.id, {deletedAt: now()});
+  await w.catalog.audit(projectId, c.authorName, 'label_comments.delete', {commentId: c.id, exampleId: c.exampleId});
+  w.tm.event('label_comment_deleted', {});
+  w.emitChange(projectId);
 }

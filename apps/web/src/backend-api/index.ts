@@ -98,6 +98,8 @@ export const {
   restoreExamples,
   pruneDataset,
   addComment,
+  editComment,
+  deleteComment,
   saveGold,
   uploadGold,
   importBundledGold,

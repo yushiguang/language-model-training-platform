@@ -550,6 +550,19 @@ export interface AddCommentRequest {
   promptVersionId?: string | null;
 }
 
+/** Changes the text of the caller's own comment (#115). */
+export interface EditCommentRequest {
+  projectId: string;
+  commentId: string;
+  text: string;
+}
+
+/** Deletes the caller's own comment (#115). */
+export interface DeleteCommentRequest {
+  projectId: string;
+  commentId: string;
+}
+
 export interface ReviewGoldRequest {
   projectId: string;
   exampleId: string;
@@ -702,8 +715,11 @@ export interface BffContract {
    */
   uploadGoldText(projectId: string, name: string, text: string): Promise<GoldUploadResult>;
   importBundledGold(projectId: string): Promise<GoldUploadResult>;
-  /** Examples where versions disagree with the gold label, for one version (left out: the best). */
-  mismatches(projectId: string, promptVersionId?: string | null): Promise<MismatchList>;
+  /**
+   * Examples where versions disagree with the gold label, for one version (left out: the best),
+   * and only those of one label set when `labelSetId` is given (#115).
+   */
+  mismatches(projectId: string, promptVersionId?: string | null, labelSetId?: string | null): Promise<MismatchList>;
   reviewGold(req: ReviewGoldRequest): Promise<void>;
   /** Removes examples (soft delete, each with a `DatasetRemoval`). */
   removeExamples(req: RemoveExamplesRequest): Promise<void>;
@@ -726,8 +742,12 @@ export interface BffContract {
   restoreExamples(req: RestoreExamplesRequest): Promise<void>;
   /** Batch pruning; returns how many examples it removed. */
   pruneDataset(req: PruneDatasetRequest): Promise<number>;
-  /** Adds a comment to an example (append-only). */
+  /** Adds a comment to an example. */
   addComment(req: AddCommentRequest): Promise<LabelComment>;
+  /** Changes the caller's own comment; anyone else's is refused (#115). */
+  editComment(req: EditCommentRequest): Promise<LabelComment>;
+  /** Deletes the caller's own comment; anyone else's is refused (#115). */
+  deleteComment(req: DeleteCommentRequest): Promise<void>;
   /**
    * Rebuild scores: works every archived score out again from the saved answers, in the request.
    * Returns how many. @deprecated Use `rescore`; kept for the current Prompt versions page.
