@@ -3,7 +3,7 @@ import {systemConfig} from '@yushiguang/sprint-domain';
 
 import {useSearchParams} from 'next/navigation';
 import {createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode} from 'react';
-import {loadProjectState, subscribeChanges, tick, type ProjectState} from '@/backend-api';
+import {currentTenant, loadProjectState, subscribeChanges, tick, type ProjectState} from '@/backend-api';
 
 
 interface Ctx {
@@ -24,8 +24,16 @@ export function useProject(): Ctx {
   return c;
 }
 
+/** A link to a page of a tenant (#94), the page's own by default: it carries `?t=`. */
+export function tenantHref(path = '/tenant/', tenantId = currentTenant()) {
+  return tenantId ? `${path}${path.endsWith('/') ? '' : '/'}?${new URLSearchParams({t: tenantId})}` : path;
+}
+
+/** A link to a page of a project; it carries the page's tenant (`?t=`), so it opens there when shared. */
 export function hrefFor(projectId: string, path: string, params: Record<string, string | undefined> = {}) {
   const q = new URLSearchParams({p: projectId});
+  const tenant = currentTenant();
+  if (tenant) q.set('t', tenant);
   for (const [k, v] of Object.entries(params)) if (v != null) q.set(k, v);
   return `${path}${path.endsWith('/') ? '' : '/'}?${q.toString()}`;
 }
