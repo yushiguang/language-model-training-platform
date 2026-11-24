@@ -43,6 +43,7 @@ export {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/Segment
 export {Selector, type SelectorOptionData} from '@astryxdesign/core/Selector';
 export {SideNav, SideNavItem, SideNavSection} from '@astryxdesign/core/SideNav';
 export {Spinner} from '@astryxdesign/core/Spinner';
+export {Switch} from '@astryxdesign/core/Switch';
 export {pixel, proportional, Table, useTableSortable, type TableColumn, type TableSortState} from '@astryxdesign/core/Table';
 export {Heading, Text} from '@astryxdesign/core/Text';
 export {TextArea} from '@astryxdesign/core/TextArea';
