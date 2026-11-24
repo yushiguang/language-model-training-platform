@@ -346,7 +346,7 @@ test('label sets (#82): members read them; changing them needs project write', a
   const {api} = world('wf-sets', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
   const p = await api.createProject(inTenant(alice, 't1'), 'Sets');
   const bobs = inTenant(bob, 't1');
-  assert.deepEqual(await api.listLabelSets(bobs, p.id), {sets: [], unassigned: 0}, 'a member reads');
+  assert.deepEqual(await api.listLabelSets(bobs, p.id), {sets: [], unassigned: 0, labeled: 0, mismatch: 0}, 'a member reads');
   assert.deepEqual(await api.listSamples(bobs, {projectId: p.id}), {items: [], total: 0, model: null, counts: {live: 0, no_label: 0, mismatch: 0, removed: 0}});
   const structured = {taskSummary: '', features: {video: [], photo_text: [], metadata: []}, label: {name: 'x', kind: 'single' as const, values: []}, ruleGroups: [], images: []};
   assert.equal(await api.goldLabelsCleared(bobs, {projectId: p.id, structured}), 0);
@@ -457,6 +457,25 @@ test('tenants (#94): anyone signed in creates one and becomes its admin; names a
   assert.deepEqual([info.tenantRole, info.tenantName], ['admin', 'Content Safety']);
   assert.equal((await api.runtimeInfo(inTenant(eve, made.tenant.id))).tenantRole, undefined, 'not in it: no role');
   assert.equal((await catalog.find('tenants', {})).length, 2);
+});
+
+test('tenant members (#107): any member lists them by name, with the email the platform knows; a member without a name is named by the identity or the user id', async () => {
+  const perms = checking(memoryPermissionAdmin({seed: [{tenantId: 't1', userId: bob.id, role: 'member', name: 'Bob Smith', email: 'bob@example.com'}]}));
+  const {api} = world('wf-members', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
+  await perms.admin.addTenantMember(ctxOf(alice), 't1', alice.id, 'admin');
+  await perms.admin.addTenantMember(ctxOf(alice), 't1', 'u_zed', 'member');
+  const want = [
+    {userId: alice.id, name: 'Alice', role: 'admin'},
+    {userId: bob.id, name: 'Bob Smith', email: 'bob@example.com', role: 'member'},
+    {userId: 'u_zed', name: 'u_zed', role: 'member'},
+  ];
+  assert.deepEqual(await api.listTenantMembers(inTenant(alice, 't1')), want);
+  assert.deepEqual(await api.listTenantMembers(inTenant(bob, 't1')), [want[1], {...want[0], name: alice.id}, want[2]], "another member's name is the platform's to give; by name");
+  await assert.rejects(api.listTenantMembers(inTenant(eve, 't1')), {code: 'forbidden'}, 'not a member: refused');
+  const bare = world('wf-members-bare', noHelpers);
+  assert.deepEqual(await bare.api.listTenantMembers(inTenant(alice, 't9')), [{userId: alice.id, name: 'Alice', role: 'admin'}], 'no platform: the caller alone');
+  const withEmail = {...alice, email: 'alice@example.com'};
+  assert.deepEqual(await bare.api.listTenantMembers(inTenant(withEmail, 't9')), [{userId: alice.id, name: 'Alice', email: 'alice@example.com', role: 'admin'}], "the caller's own email comes from the identity");
 });
 
 test('tenants (#94): an admin that cannot be written removes the new tenant; without a permission platform none is made', async () => {

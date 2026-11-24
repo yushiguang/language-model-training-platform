@@ -108,6 +108,7 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
 
     listTenants: ctx => tenants.listTenants(at(ctx)),
     createTenant: (ctx, r) => tenants.createTenant(at(ctx), r),
+    listTenantMembers: ctx => tenants.listTenantMembers(at(ctx)),
 
     listProjects: ctx => projects.listProjects(at(ctx)),
     createProject: (ctx, name) => projects.createProject(at(ctx), name),
@@ -172,6 +173,7 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     },
     listSamples: (ctx, r) => samples.listSamples(at(ctx), r),
     listLabelSets: (ctx, projectId) => labelSets.listLabelSets(at(ctx), projectId),
+    previewLabelSets: (ctx, r) => labelSets.previewLabelSets(at(ctx), r),
     createLabelSet: (ctx, r) => labelSets.createLabelSet(at(ctx), r),
     createLabelSets: (ctx, r) => labelSets.createLabelSets(at(ctx), r),
     updateLabelSet: (ctx, r) => labelSets.updateLabelSet(at(ctx), r),
