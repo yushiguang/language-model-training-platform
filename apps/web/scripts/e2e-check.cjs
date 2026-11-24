@@ -586,6 +586,42 @@ let current = null;
     await page.goto(url('/prompt/'));
   }
 
+  // A failed run keeps its card: Progress says why, Rounds and Activity show what it did, and Retry
+  // goes on. The stand-in model fails the Optimiser's calls while this browser asks it to.
+  {
+    await page.evaluate(() => localStorage.setItem('sprint-standin-optimiser', 'fail'));
+    await page.getByRole('button', {name: 'Optimise', exact: true}).first().click();
+    const dlg = page.getByRole('dialog');
+    await dlg.waitFor({timeout: 5000});
+    await dlg.getByRole('button', {name: 'Start', exact: true}).click();
+    await dlg.waitFor({state: 'detached', timeout: 15000});
+    const failedCard = versionsRow.locator('.sp-pt-vcard', {hasText: 'Failed'});
+    await failedCard.first().waitFor({timeout: 60000});
+    if (!(await failedCard.first().locator('.sp-pt-vbtn').getAttribute('class'))?.includes('selected')) await failedCard.first().locator('.sp-pt-vbtn').click();
+    await page.getByText('The Optimiser stopped with an error', {exact: true}).waitFor({timeout: 5000});
+    await page.locator('section[aria-label="Rounds"]').waitFor();
+    const activity = await page.locator('section[aria-label="Activity"]').innerText();
+    if (!/Started from v\d+, up to 10 rounds/.test(activity) || !/The run stopped with an error/.test(activity)) throw new Error(`the failed run's Activity is wrong: ${activity}`);
+    if (await page.getByRole('button', {name: 'Optimise', exact: true}).count()) throw new Error('Optimise shows on a failed run');
+    log('failed run:', (await page.locator('section[aria-label="Progress"]').innerText()).replace(/\n/g, ' ').slice(0, 200));
+    await shot(page, '5f-optimiser-failed');
+    await page.evaluate(() => localStorage.removeItem('sprint-standin-optimiser'));
+    await button(page, 'Retry').click();
+    await versionsRow.locator('.sp-pt-vcard', {hasText: /Round \d+ of \d+/}).first().waitFor({timeout: 15000});
+    await versionsRow.locator('.sp-pt-vcard', {hasText: 'Failed'}).waitFor({state: 'detached', timeout: 15000});
+    await page.locator('section[aria-label="Rounds"]').getByText(/^Try 1 · (?!Writing a change)/).waitFor({timeout: 15000});
+    await shot(page, '5f2-optimiser-retried');
+    // Stopped: the card goes, and a banner says how the run ended until it is dismissed.
+    await button(page, 'Stop').click();
+    const ended = page.getByText(/^(No change beat v\d+|v\d+ beat v\d+|The Optimiser found v\d+, which passes)$/);
+    await ended.first().waitFor({timeout: 30000});
+    log('run ended:', await ended.first().innerText());
+    await shot(page, '5g-optimiser-stopped');
+    await page.getByRole('button', {name: 'Dismiss', exact: true}).first().click();
+    await ended.first().waitFor({state: 'detached', timeout: 5000});
+    log('failed run: Retry went on; Stop ended it; the end banner was dismissed');
+  }
+
   // Optimise until a version passes: the suggestion then says to use it as the final prompt (T6).
   // A running Optimiser has its own card in the Versions row; selected, it shows its Progress.
   let optimised = false;
@@ -598,6 +634,8 @@ let current = null;
     if (await progress.count()) {
       if (i % 4 === 0) log('optimiser:', (await progress.innerText()).replace(/\n/g, ' ').slice(0, 160));
       if (!optimised) {
+        await page.locator('section[aria-label="Rounds"]').waitFor({timeout: 5000});
+        await page.locator('section[aria-label="Activity"]').waitFor();
         await shot(page, '5b-optimiser-running');
         if (!(await versionsRow.locator('.sp-pt-vcard.selected').getByText(/Round \d+ of \d+/).count())) throw new Error('the Optimiser card does not say its round');
       }
@@ -624,6 +662,11 @@ let current = null;
       if (++starts > 8) throw new Error(`no version passed after 8 Optimiser runs: ${text.replace(/\n/g, ' | ')}`);
       log('optimise started:', text.replace(/\n/g, ' | ').slice(0, 200));
     }
+  }
+  if (optimised) {
+    // The run that passed ends with a banner naming the version it found.
+    await page.getByText(/^The Optimiser found v\d+, which passes$/).first().waitFor({timeout: 10000});
+    await shot(page, '5d-optimiser-passed');
   }
   await shot(page, '5-prompt-versions');
   log('suggestion:', (await suggestion()).replace(/\n/g, ' | '));

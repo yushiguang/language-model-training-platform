@@ -1,4 +1,5 @@
 import {
+  LlmCallError,
   type AgentChatOptions,
   type AgentCompletionResult,
   type AgentModel,
@@ -392,10 +393,23 @@ function passOn(r: Req) {
   return fd.handoff && fd.handoff.to !== r.preset ? fd : null;
 }
 
+/**
+ * A browser that holds `sprint-standin-optimiser` = `fail` in its local storage gets an error from
+ * the Optimiser's model calls, so a failed run and its Retry can be tried without a real model.
+ */
+function optimiserFails(): boolean {
+  try {
+    return globalThis.localStorage?.getItem('sprint-standin-optimiser') === 'fail';
+  } catch {
+    return false;
+  }
+}
+
 export function scriptedAgent(): AgentModel {
   const runText = async (messages: ModelMessage[]) => {
     await new Promise(res => setTimeout(res, 450));
     const req = readRequest(messages);
+    if (req.preset === 'optimiser' && optimiserFails()) throw new LlmCallError('rejected', 'The model refused the request.');
     const out =
       skill(req) ??
       (req.preset !== 'optimiser' && req.intent !== 'improve' ? problemReport(req) : null) ??

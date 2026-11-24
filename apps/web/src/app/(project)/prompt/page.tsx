@@ -9,23 +9,24 @@ import {useProject} from '@/components/ProjectContext';
 import {useSettings} from '@/components/ProjectSettings';
 import {WithSide} from '@/components/shell/Page';
 import {labelCounts} from '@/components/LabelDistribution';
-import {predictionsFor, rescore, scoreVersion, stopOptimiser, stopRun, type ProjectState} from '@/backend-api';
+import {predictionsFor, rescore, retryOptimiser, scoreVersion, stopOptimiser, stopRun, type ProjectState} from '@/backend-api';
 import {Banner, Button, EmptyState, HStack, Icon, ProgressBar, Spinner, VStack} from '@/ui/astryx';
 import {action, num, PageTitle} from '@/ui';
 import {t} from '@/i18n';
-import {bestItem, busy, endpointOf, orderItems, tuningItems, type SortBy, type TuningItem} from '@/components/tuning/items';
+import {bestItem, busy, endpointOf, openRun, orderItems, tuningItems, type SortBy, type TuningItem} from '@/components/tuning/items';
 import {VersionRow} from '@/components/tuning/VersionRow';
 import {AnswerSpread, ScoreCards, ScoresWait, ValueRows} from '@/components/tuning/Scores';
 import {Suggestions, SuggestionsLater, SuggestionsWaiting} from '@/components/tuning/Suggestions';
-import {OptimiseDialog, OptimiserProgress} from '@/components/tuning/Optimiser';
+import {OptimiseDialog, OptimiserActivity, OptimiserEnd, OptimiserProgress, OptimiserRounds} from '@/components/tuning/Optimiser';
 
 const PAGE: PageContext = {label: 'Prompt Tuning', agent: 'front_desk', intent: 'answer', hint: 'Ask me about any version.', context: {}};
 
 /**
  * Step 4, Prompt Tuning (wireframes v346, W-PromptTuning*): a row of version cards; under it the
  * selected version's Scores and Values, with Suggestions on the right. Before every label set is
- * done there are no scores: versions show "Labeled" and Values how the answers spread. A running
- * Optimiser has a card of its own whose Progress shows when it is selected.
+ * done there are no scores: versions show "Labeled" and Values how the answers spread. An Optimiser
+ * run that is under way, failed or paused has a card of its own; selected, it shows its Progress,
+ * Rounds and Activity. When a run ends, a banner says how it went.
  */
 export default function PromptTuningPage() {
   return (
@@ -36,7 +37,9 @@ export default function PromptTuningPage() {
 }
 
 function Router() {
-  const vId = useSearchParams().get('v');
+  const q = useSearchParams();
+  const vId = q.get('v');
+  const runId = q.get('run');
   const [page, setPage] = useState<PageContext>(PAGE);
   return (
     <ProjectPage node="prompt" page={page}>
@@ -46,7 +49,7 @@ function Router() {
             <EmptyState title={t('No prompt yet')} description={t('Save the first prompt on Prompt Design.')} />
           </Frame>
         ) : (
-          <Tuning state={state} vId={vId} setPage={setPage} />
+          <Tuning state={state} vId={vId} runId={runId} setPage={setPage} />
         )
       }
     </ProjectPage>
@@ -77,7 +80,7 @@ function useStored<T>(key: string): [T | null, (v: T) => void, boolean] {
   return [v, save, loaded];
 }
 
-function Tuning({state, vId, setPage}: {state: ProjectState; vId: string | null; setPage: (p: PageContext) => void}) {
+function Tuning({state, vId, runId, setPage}: {state: ProjectState; vId: string | null; runId: string | null; setPage: (p: PageContext) => void}) {
   const {href} = useProject();
   const settings = useSettings();
   const projectId = state.project.id;
@@ -87,6 +90,7 @@ function Tuning({state, vId, setPage}: {state: ProjectState; vId: string | null;
   const [sort, setSort] = useState<SortBy>('score');
   const [pinned, setPinned] = useStored<number | null>(`sp-pt-pin:${projectId}`);
   const [seenList, setSeen, seenLoaded] = useStored<string[]>(`sp-pt-seen:${projectId}`);
+  const [endSeen, setEndSeen] = useStored<string>(`sp-pt-end:${projectId}`);
   const all = useMemo(() => tuningItems(state), [state]);
   const scoredIds = all.flatMap(i => (i.state.kind === 'scored' ? [i.state.report.id] : []));
   // The first visit has opened nothing: every score there is counts as seen.
@@ -99,20 +103,31 @@ function Tuning({state, vId, setPage}: {state: ProjectState; vId: string | null;
   const best = bestItem(all);
   const asked = vId ? state.versions.find(v => v.id === vId)?.major : undefined;
   const [selMajor, setSel] = useState<number | null>(asked ?? null);
-  const sel = items.find(i => i.major === selMajor) ?? (best ? items.find(i => i.major === best.major) : undefined) ?? items[0];
-  // The selection is kept in the address (?v=), so a reload or a language switch keeps it.
-  const keep = (major: number) => {
-    const id = state.versions.filter(v => v.major === major).at(-1)?.id;
+  // A run just started from the Optimise dialog stays selected until another card is picked.
+  const [selRun, setSelRun] = useState<string | null>(runId);
+  const runCard = selRun ? items.find(i => i.state.kind === 'optimiser' && i.state.run.id === selRun) : undefined;
+  const sel = runCard ?? items.find(i => i.major === selMajor) ?? (best ? items.find(i => i.major === best.major) : undefined) ?? items[0];
+  // The selection is kept in the address (?v=, or ?run= for a run's card), so a reload or a
+  // language switch keeps it.
+  const address = (key: 'v' | 'run', id: string | undefined) => {
     if (typeof window === 'undefined') return;
     const u = new URL(window.location.href);
-    if (id) u.searchParams.set('v', id);
-    else u.searchParams.delete('v');
+    u.searchParams.delete('v');
+    u.searchParams.delete('run');
+    if (id) u.searchParams.set(key, id);
     window.history.replaceState(null, '', u);
   };
+  const keep = (major: number) => address('v', state.versions.filter(v => v.major === major).at(-1)?.id);
   const select = (major: number) => {
-    setSel(major);
-    keep(major);
     const it = items.find(i => i.major === major);
+    setSel(major);
+    if (it?.state.kind === 'optimiser') {
+      setSelRun(it.state.run.id);
+      address('run', it.state.run.id);
+    } else {
+      setSelRun(null);
+      keep(major);
+    }
     if (it?.state.kind === 'scored' && !seen.has(it.state.report.id)) setSeen([...seen, it.state.report.id]);
   };
   useEffect(() => {
@@ -124,6 +139,7 @@ function Tuning({state, vId, setPage}: {state: ProjectState; vId: string | null;
   const version = sel.version;
   const s = sel.state;
   const optimiserBusy = state.optimisation.some(busy);
+  const optimiserOpen = state.optimisation.some(openRun);
   const editHref = version ? href('/prompt-design', {v: version.id}) : undefined;
   const edit = editHref ? <Button key="edit" label={t('Edit')} variant="secondary" icon={<Icon icon={PencilSquareIcon} size="sm" />} href={editHref} /> : null;
   const stopAll = (runs: {projectId: string; id: string}[]) => Promise.all(runs.map(r => stopRun({projectId: r.projectId, runId: r.id})));
@@ -135,7 +151,17 @@ function Tuning({state, vId, setPage}: {state: ProjectState; vId: string | null;
   const canRescore = state.scoresUpdating && sc.ready && !sc.rescoring;
   const actions =
     s.kind === 'optimiser' ? (
-      <Button label={t('Stop')} variant="secondary" icon={<Icon icon={StopIcon} size="sm" />} clickAction={action(t('Stop'), () => stopOptimiser({projectId, runId: s.run.id}))} />
+      <>
+        {!busy(s.run) && (
+          <Button
+            label={s.run.state === 'failed' ? t('Retry') : t('Resume')}
+            variant={'ai' as never}
+            icon={<Icon icon={s.run.state === 'failed' ? ArrowPathIcon : PlayIcon} size="sm" />}
+            clickAction={action(s.run.state === 'failed' ? t('Retry') : t('Resume'), () => retryOptimiser({projectId, runId: s.run.id}))}
+          />
+        )}
+        <Button label={t('Stop')} variant="secondary" icon={<Icon icon={StopIcon} size="sm" />} clickAction={action(t('Stop'), () => stopOptimiser({projectId, runId: s.run.id}))} />
+      </>
     ) : s.kind === 'labeling' || s.kind === 'queued' ? (
       <>
         {edit}
@@ -163,8 +189,8 @@ function Tuning({state, vId, setPage}: {state: ProjectState; vId: string | null;
           label={t('Optimise')}
           variant={'ai' as never}
           icon={<Icon icon={PlayIcon} size="sm" />}
-          isDisabled={optimiserBusy}
-          tooltip={optimiserBusy ? t('The Optimiser is already running') : undefined}
+          isDisabled={optimiserOpen}
+          tooltip={optimiserBusy ? t('The Optimiser is already running') : optimiserOpen ? t('Retry or stop the Optimiser run first') : undefined}
           clickAction={action(t('Optimise'), async () => {
             if (await settings.confirmed()) setOptimise(true);
           })}
@@ -181,9 +207,15 @@ function Tuning({state, vId, setPage}: {state: ProjectState; vId: string | null;
     <Frame head={<PageTitle title={t('Prompt Tuning')} subtitle={subtitle} actions={<HStack gap={2}>{actions}</HStack>} />}>
       <VStack gap={8}>
         <RescoreBanner state={state} />
+        {state.optimisation[0] && endSeen !== state.optimisation[0].id && <OptimiserEnd state={state} onShow={select} onDismiss={setEndSeen} />}
         <VersionRow items={items} selected={sel.major} onSelect={select} sort={sort} onSort={setSort} pinned={pinned ?? null} onPin={setPinned} best={best?.major ?? null} unread={unread} />
         {s.kind === 'optimiser' ? (
-          <OptimiserProgress state={state} run={s.run} />
+          <WithSide side={<OptimiserActivity state={state} run={s.run} />}>
+            <VStack gap={8}>
+              <OptimiserProgress state={state} run={s.run} />
+              <OptimiserRounds run={s.run} />
+            </VStack>
+          </WithSide>
         ) : (
           <WithSide side={!sc.ready ? <SuggestionsWaiting state={state} /> : s.kind === 'scored' && version ? <Suggestions state={state} versionId={version.id} onOptimise={() => setOptimise(true)} onSwitch={id => select(state.versions.find(v => v.id === id)?.major ?? sel.major)} /> : <SuggestionsLater />}>
             <Detail state={state} item={sel} items={all} />
@@ -197,10 +229,10 @@ function Tuning({state, vId, setPage}: {state: ProjectState; vId: string | null;
           label={sel.label}
           score={s.report.metrics.macroF1}
           onClose={() => setOptimise(false)}
-          onStarted={major => {
+          onStarted={id => {
             setOptimise(false);
-            setSel(major);
-            if (major != null) keep(major);
+            setSelRun(id);
+            address('run', id ?? undefined);
           }}
         />
       )}
