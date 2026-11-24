@@ -78,6 +78,11 @@ body { background: var(--color-background-surface, #fff); }
 .sp-rows .sp-row-actions { display: inline-flex; opacity: 0; }
 .sp-rows tr:hover .sp-row-actions, .sp-rows .sp-row-actions:focus-within, .sp-rows .sp-row-actions:has([aria-expanded='true']) { opacity: 1; }
 @media (hover: none) { .sp-rows .sp-row-actions { opacity: 1; } }
+
+/* A list of planned items in a dialog (label sets to create): one bordered box, rows split by a line. */
+.sp-plan { border: 1px solid var(--color-border, #e3e4e8); border-radius: var(--radius-container, 12px); max-height: 320px; overflow-y: auto; }
+.sp-plan-row { padding: 12px 16px; }
+.sp-plan-row + .sp-plan-row { border-top: 1px solid var(--color-border, #e3e4e8); }
 /* The tenant page (#103): an Admin card's mark for what a project needs first; the thresholds' rows. */
 .sp-needed { display: inline-flex; color: var(--color-text-warning, #b54708); }
 .sp-threshold { padding: 12px 16px; }

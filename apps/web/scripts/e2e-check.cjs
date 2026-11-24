@@ -286,8 +286,47 @@ let current = null;
   await shot(page, '2-dataset');
   await next.click();
 
-  // Gold Labels: every eval example and some test examples, picked on the page
+  // Gold Labels (#107): the dataset's label sets. None yet: a preview of several sets shows their
+  // ranges, then one set of every example goes to the signed-in user, is renamed in its settings,
+  // and opens for labeling.
   await page.waitForURL(/gold/);
+  await page.getByText('No label sets yet', {exact: true}).waitFor({timeout: 10000});
+  await button(page, 'Create label sets').first().click();
+  const mk = page.locator('dialog[open]');
+  await mk.getByRole('radio', {name: 'Several sets'}).click();
+  await howMany(mk.getByLabel('Number of sets', {exact: true}), '2');
+  if ((await mk.getByLabel('Examples per set', {exact: true}).inputValue()) !== String(N / 2)) throw new Error('Examples per set did not follow Number of sets');
+  await mk.getByText(`#1–${N / 2} · ${N / 2} examples`).waitFor({timeout: 5000});
+  await mk.getByText(`#${N / 2 + 1}–${N} · ${N / 2} examples`).waitFor();
+  await shot(page, '3-labeling-batch');
+  await mk.getByRole('radio', {name: 'One set'}).click();
+  await howMany(mk.getByLabel('Examples', {exact: true}), String(N + 1));
+  await mk.getByText(`Only ${N} samples are left without a label set.`).first().waitFor({timeout: 5000});
+  if (!(await button(mk, 'Create').isDisabled())) throw new Error('Create is on for more examples than are left');
+  await howMany(mk.getByLabel('Examples', {exact: true}), String(N));
+  await mk.getByText(`Takes the next ones in order: #1–${N}`).waitFor({timeout: 5000});
+  await mk.getByRole('combobox', {name: 'Labeler'}).click();
+  await page.getByRole('option', {name: 'Evelyn'}).click();
+  await shot(page, '3-labeling-create');
+  await button(mk, 'Create').click();
+  await mk.waitFor({state: 'detached', timeout: 10000});
+  await page.getByRole('radio', {name: 'Mine 1'}).waitFor({timeout: 10000});
+  const setRow = page.locator('main tbody tr').first();
+  if (!/Set 1[\s\S]*#1–40[\s\S]*40[\s\S]*Evelyn[\s\S]*0 \/ 40/.test(await setRow.innerText())) throw new Error(`the label set row is not right: ${await setRow.innerText()}`);
+  await setRow.hover();
+  await page.getByRole('button', {name: 'Settings for Set 1'}).click();
+  const st = page.locator('dialog[open]');
+  if ((await st.getByLabel('Examples', {exact: true}).inputValue()) !== `#1–${N} · ${N}`) throw new Error('the settings do not show the fixed range');
+  await st.getByLabel('Name', {exact: true}).fill('First batch');
+  await button(st, 'Save').click();
+  await st.waitFor({state: 'detached', timeout: 10000});
+  await page.getByRole('link', {name: 'First batch'}).waitFor({timeout: 10000});
+  await shot(page, '3-labeling');
+  log('label sets:', (await page.locator('main').innerText()).replace(/\s+/g, ' ').slice(0, 200));
+  await page.getByRole('link', {name: 'First batch'}).click();
+
+  // The label set: every eval example and some test examples, picked on the page
+  await page.waitForURL(/gold\/set/);
   // Spec 5.3: nothing saves before Save; in To label, Save moves on to the next example.
   const labelSet = async n => {
     for (let i = 0; i < n; i++) {

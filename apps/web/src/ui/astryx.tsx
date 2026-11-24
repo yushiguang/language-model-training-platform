@@ -40,7 +40,7 @@ export {Pagination} from '@astryxdesign/core/Pagination';
 export {ProgressBar} from '@astryxdesign/core/ProgressBar';
 export {RadioList, RadioListItem} from '@astryxdesign/core/RadioList';
 export {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl';
-export {Selector} from '@astryxdesign/core/Selector';
+export {Selector, type SelectorOptionData} from '@astryxdesign/core/Selector';
 export {SideNav, SideNavItem, SideNavSection} from '@astryxdesign/core/SideNav';
 export {Spinner} from '@astryxdesign/core/Spinner';
 export {Switch} from '@astryxdesign/core/Switch';
