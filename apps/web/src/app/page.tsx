@@ -1,15 +1,17 @@
 'use client';
 
-import {useEffect, useState} from 'react';
-import {Badge, Button, Card, ClickableCard, Grid, Heading, HStack, Icon, Text, TextInput, VStack} from '@/ui/astryx';
+import {useEffect, useMemo, useState} from 'react';
+import {Avatar, Badge, Button, Card, ClickableCard, Grid, Heading, HStack, Icon, IconButton, Text, TextInput, Typeahead, VStack, type SearchableItem, type SearchSource} from '@/ui/astryx';
 import {ArrowRightIcon} from '@heroicons/react/20/solid';
+import {MagnifyingGlassIcon, UserPlusIcon, XMarkIcon} from '@heroicons/react/24/outline';
+import type {Msg, Person} from '@yushiguang/sprint-contracts';
 import {NODES} from '@yushiguang/sprint-domain';
-import {createTenant, listTenants, rememberTenant, type TenantSummary} from '@/backend-api';
+import {createTenant, listTenants, rememberTenant, searchPeople, type TenantSummary} from '@/backend-api';
 import {HomeFrame} from '@/components/Shell';
 import {FormDialog} from '@/components/shell/dialogs';
 import {tenantHref} from '@/components/ProjectContext';
 import {useGo} from '@/components/nav';
-import {forgetRuntime} from '@/components/session';
+import {forgetRuntime, useRuntime} from '@/components/session';
 import {t} from '@/i18n';
 
 /**
@@ -126,18 +128,54 @@ function Tenants() {
   );
 }
 
-/** Create a tenant (W-Home-Create): the name only; the new tenant opens on its tenant page. */
+type PersonItem = SearchableItem<Person>;
+
+/** Create a tenant (W-Home-Create): the name, plus initial co-admins when deployment policy requires them. */
 function CreateTenant({onClose}: {onClose: () => void}) {
   const go = useGo();
+  const {info} = useRuntime();
+  const minAdmins = Math.min(50, Math.max(1, Math.floor(info?.minTenantAdmins ?? 1)));
+  const extraNeeded = Math.max(0, minAdmins - 1);
   const [name, setName] = useState('');
+  const [coAdmins, setCoAdmins] = useState<Person[]>([]);
+  const [picked, setPicked] = useState<PersonItem | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [adminError, setAdminError] = useState<Msg | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const excluded = useMemo(() => {
+    const s = new Set(coAdmins.map(p => p.id));
+    if (info?.user.id) s.add(info.user.id);
+    return s;
+  }, [coAdmins, info?.user.id]);
+  const source = useMemo<SearchSource<PersonItem>>(
+    () => ({
+      search: async q => (await searchPeople({query: q})).filter(p => !excluded.has(p.id)).map(p => ({id: p.id, label: p.name, auxiliaryData: p})),
+      bootstrap: () => [],
+    }),
+    [excluded],
+  );
+  const addAdmin = () => {
+    const p = picked?.auxiliaryData;
+    if (!p) return;
+    setCoAdmins(a => (a.some(x => x.id === p.id) ? a : [...a, p]));
+    setPicked(null);
+    setAdminError(null);
+  };
   const create = async () => {
     if (!name.trim()) return setError('Enter a name. Spaces alone are not a name.');
+    if (extraNeeded > 0 && coAdmins.length < extraNeeded) {
+      return setAdminError(extraNeeded === 1 ? {key: 'Pick at least one other admin.'} : {key: 'Pick at least {n} other admins.', params: {n: extraNeeded}});
+    }
     setBusy(true);
     try {
-      const r = await createTenant({name});
-      if (!r.tenant) return setError(r.error ?? 'The tenant could not be created. Try again.');
+      const r = await createTenant({name, ...(coAdmins.length ? {adminIds: coAdmins.map(p => p.id)} : {})});
+      if (!r.tenant) {
+        if (r.error && /^Pick at least /.test(r.error)) {
+          return setAdminError(extraNeeded === 1 ? {key: 'Pick at least one other admin.'} : {key: 'Pick at least {n} other admins.', params: {n: extraNeeded}});
+        }
+        return setError(r.error ?? 'The tenant could not be created. Try again.');
+      }
       rememberTenant(r.tenant.id);
       forgetRuntime();
       await go(tenantHref('/tenant/', r.tenant.id));
@@ -165,14 +203,83 @@ function CreateTenant({onClose}: {onClose: () => void}) {
           if (!error && !busy) void create();
         }}
       >
-        <TextInput
-          label={t('Tenant name')}
-          placeholder={t('For example: Content Safety')}
-          value={name}
-          onChange={v => (setName(v), setError(null))}
-          hasAutoFocus
-          status={error ? {type: 'error', message: t(error)} : undefined}
-        />
+        <VStack gap={4}>
+          <TextInput
+            label={t('Tenant name')}
+            placeholder={t('For example: Content Safety')}
+            value={name}
+            onChange={v => (setName(v), setError(null))}
+            hasAutoFocus
+            status={error ? {type: 'error', message: t(error)} : undefined}
+          />
+          {extraNeeded > 0 && (
+            <VStack gap={3}>
+              <VStack gap={1}>
+                <HStack gap={2} vAlign="end">
+                  <div style={{flex: 1, minWidth: 0}}>
+                    <Typeahead<PersonItem>
+                      label={extraNeeded === 1 ? t('Additional admin') : t('Additional admins')}
+                      placeholder={t('Search by name or email')}
+                      startIcon={MagnifyingGlassIcon}
+                      searchSource={source}
+                      value={picked}
+                      onChange={v => (setPicked(v), setAdminError(null))}
+                      renderItem={p => (
+                        <HStack gap={2} vAlign="center">
+                          <Avatar name={p.label} size="xsm" />
+                          <VStack gap={0}>
+                            <Text type="body">{p.label}</Text>
+                            {p.auxiliaryData?.email && (
+                              <Text type="supporting" color="secondary">
+                                {p.auxiliaryData.email}
+                              </Text>
+                            )}
+                          </VStack>
+                        </HStack>
+                      )}
+                      emptySearchText={t('Nobody found.')}
+                    />
+                  </div>
+                  <Button label={t('Add')} variant="secondary" icon={<Icon icon={UserPlusIcon} size="sm" />} isDisabled={!picked || busy} onClick={addAdmin} />
+                </HStack>
+                <Text type="supporting" color="secondary">
+                  {extraNeeded === 1 ? t('You are the first admin. Pick at least 1 other person as an admin.') : t('You are the first admin. Pick at least {n} other people as admins.', {n: extraNeeded})}
+                </Text>
+              </VStack>
+              {coAdmins.length > 0 && (
+                <VStack gap={2}>
+                  {coAdmins.map(p => (
+                    <HStack key={p.id} gap={2} vAlign="center" hAlign="between">
+                      <HStack gap={2} vAlign="center">
+                        <Avatar name={p.name} size="xsm" />
+                        <VStack gap={0}>
+                          <Text type="label">{p.name}</Text>
+                          {p.email && (
+                            <Text type="supporting" color="secondary">
+                              {p.email}
+                            </Text>
+                          )}
+                        </VStack>
+                      </HStack>
+                      <IconButton
+                        label={t('Remove {name}', {name: p.name})}
+                        variant="ghost"
+                        size="sm"
+                        icon={<Icon icon={XMarkIcon} size="sm" />}
+                        onClick={() => setCoAdmins(a => a.filter(x => x.id !== p.id))}
+                      />
+                    </HStack>
+                  ))}
+                </VStack>
+              )}
+              {adminError && (
+                <Text type="supporting" className="sp-error" role="alert">
+                  {t(adminError.key, adminError.params)}
+                </Text>
+              )}
+            </VStack>
+          )}
+        </VStack>
       </form>
     </FormDialog>
   );

@@ -19,7 +19,7 @@ import {
 } from '@/backend-api';
 import {FormDialog, SettingsCard, SettingsDialog, SettingsRow} from '@/components/shell/dialogs';
 import {ErrorLine} from '@/components/sources/dialogs';
-import {forgetRuntime} from '@/components/session';
+import {forgetRuntime, useRuntime} from '@/components/session';
 import {useGo} from '@/components/nav';
 import {Avatar, Badge, Button, HStack, Icon, IconButton, NumberInput, Selector, Text, TextInput, Typeahead, VStack, type SearchableItem, type SearchSource} from '@/ui/astryx';
 import {isAccessDenied, reportAccessDenied} from '@/ui';
@@ -43,6 +43,8 @@ const LAST_ADMIN = "The last admin can't be changed. Make someone else an admin 
 
 export function TenantSettings({tenant, me, tab: first = 'general', onClose, onChanged}: {tenant: TenantDetail; me: string | undefined; tab?: TenantSettingsTab; onClose: () => void; onChanged: () => void}) {
   const go = useGo();
+  const {info} = useRuntime();
+  const minAdmins = Math.min(50, Math.max(1, Math.floor(info?.minTenantAdmins ?? 1)));
   const [tab, setTab] = useState<TenantSettingsTab>(first);
   const [name, setName] = useState(tenant.name);
   const [members, setMembers] = useState<TenantMemberView[] | null>(null);
@@ -167,6 +169,7 @@ export function TenantSettings({tenant, me, tab: first = 'general', onClose, onC
           loading={!members}
           me={me}
           admins={admins}
+          minAdmins={minAdmins}
           onAdd={p => (setAdding(a => (a.some(x => x.id === p.id) ? a : [...a, p])), setRemoving(r => r.filter(id => id !== p.id)))}
           onRole={(m, role) => {
             const original = members?.find(x => x.userId === m.userId)?.role ?? 'member';
@@ -247,6 +250,7 @@ function Members({
   loading,
   me,
   admins,
+  minAdmins,
   onAdd,
   onRole,
   onRemove,
@@ -255,6 +259,7 @@ function Members({
   loading: boolean;
   me: string | undefined;
   admins: number;
+  minAdmins: number;
   onAdd: (p: Person) => void;
   onRole: (m: Shown, role: TenantRole) => void;
   onRemove: (m: Shown) => void;
@@ -314,7 +319,8 @@ function Members({
         <SettingsRow title={<Text color="secondary">{t('Loading')}</Text>} />
       ) : (
         shown.map(m => {
-          const last = m.role === 'admin' && admins === 1;
+          const locked = m.role === 'admin' && admins <= minAdmins;
+          const lockMsg = minAdmins <= 1 ? t(LAST_ADMIN) : t('A tenant must keep at least {n} admins. Make someone else an admin first.', {n: minAdmins});
           return (
             <SettingsRow
               key={m.userId}
@@ -337,16 +343,16 @@ function Members({
                     options={roleOptions}
                     value={m.role}
                     onChange={v => onRole(m, v as TenantRole)}
-                    isDisabled={last}
-                    disabledMessage={last ? t(LAST_ADMIN) : undefined}
+                    isDisabled={locked}
+                    disabledMessage={locked ? lockMsg : undefined}
                   />
                   <span className="sp-hover-acts">
                     <IconButton
                       label={t('Remove {name}', {name: m.name})}
-                      tooltip={last ? t(LAST_ADMIN) : t('Remove from tenant')}
+                      tooltip={locked ? lockMsg : t('Remove from tenant')}
                       variant="ghost"
                       size="sm"
-                      isDisabled={last}
+                      isDisabled={locked}
                       icon={<Icon icon={XMarkIcon} size="sm" />}
                       onClick={() => onRemove(m)}
                     />

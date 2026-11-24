@@ -27,17 +27,26 @@ export function NoAccessHost({project}: {project?: {id: string; name: string}}) 
 function NoAccessDialog({permission, project, onClose}: {permission: PermissionPoint; project?: {id: string; name: string}; onClose: () => void}) {
   const {info} = useRuntime();
   const tenant = info?.tenant?.name ?? '';
+  const redirectMode = info?.accessRequestMode === 'redirect';
   const [reason, setReason] = useState('');
   const [sending, setSending] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
-  const [sent, setSent] = useState<{trackUrl?: string} | null>(null);
+  const [sent, setSent] = useState<{trackUrl?: string; applyUrl?: string} | null>(null);
   const text = {...words(permission, tenant, permission === 'project_write' ? project?.name : undefined), ...accessDeniedText()};
 
   const send = async () => {
     setSending(true);
     setFailed(null);
     try {
-      setSent(await requestAccess({permission, ...(permission === 'project_write' && project ? {projectId: project.id} : {}), ...(reason.trim() ? {reason: reason.trim()} : {})}));
+      const res = await requestAccess({
+        permission,
+        ...(permission === 'project_write' && project ? {projectId: project.id} : {}),
+        ...(!redirectMode && reason.trim() ? {reason: reason.trim()} : {}),
+      });
+      if (res.applyUrl && /^https?:\/\//i.test(res.applyUrl)) {
+        window.open(res.applyUrl, '_blank', 'noopener,noreferrer');
+      }
+      setSent(res);
     } catch (e) {
       const msg = e instanceof Error ? e.message : '';
       setFailed(/^[A-Z][^{}<>\n]{0,160}\.$/.test(msg) ? t(msg) : t('Check your connection and try again.'));
@@ -45,6 +54,34 @@ function NoAccessDialog({permission, project, onClose}: {permission: PermissionP
       setSending(false);
     }
   };
+
+  const applyUrl = sent?.applyUrl && /^https?:\/\//i.test(sent.applyUrl) ? sent.applyUrl : undefined;
+  if (sent && applyUrl)
+    return (
+      <FormDialog
+        width={480}
+        onClose={onClose}
+        title={
+          <HStack gap={2} vAlign="center">
+            <Icon icon={ArrowTopRightOnSquareIcon} size="md" color="secondary" />
+            <Heading level={3}>{t('Continue on the permission platform')}</Heading>
+          </HStack>
+        }
+        footer={<Button label={t('Done')} variant="primary" onClick={onClose} />}
+      >
+        <VStack gap={3}>
+          <Text type="body" color="secondary">
+            {t('Finish your request for {need} on the permission platform. Come back here once it is approved.', {need: text.need})}
+          </Text>
+          <Link href={applyUrl} target="_blank" rel="noopener noreferrer">
+            <HStack as="span" gap={1} vAlign="center">
+              {t('Open the permission platform')}
+              <Icon icon={ArrowTopRightOnSquareIcon} size="sm" color="inherit" />
+            </HStack>
+          </Link>
+        </VStack>
+      </FormDialog>
+    );
 
   if (sent)
     return (
@@ -88,7 +125,13 @@ function NoAccessDialog({permission, project, onClose}: {permission: PermissionP
       footer={
         <>
           <Button label={t('Cancel')} variant="ghost" onClick={onClose} />
-          <Button label={t('Request access')} variant="primary" isLoading={sending} onClick={() => void send()} />
+          <Button
+            label={t('Request access')}
+            variant="primary"
+            endContent={redirectMode ? <Icon icon={ArrowTopRightOnSquareIcon} size="sm" color="inherit" /> : undefined}
+            isLoading={sending}
+            onClick={() => void send()}
+          />
         </>
       }
     >
@@ -102,10 +145,16 @@ function NoAccessDialog({permission, project, onClose}: {permission: PermissionP
           </Text>
           <Text type="label">{text.need}</Text>
         </VStack>
-        <TextArea label={t('Why you need it')} isOptional value={reason} onChange={setReason} placeholder={t("For example: I'm labeling the Food examples this week")} rows={3} />
+        {redirectMode ? (
+          <Text type="supporting" color="secondary">
+            {t('Your request opens on the permission platform.')}
+          </Text>
+        ) : (
+          <TextArea label={t('Why you need it')} isOptional value={reason} onChange={setReason} placeholder={t("For example: I'm labeling the Food examples this week")} rows={3} />
+        )}
         {failed && (
           <Text type="supporting" className="sp-error" role="alert">
-            {t('The request was not sent. {why}', {why: failed})}
+            {t(redirectMode ? 'Could not open the permission platform. {why}' : 'The request was not sent. {why}', {why: failed})}
           </Text>
         )}
       </VStack>
