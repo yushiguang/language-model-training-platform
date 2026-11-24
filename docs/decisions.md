@@ -11,6 +11,7 @@ where it matters, why. The code follows these; change a line here when a decisio
 ## 2026-11-24 (Project editors, #118)
 
 - **Project Settings lists who can edit**: the creator first, who can always edit and cannot be removed, then everyone added, with when. Anyone who can edit adds tenant members or removes them; everyone in the tenant can still open and read the project.
+- **Project settings is one settings dialog like the tenant's**: General (name, labeling model, the three thresholds), Members (who can view, who can edit) and Delete project (the name typed to confirm). Name, threshold and editor changes wait for Save. Value F1 no longer shows; projects keep the value they had.
 
 ## 2026-11-24 (Tenant settings, #111)
 

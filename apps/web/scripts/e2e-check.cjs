@@ -6,7 +6,7 @@
  * pasted into Ask AI is imported with its "Not carried over" list; a prompt drafted from a
  * description is approved as v1 with the page's Approve button, never in the chat), Dataset
  * (auto sampling, no split), Gold Labels (labeled on the page with the answers bundled with the
- * sample file), Project Settings from the overview, then Prompt Tuning:
+ * sample file), Project Settings from the overview (#118: thresholds, editors added and removed), then Prompt Tuning:
  * scoring, the fixed AI Suggestion cards, Mismatches, Improve with AI with word marks, Auto
  * Optimise until a version passes, Copy prompt and Finish; and the telemetry events and metrics.
  * 1.1.0: the Created by column, renaming in Project Settings, a problem report from Ask AI, and the
@@ -435,39 +435,32 @@ let current = null;
   await page.goto(url('/overview/'));
   await button(page, 'Project settings').click();
   const set = page.getByRole('dialog');
-  await set.getByText('Project Settings', {exact: true}).waitFor({timeout: 5000});
-  // Default shows its exact thresholds, locked; each check's meaning is a line under its name
-  const f1 = set.getByLabel('Macro-F1 threshold');
-  if ((await f1.inputValue()) !== '0.80' || !(await f1.isDisabled())) throw new Error('Default does not show Macro-F1 0.80 locked');
-  if ((await set.getByLabel('Value F1 threshold').inputValue()) !== '–') throw new Error('Default does not show Value F1 as off');
-  if ((await set.getByLabel('Invalid outputs limit').inputValue()) !== '≤ 1%') throw new Error('Invalid outputs is not shown as locked at 1%');
-  // 2026-11-16 refinements, 3: no intro line, no model description, no native select; Default/Custom sits by the Evaluation heading.
-  if (await set.getByText(/Check these once before the first scoring run/).count()) throw new Error('Project Settings still has its intro line');
-  if (await set.locator('select').count()) throw new Error('Project Settings still uses a native select');
-  if (!(await set.locator('.set-sec-h').filter({hasText: 'Evaluation'}).getByRole('group', {name: 'Pass rule'}).count())) throw new Error('the Default/Custom switch is not beside the Evaluation heading');
-  if ((await set.locator('section.set-sec').count()) !== 3) throw new Error('Project Settings does not have three sections');
-  // 2026-11-16: the checks show their names only, with no line between them.
-  if (await set.locator('.set-checks .set-sub').count()) throw new Error('a check still has an explanation line');
-  if ((await set.locator('.set-checks .tbl td').first().evaluate(el => getComputedStyle(el).borderBottomWidth)) !== '0px') throw new Error('the checks still have lines between them');
-  if (await set.locator('.hov').count()) throw new Error('Project Settings still uses hover text');
+  await set.getByRole('heading', {name: 'General', level: 2}).waitFor({timeout: 5000});
+  // #118: General holds the name, the model and the three thresholds as the new-project dialog does.
+  const f1 = set.getByRole('spinbutton', {name: 'Macro-F1 threshold'});
+  if ((await f1.inputValue()) !== '80') throw new Error('Project Settings does not show Macro-F1 at 80%');
+  if (!(await set.getByRole('spinbutton', {name: 'Precision threshold'}).isDisabled())) throw new Error('Precision is not off');
+  if (await set.getByText('Value F1').count()) throw new Error('Project Settings still shows Value F1');
   await shot(page, '3b-project-settings');
-  const passRule = set.getByRole('group', {name: 'Pass rule'});
-  await passRule.getByRole('button', {name: 'Custom', exact: true}).click();
-  if (await f1.isDisabled()) throw new Error('Custom does not unlock the thresholds');
-  await shot(page, '3c-project-settings-custom');
-  // The model list is the site's own: it opens under the button, the arrows move, Escape closes it and not the dialog.
-  await set.locator('.select-btn').click();
-  const listbox = page.getByRole('listbox');
-  await listbox.waitFor({timeout: 5000});
-  if (!(await listbox.getByRole('option').count())) throw new Error('the model list has no options');
-  await shot(page, '3d-model-list');
-  await page.keyboard.press('ArrowDown');
-  await page.keyboard.press('Escape');
-  await listbox.waitFor({state: 'detached', timeout: 5000});
-  if (!(await set.isVisible())) throw new Error('Escape in the model list closed Project Settings');
-  await passRule.getByRole('button', {name: 'Default', exact: true}).click();
+  // Members: the creator can always edit; a tenant member is added and kept with Save, then removed.
+  await set.getByRole('button', {name: 'Members'}).first().click();
+  await set.getByText('Created this project', {exact: true}).waitFor();
+  if (await set.getByRole('button', {name: /^Remove /}).count()) throw new Error('the creator can be removed');
+  await set.getByRole('combobox', {name: 'Add people'}).fill('mei');
+  await page.getByRole('option', {name: /Mei Wang/}).click();
+  await button(set, 'Add').click();
+  await shot(page, '3c-project-editors');
   await button(set, 'Save').click();
   await set.waitFor({state: 'detached', timeout: 10000});
+  await button(page, 'Project settings').click();
+  await page.getByRole('dialog').getByRole('button', {name: 'Members'}).first().click();
+  const editor = page.getByRole('dialog').getByRole('button', {name: 'Remove Mei Wang'});
+  await editor.waitFor({state: 'attached'});
+  await page.getByRole('dialog').getByText(/^Added /).waitFor();
+  await editor.click({force: true});
+  await button(page.getByRole('dialog'), 'Save').click();
+  await page.getByRole('dialog').waitFor({state: 'detached', timeout: 10000});
+  log('project editors: Mei Wang added, then removed; the creator stays');
   await page.goto(goldUrl);
   await button(page, 'Next: Prompt Tuning').click();
   await page.waitForURL(/\/prompt\/?\?/);
@@ -754,7 +747,7 @@ let current = null;
   await page.goto(url('/overview/'));
   await button(page, 'Project settings').click();
   const again = page.getByRole('dialog');
-  await again.getByText('Project Settings', {exact: true}).waitFor();
+  await again.getByRole('heading', {name: 'General', level: 2}).waitFor();
   if (!(await button(again, 'Save').count())) throw new Error('Project Settings has no Save');
   const nameBox = again.getByLabel('Name', {exact: true});
   if ((await nameBox.inputValue()) !== 'Short-video tagging') throw new Error('the Name field is not prefilled with the project name');
