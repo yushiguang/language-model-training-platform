@@ -422,6 +422,12 @@ export interface ConfigReader {
 - **加人**：`addProjectEditors({projectId, userIds})` 只收本租户成员（否则返回 `error`，什么都不改），已能编辑的人不变，一次最多 50 人。每人经 `grantProjectWrite` 授权（失败重试 3 次），并记一条操作记录。需要项目编辑权限。
 - **移除**：`removeProjectEditor({projectId, userId})` 经 `revokeProjectWrite` 撤销；创建人不能移除。持有 `editors:<项目>` 锁。需要项目编辑权限。
 
+### 9.6 项目 Overview（#123）
+
+- `getProjectOverview({projectId, limit?})` → `{canEdit, activity}`。能打开项目的人都能读。
+- **canEdit**：调用者有没有这个项目的编辑权限（`AuthorizationPort.allowed`，`project_write`）；没接权限平台时为 true。
+- **activity**：最新在前，默认 20 条，最多 50 条。来源三处：项目操作记录里固定的几种（创建、改名、保存设置、加入 / 移除 / 恢复样本、上传人工标签、建标注集、保存提示词版本、完成一步、加 / 移除编辑者；数量为 0 的不显示），AI 的建议（`agent_proposals` 的简介），人工标注（`gold_labels` 里 `source: 'labeled'` 的，按人按天（UTC）合并成一条）。Sprint 自己的记录（自动开销、智能体工具调用、两半平衡等）不显示。每条带 `by`（`person` 人名 / `ai` / `sprint`）和 `kind`，文字由页面翻译。
+
 ## 10. Contract 改动
 
 按 CONTRIBUTING，每个 contract 改动单独一个 PR，标明是新增还是破坏性：
@@ -445,6 +451,7 @@ export interface ConfigReader {
 | 租户页：`listProjectRows`（每行当前步骤、最好分数、运行中任务数、最近改动时间，分页，`mine`）、`getTenant`（Admin 卡片的计数）、`projectDefaults`、`newProject`（名称、模型、阈值，存为已确认的项目设置）；步骤规则 `stepStates` / `currentStep` 移到 domain | 新增（#103）。`createProject(name)` 保留给脚本和测试 |
 | 租户设置：`renameTenant`、`deleteTenant`、`addTenantMembers` / `setTenantRole` / `removeTenantMember`、`searchPeople`；`PeopleDirectory`（`Platform.people` 可选） | 新增（#111）：部署方可以不接目录 |
 | 项目编辑者：`listProjectEditors`、`addProjectEditors`、`removeProjectEditor`，`ProjectEditor` | 新增（#118）：用已有的权限平台方法，部署方的适配器不用改 |
+| 项目 Overview：`getProjectOverview`，`ProjectOverview`、`ProjectActivity` | 新增（#123）：只读，部署方的适配器不用改 |
 | `ScoreBasis`、`EvalReport.basis`（可选，旧报告没有）、`ScoringState`、任务类型 `report.rescore`、`ProjectState.scoring`、`WorkflowFacts.scoringReady`、`rescore` 接口 | 新增：只有工作流产出和读取，部署方的适配器不用改（第 9 步，#86 已完成） |
 
 ## 11. 交付计划

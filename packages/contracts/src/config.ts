@@ -112,6 +112,10 @@ export interface SystemConfig {
     /** Script error and failed-call messages are cut at this many characters. */
     messageMaxChars: number;
   };
+  tenant: {
+    /** Minimum admins a tenant starts with and keeps (1 to 50; raise when the permission platform needs multiple owners). */
+    minAdmins: number;
+  };
 }
 
 export type DeepPartial<T> = T extends (infer U)[] ? U[] : T extends object ? {[K in keyof T]?: DeepPartial<T[K]>} : T;

@@ -4,6 +4,7 @@ import {AccessDeniedError} from '@yushiguang/sprint-contracts';
 import type {AuthorizationPort, AuthorizationRequest} from '@yushiguang/sprint-contracts';
 import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, CallerUser, DocumentSource, EndpointInfo, ExampleSource, FileStore, LabelCallResult, LlmGatewayContract, PageContext, RequestContext, TicketSubmission, WorkflowContract} from '@yushiguang/sprint-contracts';
 import {createCatalog} from '@yushiguang/sprint-catalog';
+import {configureSystem} from '@yushiguang/sprint-domain';
 import {createLabeling, memoryLocks} from '@yushiguang/sprint-labeling';
 import {createJobs} from '@yushiguang/sprint-jobs';
 import {localDocRuntime, loopback, memoryAccessRequests, memoryJobStore, memoryPeople, memoryPermissionAdmin, memorySharedState} from '@yushiguang/sprint-platform';
@@ -587,11 +588,12 @@ test('tenant settings (#111): admins rename the tenant, add people, change roles
   assert.deepEqual(await api.addTenantMembers(a, {userIds: [bob.id, 'u-mei', alice.id, bob.id], role: 'member'}), {});
   assert.equal(perms.admin.roleOf(made.id, alice.id), 'admin', 'already in: keeps the role');
   assert.equal(perms.admin.roleOf(made.id, bob.id), 'member');
-  // Members read; only admins change members.
+  // Members read and can search the directory; only admins change members.
   const b = inTenant(bob, made.id);
   await assert.rejects(api.addTenantMembers(b, {userIds: [eve.id], role: 'member'}), {code: 'forbidden'});
   await assert.rejects(api.renameTenant(b, {name: 'Mine'}), {code: 'forbidden'});
-  await assert.rejects(api.searchPeople(b, {query: 'a'}), {code: 'forbidden'});
+  assert.deepEqual((await api.searchPeople(b, {query: 'MEI'})).map(p => p.id), ['u-mei']);
+  assert.deepEqual((await api.searchPeople(ctxOf(eve), {query: 'MEI'})).map(p => p.id), ['u-mei'], 'signed-in users outside a tenant can search to pick initial co-admins');
 
   const last = "The last admin can't be changed. Make someone else an admin first.";
   assert.deepEqual(await api.setTenantRole(a, {userId: alice.id, role: 'member'}), {error: last});
@@ -651,6 +653,48 @@ test('project editors (#118): the creator first and always; tenant members are a
   assert.ok(!perms.admin.canWrite('t1', p.id, bob.id));
   assert.deepEqual(await api.removeProjectEditor(a, {projectId: p.id, userId: bob.id}), {error: 'This person cannot edit the project.'});
   assert.deepEqual((await api.listProjectEditors(a, {projectId: p.id})).map(e => e.userId), [alice.id]);
+});
+
+test('project overview (#123): who can edit, and what happened, newest first', async () => {
+  const perms = checking();
+  const sys = {requestId: 'rq_setup', user: {id: 'u_admin', name: 'Admin'}};
+  await perms.admin.addTenantMember(sys, 't1', alice.id, 'member');
+  await perms.admin.addTenantMember(sys, 't1', bob.id, 'member');
+  const {api, catalog} = world('wf-overview', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
+  const a = inTenant(alice, 't1');
+  const b = inTenant(bob, 't1');
+  const p = await api.createProject(a, 'Topics');
+  assert.equal((await api.getProjectOverview(b, {projectId: p.id})).canEdit, false, 'a member who was not added only reads');
+  await api.renameProject(a, {projectId: p.id, name: 'Video topics'});
+  await api.addProjectEditors(a, {projectId: p.id, userIds: [bob.id]});
+  await catalog.audit(p.id, 'Alice', 'dataset.create', {source: 'file', rows: 10, notSaved: 2});
+  await catalog.audit(p.id, 'agent:prompt', 'agent.tool', {name: 'get_report'});
+  await catalog.audit(p.id, 'system', 'auto_spend', {costUsd: 1});
+  await catalog.audit(p.id, 'Alice', 'dataset.restore', {count: 0});
+  await catalog.insert('agent_proposals', {id: 'ap_1', projectId: p.id, agent: 'prompt_agent', kind: 'prompt', payload: {} as never, brief: 'a clearer definition for Practical', state: 'open', createdAt: new Date(Date.now() + 1000).toISOString()});
+  const day = new Date(Date.now() + 2000).toISOString();
+  for (const [i, at] of [day, day.replace(/\d\d\.\d+Z$/, '00.000Z')].entries()) {
+    await catalog.insert('gold_labels', {id: `gl_${i}`, projectId: p.id, exampleId: `ex_${i}`, schemaVersion: 1, answer: ['Food'], source: 'labeled', revealed: false, createdAt: at, createdBy: 'Bob'});
+  }
+  await catalog.insert('gold_labels', {id: 'gl_up', projectId: p.id, exampleId: 'ex_9', schemaVersion: 1, answer: ['Food'], source: 'uploaded', revealed: false, createdAt: day, createdBy: 'Alice'});
+
+  const view = await api.getProjectOverview(b, {projectId: p.id});
+  assert.equal(view.canEdit, true, 'Bob edits once added');
+  const lines = view.activity.map(x => [x.kind, x.by.kind, x.by.name, x.count ?? null, x.text ?? null]);
+  assert.deepEqual(lines.slice(0, 2), [
+    ['examples_labeled', 'person', 'Bob', 2, null],
+    ['ai_suggested', 'ai', 'AI', null, 'a clearer definition for Practical'],
+  ], 'labels one line per person per day; the AI suggestion; newest first');
+  const rest = new Map(lines.slice(2).map(l => [l[0], l]));
+  assert.deepEqual(rest.get('examples_added'), ['examples_added', 'person', 'Alice', 8, null], 'rows less those not saved');
+  assert.deepEqual(rest.get('editor_added'), ['editor_added', 'person', 'Alice', null, 'Bob']);
+  assert.deepEqual(rest.get('project_renamed'), ['project_renamed', 'person', 'Alice', null, 'Video topics']);
+  assert.ok(rest.has('project_created'));
+  assert.ok(!rest.has('examples_restored'), 'a count of 0 says nothing');
+  assert.equal(lines.length, 6, "Sprint's own records stay out");
+  assert.ok(view.activity.every((x, i, all) => i === 0 || all[i - 1].at >= x.at), 'newest first');
+  assert.deepEqual((await api.getProjectOverview(a, {projectId: p.id, limit: 1})).activity.map(x => x.kind), ['examples_labeled']);
+  await assert.rejects(api.getProjectOverview(inTenant(eve, 't2'), {projectId: p.id}));
 });
 
 test('page views carry the place of waiting work in its queue (#66)', async () => {
@@ -772,4 +816,224 @@ test('tenant models (#69): a project page reads the models again when the gatewa
   Object.assign(gateway, {labelingEndpointsFor: async () => { throw new Error('store down'); }});
   assert.deepEqual((await api.loadProjectState(a, p.id))!.endpoints.map(x => x.id), ['A']);
   assert.deepEqual(forgotten, ['t1'], 'the gateway is not told to forget');
+});
+
+test('access redirect mode and configurable min tenant admins (#120)', async () => {
+  const perms = checking();
+  const requests = memoryAccessRequests({
+    mode: 'redirect',
+    applyUrl: r => `https://perm.example/apply/${r.tenantId}/${r.permission}${r.projectId ? `/${r.projectId}` : ''}`,
+  });
+  configureSystem({tenant: {minAdmins: 2}});
+  try {
+    const {api} = world('wf-min-admins', noHelpers, undefined, {
+      authorization: perms.authorization,
+      permissionAdmin: perms.admin,
+      accessRequests: requests,
+    });
+    const info = await api.runtimeInfo(inTenant(alice, 't1'));
+    assert.equal(info.minTenantAdmins, 2);
+    assert.equal(info.accessRequestMode, 'redirect');
+    assert.deepEqual(await api.requestAccess(inTenant(bob, 't1'), {permission: 'read'}), {
+      applyUrl: 'https://perm.example/apply/t1/read',
+    });
+
+    // Creator alone or duplicate creator in adminIds is rejected under minAdmins = 2.
+    assert.deepEqual(await api.createTenant(ctxOf(alice), {name: 'Two Owners'}), {error: 'Pick at least one other admin.'});
+    assert.deepEqual(await api.createTenant(ctxOf(alice), {name: 'Two Owners', adminIds: [alice.id, '  ']}), {error: 'Pick at least one other admin.'});
+
+    // Duplicate co-admins are deduplicated; valid two admins succeed.
+    const made = await api.createTenant(ctxOf(alice), {name: 'Two Owners', adminIds: [bob.id, bob.id]});
+    assert.ok(made.tenant, made.error ?? 'tenant expected');
+    assert.equal(perms.admin.roleOf(made.tenant.id, alice.id), 'admin');
+    assert.equal(perms.admin.roleOf(made.tenant.id, bob.id), 'admin');
+
+    const a = inTenant(alice, made.tenant.id);
+    const keepTwo = 'A tenant must keep at least 2 admins. Make someone else an admin first.';
+    assert.deepEqual(await api.setTenantRole(a, {userId: bob.id, role: 'member'}), {error: keepTwo});
+    assert.deepEqual(await api.removeTenantMember(a, {userId: bob.id}), {error: keepTwo});
+
+    // Adding a third admin allows demoting/removing down to 2, then stops again at 2.
+    assert.deepEqual(await api.addTenantMembers(a, {userIds: [eve.id], role: 'admin'}), {});
+    assert.deepEqual(await api.setTenantRole(a, {userId: bob.id, role: 'member'}), {});
+    assert.deepEqual(await api.removeTenantMember(a, {userId: eve.id}), {error: keepTwo});
+
+    configureSystem({tenant: {minAdmins: 3}});
+    assert.deepEqual(await api.createTenant(ctxOf(alice), {name: 'Three Owners', adminIds: [bob.id]}), {error: 'Pick at least 2 other admins.'});
+  } finally {
+    configureSystem();
+  }
+  const defaults = world('wf-min-admins-default', noHelpers, undefined, {accessRequests: memoryAccessRequests()});
+  const defaultInfo = await defaults.api.runtimeInfo(inTenant(alice, 't1'));
+  assert.equal(defaultInfo.minTenantAdmins, undefined);
+  assert.equal(defaultInfo.accessRequestMode, undefined);
+});
+
+test('permission platform lifecycle hooks (#120): custom hooks run and legacy adapters without hooks keep working', async () => {
+  const calls: string[] = [];
+  const inner = memoryPermissionAdmin();
+  const hooked = {
+    listTenantMembers: inner.listTenantMembers,
+    listUserTenants: inner.listUserTenants,
+    addTenantMember: inner.addTenantMember,
+    removeTenantMember: inner.removeTenantMember,
+    setTenantRole: inner.setTenantRole,
+    listProjectWriters: inner.listProjectWriters,
+    grantProjectWrite: inner.grantProjectWrite,
+    revokeProjectWrite: inner.revokeProjectWrite,
+    createTenant: async (ctx: RequestContext, t: {tenantId: string; name: string; adminIds: string[]}) => {
+      calls.push(`createTenant:${t.tenantId}:${t.name}:${t.adminIds.join(',')}`);
+      await inner.createTenant!(ctx, t);
+    },
+    deleteTenant: async (ctx: RequestContext, tenantId: string) => {
+      calls.push(`deleteTenant:${tenantId}`);
+      await inner.deleteTenant!(ctx, tenantId);
+    },
+    createProject: async (ctx: RequestContext, p: {tenantId: string; projectId: string; name: string; creatorId: string}) => {
+      calls.push(`createProject:${p.tenantId}:${p.projectId}:${p.name}:${p.creatorId}`);
+      await inner.createProject!(ctx, p);
+    },
+    deleteProject: async (ctx: RequestContext, tenantId: string, projectId: string) => {
+      calls.push(`deleteProject:${tenantId}:${projectId}`);
+      await inner.deleteProject!(ctx, tenantId, projectId);
+    },
+  };
+  const {wf, api, jobs, catalog} = world('wf-perm-hooks', noHelpers, undefined, {permissionAdmin: hooked});
+  const tn = (await api.createTenant(ctxOf(alice), {name: 'Hooked', adminIds: [bob.id]})).tenant!;
+  const a = inTenant(alice, tn.id);
+  const pr = await api.createProject(a, 'Project A');
+  await api.deleteProject(a, {projectId: pr.id});
+  const queued = await jobs.list(a, {projectId: pr.id, kinds: ['project.delete']});
+  assert.equal(queued.length, 1);
+  const exec = wf.executors.find(e => e.kind === 'project.delete')!;
+  await exec.run(queued[0], {heartbeat: async () => {}} as never);
+  assert.equal(await catalog.get('projects', pr.id), null, 'project record removed after deleteProject hook');
+  await api.deleteTenant(a, {name: 'Hooked'});
+  assert.deepEqual(calls, [
+    `createTenant:${tn.id}:Hooked:${alice.id},${bob.id}`,
+    `createProject:${tn.id}:${pr.id}:Project A:${alice.id}`,
+    `deleteProject:${tn.id}:${pr.id}`,
+    `deleteTenant:${tn.id}`,
+  ]);
+
+  // Minimal legacy adapter omitting all four optional hooks falls back cleanly.
+  const minimal = memoryPermissionAdmin();
+  const legacy = {
+    listTenantMembers: minimal.listTenantMembers,
+    listUserTenants: minimal.listUserTenants,
+    addTenantMember: minimal.addTenantMember,
+    removeTenantMember: minimal.removeTenantMember,
+    setTenantRole: minimal.setTenantRole,
+    listProjectWriters: minimal.listProjectWriters,
+    grantProjectWrite: minimal.grantProjectWrite,
+    revokeProjectWrite: minimal.revokeProjectWrite,
+  };
+  const leg = world('wf-perm-legacy', noHelpers, undefined, {permissionAdmin: legacy});
+  const tn2 = (await leg.api.createTenant(ctxOf(alice), {name: 'Legacy'})).tenant!;
+  const pr2 = await leg.api.createProject(inTenant(alice, tn2.id), 'Project L');
+  assert.equal(minimal.roleOf(tn2.id, alice.id), 'admin');
+  assert.equal(minimal.canWrite(tn2.id, pr2.id, alice.id), true);
+  await leg.api.deleteTenant(inTenant(alice, tn2.id), {name: 'Legacy'});
+  assert.deepEqual(await minimal.listTenantMembers(tn2.id), []);
+});
+
+test('permission platform teardown order and partial-failure rollback (#120)', async () => {
+  // 1. deleteTenant deletes member projects on the permission platform before deleting the tenant,
+  //    and queued project.delete jobs succeed even when the admin lacks project_write on a member's project.
+  const perms = checking();
+  const order: string[] = [];
+  const admin = {
+    listTenantMembers: perms.admin.listTenantMembers,
+    listUserTenants: perms.admin.listUserTenants,
+    addTenantMember: perms.admin.addTenantMember,
+    removeTenantMember: perms.admin.removeTenantMember,
+    setTenantRole: perms.admin.setTenantRole,
+    listProjectWriters: perms.admin.listProjectWriters,
+    grantProjectWrite: perms.admin.grantProjectWrite,
+    revokeProjectWrite: perms.admin.revokeProjectWrite,
+    createTenant: perms.admin.createTenant,
+    createProject: perms.admin.createProject,
+    deleteProject: async (ctx: RequestContext, tenantId: string, projectId: string) => {
+      order.push(`deleteProject:${projectId}`);
+      await perms.admin.deleteProject!(ctx, tenantId, projectId);
+    },
+    deleteTenant: async (ctx: RequestContext, tenantId: string) => {
+      order.push(`deleteTenant:${tenantId}`);
+      await perms.admin.deleteTenant!(ctx, tenantId);
+    },
+  };
+  const {wf, api, jobs, catalog} = world('wf-teardown-order', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: admin});
+  const tn = (await api.createTenant(ctxOf(alice), {name: 'TearDown'})).tenant!;
+  const a = inTenant(alice, tn.id);
+  const b = inTenant(bob, tn.id);
+  await api.addTenantMembers(a, {userIds: [bob.id], role: 'member'});
+  const prBob = await api.createProject(b, 'Bobs Project');
+  assert.equal(perms.admin.canWrite(tn.id, prBob.id, alice.id), false);
+
+  assert.deepEqual(await api.deleteTenant(a, {name: 'TearDown'}), {});
+  assert.deepEqual(order, [`deleteProject:${prBob.id}`, `deleteTenant:${tn.id}`]);
+  const delJobs = await jobs.list(a, {projectId: prBob.id, kinds: ['project.delete']});
+  assert.equal(delJobs.length, 1);
+  const exec = wf.executors.find(e => e.kind === 'project.delete')!;
+  const outcome = await exec.run(delJobs[0], {heartbeat: async () => {}} as never);
+  assert.deepEqual(outcome, {state: 'done'});
+  assert.equal(await catalog.get('projects', prBob.id), null);
+  assert.deepEqual(order, [`deleteProject:${prBob.id}`, `deleteTenant:${tn.id}`], 'deleteProject is not called again after deleteTenant');
+
+  // 2. Partial failure during createTenant / createProject rolls back both catalog and permission platform.
+  const partialHookedInner = memoryPermissionAdmin();
+  let deletedOnRollback = '';
+  const partialHooked = {
+    listTenantMembers: partialHookedInner.listTenantMembers,
+    listUserTenants: partialHookedInner.listUserTenants,
+    addTenantMember: partialHookedInner.addTenantMember,
+    removeTenantMember: partialHookedInner.removeTenantMember,
+    setTenantRole: partialHookedInner.setTenantRole,
+    listProjectWriters: partialHookedInner.listProjectWriters,
+    grantProjectWrite: partialHookedInner.grantProjectWrite,
+    revokeProjectWrite: partialHookedInner.revokeProjectWrite,
+    createTenant: async (ctx: RequestContext, t: {tenantId: string; adminIds: string[]}) => {
+      await partialHookedInner.addTenantMember(ctx, t.tenantId, t.adminIds[0], 'admin');
+      throw new Error('second co-admin rejected');
+    },
+    deleteTenant: async (ctx: RequestContext, tenantId: string) => {
+      deletedOnRollback = tenantId;
+      await partialHookedInner.deleteTenant!(ctx, tenantId);
+    },
+    createProject: async () => {
+      throw new Error('project resource error');
+    },
+    deleteProject: async (_ctx: RequestContext, _tid: string, projectId: string) => {
+      deletedOnRollback = projectId;
+    },
+  };
+  const hWorld = world('wf-rollback-hooked', noHelpers, undefined, {permissionAdmin: partialHooked});
+  await assert.rejects(hWorld.api.createTenant(ctxOf(alice), {name: 'Partial', adminIds: [bob.id]}), /could not be created/);
+  assert.match(deletedOnRollback, /^tn_/);
+  assert.deepEqual(await hWorld.api.listTenants(ctxOf(alice)), [], 'partial admin cleaned up on rollback');
+  assert.deepEqual(await hWorld.catalog.find('tenants', {}), []);
+  await partialHookedInner.addTenantMember(ctxOf(alice), 't1', alice.id, 'admin');
+  deletedOnRollback = '';
+  await assert.rejects(hWorld.api.createProject(inTenant(alice, 't1'), 'Partial Project'), /could not be created/);
+  assert.match(deletedOnRollback, /^pr_/);
+  assert.deepEqual(await hWorld.catalog.find('projects', {}), []);
+
+  // Legacy adapter without createTenant/deleteTenant cleans up already-written first admin if second fails.
+  const legacyInner = memoryPermissionAdmin();
+  const legacyPartial = {
+    listTenantMembers: legacyInner.listTenantMembers,
+    listUserTenants: legacyInner.listUserTenants,
+    addTenantMember: async (ctx: RequestContext, tenantId: string, userId: string, role: 'admin' | 'member') => {
+      if (userId === bob.id) throw new Error('second admin failed');
+      await legacyInner.addTenantMember(ctx, tenantId, userId, role);
+    },
+    removeTenantMember: legacyInner.removeTenantMember,
+    setTenantRole: legacyInner.setTenantRole,
+    listProjectWriters: legacyInner.listProjectWriters,
+    grantProjectWrite: legacyInner.grantProjectWrite,
+    revokeProjectWrite: legacyInner.revokeProjectWrite,
+  };
+  const lWorld = world('wf-rollback-legacy', noHelpers, undefined, {permissionAdmin: legacyPartial});
+  await assert.rejects(lWorld.api.createTenant(ctxOf(alice), {name: 'Partial Legacy', adminIds: [bob.id]}), /could not be created/);
+  assert.deepEqual(await lWorld.api.listTenants(ctxOf(alice)), [], 'first admin removed when co-admin failed');
 });

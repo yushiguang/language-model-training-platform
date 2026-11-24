@@ -74,6 +74,10 @@ export interface RuntimeInfo {
    * Missing when the caller is not in it (the site then goes to the home page).
    */
   tenant?: TenantInfo;
+  /** Minimum admins a tenant starts with and keeps, set when greater than 1. */
+  minTenantAdmins?: number;
+  /** Emitted as `'redirect'` when access requests open the permission platform's own form via `applyUrl` (omitted otherwise). */
+  accessRequestMode?: 'submit' | 'redirect';
 }
 
 /** The caller's current tenant (docs/design/server.md, 2). */
@@ -108,6 +112,8 @@ export interface TenantMemberView {
  */
 export interface CreateTenantRequest {
   name: string;
+  /** Additional initial admins alongside the creator, when a deployment requires more than one. */
+  adminIds?: string[];
 }
 
 /** The new tenant, its creator its admin; or why nothing was created (shown under the name field). */
@@ -244,6 +250,8 @@ export interface RequestAccessRequest {
 export interface RequestAccessResult {
   /** Where the caller can follow the request on the permission platform, when it has such a page. */
   trackUrl?: string;
+  /** Where the caller fills out the request on the permission platform, when it uses its own form. */
+  applyUrl?: string;
 }
 
 /** Paid or mutating starts take an optional key: the same key never starts the same work twice. */
@@ -632,7 +640,6 @@ export interface DeleteProjectRequest {
   projectId: string;
 }
 
-/** Spec 1.1.0, 1.2: a new name for a project (trimmed, not empty, cut at `project.nameMaxChars`). */
 /** Someone who can edit a project (#118): its creator, or someone added in Project Settings. */
 export interface ProjectEditor {
   userId: string;
@@ -660,6 +667,55 @@ export interface RemoveProjectEditorRequest {
   userId: string;
 }
 
+/** What happened in a project, as the Overview's activity lists it (#123). The page words each kind. */
+export type ProjectActivityKind =
+  | 'project_created'
+  | 'project_renamed'
+  | 'settings_saved'
+  | 'examples_added'
+  | 'examples_removed'
+  | 'examples_restored'
+  | 'examples_labeled'
+  | 'gold_uploaded'
+  | 'label_sets_created'
+  | 'version_saved'
+  | 'step_finished'
+  | 'editor_added'
+  | 'editor_removed'
+  | 'ai_suggested';
+
+/** One line of a project's activity (#123). */
+export interface ProjectActivity {
+  id: string;
+  /** ISO time; for `examples_labeled`, the last label of that person's day. */
+  at: string;
+  /** A person by name; `ai`: the helpers or the Optimiser; `sprint`: work Sprint did on its own. */
+  by: {kind: 'person' | 'ai' | 'sprint'; name: string};
+  kind: ProjectActivityKind;
+  /** How many examples, labels or label sets. */
+  count?: number;
+  /**
+   * The rest of the line: the new name (`project_renamed`), the version (`version_saved`, "v3"),
+   * the step id (`step_finished`), the person (`editor_added`, `editor_removed`) or the AI's
+   * suggestion in brief (`ai_suggested`).
+   */
+  text?: string;
+}
+
+export interface ProjectOverviewRequest {
+  projectId: string;
+  /** Activity lines, newest first: 20 when left out, at most 50. */
+  limit?: number;
+}
+
+/** What the Overview needs beyond the project's state (#123). */
+export interface ProjectOverview {
+  /** The caller can edit this project (project write). */
+  canEdit: boolean;
+  activity: ProjectActivity[];
+}
+
+/** Spec 1.1.0, 1.2: a new name for a project (trimmed, not empty, cut at `project.nameMaxChars`). */
 export interface RenameProjectRequest {
   projectId: string;
   name: string;
@@ -744,6 +800,8 @@ export interface BffContract {
   addProjectEditors(req: AddProjectEditorsRequest): Promise<MemberChangeResult>;
   /** Takes edit access away (#118); the creator keeps it (`error`). Needs project edit. */
   removeProjectEditor(req: RemoveProjectEditorRequest): Promise<MemberChangeResult>;
+  /** The Overview's access line and activity (#123). Anyone who can open the project reads it. */
+  getProjectOverview(req: ProjectOverviewRequest): Promise<ProjectOverview>;
 
   // Project Settings (the pass rule and the labeling model). Saving also confirms them.
   saveSettings(req: SaveSettingsRequest): Promise<void>;

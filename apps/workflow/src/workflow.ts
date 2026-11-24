@@ -8,6 +8,7 @@ import * as features from './services/features.ts';
 import * as mismatch from './services/mismatches.ts';
 import * as governance from './services/governance.ts';
 import * as projects from './services/projects.ts';
+import * as overview from './services/overview.ts';
 import * as editors from './services/editors.ts';
 import * as prompts from './services/prompts.ts';
 import * as settings from './services/settings.ts';
@@ -18,7 +19,7 @@ import * as tenants from './services/tenants.ts';
 import * as samples from './services/samples.ts';
 import * as labelSets from './services/label-sets.ts';
 import * as work from './services/work.ts';
-import {answerProblem, projectIdOf, WORKFLOW_PERMISSIONS} from '@yushiguang/sprint-domain';
+import {answerProblem, projectIdOf, systemConfig, WORKFLOW_PERMISSIONS} from '@yushiguang/sprint-domain';
 import {agentToolHost} from './services/page-views.ts';
 import {optimiserHost} from './services/optimiser-host.ts';
 import {workflowExecutors} from './services/executors.ts';
@@ -103,7 +104,16 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
       const w = at(ctx);
       // A caller who is not in the tenant the channel names gets no role: the site sends them home.
       const [member, name] = await Promise.all([tenants.inTenant(w), tenants.tenantName(w)]);
-      return {standIns: w.standIns, endpoints: w.gateway.labelingEndpoints(), hasBundledGold: dataset.hasBundledGold(w), ...(member ? {tenantRole: await tenantRole(w)} : {}), ...(name ? {tenantName: name} : {})};
+      const min = Math.min(50, Math.max(1, Math.floor(systemConfig().tenant.minAdmins)));
+      return {
+        standIns: w.standIns,
+        endpoints: w.gateway.labelingEndpoints(),
+        hasBundledGold: dataset.hasBundledGold(w),
+        ...(member ? {tenantRole: await tenantRole(w)} : {}),
+        ...(name ? {tenantName: name} : {}),
+        ...(min > 1 ? {minTenantAdmins: min} : {}),
+        ...(w.accessRequests?.mode === 'redirect' ? {accessRequestMode: 'redirect' as const} : {}),
+      };
     },
     requestAccess: (ctx, req) => requestAccess(at(ctx), req),
 
@@ -139,6 +149,7 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     listProjectEditors: (ctx, r) => editors.listProjectEditors(at(ctx), r),
     addProjectEditors: (ctx, r) => editors.addProjectEditors(at(ctx), r),
     removeProjectEditor: (ctx, r) => editors.removeProjectEditor(at(ctx), r),
+    getProjectOverview: (ctx, r) => overview.getProjectOverview(at(ctx), r),
     // The caller only needs to read the project: the work its check queues runs as Sprint in the
     // project's tenant, as the server's sweep does (docs/design/server.md, 2.2).
     async tick(ctx, {projectId}) {

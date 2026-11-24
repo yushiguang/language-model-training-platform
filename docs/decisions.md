@@ -11,6 +11,17 @@ where it matters, why. The code follows these; change a line here when a decisio
 - **Suggestions** sit beside the scores. Until the AI evaluates each version, the card is the one code picks from the project's records, with its buttons ("Fix in Prompt Design" replaces Improve with AI) and Dismiss for this visit.
 - **The selected version is in the address** (`?v=`), so a reload or a language switch keeps it.
 
+## 2026-11-24 (Project Overview, #123)
+
+- **The Overview shows what happened, in plain lines**: who did what and when, newest first, from the project's own records, the AI's suggestions, and the gold labels people saved (one line per person per day). Records Sprint keeps for itself (spend, tool calls) stay out.
+- **The Overview says whether you can edit**: "Can edit" or "Can view", from the permission platform.
+
+## 2026-11-24 (Permission platform lifecycle and minimum admins, #120)
+
+- **Permission platform lifecycle is optional on `PermissionAdminPort`**: deployments that provision dedicated resources or roles per tenant and project can implement `createTenant`, `deleteTenant`, `createProject` and `deleteProject`, while simpler adapters keep using member and project-writer grants alone.
+- **Minimum tenant admins are configurable (`tenant.minAdmins`, default `1`)**: deployments whose permission platform requires multiple resource owners can raise it so creating a tenant accepts co-admins (`adminIds`), directory search (`searchPeople`) is open to any signed-in user picking initial co-admins, and demotions/removals preserve the minimum.
+- **Access requests support external approval forms (`mode: 'redirect'`, `applyUrl`)**: deployments where users submit requests on the permission platform itself can redirect instead of asking for a reason inside Sprint.
+
 ## 2026-11-24 (Label set detail, #115)
 
 - **Comments can be edited and deleted by their author only** (wireframe round 9): `editComment` and `deleteComment` refuse anyone else's. A delete is soft, kept in the audit log with the earlier text of every edit, and a deleted comment no longer reaches the helpers.
@@ -19,6 +30,7 @@ where it matters, why. The code follows these; change a line here when a decisio
 ## 2026-11-24 (Project editors, #118)
 
 - **Project Settings lists who can edit**: the creator first, who can always edit and cannot be removed, then everyone added, with when. Anyone who can edit adds tenant members or removes them; everyone in the tenant can still open and read the project.
+- **Project settings is one settings dialog like the tenant's**: General (name, labeling model, the three thresholds), Members (who can view, who can edit) and Delete project (the name typed to confirm). Name, threshold and editor changes wait for Save. Value F1 no longer shows; projects keep the value they had.
 
 ## 2026-11-24 (Tenant settings, #111)
 
