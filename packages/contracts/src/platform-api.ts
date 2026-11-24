@@ -882,6 +882,11 @@ export interface Person {
 export interface PeopleDirectory {
   /** People whose name or email matches the query (no case), best first, at most `limit`. */
   search(query: string, limit: number): Promise<Person[]>;
+  /**
+   * Optional (#120): the people with these user ids; ids nobody has are left out. When present,
+   * co-admins picked for a new tenant are checked against it, so a made-up id can't count as an admin.
+   */
+  get?(userIds: string[]): Promise<Person[]>;
 }
 
 export interface Platform {

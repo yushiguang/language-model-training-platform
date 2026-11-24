@@ -161,7 +161,9 @@ A deployment supplies three optional ports in `Platform`:
   `addTenantMember`, `removeTenantMember` and `grantProjectWrite`). Deployments whose permission
   platform requires multiple resource owners can raise `tenant.minAdmins` (1 to 50, default `1`) in
   config so tenants are created with and keep at least that many admins; directory search
-  (`people`) is open to any signed-in user so tenant creators can pick initial co-admins.
+  (`people`) is open to any signed-in user so tenant creators can pick initial co-admins. Give
+  `people` the optional `get(userIds)` so those co-admins are checked to be real people: an id it
+  does not return is refused (without it, ids are taken as given).
 - `accessRequests` (`AccessRequestPort`): `request(ctx, {tenantId, permission, projectId?,
   reason?})` handles a request from the "insufficient access" dialog, where approvers handle it
   on the permission platform. By default (`mode: 'submit'`), return `trackUrl` when the platform
@@ -169,6 +171,8 @@ A deployment supplies three optional ports in `Platform`:
   out the request directly on the permission platform's own form (`RuntimeInfo.accessRequestMode`
   exposes `'redirect'` to pages). Sprint stores and approves nothing (#91). The stand-ins keep
   requests in memory (`memoryAccessRequests`); a deployment without it refuses requests for access.
+  To try both modes on the stand-ins, set `sprint-standin-min-admins` (for example `2`) and
+  `sprint-standin-access-requests` = `redirect` in the browser's local storage and reload.
 
 Pass them to `createWorkflow` (`authorization`, `permissionAdmin`, `accessRequests`), as the
 in-process root does. The top bar names the tenant by its record (tenants created in Sprint,

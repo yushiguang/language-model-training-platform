@@ -869,6 +869,27 @@ test('access redirect mode and configurable min tenant admins (#120)', async () 
   assert.equal(defaultInfo.accessRequestMode, undefined);
 });
 
+test('co-admins of a new tenant must be in the company directory when it looks people up by id (#120)', async () => {
+  const perms = checking();
+  configureSystem({tenant: {minAdmins: 2}});
+  try {
+    const known = [{id: bob.id, name: 'Bob', email: 'bob@example.com'}];
+    const {api} = world('wf-coadmin-directory', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin, people: memoryPeople(known)});
+    const unknown = 'Someone you picked as an admin is not in the company directory. Remove them and pick again.';
+    assert.deepEqual(await api.createTenant(ctxOf(alice), {name: 'Made Up', adminIds: ['u_nobody']}), {error: unknown});
+    assert.deepEqual(await api.createTenant(ctxOf(alice), {name: 'Made Up', adminIds: [bob.id, 'u_nobody']}), {error: unknown});
+    assert.equal((await api.listTenants(ctxOf(alice))).some(t => t.name === 'Made Up'), false, 'nothing is created');
+    const made = await api.createTenant(ctxOf(alice), {name: 'Real People', adminIds: [bob.id]});
+    assert.ok(made.tenant, made.error ?? 'tenant expected');
+    assert.equal(perms.admin.roleOf(made.tenant.id, bob.id), 'admin');
+    // A directory without lookup by id keeps the old behaviour: ids are taken as given.
+    const {api: plain} = world('wf-coadmin-plain', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin, people: {search: async () => []}});
+    assert.ok((await plain.createTenant(ctxOf(alice), {name: 'Plain', adminIds: ['u_someone']})).tenant);
+  } finally {
+    configureSystem();
+  }
+});
+
 test('permission platform lifecycle hooks (#120): custom hooks run and legacy adapters without hooks keep working', async () => {
   const calls: string[] = [];
   const inner = memoryPermissionAdmin();

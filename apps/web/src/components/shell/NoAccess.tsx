@@ -35,6 +35,10 @@ function NoAccessDialog({permission, project, onClose}: {permission: PermissionP
   const text = {...words(permission, tenant, permission === 'project_write' ? project?.name : undefined), ...accessDeniedText()};
 
   const send = async () => {
+    // Redirect mode (#120, W-NoAccess-Redirect): the platform's form opens in a new tab. The tab is
+    // opened now, inside the click, because browsers block a window opened after a network wait;
+    // it is pointed at the form once Sprint has the link, or closed again if there is none.
+    const tab = redirectMode ? window.open('', '_blank') : null;
     setSending(true);
     setFailed(null);
     try {
@@ -43,11 +47,16 @@ function NoAccessDialog({permission, project, onClose}: {permission: PermissionP
         ...(permission === 'project_write' && project ? {projectId: project.id} : {}),
         ...(!redirectMode && reason.trim() ? {reason: reason.trim()} : {}),
       });
-      if (res.applyUrl && /^https?:\/\//i.test(res.applyUrl)) {
-        window.open(res.applyUrl, '_blank', 'noopener,noreferrer');
+      const url = res.applyUrl && /^https?:\/\//i.test(res.applyUrl) ? res.applyUrl : undefined;
+      if (tab && url) {
+        tab.opener = null;
+        tab.location.href = url;
+        return onClose();
       }
+      tab?.close();
       setSent(res);
     } catch (e) {
+      tab?.close();
       const msg = e instanceof Error ? e.message : '';
       setFailed(/^[A-Z][^{}<>\n]{0,160}\.$/.test(msg) ? t(msg) : t('Check your connection and try again.'));
     } finally {
@@ -126,7 +135,7 @@ function NoAccessDialog({permission, project, onClose}: {permission: PermissionP
         <>
           <Button label={t('Cancel')} variant="ghost" onClick={onClose} />
           <Button
-            label={t('Request access')}
+            label={redirectMode ? t('Request on the permission platform') : t('Request access')}
             variant="primary"
             endContent={redirectMode ? <Icon icon={ArrowTopRightOnSquareIcon} size="sm" color="inherit" /> : undefined}
             isLoading={sending}
@@ -147,7 +156,7 @@ function NoAccessDialog({permission, project, onClose}: {permission: PermissionP
         </VStack>
         {redirectMode ? (
           <Text type="supporting" color="secondary">
-            {t('Your request opens on the permission platform.')}
+            {t('The request form opens in a new tab. Come back here once it is approved.')}
           </Text>
         ) : (
           <TextArea label={t('Why you need it')} isOptional value={reason} onChange={setReason} placeholder={t("For example: I'm labeling the Food examples this week")} rows={3} />

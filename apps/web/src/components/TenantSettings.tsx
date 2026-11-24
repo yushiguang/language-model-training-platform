@@ -126,7 +126,8 @@ export function TenantSettings({tenant, me, tab: first = 'general', onClose, onC
 
   const heading: Record<TenantSettingsTab, [string, string?]> = {
     general: [t('General'), t('Only admins can change these.')],
-    members: [t('Members'), t('Everyone here sees every project. Admins also manage members, models and data sources.')],
+    // #120 (W-TenantSettings-MinAdmins): with a minimum above one, the line states it.
+    members: [t('Members'), minAdmins > 1 ? t('Everyone here sees every project. This tenant needs at least {n} admins.', {n: minAdmins}) : t('Everyone here sees every project. Admins also manage members, models and data sources.')],
     models: [t('Models'), t('Models that projects in this tenant may label with.')],
     delete: [t('Delete tenant')],
   };
