@@ -90,6 +90,7 @@ export const {
   listProjectEditors,
   addProjectEditors,
   removeProjectEditor,
+  getProjectOverview,
   saveSettings,
   listDataSources,
   getDataSource,

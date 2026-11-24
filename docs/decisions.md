@@ -7,6 +7,7 @@ where it matters, why. The code follows these; change a line here when a decisio
 
 - **The Overview shows what happened, in plain lines**: who did what and when, newest first, from the project's own records, the AI's suggestions, and the gold labels people saved (one line per person per day). Records Sprint keeps for itself (spend, tool calls) stay out.
 - **The Overview says whether you can edit**: "Can edit" or "Can view", from the permission platform.
+- **The Overview page** (wireframe W-Overview): the best score (opens Prompt Tuning) and the next step side by side, the tasks running or waiting with Stop or Cancel, then the activity; beside them the details, who can edit, and the data sources the dataset came from. Renaming a project in Project Settings no longer also records a settings change.
 
 ## 2026-11-24 (Permission platform lifecycle and minimum admins, #120)
 
