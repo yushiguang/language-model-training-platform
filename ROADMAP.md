@@ -35,6 +35,10 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Done
 
+- 2026-11-24: contract change (#129): `rebuildReports` is removed from the page contract; pages
+  use Rescore (`rescore`), which queues a job.
+- 2026-11-24: Optimiser runs on Prompt Tuning (#90 lane 3, #127): Rounds with Show dropped,
+  Activity, a failed or paused run's card with Retry or Resume, and a banner on how a run ended.
 - 2026-11-24: Prompt Tuning on Astryx (#90 lane 3, #105): version cards (sort, pin, Best, change),
   Macro-F1 / Precision / Recall cards against thresholds, per-value rows with false negative and
   false positive rings, Rescore, the Optimise dialog and the running Optimiser's progress.

@@ -9,7 +9,8 @@ import {withLock} from './sources.ts';
 const FOLLOW = 3;
 
 /**
- * Rescore (Evelyn, 2026-11-12; docs/design/server.md 4.3): only when someone presses it. Nothing
+ * The work of a Rescore (Evelyn, 2026-11-12; docs/design/server.md 4.3), run by the
+ * `report.rescore` job (`rescore` queues it): only when someone presses Rescore. Nothing
  * starts it by itself, since gold edits, thresholds and samples all move scores. Every version of
  * the current label, on the project's model, with saved answers on today's samples gets a fresh
  * report on today's basis, from saved answers only: nothing is labeled. A version missing answers

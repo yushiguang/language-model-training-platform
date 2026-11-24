@@ -179,7 +179,6 @@ export function createBffApi(deps: BffDeps): BffContract {
     importBundledGold: pass('importBundledGold'),
     mismatches: pass('mismatches'),
     reviewGold: pass('reviewGold'),
-    rebuildReports: pass('rebuildReports'),
     rescore: pass('rescore'),
 
     createVersion: r => idempotent('createVersion', r.idempotencyKey, async () => workflow.createVersion(await context(), r)),
