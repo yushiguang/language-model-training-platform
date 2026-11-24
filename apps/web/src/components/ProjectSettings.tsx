@@ -1,18 +1,26 @@
 'use client';
 
-import {createContext, useCallback, useContext, useRef, useState, type ReactNode} from 'react';
-import {CUSTOM_START, DEFAULT_THRESHOLDS, systemConfig} from '@yushiguang/sprint-domain';
-import type {Thresholds} from '@yushiguang/sprint-contracts';
-import {renameProject, saveSettings, type ProjectState} from '@/backend-api';
+import {createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+import {Cog6ToothIcon, CpuChipIcon, EyeIcon, MagnifyingGlassIcon, TagIcon, TrashIcon, UserGroupIcon, UserPlusIcon, XMarkIcon} from '@heroicons/react/24/outline';
+import {DEFAULT_THRESHOLDS, systemConfig} from '@yushiguang/sprint-domain';
+import type {ProjectEditor, TenantMemberView, Thresholds} from '@yushiguang/sprint-contracts';
+import {addProjectEditors, deleteProject, listProjectEditors, listTenantMembers, removeProjectEditor, renameProject, saveSettings, type NewProjectThresholds, type ProjectState} from '@/backend-api';
+import {FormDialog, SettingsCard, SettingsDialog as Frame, SettingsRow} from '@/components/shell/dialogs';
+import {ErrorLine} from '@/components/sources/dialogs';
+import {ThresholdFields} from '@/components/thresholds';
+import {tenantHref} from '@/components/ProjectContext';
+import {useGo} from '@/components/nav';
+import {useRuntime} from '@/components/session';
+import {Avatar, Badge, Button, HStack, Icon, IconButton, Selector, Text, TextInput, Typeahead, VStack, type SearchableItem, type SearchSource} from '@/ui/astryx';
+import {dateTime, isAccessDenied, reportAccessDenied} from '@/ui';
 import {t} from '@/i18n';
-import {Button, Dialog, Field, Seg, Select, Switch, Table} from '@/ui';
 
 /**
- * Project Settings (spec 1.0.0, 2.3; 1.1.0, 1.2; 2026-11-16 refinements, 3): the project's name,
- * the pass rule (Default or Custom, switched beside the Evaluation heading) and the labeling
- * model, in three sections set apart by a line and space. They are not workflow
- * steps: a new project starts from defaults, the Settings button at the top opens this dialog at
- * any time, and it opens once by itself before the first paid run so the user confirms them.
+ * Project Settings (wireframes v346: W-ProjectSettings, -People, -Delete; #118): General (the
+ * name, the labeling model, the three thresholds), Members (who can view and who can edit) and
+ * Delete project, in the same settings dialog as the tenant's. They are not workflow steps: the
+ * Settings button opens the dialog at any time, and a project whose settings were never confirmed
+ * gets it once by itself before its first paid run.
  */
 interface Settings {
   /** Opens the dialog. */
@@ -53,131 +61,339 @@ export function SettingsProvider({state, children}: {state: ProjectState | null;
   );
 }
 
-type Mode = 'default' | 'custom';
-type Check = 'macroF1' | 'valueF1' | 'precision' | 'recall';
-/** The checks of the pass rule (names are catalog keys). Names only, no explanation line (2026-11-16). */
-const CHECKS: {key: Check; name: string}[] = [
-  {key: 'macroF1', name: 'Macro-F1'},
-  {key: 'valueF1', name: 'Value F1'},
-  {key: 'precision', name: 'Precision'},
-  {key: 'recall', name: 'Recall'},
-];
+type Tab = 'general' | 'members' | 'delete';
+
+/** Errors the server words for people come through translated; anything else says to try again. */
+const said = (e: unknown) => {
+  const msg = e instanceof Error ? e.message : '';
+  return /^[A-Z][^{}<>\n]{0,160}\.$/.test(msg) ? t(msg) : t('Check your connection and try again.');
+};
+
+/** The saved pass rule as the three thresholds the page edits. */
+function shownThresholds(th: Thresholds | null | undefined): NewProjectThresholds {
+  if (!th || th.mode !== 'custom') return {macroF1: DEFAULT_THRESHOLDS.macroF1, precision: null, recall: null};
+  return {macroF1: th.macroF1, precision: th.precision ?? null, recall: th.recall ?? null};
+}
+
+/** The three thresholds back as a pass rule: the defaults stay the default; Value F1, no longer shown, keeps what it had. */
+function savedThresholds(v: NewProjectThresholds, was: Thresholds | null | undefined): Thresholds {
+  const d = DEFAULT_THRESHOLDS;
+  const valueF1 = was?.mode === 'custom' ? was.valueF1 : null;
+  if (v.macroF1 === d.macroF1 && v.precision == null && v.recall == null && valueF1 == null) return d;
+  return {...d, mode: 'custom', macroF1: v.macroF1, valueF1, precision: v.precision, recall: v.recall};
+}
 
 function SettingsDialog({state, first, onDone}: {state: ProjectState; first: boolean; onDone: (saved: boolean) => void}) {
+  const go = useGo();
+  const {info} = useRuntime();
+  const p = state.project;
   const s = state.setup;
-  const saved = s?.thresholds ?? DEFAULT_THRESHOLDS;
-  const [mode, setMode] = useState<Mode>(saved.mode === 'custom' ? 'custom' : 'default');
-  const start = saved.mode === 'custom' ? saved : null;
-  const [on, setOn] = useState<Record<Check, boolean>>({macroF1: true, valueF1: start?.valueF1 != null, precision: start?.precision != null, recall: start?.recall != null});
-  const [val, setVal] = useState<Record<Check, string>>({
-    macroF1: (start?.macroF1 ?? DEFAULT_THRESHOLDS.macroF1).toFixed(2),
-    valueF1: (start?.valueF1 ?? CUSTOM_START.valueF1).toFixed(2),
-    precision: (start?.precision ?? CUSTOM_START.precision).toFixed(2),
-    recall: (start?.recall ?? CUSTOM_START.recall).toFixed(2),
-  });
-  const eps = state.endpoints;
+  const [tab, setTab] = useState<Tab>('general');
+  const [name, setName] = useState(p.name);
   const model = s?.models[0];
-  const [ep, setEp] = useState(model?.endpoint ?? eps[0]?.id);
-  const info = eps.find(e => e.id === ep);
-  const [tokens, setTokens] = useState(String(model?.maxOutputTokens ?? 1024));
-  const [temp, setTemp] = useState(String(model?.temperature ?? 0));
-  const custom = mode === 'custom';
-  const [name, setName] = useState(state.project.name);
+  const [endpoint, setEndpoint] = useState<string>(model?.endpoint ?? state.endpoints[0]?.id ?? '');
+  const startThresholds = useMemo(() => shownThresholds(s?.thresholds), [s]);
+  const [thresholds, setThresholds] = useState<NewProjectThresholds>(startThresholds);
+  const [editors, setEditors] = useState<ProjectEditor[] | null>(null);
+  const [members, setMembers] = useState<TenantMemberView[]>([]);
+  const [adding, setAdding] = useState<TenantMemberView[]>([]);
+  const [removing, setRemoving] = useState<string[]>([]);
+  const [error, setError] = useState<{field: 'name' | 'form'; text: string} | null>(null);
+  const [busy, setBusy] = useState(false);
   const nameMax = systemConfig().project.nameMaxChars;
-  const cap = `≤ ${+(100 * systemConfig().evaluation.invalidRateCap).toFixed(1)}%`;
+
+  useEffect(() => {
+    listProjectEditors({projectId: p.id}).then(setEditors, e => setError({field: 'form', text: said(e)}));
+    listTenantMembers().then(setMembers, () => undefined);
+  }, [p.id]);
+
+  const creator = editors?.find(e => e.creator);
+  const shown = useMemo(() => {
+    const list: (ProjectEditor & {isNew?: boolean})[] = (editors ?? []).filter(e => !removing.includes(e.userId));
+    for (const m of adding) if (!list.some(e => e.userId === m.userId)) list.push({userId: m.userId, name: m.name, ...(m.email ? {email: m.email} : {}), creator: false, addedAt: null, isNew: true});
+    return list;
+  }, [editors, adding, removing]);
+  const sameThresholds = JSON.stringify(thresholds) === JSON.stringify(startThresholds);
+  const renamed = name.trim().replace(/\s+/g, ' ') !== p.name;
+  const settingsChanged = renamed || endpoint !== (model?.endpoint ?? '') || !sameThresholds;
+  const dirty = first || settingsChanged || adding.length > 0 || removing.length > 0;
+  const info2 = state.endpoints.find(e => e.id === endpoint);
+
+  const denied = (e: unknown) => {
+    if (!isAccessDenied(e)) return false;
+    onDone(false);
+    reportAccessDenied(e.permission, undefined, {id: p.id, name: p.name});
+    return true;
+  };
 
   const save = async () => {
-    if (!info || !name.trim()) return;
-    if (name.trim() !== state.project.name) await renameProject({projectId: state.project.id, name});
-    const n = (k: Check) => (on[k] ? Math.min(1, Math.max(0, parseFloat(val[k]) || 0)) : null);
-    const thresholds: Thresholds = custom ? {...DEFAULT_THRESHOLDS, mode: 'custom', macroF1: n('macroF1') ?? DEFAULT_THRESHOLDS.macroF1, valueF1: n('valueF1'), precision: n('precision'), recall: n('recall')} : DEFAULT_THRESHOLDS;
-    await saveSettings({projectId: state.project.id, thresholds, model: {endpoint: info.id, maxOutputTokens: parseInt(tokens) || 1024, temperature: info.supportsTemperature ? parseFloat(temp) || 0 : null}});
-    onDone(true);
+    if (!name.trim()) return setError({field: 'name', text: t('Enter a name. Spaces alone are not a name.')}), setTab('general');
+    if (!info2) return setError({field: 'form', text: t('This model is not available.')}), setTab('general');
+    setBusy(true);
+    setError(null);
+    try {
+      if (renamed) await renameProject({projectId: p.id, name});
+      if (first || settingsChanged)
+        await saveSettings({
+          projectId: p.id,
+          thresholds: savedThresholds(thresholds, s?.thresholds),
+          model: {endpoint: info2.id, maxOutputTokens: model?.maxOutputTokens ?? 1024, temperature: info2.supportsTemperature ? (model?.temperature ?? 0) : null},
+        });
+      if (adding.length) {
+        const r = await addProjectEditors({projectId: p.id, userIds: adding.map(m => m.userId)});
+        if (r.error) return setError({field: 'form', text: t(r.error)}), setTab('members');
+      }
+      for (const userId of removing) {
+        const r = await removeProjectEditor({projectId: p.id, userId});
+        if (r.error) return setError({field: 'form', text: t(r.error)}), setTab('members');
+      }
+      onDone(true);
+    } catch (e) {
+      if (!denied(e)) setError({field: 'form', text: said(e)});
+    } finally {
+      setBusy(false);
+    }
   };
 
-  // Default shows the exact thresholds it uses, locked; Custom unlocks them (feedback 5).
-  const row = (c: (typeof CHECKS)[number]) => {
-    const isOn = custom ? on[c.key] : c.key === 'macroF1';
-    return {
-      key: c.key,
-      cells: [
-        <b key="n">{t(c.name)}</b>,
-        <Switch key="s" label={t('{check} on', {check: t(c.name)})} on={isOn} locked={!custom || c.key === 'macroF1'} onChange={v => setOn({...on, [c.key]: v})} />,
-        <input
-          key="v"
-          className="input sm"
-          style={{width: 72, textAlign: 'center', padding: '0 8px'}}
-          aria-label={t('{check} threshold', {check: t(c.name)})}
-          disabled={!custom}
-          value={custom ? val[c.key] : c.key === 'macroF1' ? DEFAULT_THRESHOLDS.macroF1.toFixed(2) : '–'}
-          onChange={e => {
-            setVal({...val, [c.key]: e.target.value});
-            if (c.key !== 'macroF1') setOn({...on, [c.key]: true});
-          }}
-        />,
-      ],
-    };
+  const heading: Record<Tab, [string, string?]> = {
+    general: [t('General'), t('Only people who can edit this project can change these.')],
+    members: [t('Members'), creator ? t('{name} created this project and can always edit it.', {name: creator.name}) : undefined],
+    delete: [t('Delete project'), t('Anyone who can edit this project can delete it.')],
   };
-  const invalid = {
-    key: 'invalid',
-    cells: [
-      <b key="n">{t('Invalid outputs')}</b>,
-      <Switch key="s" label={t('{check} on', {check: t('Invalid outputs')})} on locked />,
-      <input key="v" className="input sm" style={{width: 72, textAlign: 'center', padding: '0 8px'}} aria-label={t('Invalid outputs limit')} disabled value={cap} readOnly />,
-    ],
-  };
+  const [title, sub] = heading[tab];
 
   return (
-    <Dialog
-      title={t('Project Settings')}
-      width={760}
+    <Frame<Tab>
+      title={t('Project settings')}
+      sections={[
+        {
+          title: t('Project'),
+          items: [
+            {key: 'general', label: t('General'), icon: Cog6ToothIcon},
+            {key: 'members', label: t('Members'), icon: UserGroupIcon, ...(editors ? {end: String(shown.length)} : {})},
+          ],
+        },
+        ...(first ? [] : [{items: [{key: 'delete' as const, label: t('Delete project'), icon: TrashIcon}]}]),
+      ]}
+      selected={tab}
+      onSelect={k => (setTab(k), setError(e => (e?.field === 'name' ? e : null)))}
+      heading={title}
+      sub={sub}
       onClose={() => onDone(false)}
-      actions={
-        <>
-          <Button label={t('Cancel')} onClick={() => onDone(false)} />
-          <Button label={first ? t('Confirm') : t('Save')} kind="primary" disabled={!info || !name.trim()} onClick={save} />
-        </>
+      footer={
+        tab === 'delete' ? undefined : (
+          <>
+            <Button label={t('Cancel')} variant="ghost" onClick={() => onDone(false)} />
+            <Button label={first ? t('Confirm') : t('Save')} variant="primary" isDisabled={!dirty} isLoading={busy} onClick={() => void save()} />
+          </>
+        )
       }
     >
-      <div className="set-secs">
-        <section className="set-sec">
-          <h3 id="set-name">{t('Name')}</h3>
-          <input className="input" value={name} maxLength={nameMax} aria-labelledby="set-name" aria-invalid={!name.trim() || undefined} onChange={e => setName(e.target.value)} />
-        </section>
-        <section className="set-sec set-checks">
-          <div className="set-sec-h">
-            <h3 id="set-eval">{t('Evaluation')}</h3>
-            <Seg
-              label={t('Pass rule')}
-              value={mode}
-              options={[
-                {value: 'default', label: t('Default')},
-                {value: 'custom', label: t('Custom')},
-              ]}
-              onChange={setMode}
+      {tab === 'general' && (
+        <VStack gap={5}>
+          <SettingsCard title={t('Project')}>
+            <SettingsRow
+              icon={TagIcon}
+              title={t('Name')}
+              control={
+                <TextInput
+                  label={t('Name')}
+                  isLabelHidden
+                  value={name}
+                  onChange={v => (setName(v.slice(0, nameMax)), setError(null))}
+                  status={error?.field === 'name' ? {type: 'error', message: error.text} : undefined}
+                />
+              }
             />
-          </div>
-          <Table cols={[{label: t('Check')}, {label: t('On'), kind: 'c'}, {label: t('Threshold'), kind: 'c'}]} widths={['auto', 72, 112]} rows={[...CHECKS.map(row), invalid]} />
-        </section>
-        <section className="set-sec">
-          <h3 id="set-model">{t('Labeling model')}</h3>
-          <div className="row" style={{gap: 16, alignItems: 'flex-end'}}>
-            <Select label={t('Model')} value={ep ?? ''} options={eps.map(e => ({value: e.id as string, label: e.name}))} onChange={v => setEp(v as typeof ep)} />
-            <Field label={t('Max output tokens')}>
-              <input className="input" value={tokens} onChange={e => setTokens(e.target.value.replace(/\D/g, ''))} />
-            </Field>
-            {info?.supportsTemperature ? (
-              <Field label={t('Temperature')}>
-                <input className="input" value={temp} onChange={e => setTemp(e.target.value)} />
-              </Field>
-            ) : (
-              <Field label={t('Temperature')} off>
-                <input className="input" value={t('Not supported')} readOnly disabled />
-              </Field>
-            )}
-          </div>
-        </section>
-      </div>
-    </Dialog>
+            <SettingsRow
+              icon={CpuChipIcon}
+              title={t('Labeling model')}
+              description={t('One model per project.')}
+              control={<Selector label={t('Model')} isLabelHidden options={state.endpoints.map(e => ({value: e.id as string, label: e.name}))} value={endpoint} onChange={setEndpoint} />}
+            />
+          </SettingsCard>
+          <ThresholdFields value={thresholds} onChange={setThresholds} />
+        </VStack>
+      )}
+      {tab === 'members' && (
+        <Editors
+          tenant={info?.tenant?.name ?? ''}
+          shown={shown}
+          loading={!editors}
+          members={members}
+          onAdd={m => (setAdding(a => (a.some(x => x.userId === m.userId) ? a : [...a, m])), setRemoving(r => r.filter(id => id !== m.userId)))}
+          onRemove={e => (e.isNew ? setAdding(a => a.filter(m => m.userId !== e.userId)) : setRemoving(r => [...r, e.userId]))}
+        />
+      )}
+      {tab === 'delete' && (
+        <DeleteProject
+          project={p}
+          onDenied={denied}
+          onDeleted={() => {
+            onDone(false);
+            void go(tenantHref());
+          }}
+        />
+      )}
+      {error?.field === 'form' && <ErrorLine text={error.text} />}
+    </Frame>
+  );
+}
+
+type MemberItem = SearchableItem<TenantMemberView>;
+
+/** Members (W-ProjectSettings-People): everyone in the tenant views; editors are listed, added and removed. */
+function Editors({
+  tenant,
+  shown,
+  loading,
+  members,
+  onAdd,
+  onRemove,
+}: {
+  tenant: string;
+  shown: (ProjectEditor & {isNew?: boolean})[];
+  loading: boolean;
+  members: TenantMemberView[];
+  onAdd: (m: TenantMemberView) => void;
+  onRemove: (e: ProjectEditor & {isNew?: boolean}) => void;
+}) {
+  const [picked, setPicked] = useState<MemberItem | null>(null);
+  const source = useMemo<SearchSource<MemberItem>>(() => {
+    const ids = new Set(shown.map(e => e.userId));
+    return {
+      search: q => {
+        const s = q.trim().toLowerCase();
+        return members
+          .filter(m => !ids.has(m.userId) && (m.name.toLowerCase().includes(s) || (m.email ?? '').toLowerCase().includes(s)))
+          .map(m => ({id: m.userId, label: m.name, auxiliaryData: m}));
+      },
+      bootstrap: () => [],
+    };
+  }, [members, shown]);
+  const add = () => {
+    if (!picked?.auxiliaryData) return;
+    onAdd(picked.auxiliaryData);
+    setPicked(null);
+  };
+  return (
+    <VStack gap={5}>
+      <SettingsCard title={t('Who can view')}>
+        <SettingsRow icon={EyeIcon} title={t('Everyone in {tenant}', {tenant})} description={t('Open the project and read every page.')} />
+      </SettingsCard>
+      <SettingsCard title={t('Who can edit')}>
+        <SettingsRow
+          title={
+            <HStack gap={2} vAlign="end">
+              <div style={{flex: 1, minWidth: 0}}>
+                <Typeahead<MemberItem>
+                  label={t('Add people')}
+                  placeholder={t('Search by name or email')}
+                  startIcon={MagnifyingGlassIcon}
+                  searchSource={source}
+                  value={picked}
+                  onChange={setPicked}
+                  renderItem={m => (
+                    <HStack gap={2} vAlign="center">
+                      <Avatar name={m.label} size="xsm" />
+                      <VStack gap={0}>
+                        <Text type="body">{m.label}</Text>
+                        {m.auxiliaryData?.email && (
+                          <Text type="supporting" color="secondary">
+                            {m.auxiliaryData.email}
+                          </Text>
+                        )}
+                      </VStack>
+                    </HStack>
+                  )}
+                  emptySearchText={t('Nobody found in this tenant.')}
+                />
+              </div>
+              <Button label={t('Add')} variant="secondary" icon={<Icon icon={UserPlusIcon} size="sm" />} isDisabled={!picked} onClick={add} />
+            </HStack>
+          }
+        />
+        {loading ? (
+          <SettingsRow title={<Text color="secondary">{t('Loading')}</Text>} />
+        ) : (
+          shown.map(e => (
+            <SettingsRow
+              key={e.userId}
+              start={<Avatar name={e.name} size="sm" />}
+              title={
+                <HStack gap={2} vAlign="center">
+                  <Text type="label">{e.name}</Text>
+                  {e.creator && <Badge variant="neutral" label={t('Project creator')} />}
+                  {e.isNew && <Badge variant="info" label={t('New')} />}
+                </HStack>
+              }
+              description={e.creator ? t('Created this project') : e.addedAt ? t('Added {when}', {when: dateTime(e.addedAt)}) : (e.email ?? undefined)}
+              controlWidth="auto"
+              control={
+                e.creator ? undefined : (
+                  <span className="sp-hover-acts">
+                    <IconButton label={t('Remove {name}', {name: e.name})} tooltip={t('Remove')} variant="ghost" size="sm" icon={<Icon icon={XMarkIcon} size="sm" />} onClick={() => onRemove(e)} />
+                  </span>
+                )
+              }
+            />
+          ))
+        )}
+      </SettingsCard>
+    </VStack>
+  );
+}
+
+/** Delete project (W-ProjectSettings-Delete): the button asks for the project's name first. */
+function DeleteProject({project, onDenied, onDeleted}: {project: {id: string; name: string}; onDenied: (e: unknown) => boolean; onDeleted: () => void}) {
+  const [asking, setAsking] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const remove = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteProject({projectId: project.id});
+      onDeleted();
+    } catch (e) {
+      if (!onDenied(e)) setError(said(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <SettingsCard danger>
+        <SettingsRow
+          icon={TrashIcon}
+          title={t('Delete {name}', {name: project.name})}
+          description={t('Its prompt versions, datasets, label sets and scores are removed. Data sources stay. This cannot be undone.')}
+          controlWidth="auto"
+          control={<Button label={t('Delete project')} variant="destructive" onClick={() => (setTyped(''), setError(null), setAsking(true))} />}
+        />
+      </SettingsCard>
+      {asking && (
+        <FormDialog
+          title={t('Delete {name}?', {name: project.name})}
+          width={480}
+          onClose={() => setAsking(false)}
+          footer={
+            <>
+              <Button label={t('Cancel')} variant="ghost" onClick={() => setAsking(false)} />
+              <Button label={t('Delete project')} variant="destructive" isDisabled={typed !== project.name} isLoading={busy} onClick={() => void remove()} />
+            </>
+          }
+        >
+          <VStack gap={5}>
+            <Text type="body" color="secondary">
+              {t('Its prompt versions, datasets, label sets and scores are removed. Data sources stay. This cannot be undone.')}
+            </Text>
+            <TextInput label={t('Type the project name to confirm')} value={typed} onChange={setTyped} hasAutoFocus />
+            {error && <ErrorLine text={error} />}
+          </VStack>
+        </FormDialog>
+      )}
+    </>
   );
 }
