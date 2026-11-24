@@ -4,7 +4,7 @@ import {useEffect, useState, type ReactNode} from 'react';
 import type {MismatchList} from '@yushiguang/sprint-contracts';
 import {aiSuggestion, compilePrompt, withNewestReports, type SuggestionAction} from '@yushiguang/sprint-domain';
 import {SparklesIcon} from '@heroicons/react/24/outline';
-import {Button, Card, Heading, HStack, Icon, Text, VStack} from '@/ui/astryx';
+import {Badge, Button, Card, Heading, HStack, Icon, Text, VStack} from '@/ui/astryx';
 import {action, reportFailure, useCopy} from '@/ui';
 import {useGo} from '@/components/nav';
 import {useProject} from '@/components/ProjectContext';
@@ -155,9 +155,7 @@ export function Suggestions({state, versionId, onOptimise, onSwitch}: {state: Pr
         );
       case 'finish':
         return finished ? (
-          <Text key={act} type="supporting" color="secondary">
-            {t('Finished')}
-          </Text>
+          <Badge key={act} label={t('Finished')} variant="success" />
         ) : (
           <Button key={act} label={t('Finish')} variant={variant} size="sm" tooltip={t('Marks this project as finished. You can still come back and change it.')} clickAction={action(t('Finish'), () => approveNode(state.project.id, 'prompt'))} />
         );

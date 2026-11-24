@@ -100,8 +100,18 @@ function Tuning({state, vId, setPage}: {state: ProjectState; vId: string | null;
   const asked = vId ? state.versions.find(v => v.id === vId)?.major : undefined;
   const [selMajor, setSel] = useState<number | null>(asked ?? null);
   const sel = items.find(i => i.major === selMajor) ?? (best ? items.find(i => i.major === best.major) : undefined) ?? items[0];
+  // The selection is kept in the address (?v=), so a reload or a language switch keeps it.
+  const keep = (major: number) => {
+    const id = state.versions.filter(v => v.major === major).at(-1)?.id;
+    if (typeof window === 'undefined') return;
+    const u = new URL(window.location.href);
+    if (id) u.searchParams.set('v', id);
+    else u.searchParams.delete('v');
+    window.history.replaceState(null, '', u);
+  };
   const select = (major: number) => {
     setSel(major);
+    keep(major);
     const it = items.find(i => i.major === major);
     if (it?.state.kind === 'scored' && !seen.has(it.state.report.id)) setSeen([...seen, it.state.report.id]);
   };
@@ -190,6 +200,7 @@ function Tuning({state, vId, setPage}: {state: ProjectState; vId: string | null;
           onStarted={major => {
             setOptimise(false);
             setSel(major);
+            if (major != null) keep(major);
           }}
         />
       )}
