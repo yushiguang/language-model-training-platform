@@ -3,6 +3,12 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-24 (Tenant settings, #111)
+
+- **Admins manage the tenant in one settings dialog**: rename it (same rules as a new name), add people from the company directory by name or email, change roles, remove members, delete the tenant. Only admins change anything; members only read.
+- **A tenant always keeps an admin**: the last admin can't be made a member or removed; the page says to make someone else an admin first.
+- **Deleting a tenant takes everything in it**: its projects, data sources, models and members, once its name is typed. Tenants that come with the organization (no record here) can't be deleted.
+
 ## 2026-11-23 (Tenant page, #103)
 
 - **A new project's settings are chosen when it is made**: the new-project dialog asks for the name, the labeling model (the tenant's default first) and the three thresholds (Macro-F1 at the configured default, Precision and Recall off), and saving them there counts as confirming Project Settings, so no second confirmation comes before the first paid run. Names may still repeat; a blank one is shown under the field.

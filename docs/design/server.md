@@ -407,6 +407,13 @@ export interface ConfigReader {
 - **Admin 卡片**：`getTenant()` 给当前租户的名称、角色、项目数，以及数据源数（和数据源页同一个列表）、租户自己的模型数、成员数（没接权限平台时为 null）。
 - **新建项目**：`projectDefaults()` 给可选模型（和项目设置同一个列表：租户的模型，然后平台默认）、默认模型、默认阈值（Macro-F1 取配置的默认值，Precision / Recall 关）。`newProject({name, model?, thresholds?})` 先检查（名称不能为空、模型要在列表里、阈值在 0 到 1 之间），错误由返回值给出；然后建项目、存项目设置，并算作已确认。两个都没给时和 `createProject` 一样，用默认值，之后再确认。
 
+### 9.4 租户设置（#111）
+
+- **改名**：`renameTenant({name})`，规则和新建一样（空白合并、不能为空、全局不重名，持有 `tenants:names` 锁）。没有记录的租户（`default`、organization）改名时用同一个 id 建一条记录。
+- **成员**：读用线 2 的 `listTenantMembers()`（#107）。改动只有管理员能做：`addTenantMembers({userIds, role})` 一次加多人（已在的人角色不变，一次最多 50 人），`setTenantRole({userId, role})`、`removeTenantMember({userId})`。租户至少留一个管理员：最后一个管理员不能降级或移除，返回 `error`。角色改动持有 `members:<租户>` 锁，两个管理员同时降级对方时也不会一个都不剩。
+- **找人**：`searchPeople({query})` 查公司目录（新的可选 `Platform.people`，`PeopleDirectory.search`），按名字或邮箱，最多 20 人；没接目录时返回空，页面只能按用户 id 加人。浏览器替身是几位虚构同事（example.com 邮箱）。
+- **删除租户**：`deleteTenant({name})` 要输入租户名称确认。依次删项目（各自走删除任务）、删数据源（内置样例除外）、删租户的模型并让网关重读、移除所有成员，最后删记录；中途失败可以再执行一次。没有记录的租户不能删。
+
 ## 10. Contract 改动
 
 按 CONTRIBUTING，每个 contract 改动单独一个 PR，标明是新增还是破坏性：
@@ -428,6 +435,7 @@ export interface ConfigReader {
 | `Tenant` 和 catalog 的 `tenants` 集合、`listTenants` / `createTenant`、`RuntimeInfo.tenant` 在调用方不在租户时省略、`BffDeps.tenant` | 新增（#94） |
 | `PermissionAdminPort.listUserTenants` | 破坏性：部署方的权限平台适配器要实现（#94） |
 | 租户页：`listProjectRows`（每行当前步骤、最好分数、运行中任务数、最近改动时间，分页，`mine`）、`getTenant`（Admin 卡片的计数）、`projectDefaults`、`newProject`（名称、模型、阈值，存为已确认的项目设置）；步骤规则 `stepStates` / `currentStep` 移到 domain | 新增（#103）。`createProject(name)` 保留给脚本和测试 |
+| 租户设置：`renameTenant`、`deleteTenant`、`addTenantMembers` / `setTenantRole` / `removeTenantMember`、`searchPeople`；`PeopleDirectory`（`Platform.people` 可选） | 新增（#111）：部署方可以不接目录 |
 | `ScoreBasis`、`EvalReport.basis`（可选，旧报告没有）、`ScoringState`、任务类型 `report.rescore`、`ProjectState.scoring`、`WorkflowFacts.scoringReady`、`rescore` 接口 | 新增：只有工作流产出和读取，部署方的适配器不用改（第 9 步，#86 已完成） |
 
 ## 11. 交付计划

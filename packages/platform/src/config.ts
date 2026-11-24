@@ -11,6 +11,7 @@ import {browserFiles, LOCAL_USER, localIdentity, localTelemetrySink} from './sta
 import {localTickets} from './standins/tickets.ts';
 import {logNotifications} from './standins/notifications.ts';
 import {memorySharedState} from './standins/shared-state.ts';
+import {memoryPeople} from './standins/people.ts';
 
 /**
  * The default platform: browser/local stand-ins, so the repository runs end to end without any
@@ -39,10 +40,11 @@ export function createPlatform(): Platform {
     // in this browser.
     permissionAdmin: memoryPermissionAdmin({seed: [{tenantId: DEFAULT_TENANT, userId: LOCAL_USER, role: 'admin'}], storageKey: 'sprint-permissions'}),
     accessRequests: memoryAccessRequests(),
+    people: memoryPeople(),
     tickets: localTickets(),
     notifications: logNotifications(),
     sharedState: memorySharedState(),
-    standIns: ['storage', 'labeling models', 'agent model', 'identity', 'files', 'examples', 'media', 'feature descriptions', 'document links', 'telemetry', 'problem reports', 'notifications', 'shared state', 'configuration', 'permissions'],
+    standIns: ['storage', 'labeling models', 'agent model', 'identity', 'files', 'examples', 'media', 'feature descriptions', 'document links', 'telemetry', 'problem reports', 'notifications', 'shared state', 'configuration', 'permissions', 'people directory'],
   };
 }
 
