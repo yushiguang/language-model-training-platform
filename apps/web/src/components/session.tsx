@@ -34,10 +34,17 @@ function loadRuntime(): Promise<RuntimeInfo> {
   return pending!.info;
 }
 
-/** Forgets the runtime info, so the next page reads it again (a tenant was created or renamed). */
+/** Bumped by `forgetRuntime`: pages showing the old info read it again. */
+let version = 0;
+const forgot = new Set<() => void>();
+const onForget = (l: () => void) => (forgot.add(l), () => void forgot.delete(l));
+
+/** Forgets the runtime info, so it is read again (a tenant was created or renamed); open pages update. */
 export function forgetRuntime(): void {
   cached = null;
   pending = null;
+  version++;
+  for (const l of forgot) l();
 }
 
 /** Told after every move to another page (`NavWatcher`): the address may name another tenant. */
@@ -50,21 +57,25 @@ const onMove = (l: () => void) => (moved.add(l), () => void moved.delete(l));
 export function useRuntime(): {info: RuntimeInfo | null; error: string | null; retry: () => void} {
   // The page's tenant, read again after every move: another tenant's page reads the info again.
   const tenant = useSyncExternalStore(onMove, currentTenant, () => undefined);
-  const [got, setGot] = useState<{tenant: string | undefined; info: RuntimeInfo} | null>(cached);
-  const info = got && got.tenant === tenant ? got.info : fresh();
+  const seen = useSyncExternalStore(onForget, () => version, () => 0);
+  const [got, setGot] = useState<{tenant: string | undefined; info: RuntimeInfo; version: number} | null>(cached && {...cached, version});
+  // After `forgetRuntime` the old info stays on screen until the new one is read.
+  const mine = got && got.tenant === tenant ? got : null;
+  const current = mine?.version === seen ? mine.info : fresh();
+  const info = current ?? mine?.info ?? null;
   const [error, setError] = useState<string | null>(null);
   const [tries, setTries] = useState(0);
   useEffect(() => {
-    if (info) return;
+    if (current) return;
     let live = true;
     loadRuntime().then(
-      i => live && setGot({tenant, info: i}),
+      i => live && setGot({tenant, info: i, version: seen}),
       e => live && setError((e as Error)?.message || 'The sign-in service did not answer.'),
     );
     return () => {
       live = false;
     };
-  }, [info, tenant, tries]);
+  }, [current, tenant, tries, seen]);
   return {info, error, retry: () => (setError(null), setTries(n => n + 1))};
 }
 
