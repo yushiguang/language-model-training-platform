@@ -34,3 +34,4 @@
 .sp-pt-ring-n { font-size: 7px; font-weight: 600; fill: var(--color-text-primary); }
 .sp-pt-swatch { display: inline-block; width: 8px; height: 8px; border-radius: 2px; flex: none; }
 @media (prefers-reduced-motion: reduce) { .sp-pt-vhead > :first-child, .sp-pt-vnums { transition: none; } }
+.sp-pt-nowrap { white-space: nowrap; }

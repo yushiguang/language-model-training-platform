@@ -103,7 +103,9 @@ function Mistakes({title, tip, slices, colorOf}: {title: string; tip: string; sl
       <Ring slices={slices.map(s => ({n: s.n, color: colorOf(s.other)}))} size={88} label={title} />
       <VStack gap={1}>
         <HStack gap={1} vAlign="center">
-          <Text type="body">{title}</Text>
+          <span className="sp-pt-nowrap">
+            <Text type="body">{title}</Text>
+          </span>
           <InfoTip content={tip} label={t('About {name}', {name: title})} />
         </HStack>
         {slices.length ? (
