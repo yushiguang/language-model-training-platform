@@ -6,7 +6,7 @@ import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, CallerUse
 import {createCatalog} from '@yushiguang/sprint-catalog';
 import {createLabeling, memoryLocks} from '@yushiguang/sprint-labeling';
 import {createJobs} from '@yushiguang/sprint-jobs';
-import {localDocRuntime, loopback, memoryAccessRequests, memoryJobStore, memoryPermissionAdmin, memorySharedState} from '@yushiguang/sprint-platform';
+import {localDocRuntime, loopback, memoryAccessRequests, memoryJobStore, memoryPeople, memoryPermissionAdmin, memorySharedState} from '@yushiguang/sprint-platform';
 import {createWorkflow} from './workflow.ts';
 import type {WorkflowDeps} from './services/app.ts';
 
@@ -24,7 +24,7 @@ const ctxOf = (user: CallerUser): RequestContext => ({requestId: `rq_${++n}`, us
 const page = (agent: PageContext['agent'] = 'front_desk'): PageContext => ({label: 'Projects', agent, intent: 'answer', context: {}, where: {page: 'projects', params: {}}});
 
 /** A workflow over the real catalog and labeling, with a fake model and the given helpers. */
-function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) => AgentRuntimeContract, documents?: DocumentSource, access: Pick<WorkflowDeps, 'authorization' | 'permissionAdmin' | 'accessRequests'> = {}) {
+function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) => AgentRuntimeContract, documents?: DocumentSource, access: Pick<WorkflowDeps, 'authorization' | 'permissionAdmin' | 'accessRequests' | 'people'> = {}) {
   const db = localDocRuntime(prefix);
   const catalog = createCatalog(db);
   const forgotten: string[] = [];
@@ -562,6 +562,68 @@ test('tenant page (#103): the tenant and its counts; a new project takes the dia
   assert.deepEqual({...t, dataSources: undefined}, {id: 't1', name: 't1', role: 'member', projects: 3, dataSources: undefined, models: 1, members: 2});
   assert.equal(typeof t.dataSources, 'number');
   await assert.rejects(api.getTenant(inTenant(eve, 't1')), {code: 'forbidden'});
+});
+
+test('tenant settings (#111): admins rename the tenant, add people, change roles and remove members; the tenant always keeps an admin', async () => {
+  const perms = checking();
+  const {api, catalog} = world('wf-tenant-admin', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin, people: memoryPeople()});
+  const made = (await api.createTenant(ctxOf(alice), {name: 'Safety'})).tenant!;
+  await api.createTenant(ctxOf(bob), {name: 'Ads'});
+  const a = inTenant(alice, made.id);
+  assert.deepEqual(await api.renameTenant(a, {name: '  '}), {error: 'Enter a name. Spaces alone are not a name.'});
+  assert.deepEqual(await api.renameTenant(a, {name: 'ads'}), {error: 'A tenant with this name already exists. Pick another name.'});
+  assert.deepEqual(await api.renameTenant(a, {name: ' Content   Safety '}), {name: 'Content Safety'});
+  assert.deepEqual(await api.renameTenant(a, {name: 'content safety'}), {name: 'content safety'}, 'its own name, another case');
+  assert.equal((await catalog.get('tenants', made.id))?.name, 'content safety');
+  // A tenant without a record gets one under its id.
+  await perms.admin.addTenantMember(ctxOf(alice), 't-org', alice.id, 'admin');
+  assert.deepEqual(await api.renameTenant(inTenant(alice, 't-org'), {name: 'Org'}), {name: 'Org'});
+  assert.equal((await catalog.get('tenants', 't-org'))?.name, 'Org');
+
+  // People come from the directory; a blank query finds no one.
+  assert.deepEqual(await api.searchPeople(a, {query: ' '}), []);
+  assert.deepEqual((await api.searchPeople(a, {query: 'MEI'})).map(p => p.id), ['u-mei']);
+  assert.deepEqual(await api.addTenantMembers(a, {userIds: [], role: 'member'}), {error: 'Pick someone to add.'});
+  assert.deepEqual(await api.addTenantMembers(a, {userIds: [bob.id, 'u-mei', alice.id, bob.id], role: 'member'}), {});
+  assert.equal(perms.admin.roleOf(made.id, alice.id), 'admin', 'already in: keeps the role');
+  assert.equal(perms.admin.roleOf(made.id, bob.id), 'member');
+  // Members read; only admins change members.
+  const b = inTenant(bob, made.id);
+  await assert.rejects(api.addTenantMembers(b, {userIds: [eve.id], role: 'member'}), {code: 'forbidden'});
+  await assert.rejects(api.renameTenant(b, {name: 'Mine'}), {code: 'forbidden'});
+  await assert.rejects(api.searchPeople(b, {query: 'a'}), {code: 'forbidden'});
+
+  const last = "The last admin can't be changed. Make someone else an admin first.";
+  assert.deepEqual(await api.setTenantRole(a, {userId: alice.id, role: 'member'}), {error: last});
+  assert.deepEqual(await api.removeTenantMember(a, {userId: alice.id}), {error: last});
+  assert.deepEqual(await api.setTenantRole(a, {userId: bob.id, role: 'admin'}), {});
+  assert.deepEqual(await api.setTenantRole(a, {userId: alice.id, role: 'member'}), {}, 'Bob is an admin now');
+  assert.deepEqual(await api.removeTenantMember(b, {userId: 'u-mei'}), {});
+  assert.deepEqual(await api.removeTenantMember(b, {userId: 'u-mei'}), {error: 'This person is not in the tenant.'});
+  assert.deepEqual((await perms.admin.listTenantMembers(made.id)).map(m => [m.userId, m.role]).sort(), [[alice.id, 'member'], [bob.id, 'admin']]);
+  assert.ok((await catalog.find('audit_log', {action: 'tenant.role'})).length === 2);
+});
+
+test('tenant settings (#111): deleting a tenant takes its projects, sources, models and members with it', async () => {
+  const perms = checking();
+  const {api, catalog, forgotten} = world('wf-tenant-delete', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
+  const made = (await api.createTenant(ctxOf(alice), {name: 'Doomed'})).tenant!;
+  const a = inTenant(alice, made.id);
+  await api.addTenantMembers(a, {userIds: [bob.id], role: 'member'});
+  const p = await api.createProject(a, 'One');
+  await api.addModel(a, {name: 'Team', endpoint: 'https://models.example/team', qpm: 60, tpm: 100_000});
+  await assert.rejects(api.deleteTenant(inTenant(bob, made.id), {name: 'Doomed'}), {code: 'forbidden'});
+  assert.deepEqual(await api.deleteTenant(a, {name: 'doomed'}), {error: 'Type the tenant name to confirm.'});
+  assert.deepEqual(await api.deleteTenant(a, {name: 'Doomed'}), {});
+  assert.ok(!(await catalog.get('tenants', made.id)), 'its record is gone');
+  assert.deepEqual(await catalog.find('tenant_models', {tenantId: made.id}), []);
+  assert.ok(forgotten.includes(made.id), 'the gateway reads the models again');
+  assert.equal((await catalog.get('projects', p.id))?.deleting, true, 'its project is on its way out');
+  assert.deepEqual(await perms.admin.listTenantMembers(made.id), []);
+  assert.deepEqual(await api.listTenants(ctxOf(alice)), [], 'gone from the home page');
+  // A tenant without a record (the organization's own) cannot be deleted here.
+  await perms.admin.addTenantMember(ctxOf(alice), 't-org', alice.id, 'admin');
+  assert.deepEqual(await api.deleteTenant(inTenant(alice, 't-org'), {name: 't-org'}), {error: "This tenant comes with your organization. It can't be deleted."});
 });
 
 test('page views carry the place of waiting work in its queue (#66)', async () => {

@@ -1,4 +1,4 @@
-import type {AccessRequest, AccessRequestPort, AuthorizationPort, PermissionAdminPort, TenantMember, TenantRole, UserTenant} from '@yushiguang/sprint-contracts';
+import type {AccessRequest, AccessRequestPort, AuthorizationPort, PermissionAdminPort, Person, TenantMember, TenantRole, UserTenant} from '@yushiguang/sprint-contracts';
 
 /**
  * Single-tenant stand-in for the permission port: every action allowed. (The job store's
@@ -31,6 +31,8 @@ export interface MemoryPermissionOptions {
   seed?: (TenantMember & {tenantId: string})[];
   /** A local-storage key: what is written is kept there, so a reload keeps new tenants and members. */
   storageKey?: string;
+  /** Names and emails of people who may be added later (the stand-in directory, #111). */
+  people?: Person[];
 }
 
 /**
@@ -46,7 +48,8 @@ export function memoryPermissionAdmin(opts: MemoryPermissionOptions = {}): Permi
   const members = new Map<string, Map<string, TenantRole>>();
   const writers = new Map<string, Set<string>>();
   const tenant = (id: string) => members.get(id) ?? members.set(id, new Map()).get(id)!;
-  const profiles = new Map((opts.seed ?? []).filter(m => m.name || m.email).map(m => [m.userId, {...(m.name ? {name: m.name} : {}), ...(m.email ? {email: m.email} : {})}]));
+  const known = [...(opts.people ?? []).map(p => ({userId: p.id, name: p.name, email: p.email})), ...(opts.seed ?? [])];
+  const profiles = new Map(known.filter(m => m.name || m.email).map(m => [m.userId, {...(m.name ? {name: m.name} : {}), ...(m.email ? {email: m.email} : {})}]));
   const project = (tenantId: string, projectId: string) => {
     const k = `${tenantId}/${projectId}`;
     return writers.get(k) ?? writers.set(k, new Set()).get(k)!;

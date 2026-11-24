@@ -35,6 +35,13 @@ export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: Acti
   // The tenant page (#103): any member reads the rows and counts, and creates projects.
   listProjectRows: read(),
   getTenant: read(),
+  // Tenant settings (#111).
+  renameTenant: admin,
+  deleteTenant: admin,
+  addTenantMembers: admin,
+  setTenantRole: admin,
+  removeTenantMember: admin,
+  searchPeople: admin,
   projectDefaults: read(),
   newProject: read(),
   getProject: read('arg'),

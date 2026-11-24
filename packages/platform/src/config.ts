@@ -11,14 +11,10 @@ import {browserFiles, LOCAL_USER, localIdentity, localTelemetrySink} from './sta
 import {localTickets} from './standins/tickets.ts';
 import {logNotifications} from './standins/notifications.ts';
 import {memorySharedState} from './standins/shared-state.ts';
+import {memoryPeople, SAMPLE_PEOPLE} from './standins/people.ts';
 
 /** Stand-in colleagues in the default tenant (#107), so label sets have someone to assign. */
-const COLLEAGUES = [
-  {userId: 'u-mei', name: 'Mei Wang', email: 'mei.wang@example.com'},
-  {userId: 'u-ravi', name: 'Ravi Kumar', email: 'ravi.kumar@example.com'},
-  {userId: 'u-ana', name: 'Ana Souza', email: 'ana.souza@example.com'},
-  {userId: 'u-tom', name: 'Tom Li', email: 'tom.li@example.com'},
-];
+const COLLEAGUES = SAMPLE_PEOPLE.slice(0, 4).map(p => ({userId: p.id, name: p.name, ...(p.email ? {email: p.email} : {})}));
 
 /**
  * The default platform: browser/local stand-ins, so the repository runs end to end without any
@@ -45,12 +41,13 @@ export function createPlatform(): Platform {
     authorization: standInAuthorization(),
     // The local user is an admin of the tenant the sample data lives in, with a few made-up
     // colleagues to pick as labelers; tenants made here are kept in this browser.
-    permissionAdmin: memoryPermissionAdmin({seed: [{tenantId: DEFAULT_TENANT, userId: LOCAL_USER, role: 'admin'}, ...COLLEAGUES.map(c => ({tenantId: DEFAULT_TENANT, ...c, role: 'member' as const}))], storageKey: 'sprint-permissions'}),
+    permissionAdmin: memoryPermissionAdmin({seed: [{tenantId: DEFAULT_TENANT, userId: LOCAL_USER, role: 'admin'}, ...COLLEAGUES.map(c => ({tenantId: DEFAULT_TENANT, ...c, role: 'member' as const}))], storageKey: 'sprint-permissions', people: SAMPLE_PEOPLE}),
     accessRequests: memoryAccessRequests(),
+    people: memoryPeople(),
     tickets: localTickets(),
     notifications: logNotifications(),
     sharedState: memorySharedState(),
-    standIns: ['storage', 'labeling models', 'agent model', 'identity', 'files', 'examples', 'media', 'feature descriptions', 'document links', 'telemetry', 'problem reports', 'notifications', 'shared state', 'configuration', 'permissions'],
+    standIns: ['storage', 'labeling models', 'agent model', 'identity', 'files', 'examples', 'media', 'feature descriptions', 'document links', 'telemetry', 'problem reports', 'notifications', 'shared state', 'configuration', 'permissions', 'people directory'],
   };
 }
 

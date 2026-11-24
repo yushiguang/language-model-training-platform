@@ -1,4 +1,4 @@
-import {NO_TELEMETRY, type AccessRequestPort, type AuthorizationPort, type PermissionAdminPort, type ConfigReader, type TicketPort, type NotificationPort, type AgentRuntimeContract, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FeatureStorePort, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@yushiguang/sprint-contracts';
+import {NO_TELEMETRY, type AccessRequestPort, type PeopleDirectory, type AuthorizationPort, type PermissionAdminPort, type ConfigReader, type TicketPort, type NotificationPort, type AgentRuntimeContract, type CallerUser, type CatalogContract, type ExampleSource, type DocumentSource, type FeatureInfoSource, type FeatureStorePort, type FileStore, type JobsContract, type MediaSource, type LabelingContract, type LlmGatewayContract, type LockPort, type OptimiserContract, type Prediction, type RequestContext, type SharedStatePort, type TelemetryPort} from '@yushiguang/sprint-contracts';
 import {newId, processConfigReader} from '@yushiguang/sprint-domain';
 
 /**
@@ -79,6 +79,8 @@ export interface WorkflowDeps {
   permissionAdmin?: PermissionAdminPort;
   /** Sends access requests to the permission platform. Without it Request access is refused. */
   accessRequests?: AccessRequestPort;
+  /** The company directory: admins find people to add (#111). Without it, by user id only. */
+  people?: PeopleDirectory;
   /** The first wait before a failed grant is tried again (default 200 ms, doubling; tests pass 0). */
   grantRetryMs?: number;
 }
