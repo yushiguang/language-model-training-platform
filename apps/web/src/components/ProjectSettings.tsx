@@ -115,7 +115,9 @@ function SettingsDialog({state, first, onDone}: {state: ProjectState; first: boo
   }, [editors, adding, removing]);
   const sameThresholds = JSON.stringify(thresholds) === JSON.stringify(startThresholds);
   const renamed = name.trim().replace(/\s+/g, ' ') !== p.name;
-  const settingsChanged = renamed || endpoint !== (model?.endpoint ?? '') || !sameThresholds;
+  // A rename alone saves no settings, so the Overview's activity shows only the rename.
+  const ruleChanged = endpoint !== (model?.endpoint ?? '') || !sameThresholds;
+  const settingsChanged = renamed || ruleChanged;
   const dirty = first || settingsChanged || adding.length > 0 || removing.length > 0;
   const info2 = state.endpoints.find(e => e.id === endpoint);
 
@@ -133,7 +135,7 @@ function SettingsDialog({state, first, onDone}: {state: ProjectState; first: boo
     setError(null);
     try {
       if (renamed) await renameProject({projectId: p.id, name});
-      if (first || settingsChanged)
+      if (first || ruleChanged)
         await saveSettings({
           projectId: p.id,
           thresholds: savedThresholds(thresholds, s?.thresholds),
