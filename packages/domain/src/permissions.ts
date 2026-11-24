@@ -30,6 +30,11 @@ export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: Acti
   listProjects: read(),
   // Any member of the tenant creates projects, and becomes the project's first writer.
   createProject: read(),
+  // The tenant page (#103): any member reads the rows and counts, and creates projects.
+  listProjectRows: read(),
+  getTenant: read(),
+  projectDefaults: read(),
+  newProject: read(),
   getProject: read('arg'),
   loadProjectState: read('arg'),
   projectStatus: read('arg'),

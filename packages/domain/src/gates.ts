@@ -1,4 +1,4 @@
-import type {Msg, NodeId, WorkflowFacts} from '@yushiguang/sprint-contracts';
+import type {Msg, NodeId, ProjectState, WorkflowFacts} from '@yushiguang/sprint-contracts';
 import {systemConfig} from './config.ts';
 import {msg, msgText} from './i18n.ts';
 
@@ -49,4 +49,28 @@ export function gate(node: NodeId, f: WorkflowFacts): Gate {
       if (!f.passing.length) return blocked(msg('No version passes the threshold yet.'));
       return READY;
   }
+}
+
+export type StepState = 'todo' | 'running' | 'done' | 'attention';
+
+/**
+ * The step bar (design: "Workflow steps"): Finished, In progress while a task runs in the step,
+ * otherwise Not started. Finished steps stay usable.
+ */
+export function stepStates(s: Pick<ProjectState, 'facts' | 'runs' | 'optimisation' | 'versions' | 'samplingTask' | 'snapshot'>): Record<NodeId, StepState> {
+  const ok = (n: NodeId) => s.facts.approved.includes(n);
+  const promptRunning = s.runs.some(r => r.state === 'running') || s.optimisation.some(o => o.state === 'running');
+  const total = s.facts.examples;
+  return {
+    prompt_design: s.versions.length ? 'done' : 'todo',
+    dataset: s.samplingTask?.state === 'running' ? 'running' : s.snapshot || ok('dataset') ? 'done' : 'todo',
+    gold: total > 0 && s.facts.goldEvalDone >= total ? 'done' : s.facts.goldEvalDone > 0 ? (canScore(s.facts) && ok('gold') ? 'done' : 'running') : 'todo',
+    prompt: promptRunning ? 'running' : ok('prompt') ? 'done' : 'todo',
+  };
+}
+
+/** The step a project is at (the Overview's Next, the projects list): the first not finished; the last once all are. */
+export function currentStep(s: Parameters<typeof stepStates>[0]): NodeId {
+  const st = stepStates(s);
+  return NODES.find(n => st[n.id] !== 'done')?.id ?? NODES[NODES.length - 1].id;
 }
