@@ -88,6 +88,33 @@ body { background: var(--color-background-surface, #fff); }
 /* The tenant page (#103): an Admin card's mark for what a project needs first; the thresholds' rows. */
 .sp-needed { display: inline-flex; color: var(--color-text-warning, #b54708); }
 .sp-threshold { padding: 12px 16px; }
+
+/* A word whose meaning shows on hover (dashed underline). */
+.sp-hint { cursor: help; text-decoration: underline dashed; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+
+/* One label set (#115): sample numbers, the example, and the answers side by side. */
+.sp-tabs-row { border-bottom: 1px solid var(--color-border, #e3e4e8); }
+.sp-tabs-inset { margin-inline-start: -12px; }
+.sp-labeling { display: grid; grid-template-columns: 148px minmax(0, 5fr) minmax(0, 4fr); gap: 24px; align-items: start; }
+.sp-numbers { display: flex; flex-direction: column; margin-inline-start: -12px; max-height: calc(100vh - 240px); overflow-y: auto; position: sticky; top: 16px; }
+.sp-number { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 12px; border: 0; border-radius: 6px; background: none; cursor: pointer; font: inherit; color: inherit; text-align: start; }
+.sp-number:hover { background: var(--color-background-muted, #f5f5f5); }
+.sp-number[aria-current='true'] { background: var(--color-background-muted, #f2f2f2); }
+.sp-media { height: min(56vh, 520px); }
+.sp-still { width: 44px; height: 44px; padding: 0; border: 0; border-radius: 6px; overflow: hidden; background: #1d1d1d; color: #fff; cursor: pointer; display: grid; place-items: center; outline-offset: 2px; }
+.sp-still img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sp-still.is-on { outline: 2px solid var(--color-border-strong, #8a8a8a); }
+.sp-values { display: flex; flex-wrap: wrap; gap: 8px; }
+.sp-cmts { margin-inline: -8px; }
+.sp-cmt { padding: 6px 8px; border-radius: 6px; }
+.sp-cmt:hover, .sp-cmt:focus-within { background: var(--color-background-muted, #f5f5f5); }
+.sp-cmt.is-editing { background: none; }
+.sp-cmt .sp-cmt-act { opacity: 0; transition: opacity 120ms; }
+.sp-cmt:hover .sp-cmt-act, .sp-cmt .sp-cmt-act:focus-within { opacity: 1; }
+@media (hover: none) { .sp-cmt .sp-cmt-act { opacity: 1; } }
+.sp-cmt-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.sp-open-item { display: inline-flex; align-items: center; gap: 4px; color: var(--color-text-secondary, #5c5c5c); text-decoration: none; }
+.sp-open-item:hover { color: var(--color-text-primary, #111); text-decoration: underline; }
 /* Tenant settings (#111): a row's own buttons (remove, edit) show on hover, as in tables. */
 .sp-hover-acts { display: inline-flex; opacity: 0; }
 .sp-settings-row:hover .sp-hover-acts, .sp-hover-acts:focus-within { opacity: 1; }

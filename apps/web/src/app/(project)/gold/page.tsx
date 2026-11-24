@@ -1,18 +1,23 @@
 'use client';
 
 import {useState} from 'react';
+import type {GoldUploadResult} from '@yushiguang/sprint-contracts';
+import {gate} from '@yushiguang/sprint-domain';
 import {PlusIcon, RectangleStackIcon} from '@heroicons/react/24/outline';
 import type {PageContext} from '@yushiguang/sprint-contracts';
 import {Frame, ProjectPage} from '@/components/Shell';
 import {useProject} from '@/components/ProjectContext';
+import {useSettings} from '@/components/ProjectSettings';
+import {useGo} from '@/components/nav';
+import {UploadLabels, UploadResult} from '@/components/gold/upload';
 import {useRuntime} from '@/components/session';
 import {CreateSetsDialog, SetSettingsDialog} from '@/components/gold/dialogs';
 import {LabelSets, useLabelSets, useMembers} from '@/components/gold/sets';
-import type {LabelSetView, ProjectState} from '@/backend-api';
+import {approveNode, type LabelSetView, type ProjectState} from '@/backend-api';
 import {Button, Card, EmptyState, Grid, Heading, HStack, Icon, ProgressBar, Spinner, Text, VStack} from '@/ui/astryx';
 import {PageTitle} from '@/ui';
 import {ErrorLine} from '@/components/sources/dialogs';
-import {t} from '@/i18n';
+import {t, tm} from '@/i18n';
 
 /**
  * Gold Labels (wireframes v346: W-Labeling, -Create, -Batch, -Settings): the dataset's label sets.
@@ -42,10 +47,39 @@ function GoldLabels({state}: {state: ProjectState}) {
   const create = () => setOpen({kind: 'create'});
   const createButton = <Button label={t('Create label sets')} variant="primary" icon={<Icon icon={PlusIcon} size="sm" />} onClick={create} isDisabled={!list?.unassigned} tooltip={list && !list.unassigned && list.sets.length ? t('Every example is already in a label set. Append examples on Dataset to make more.') : undefined} />;
   const setHref = (s: LabelSetView) => href('/gold/set', {set: s.id});
+  // Project-wide, so here rather than in a set (#115): Upload labels and the step's Next.
+  const [uploaded, setUploaded] = useState<GoldUploadResult | null>(null);
+  const go = useGo();
+  const settings = useSettings();
+  const next_ = gate('gold', state.facts);
+  const hasSamples = !!list && (list.sets.length > 0 || list.unassigned > 0);
+  const actions = hasSamples ? (
+    <>
+      <UploadLabels projectId={state.project.id} onResult={setUploaded} />
+      {createButton}
+      <Button
+        label={t('Next: Prompt Tuning')}
+        variant="secondary"
+        isDisabled={!next_.ready}
+        tooltip={next_.msg ? tm(next_.msg) : undefined}
+        onClick={async () => {
+          // The first paid run is about to start: the user confirms Project Settings once.
+          if (!(await settings.confirmed())) return;
+          await approveNode(state.project.id, 'gold');
+          await go(href('/prompt'));
+        }}
+      />
+    </>
+  ) : undefined;
   const next = (list?.sets.reduce((n, s) => Math.max(n, s.number), 0) ?? 0) + 1;
 
   return (
-    <Frame head={<PageTitle title={t('Gold Labels')} actions={list && (list.sets.length > 0 || list.unassigned > 0) ? createButton : undefined} />}>
+    <Frame head={<PageTitle title={t('Gold Labels')} actions={actions} />}>
+      {uploaded && (
+        <div style={{marginBottom: 24}}>
+          <UploadResult result={uploaded} onDismiss={() => setUploaded(null)} />
+        </div>
+      )}
       {failed ? (
         <Card padding={6}>
           <VStack gap={3}>
