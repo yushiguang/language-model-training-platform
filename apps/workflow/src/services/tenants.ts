@@ -71,6 +71,8 @@ export async function inTenant(w: Scope): Promise<boolean> {
   return (await w.permissionAdmin.listUserTenants(u.id)).some(t => t.tenantId === tenantOf(w));
 }
 
+const UNKNOWN_ADMIN = 'Someone you picked as an admin is not in the company directory. Remove them and pick again.';
+
 const minTenantAdmins = (): number => Math.min(50, Math.max(1, Math.floor(systemConfig().tenant.minAdmins)));
 
 /**
@@ -88,6 +90,13 @@ export async function createTenant(w: Scope, req: CreateTenantRequest): Promise<
   const adminIds = [...new Set([u.id, ...extra])].slice(0, 50);
   const min = minTenantAdmins();
   if (adminIds.length < min) return {error: min === 2 ? 'Pick at least one other admin.' : `Pick at least ${min - 1} other admins.`};
+  // Co-admins must be real people (#120): with a directory that looks people up by id, an id it
+  // does not know is refused, so a made-up id can't make up the number of admins.
+  const others = adminIds.filter(id => id !== u.id);
+  if (others.length && w.people?.get) {
+    const known = new Set((await w.people.get(others)).map(p => p.id));
+    if (others.some(id => !known.has(id))) return {error: UNKNOWN_ADMIN};
+  }
   const tenant = await withLock(
     w,
     'tenants:names',

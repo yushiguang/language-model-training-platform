@@ -1,15 +1,16 @@
 'use client';
 
-import {useEffect, useState} from 'react';
-import {Badge, Button, Card, ClickableCard, Grid, Heading, HStack, Icon, Text, TextInput, VStack} from '@/ui/astryx';
+import {useEffect, useMemo, useState} from 'react';
+import {Badge, Button, Card, ClickableCard, Grid, Heading, HStack, Icon, Text, TextInput, Token, Tokenizer, VStack, type SearchableItem, type SearchSource} from '@/ui/astryx';
 import {ArrowRightIcon} from '@heroicons/react/20/solid';
+import type {Person} from '@yushiguang/sprint-contracts';
 import {NODES} from '@yushiguang/sprint-domain';
-import {createTenant, listTenants, rememberTenant, type TenantSummary} from '@/backend-api';
+import {createTenant, listTenants, rememberTenant, searchPeople, type TenantSummary} from '@/backend-api';
 import {HomeFrame} from '@/components/Shell';
 import {FormDialog} from '@/components/shell/dialogs';
 import {tenantHref} from '@/components/ProjectContext';
 import {useGo} from '@/components/nav';
-import {forgetRuntime} from '@/components/session';
+import {forgetRuntime, useRuntime} from '@/components/session';
 import {t} from '@/i18n';
 
 /**
@@ -126,18 +127,48 @@ function Tenants() {
   );
 }
 
-/** Create a tenant (W-Home-Create): the name only; the new tenant opens on its tenant page. */
+type PersonItem = SearchableItem<Person>;
+
+/**
+ * Create a tenant (W-Home-Create): the name; the new tenant opens on its tenant page. When the
+ * deployment needs more than one admin per tenant (#120, W-Home-Create-Admins), an Admins field
+ * holds the creator as a fixed token and the co-admins picked from the company directory.
+ */
 function CreateTenant({onClose}: {onClose: () => void}) {
   const go = useGo();
+  const {info} = useRuntime();
+  const minAdmins = Math.min(50, Math.max(1, Math.floor(info?.minTenantAdmins ?? 1)));
+  const me = info?.user;
   const [name, setName] = useState('');
+  const [coAdmins, setCoAdmins] = useState<Person[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [adminError, setAdminError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const meItem = useMemo<PersonItem | null>(() => (me ? {id: me.id, label: t('{name} (you)', {name: me.name}), auxiliaryData: {id: me.id, name: me.name}} : null), [me]);
+  const admins = useMemo<PersonItem[]>(() => [...(meItem ? [meItem] : []), ...coAdmins.map(p => ({id: p.id, label: p.name, auxiliaryData: p}))], [meItem, coAdmins]);
+  const source = useMemo<SearchSource<PersonItem>>(
+    () => ({
+      search: async q => {
+        const taken = new Set(admins.map(a => a.id));
+        return (await searchPeople({query: q})).filter(p => !taken.has(p.id)).map(p => ({id: p.id, label: p.name, auxiliaryData: p}));
+      },
+      bootstrap: () => [],
+    }),
+    [admins],
+  );
   const create = async () => {
     if (!name.trim()) return setError('Enter a name. Spaces alone are not a name.');
+    if (minAdmins > 1 && coAdmins.length < minAdmins - 1) return setAdminError(t('A tenant needs at least {n} admins, you included.', {n: minAdmins}));
     setBusy(true);
     try {
-      const r = await createTenant({name});
-      if (!r.tenant) return setError(r.error ?? 'The tenant could not be created. Try again.');
+      const r = await createTenant({name, ...(coAdmins.length ? {adminIds: coAdmins.map(p => p.id)} : {})});
+      // With an Admins field, a refusal may be about the name or the admins, so it shows under the
+      // last field; the name-only dialog keeps it on the name field (W-Home-Create-Taken).
+      if (!r.tenant) {
+        const why = r.error ?? 'The tenant could not be created. Try again.';
+        return minAdmins > 1 ? setAdminError(t(why)) : setError(why);
+      }
       rememberTenant(r.tenant.id);
       forgetRuntime();
       await go(tenantHref('/tenant/', r.tenant.id));
@@ -165,14 +196,29 @@ function CreateTenant({onClose}: {onClose: () => void}) {
           if (!error && !busy) void create();
         }}
       >
-        <TextInput
-          label={t('Tenant name')}
-          placeholder={t('For example: Content Safety')}
-          value={name}
-          onChange={v => (setName(v), setError(null))}
-          hasAutoFocus
-          status={error ? {type: 'error', message: t(error)} : undefined}
-        />
+        <VStack gap={4}>
+          <TextInput
+            label={t('Tenant name')}
+            placeholder={t('For example: Content Safety')}
+            value={name}
+            onChange={v => (setName(v), setError(null))}
+            hasAutoFocus
+            status={error ? {type: 'error', message: t(error)} : undefined}
+          />
+          {minAdmins > 1 && (
+            <Tokenizer<PersonItem>
+              label={t('Admins')}
+              description={t('A tenant needs at least {n} admins, you included.', {n: minAdmins})}
+              placeholder={t('Search by name or email')}
+              searchSource={source}
+              value={admins}
+              onChange={items => (setCoAdmins(items.filter(i => i.id !== me?.id).map(i => i.auxiliaryData ?? {id: i.id, name: i.label})), setAdminError(null))}
+              renderToken={(item, onRemove) => (item.id === me?.id ? <Token key={item.id} label={item.label} /> : <Token key={item.id} label={item.label} onRemove={onRemove} />)}
+              emptySearchText={t('Nobody found.')}
+              status={adminError ? {type: 'error', message: adminError} : undefined}
+            />
+          )}
+        </VStack>
       </form>
     </FormDialog>
   );

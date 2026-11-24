@@ -26,5 +26,9 @@ export function memoryPeople(people: Person[] = SAMPLE_PEOPLE): PeopleDirectory 
       const starts = (p: Person) => Number(!p.name.toLowerCase().startsWith(q));
       return hits.sort((a, b) => starts(a) - starts(b) || a.name.localeCompare(b.name)).slice(0, Math.max(0, limit));
     },
+    async get(userIds) {
+      const want = new Set(userIds);
+      return people.filter(p => want.has(p.id));
+    },
   };
 }

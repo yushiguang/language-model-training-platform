@@ -49,6 +49,7 @@ export {Heading, Text} from '@astryxdesign/core/Text';
 export {TextArea} from '@astryxdesign/core/TextArea';
 export {TextInput} from '@astryxdesign/core/TextInput';
 export {Token, type TokenColor} from '@astryxdesign/core/Token';
+export {Tokenizer} from '@astryxdesign/core/Tokenizer';
 export {TabList, Tab} from '@astryxdesign/core/TabList';
 export {Toolbar} from '@astryxdesign/core/Toolbar';
 export {Tooltip} from '@astryxdesign/core/Tooltip';

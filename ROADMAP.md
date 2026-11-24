@@ -6,9 +6,6 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Now
 
-- **Permission platform hooks** (#120). Redirect access requests to an external approval form,
-  optional tenant and project lifecycle hooks on `PermissionAdminPort`, and a configurable
-  minimum number of tenant admins. PR 1 (contract) then PR 2 (web).
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
   tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are merged (see Done);
   step 3, action tools, is next, with their cards drawn on the UI design first.
@@ -27,6 +24,10 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Done
 
+- 2026-11-24: permission platform hooks (#120): optional tenant and project lifecycle hooks on
+  `PermissionAdminPort`, a configurable minimum of tenant admins (co-admins picked when the
+  tenant is created, checked against the company directory, kept on role changes), and access
+  requests that open the permission platform's own form (#121, #132).
 - 2026-11-24: the frontend on Astryx (#90) is fully delivered: the app shell (#91) and three
   lanes, tenant and project pages (#94, #103, #111, #118, #123), data pages (#95, #100, #107,
   #115) and prompt pages (#96, #105, #127, #129), each listed below.

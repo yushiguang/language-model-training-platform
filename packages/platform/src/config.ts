@@ -17,6 +17,20 @@ import {memoryPeople, SAMPLE_PEOPLE} from './standins/people.ts';
 const COLLEAGUES = SAMPLE_PEOPLE.slice(0, 4).map(p => ({userId: p.id, name: p.name, ...(p.email ? {email: p.email} : {})}));
 
 /**
+ * A stand-in switch this browser holds in its local storage, so a deployment's optional modes
+ * can be tried without its platform (#120): `sprint-standin-min-admins` = a number of admins every
+ * tenant needs, `sprint-standin-access-requests` = `redirect` for requests made on the permission
+ * platform's own form.
+ */
+function standInSwitch(key: string): string | null {
+  try {
+    return globalThis.localStorage?.getItem(key) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * The default platform: browser/local stand-ins, so the repository runs end to end without any
  * credentials.
  *
@@ -25,7 +39,10 @@ const COLLEAGUES = SAMPLE_PEOPLE.slice(0, 4).map(p => ({userId: p.id, name: p.na
  * docs/integration.md).
  */
 export function createPlatform(): Platform {
+  const minAdmins = Number(standInSwitch('sprint-standin-min-admins'));
+  const redirect = standInSwitch('sprint-standin-access-requests') === 'redirect';
   return {
+    ...(Number.isInteger(minAdmins) && minAdmins > 1 ? {config: {tenant: {minAdmins}}} : {}),
     // Single-label projects (2026-11-16): projects saved before are test data and start fresh.
     db: localDocRuntime('sprint-doc', ['tsp-doc', 'tsp-doc-v2']),
     models: simulatedModels(),
@@ -42,7 +59,9 @@ export function createPlatform(): Platform {
     // The local user is an admin of the tenant the sample data lives in, with a few made-up
     // colleagues to pick as labelers; tenants made here are kept in this browser.
     permissionAdmin: memoryPermissionAdmin({seed: [{tenantId: DEFAULT_TENANT, userId: LOCAL_USER, role: 'admin'}, ...COLLEAGUES.map(c => ({tenantId: DEFAULT_TENANT, ...c, role: 'member' as const}))], storageKey: 'sprint-permissions', people: SAMPLE_PEOPLE}),
-    accessRequests: memoryAccessRequests(),
+    accessRequests: redirect
+      ? memoryAccessRequests({mode: 'redirect', applyUrl: r => `https://permissions.example.com/apply?tenant=${encodeURIComponent(r.tenantId)}&permission=${r.permission}${r.projectId ? `&project=${encodeURIComponent(r.projectId)}` : ''}`})
+      : memoryAccessRequests(),
     people: memoryPeople(),
     tickets: localTickets(),
     notifications: logNotifications(),
