@@ -111,6 +111,10 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
 
     listProjects: ctx => projects.listProjects(at(ctx)),
     createProject: (ctx, name) => projects.createProject(at(ctx), name),
+    listProjectRows: (ctx, r) => projects.listProjectRows(at(ctx), r),
+    getTenant: ctx => tenants.getTenant(at(ctx)),
+    projectDefaults: ctx => projects.projectDefaults(at(ctx)),
+    newProject: (ctx, r) => projects.newProject(at(ctx), r),
     getProject: (ctx, id) => projects.getProject(at(ctx), id),
     // Pages see where waiting work stands in its queue (docs/design/server.md, 5.2).
     async loadProjectState(ctx, projectId) {

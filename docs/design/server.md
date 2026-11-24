@@ -401,6 +401,12 @@ export interface ConfigReader {
 - **每次调用的租户**：由渠道给出（`createBffApi({tenant})`：浏览器是页面所在的租户，HTTP 部署读请求头），没给时照旧用身份的 organization，否则 `default`。各接口照常按 `ctx.tenantId` 校验权限，所以选了自己不在的租户会被拒绝；`runtimeInfo` 在调用方不在这个租户时不给 `tenant`，页面回到首页。
 - **旧租户**：没有记录的租户（`default`、organization）照常可用，名称照旧（身份自己的租户用 `organizationName`，其他用 id）。浏览器替身里本地用户是 `default` 的管理员，权限替身存进 localStorage，刷新后新建的租户还在。
 
+### 9.3 租户页（#103）
+
+- **项目行**：`listProjectRows({mine?, offset?, limit?})` 返回 `{rows, total}`，按创建时间从新到旧，每页默认 10 条、最多 50 条；`mine` 只要调用方创建的。每行读一次完整的项目状态，所以当前步骤（第一个没完成的步骤，和步骤条同一个规则）、最好分数（`bestReport`，带 Passed / Below 和“粗略”）和项目页一致；运行中任务数 = 运行中的标注任务 + Optimiser + 取样；更新时间是项目最近一条操作记录的时间。
+- **Admin 卡片**：`getTenant()` 给当前租户的名称、角色、项目数，以及数据源数（和数据源页同一个列表）、租户自己的模型数、成员数（没接权限平台时为 null）。
+- **新建项目**：`projectDefaults()` 给可选模型（和项目设置同一个列表：租户的模型，然后平台默认）、默认模型、默认阈值（Macro-F1 取配置的默认值，Precision / Recall 关）。`newProject({name, model?, thresholds?})` 先检查（名称不能为空、模型要在列表里、阈值在 0 到 1 之间），错误由返回值给出；然后建项目、存项目设置，并算作已确认。两个都没给时和 `createProject` 一样，用默认值，之后再确认。
+
 ## 10. Contract 改动
 
 按 CONTRIBUTING，每个 contract 改动单独一个 PR，标明是新增还是破坏性：
@@ -421,6 +427,7 @@ export interface ConfigReader {
 | `Example.number`（样本序号，可选，旧样本第一次读时补上）、`DatasetSnapshot.numbered`、`LabelSet` 和 catalog 的 `label_sets` 集合、`CatalogContract.page`（分页读取） | 新增：catalog 在本仓库实现，部署方的文档库适配器不用改（第 8 步，#82 已完成） |
 | `Tenant` 和 catalog 的 `tenants` 集合、`listTenants` / `createTenant`、`RuntimeInfo.tenant` 在调用方不在租户时省略、`BffDeps.tenant` | 新增（#94） |
 | `PermissionAdminPort.listUserTenants` | 破坏性：部署方的权限平台适配器要实现（#94） |
+| 租户页：`listProjectRows`（每行当前步骤、最好分数、运行中任务数、最近改动时间，分页，`mine`）、`getTenant`（Admin 卡片的计数）、`projectDefaults`、`newProject`（名称、模型、阈值，存为已确认的项目设置）；步骤规则 `stepStates` / `currentStep` 移到 domain | 新增（#103）。`createProject(name)` 保留给脚本和测试 |
 | `ScoreBasis`、`EvalReport.basis`（可选，旧报告没有）、`ScoringState`、任务类型 `report.rescore`、`ProjectState.scoring`、`WorkflowFacts.scoringReady`、`rescore` 接口 | 新增：只有工作流产出和读取，部署方的适配器不用改（第 9 步，#86 已完成） |
 
 ## 11. 交付计划
