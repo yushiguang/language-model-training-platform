@@ -1,4 +1,4 @@
-import type {CreateTenantRequest, CreateTenantResult, Tenant, TenantDetail, TenantRole, TenantSummary} from '@yushiguang/sprint-contracts';
+import type {CreateTenantRequest, CreateTenantResult, Tenant, TenantDetail, TenantMemberView, TenantRole, TenantSummary} from '@yushiguang/sprint-contracts';
 import {newId, systemConfig} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {tenantRole, withRetries} from './access.ts';
@@ -41,6 +41,22 @@ export async function listTenants(w: Scope): Promise<TenantSummary[]> {
   return ids
     .map(id => ({id, name: names.get(id) ?? id, role: mine.find(m => m.tenantId === id)!.role, projects: counts.get(id) ?? 0}))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * The members of the caller's current tenant, by name (#107): from the permission platform when it
+ * is wired, else the caller alone, as an admin. A member the platform gives no name is named by
+ * the identity when it is the caller, else by their user id.
+ */
+export async function listTenantMembers(w: Scope): Promise<TenantMemberView[]> {
+  const u = await w.user();
+  const list = w.permissionAdmin ? await w.permissionAdmin.listTenantMembers(tenantOf(w)) : [{userId: u.id, role: 'admin' as const}];
+  return list
+    .map((m): TenantMemberView => {
+      const email = m.email?.trim() || (m.userId === u.id ? u.email : undefined);
+      return {userId: m.userId, name: m.name?.trim() || (m.userId === u.id ? u.name : m.userId), ...(email ? {email} : {}), role: m.role};
+    })
+    .sort((a, b) => a.name.localeCompare(b.name) || a.userId.localeCompare(b.userId));
 }
 
 /** The name of the caller's current tenant, when it has a record. */

@@ -2957,7 +2957,7 @@ test('label set labelers: one per set, tenant members only, granted project writ
   assert.equal((await w.sets.listLabelSets(w.ws, w.projectId)).sets.length, 0, 'nothing saved');
   const a = await w.sets.createLabelSet(w.ws, {projectId: w.projectId, count: 2, labelerIds: ['u_2']});
   assert.ok(w.admin.canWrite('default', w.projectId, 'u_2'), 'the labeler can edit the project');
-  assert.deepEqual(w.sent.map(n => [n.kind, n.userIds, n.link]), [['label_set_created', ['u_2'], `/gold/?p=${w.projectId}&set=${a.id}`]]);
+  assert.deepEqual(w.sent.map(n => [n.kind, n.userIds, n.link]), [['label_set_created', ['u_2'], `/gold/set/?p=${w.projectId}&set=${a.id}`]]);
   assert.match(w.sent[0].text, /label set #1 \(samples 1 to 2\) in p/);
   // Changing the labeler tells the new one only; the creator setting themselves hears nothing.
   await w.sets.updateLabelSet(w.ws, {projectId: w.projectId, labelSetId: a.id, labelerIds: ['u_3']});
@@ -2971,6 +2971,48 @@ test('label set labelers: one per set, tenant members only, granted project writ
   await assert.rejects(w.sets.createLabelSet(w.ws, {projectId: w.projectId, count: 2, labelerIds: ['u_2']}), /Edit access/);
   assert.deepEqual((await w.catalog.get('label_sets', a.id))?.labelerIds, ['u_1']);
   assert.equal((await w.sets.listLabelSets(w.ws, w.projectId)).sets.length, 1);
+});
+
+test('label set previews (#107) give the ranges a create would cut, and refuse what it would refuse; several sets take a labeler each', async () => {
+  const w = await setsWorld('ls4');
+  const {removeExamples} = await import('./governance.ts');
+  const s0 = await w.state();
+  // Sample 2 is removed: ranges skip it.
+  await removeExamples(w.ws, w.projectId, [s0.examples.find(e => e.externalId === '1')!.id], 'broken');
+  assert.deepEqual(await w.sets.previewLabelSets(w.ws, {projectId: w.projectId, count: 3}), {sets: [{number: 1, first: 1, last: 4, samples: 3}], unassigned: 9});
+  assert.deepEqual((await w.sets.previewLabelSets(w.ws, {projectId: w.projectId, count: 10})).error, 'Only 9 samples are left without a label set.');
+  assert.match((await w.sets.previewLabelSets(w.ws, {projectId: w.projectId, count: 2, sets: 2})).error ?? '', /Give the number of samples/);
+  assert.match((await w.sets.previewLabelSets(w.ws, {projectId: w.projectId, sets: 0})).error ?? '', /at least 1 label set/);
+  const preview = await w.sets.previewLabelSets(w.ws, {projectId: w.projectId, sets: 2});
+  assert.deepEqual(preview.sets, [{number: 1, first: 1, last: 6, samples: 5}, {number: 2, first: 7, last: 10, samples: 4}]);
+  assert.equal((await w.sets.listLabelSets(w.ws, w.projectId)).sets.length, 0, 'a preview saves nothing');
+  // The create cuts what the preview showed, with each set's own labeler; every labeler is checked first.
+  await assert.rejects(w.sets.createLabelSets(w.ws, {projectId: w.projectId, sets: 2, labelers: ['u_2', 'stranger']}), /member of this tenant/);
+  assert.equal((await w.sets.listLabelSets(w.ws, w.projectId)).sets.length, 0, 'nothing saved');
+  const made = await w.sets.createLabelSets(w.ws, {projectId: w.projectId, sets: 2, labelers: ['u_2', null]});
+  assert.deepEqual(made.map(x => [x.number, x.first, x.last, x.labelerIds]), [[1, 1, 6, ['u_2']], [2, 7, 10, []]]);
+  assert.ok(w.admin.canWrite('default', w.projectId, 'u_2'));
+  assert.deepEqual(w.sent.map(n => [n.kind, n.userIds]), [['label_set_created', ['u_2']]]);
+  assert.deepEqual(await w.sets.previewLabelSets(w.ws, {projectId: w.projectId, perSet: 2}), {sets: [], unassigned: 0, error: 'Every sample is already in a label set.'});
+});
+
+test('label set lists count mismatches (#107) per set and for the whole dataset, by the Dataset page\'s rule', async () => {
+  const w = await world('ls5', {answer: ruled, macroF1: 0.99, gold: goldOf});
+  const {createLabelSet} = await import('./label-sets.ts');
+  const {listLabelSets} = await import('./label-sets.ts');
+  const {listSamples} = await import('./samples.ts');
+  await createLabelSet(w.ws, {projectId: w.projectId, count: 6});
+  let list = await listLabelSets(w.ws, w.projectId);
+  assert.deepEqual([list.sets[0].mismatch, list.labeled, list.mismatch], [0, 10, 0], 'no version has answers yet');
+  await w.newVersion('RULE 1');
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
+  list = await listLabelSets(w.ws, w.projectId);
+  const page = await listSamples(w.ws, {projectId: w.projectId});
+  assert.equal(list.mismatch, page.counts.mismatch, 'the same count as the Dataset tab');
+  const inSet = await listSamples(w.ws, {projectId: w.projectId, labelSetId: list.sets[0].id});
+  assert.deepEqual([list.sets[0].samples, list.sets[0].labeled, list.sets[0].mismatch], [6, 6, inSet.counts.mismatch]);
+  assert.ok(list.mismatch > 0);
 });
 
 test('a label change clears only the gold labels it makes wrong; the rest carry over, and the count is known before saving', async () => {

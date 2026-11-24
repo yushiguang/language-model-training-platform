@@ -12,6 +12,14 @@ import {localTickets} from './standins/tickets.ts';
 import {logNotifications} from './standins/notifications.ts';
 import {memorySharedState} from './standins/shared-state.ts';
 
+/** Stand-in colleagues in the default tenant (#107), so label sets have someone to assign. */
+const COLLEAGUES = [
+  {userId: 'u-mei', name: 'Mei Wang', email: 'mei.wang@example.com'},
+  {userId: 'u-ravi', name: 'Ravi Kumar', email: 'ravi.kumar@example.com'},
+  {userId: 'u-ana', name: 'Ana Souza', email: 'ana.souza@example.com'},
+  {userId: 'u-tom', name: 'Tom Li', email: 'tom.li@example.com'},
+];
+
 /**
  * The default platform: browser/local stand-ins, so the repository runs end to end without any
  * credentials.
@@ -35,9 +43,9 @@ export function createPlatform(): Platform {
     telemetry: localTelemetrySink(),
     configStore: memoryConfig(),
     authorization: standInAuthorization(),
-    // The local user is an admin of the tenant the sample data lives in; tenants made here are kept
-    // in this browser.
-    permissionAdmin: memoryPermissionAdmin({seed: [{tenantId: DEFAULT_TENANT, userId: LOCAL_USER, role: 'admin'}], storageKey: 'sprint-permissions'}),
+    // The local user is an admin of the tenant the sample data lives in, with a few made-up
+    // colleagues to pick as labelers; tenants made here are kept in this browser.
+    permissionAdmin: memoryPermissionAdmin({seed: [{tenantId: DEFAULT_TENANT, userId: LOCAL_USER, role: 'admin'}, ...COLLEAGUES.map(c => ({tenantId: DEFAULT_TENANT, ...c, role: 'member' as const}))], storageKey: 'sprint-permissions'}),
     accessRequests: memoryAccessRequests(),
     tickets: localTickets(),
     notifications: logNotifications(),

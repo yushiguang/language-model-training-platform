@@ -3,6 +3,13 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-23 (Label sets page, #107)
+
+- **One members read for every page**: `listTenantMembers()` gives the page's tenant's members with a name, an email where known, and a role. The label set labeler picker uses it now; the tenant settings Members tab builds add and remove on top of it. The platform's `TenantMember` carries an optional `name` and `email`.
+- **Create dialogs show the ranges before saving**: `previewLabelSets` cuts the same ranges as the create, skipping removed samples, so the dialog can show "#829–953" without guessing. Several sets can each get their own labeler in one create.
+- **The label set list counts mismatches** per set and for the dataset, by the Dataset page's rule.
+- The browser stand-in seeds four made-up colleagues in the default tenant, so there is someone to pick as a labeler.
+
 ## 2026-11-23 (Tenant page, #103)
 
 - **A new project's settings are chosen when it is made**: the new-project dialog asks for the name, the labeling model (the tenant's default first) and the three thresholds (Macro-F1 at the configured default, Precision and Recall off), and saving them there counts as confirming Project Settings, so no second confirmation comes before the first paid run. Names may still repeat; a blank one is shown under the field.
