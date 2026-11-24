@@ -6,17 +6,6 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Now
 
-- **Frontend on Astryx** (#90). The web app rebuilt from the approved wireframes. Step 0, the app
-  shell and navigation (#91), goes first: the current tenant and access requests in the contract,
-  then the shell itself. Three lanes follow in parallel: tenant and project pages, data (data
-  sources, dataset, gold labels), and the prompt pages. Tenant lane, piece 1 (#94): tenants as
-  records (create, list, the tenant of each call), then the home page. Piece 2 (#103): the
-  tenant page's project rows and counts, and new projects with their model and thresholds, then
-  the tenant page. Piece 3 (#111): renaming and deleting a tenant, its members and roles, and
-  finding people, then the tenant settings dialog. Piece 4 (#118): who can edit a project, then
-  the project settings dialog. Piece 5 (#123): the Overview's access and activity, then the
-  project Overview. Permission platform contract additions (#120): optional lifecycle
-  hooks, configurable minimum admins and redirect access requests (PR 1 merged; PR 2 in review).
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
   tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are merged (see Done);
   step 3, action tools, is next, with their cards drawn on the UI design first.
@@ -35,6 +24,20 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Done
 
+- 2026-11-24: permission platform hooks (#120): optional tenant and project lifecycle hooks on
+  `PermissionAdminPort`, a configurable minimum of tenant admins (co-admins picked when the
+  tenant is created, checked against the company directory, kept on role changes), and access
+  requests that open the permission platform's own form (#121, #132).
+- 2026-11-24: the frontend on Astryx (#90) is fully delivered: the app shell (#91) and three
+  lanes, tenant and project pages (#94, #103, #111, #118, #123), data pages (#95, #100, #107,
+  #115) and prompt pages (#96, #105, #127, #129), each listed below.
+- 2026-11-24: contract change (#129): `rebuildReports` is removed from the page contract; pages
+  use Rescore (`rescore`), which queues a job.
+- 2026-11-24: Optimiser runs on Prompt Tuning (#90 lane 3, #127): Rounds with Show dropped,
+  Activity, a failed or paused run's card with Retry or Resume, and a banner on how a run ended.
+- 2026-11-24: Prompt Tuning on Astryx (#90 lane 3, #105): version cards (sort, pin, Best, change),
+  Macro-F1 / Precision / Recall cards against thresholds, per-value rows with false negative and
+  false positive rings, Rescore, the Optimise dialog and the running Optimiser's progress.
 - 2026-11-23: Prompt Design on Astryx (#90 lane 3, #96): one prompt card beside Ask AI with
   Sections, Changes and Full prompt, each part edited in a dialog, and flat version numbers (a save
   overwrites the version on screen; every save is kept).

@@ -120,7 +120,7 @@ export const {
   importBundledGold,
   mismatches,
   reviewGold,
-  rebuildReports,
+  rescore,
   createVersion,
   goldLabelsCleared,
   scoreVersion,

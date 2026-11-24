@@ -3,6 +3,22 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-24 (Optimiser runs on Prompt Tuning, #127)
+
+- **A run keeps its card until it ends** (wireframes v346, W-PromptTuning-Run): while it runs or waits, and also when it failed or is paused. Selected, the card shows Progress and Rounds, with Activity on the right. A failed run says why and offers Retry (goes on from where it stopped) or Stop; a paused one offers Resume or Stop. Optimise waits until no run is open, since a new start would go on with the open run.
+- **Rounds list every try**, newest round first and numbered across the run ("Try 3 · the change"), with its score once kept or where it stands. Tries the run dropped (worse in the dry run, failed the checks, the same as an earlier try) stay behind "Show dropped (N)".
+- **Activity is read from the run itself**: the start, each try that ended, and how the run ended. No new record or contract.
+- **When a run ends, a banner says how it went**: it found a version that passes, a version beat the start (with both scores), or no change beat the start, with why it ended (stopped by you, all rounds used, no new changes). "Show vN" selects the version; Dismiss hides it for that run in this browser. The advice to check the gold labels shows only when the run ended by itself after trying changes.
+- **A run's card is kept in the address** (`?run=`), like a version (`?v=`).
+
+## 2026-11-24 (Prompt Tuning on Astryx, #105)
+
+- **Prompt Tuning is a row of version cards above the selected version's details** (wireframes v346): each card shows its flat number, Best and Passed tags, its Macro-F1 and the change against the next lower scored version, or what it is doing (labeling, waiting, failed, stopped, Optimiser round). Cards sort by Score or Newest; a pinned card stays first; a dot marks scores not yet opened. Pins and the "opened" marks are kept in the browser for now.
+- **Scores are three cards**: Macro-F1, Precision and Recall, each the mean over the label's values, each tagged Passed or Below against its threshold (no tag without a threshold or on a rough reading). Values has one row per value with F1, Precision and Recall green or red against the thresholds; an open row shows each number's change against the previous version and two rings, false negatives (what the model answered instead) and false positives (what a person labeled instead).
+- **The header holds the version's actions**: Edit (opens Prompt Design on it), Rescore (enabled only when gold labels changed after the scores were built; nothing is labeled again) and Optimise (one dialog: starts from this version, Max rounds prefilled). While labeling or waiting, Stop or Cancel; after a failure or stop, Retry. A running Optimiser has its own card; selected, it shows its Progress (round, tries and dropped, best so far, started from, max rounds, what it does now) and Stop.
+- **Suggestions** sit beside the scores. Until the AI evaluates each version, the card is the one code picks from the project's records, with its buttons ("Fix in Prompt Design" replaces Improve with AI) and Dismiss for this visit.
+- **The selected version is in the address** (`?v=`), so a reload or a language switch keeps it.
+
 ## 2026-11-24 (Project Overview, #123)
 
 - **The Overview shows what happened, in plain lines**: who did what and when, newest first, from the project's own records, the AI's suggestions, and the gold labels people saved (one line per person per day). Records Sprint keeps for itself (spend, tool calls) stay out.

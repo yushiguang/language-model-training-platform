@@ -135,3 +135,40 @@ export const pct = (x: number) => `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;
 export const DEFAULT_THRESHOLDS: Thresholds = {mode: 'default', macroF1: DEFAULT_SYSTEM_CONFIG.evaluation.defaultMacroF1, valueF1: null, precision: null, recall: null, invalidRate: null, accuracy: null, minEval: DEFAULT_SYSTEM_CONFIG.dataset.minEvalRecommended};
 /** Custom starts from these: F1 on at 0.60, Precision and Recall off with 0.70 ready in their boxes. */
 export const CUSTOM_START = {valueF1: DEFAULT_SYSTEM_CONFIG.evaluation.customStartValueF1, precision: DEFAULT_SYSTEM_CONFIG.evaluation.customStartPrecision, recall: DEFAULT_SYSTEM_CONFIG.evaluation.customStartRecall};
+
+/**
+ * Prompt Tuning's Precision and Recall cards (wireframes v346): the mean over the label's values,
+ * the same way Macro-F1 averages each value's F1.
+ */
+export function macroPrecisionRecall(m: Pick<Metrics, 'values'>): {precision: number; recall: number} {
+  const n = m.values.length;
+  if (!n) return {precision: 0, recall: 0};
+  return {
+    precision: m.values.reduce((s, v) => s + v.precision, 0) / n,
+    recall: m.values.reduce((s, v) => s + v.recall, 0) / n,
+  };
+}
+
+/** One slice of a value's false negatives or false positives: the other value, or null for none. */
+export interface MistakeSlice {
+  other: string | null;
+  n: number;
+}
+
+/**
+ * A value's two rings on Prompt Tuning (round 20): false negatives (a person gave the value, the
+ * model did not: what it answered instead) and false positives (the model gave it, a person did
+ * not: what the person gave). A multi-select miss or extra has no other value (`other` null).
+ * Largest slice first.
+ */
+export function valueMistakes(m: Pick<Metrics, 'mixUps'>, value: string): {missed: MistakeSlice[]; wrong: MistakeSlice[]} {
+  const add = (into: Map<string | null, number>, k: string | null, n: number) => into.set(k, (into.get(k) ?? 0) + n);
+  const missed = new Map<string | null, number>();
+  const wrong = new Map<string | null, number>();
+  for (const x of m.mixUps) {
+    if (x.gold === value && (x.kind === 'confused' || x.kind === 'missed')) add(missed, x.kind === 'confused' ? x.predicted : null, x.count);
+    if (x.predicted === value && (x.kind === 'confused' || x.kind === 'extra')) add(wrong, x.kind === 'confused' ? x.gold : null, x.count);
+  }
+  const list = (s: Map<string | null, number>) => [...s].map(([other, n]) => ({other, n})).sort((a, b) => b.n - a.n);
+  return {missed: list(missed), wrong: list(wrong)};
+}

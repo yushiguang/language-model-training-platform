@@ -224,7 +224,6 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
       if (r.outcome === 'changed') await checkGold(w, r.projectId, r.exampleId, r.answer);
       return mismatch.reviewGold(w, r.projectId, r.exampleId, r.promptVersionId, r.outcome, r.answer, r.note);
     },
-    rebuildReports: (ctx, projectId) => scores.rebuildReports(at(ctx), projectId),
     rescore: (ctx, projectId) => scores.rescore(at(ctx), projectId),
 
     async createVersion(ctx, r) {

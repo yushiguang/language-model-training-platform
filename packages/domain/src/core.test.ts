@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {applyFix, checkTemplate, diffLines, diffWords, hasAnyFeature, isFeatureEmpty, renderPrompt, withReasons, toFeatures} from './index.ts';
 import {pageFromPath} from './pages.ts';
-import {computeMetrics, judge, DEFAULT_THRESHOLDS} from './metrics.ts';
+import {computeMetrics, judge, DEFAULT_THRESHOLDS, macroPrecisionRecall, valueMistakes} from './metrics.ts';
 import {nextVersion, shownVersions, versionLabel} from './versions.ts';
 import type {Schema} from '@yushiguang/sprint-contracts';
 
@@ -269,4 +269,24 @@ test('isFeatureEmpty matches renderPrompt "none" behavior and hasAnyFeature dete
   assert.equal(hasAnyFeature({Description: {text: 'ok'}, Frame: {items: []}}), true);
   assert.equal(hasAnyFeature({Description: {text: '  '}, Frame: {items: ['f1.jpg']}}), true);
   assert.equal(hasAnyFeature({Cover: {text: 'https://img.invalid/c.jpg'}}), true);
+});
+
+test('Prompt Tuning: macro precision and recall are means over values; a value splits its misses and wrong answers by the other value', () => {
+  const pr = macroPrecisionRecall({values: [{value: 'A', precision: 0.8, recall: 0.6, f1: 0.69, support: 10}, {value: 'B', precision: 0.6, recall: 1, f1: 0.75, support: 5}]});
+  assert.ok(Math.abs(pr.precision - 0.7) < 1e-9 && Math.abs(pr.recall - 0.8) < 1e-9);
+  assert.deepEqual(macroPrecisionRecall({values: []}), {precision: 0, recall: 0});
+  const m = {
+    mixUps: [
+      {kind: 'confused' as const, gold: 'A', predicted: 'B', count: 4, exampleIds: []},
+      {kind: 'confused' as const, gold: 'A', predicted: 'C', count: 6, exampleIds: []},
+      {kind: 'confused' as const, gold: 'B', predicted: 'A', count: 2, exampleIds: []},
+      {kind: 'missed' as const, gold: 'A', predicted: null, count: 1, exampleIds: []},
+      {kind: 'extra' as const, gold: null, predicted: 'A', count: 3, exampleIds: []},
+    ],
+  };
+  assert.deepEqual(valueMistakes(m, 'A'), {
+    missed: [{other: 'C', n: 6}, {other: 'B', n: 4}, {other: null, n: 1}],
+    wrong: [{other: null, n: 3}, {other: 'B', n: 2}],
+  });
+  assert.deepEqual(valueMistakes(m, 'D'), {missed: [], wrong: []});
 });
