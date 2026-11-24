@@ -1,11 +1,11 @@
 'use client';
 
 import type {ReactNode} from 'react';
-import {ArrowDownIcon, ArrowUpIcon, CheckCircleIcon, ClockIcon, SparklesIcon, StopCircleIcon, XCircleIcon} from '@heroicons/react/24/outline';
+import {ArrowDownIcon, ArrowUpIcon, CheckCircleIcon, ClockIcon, PauseCircleIcon, SparklesIcon, StopCircleIcon, XCircleIcon} from '@heroicons/react/24/outline';
 import {Badge, HStack, Icon, InfoTip, SegmentedControl, SegmentedControlItem, Spinner, Text} from '@/ui/astryx';
 import {SectionTitle} from '@/components/shell/Page';
 import {t} from '@/i18n';
-import type {SortBy, TuningItem} from './items';
+import {flatLabels, type SortBy, type TuningItem} from './items';
 
 /** 0.863 → "86.3%". */
 export const pct = (x: number) => `${(100 * x).toFixed(1)}%`;
@@ -54,15 +54,19 @@ function Body({item}: {item: TuningItem}) {
           <Change by={item.change} />
         </HStack>
       );
-    case 'optimiser':
+    case 'optimiser': {
+      const run = s.run;
+      if (run.state === 'failed') return <Status icon={<Icon icon={XCircleIcon} size="sm" color="error" />} text={t('Failed')} tone="error" tip={run.error ? flatLabels(run.error) : undefined} />;
+      if (run.state === 'paused' && !run.queue) return <Status icon={<Icon icon={PauseCircleIcon} size="sm" color="secondary" />} text={t('Paused')} />;
       return (
         <HStack gap={3} vAlign="center">
           {s.best != null ? <span className="sp-pt-score">{pct(s.best)}</span> : <Spinner size="sm" aria-label={t('Running')} />}
           <Text type="supporting" color="secondary">
-            {t('Round {n} of {max}', {n: Math.max(1, s.run.round), max: s.run.maxRounds})}
+            {t('Round {n} of {max}', {n: Math.max(1, run.round), max: run.maxRounds})}
           </Text>
         </HStack>
       );
+    }
     case 'labeling':
       return <Status icon={<Spinner size="sm" aria-label={t('Labeling')} />} text={t('Labeling {pct}%', {pct: s.total ? Math.floor((100 * s.done) / s.total) : 0})} />;
     case 'queued':

@@ -6,8 +6,8 @@ type Report = ProjectState['reports'][number];
 
 /**
  * What one version card on Prompt Tuning shows (wireframes v346, rounds 10 to 18): a score, or where
- * its labeling stands. One card per major version (`shownVersions`); a running Optimiser run has a
- * card of its own (`optimiser`).
+ * its labeling stands. One card per major version (`shownVersions`); an Optimiser run that is under
+ * way, failed or paused has a card of its own (`optimiser`).
  */
 export type CardState =
   | {kind: 'scored'; report: Report}
@@ -33,6 +33,9 @@ export interface TuningItem {
 
 /** Running, or waiting for the model: either way under way and can be stopped. */
 export const busy = (r: {state: string; queue?: unknown}) => r.state === 'running' || !!r.queue;
+
+/** An Optimiser run that still has a card: under way, or failed or paused and waiting for Retry. */
+export const openRun = (r: OptimisationRun) => busy(r) || r.state === 'failed' || r.state === 'paused';
 
 /** The project's one labeling model (MVP: one model per project). */
 export const endpointOf = (s: ProjectState): EndpointId | undefined => s.setup?.models[0]?.endpoint;
@@ -66,9 +69,9 @@ function cardState(s: ProjectState, v: PromptVersion): CardState {
 /** Every card of the Versions row, before ordering. */
 export function tuningItems(s: ProjectState): TuningItem[] {
   const items: TuningItem[] = shownVersions(s.versions, s.optimisation)
-    .filter(x => x.version || (x.run && busy(x.run)))
+    .filter(x => x.version || (x.run && openRun(x.run)))
     .map(x => {
-      if (x.run && busy(x.run)) {
+      if (x.run && openRun(x.run)) {
         const best = x.version ? (reportOf(s, x.version.id)?.metrics.macroF1 ?? null) : null;
         return {major: x.major, label: x.label, version: x.version, state: {kind: 'optimiser', run: x.run, best}, score: best, change: null};
       }
