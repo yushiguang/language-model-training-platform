@@ -4,6 +4,7 @@ import {useState} from 'react';
 import {ArrowUpTrayIcon, CircleStackIcon} from '@heroicons/react/24/outline';
 import {TenantPage} from '@/components/Shell';
 import {useRuntime} from '@/components/session';
+import {tenantHref} from '@/components/ProjectContext';
 import {useGo} from '@/components/nav';
 import {DeleteDialog, RenameDialog, UploadDialog} from '@/components/sources/dialogs';
 import {addedWhen, refuseSourceChange, sourceName, usedByText, useDataSources} from '@/components/sources';
@@ -112,7 +113,7 @@ function Sources() {
         <PageTitle
           title={t('Data sources')}
           subtitle={t('Each file you upload is one data source: a list of sample IDs. Everyone can read them.')}
-          back={{label: tenant || t('Projects'), href: '/tenant/'}}
+          back={{label: tenant || t('Projects'), href: tenantHref()}}
           actions={list && list.length > 0 ? uploadButton : undefined}
         />
       }

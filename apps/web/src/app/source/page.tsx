@@ -13,6 +13,7 @@ import {fileKind, refuseSourceChange, shortDate, sourceName} from '@/components/
 import {getDataSource, subscribeChanges, type DataSourceDetail} from '@/backend-api';
 import {Avatar, Button, Card, Divider, Grid, Heading, HStack, Icon, Link, MetadataList, MetadataListItem, MoreMenu, Spinner, Text, Token, VStack} from '@/ui/astryx';
 import {PageTitle} from '@/ui';
+import {tenantHref} from '@/components/ProjectContext';
 import {t} from '@/i18n';
 
 /**
@@ -49,7 +50,7 @@ function Source() {
     return subscribeChanges(() => void load());
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const back = {label: t('Data sources'), href: '/sources/'};
+  const back = {label: t('Data sources'), href: tenantHref('/sources/')};
   const s = d?.source;
   const change = (what: 'rename' | 'delete') => (admin ? setOpen(what) : refuseSourceChange('change'));
   const actions =
@@ -88,7 +89,7 @@ function Source() {
         </WithSide>
       )}
       {s && open === 'rename' && <RenameDialog source={s} onClose={() => setOpen(null)} />}
-      {s && open === 'delete' && <DeleteDialog source={s} usedBy={d!.usedByProjects.map(p => p.name)} onClose={() => setOpen(null)} onDeleted={() => void go('/sources/')} />}
+      {s && open === 'delete' && <DeleteDialog source={s} usedBy={d!.usedByProjects.map(p => p.name)} onClose={() => setOpen(null)} onDeleted={() => void go(tenantHref('/sources/'))} />}
     </TenantPage>
   );
 }

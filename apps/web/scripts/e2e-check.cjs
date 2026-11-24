@@ -97,6 +97,23 @@ let current = null;
   await page.goto(BASE + '/');
   await page.getByRole('heading', {name: 'Your tenants'}).waitFor();
   await shot(page, '0a-home');
+  // #94: a tenant is made from Home (a blank name is refused in the field) and opens on its tenant
+  // page; the tenant menu in the top bar switches back.
+  await button(page, 'Create a tenant').click();
+  await page.getByLabel('Tenant name').fill('   ');
+  await button(page, 'Create').click();
+  await page.getByText('Enter a name. Spaces alone are not a name.').first().waitFor();
+  await page.getByLabel('Tenant name').fill('Search Ads');
+  await button(page, 'Create').click();
+  await page.waitForURL(/\/tenant\/\?t=tn_/);
+  await page.getByRole('button', {name: 'Switch Search Ads'}).waitFor();
+  await page.goto(BASE + '/');
+  await page.getByRole('link', {name: 'Open Search Ads'}).waitFor();
+  await page.getByRole('heading', {name: 'My team'}).click();
+  await page.waitForURL(/\?t=default/);
+  await page.getByRole('button', {name: 'Switch My team'}).click();
+  await page.getByRole('menuitem', {name: 'Search Ads'}).waitFor();
+  await page.keyboard.press('Escape');
   await page.goto(BASE + '/tenant/');
   await page.getByPlaceholder('Short-video tagging').fill('Scratch project');
   await button(page, 'Create project').click();
@@ -229,23 +246,28 @@ let current = null;
   await page.goto(url('/dataset/'));
   log('prompt design done');
 
-  // Dataset (#29): examples come from the team's data sources. The built-in sample data is
-  // ticked with its count in the box; a count over what is left is refused before anything starts.
+  // Dataset (#29, #100): examples come from the team's data sources through Append examples. The
+  // built-in sample data is ticked with a count in the box; a count over what is left is refused.
   await page.waitForURL(/dataset/);
-  await page.waitForFunction(() => +document.querySelector('[aria-label="Examples from Sample data"]')?.value > 0, null, {timeout: 10000});
-  await page.getByLabel('Examples from Sample data').fill('999999');
-  await page.getByText(/^Only [\d,]+ left in Sample data\.$/).waitFor();
-  if (!(await button(page, 'Create dataset').isDisabled())) throw new Error('Create dataset is on for more items than are left');
-  await page.getByLabel('Examples from Sample data').fill(String(N));
-  await page.getByText(`${N} examples · repeats across sources count once`).waitFor();
+  await button(page, 'Append examples').click();
+  const app = page.locator('dialog[open]');
+  await app.getByRole('checkbox', {name: /Sample data/}).waitFor({timeout: 10000});
+  if (!(await app.getByRole('checkbox', {name: /Sample data/}).isChecked())) throw new Error('the sample data is not ticked');
+  // The box takes its number when it loses focus.
+  const howMany = async (box, n) => (await box.fill(n), await box.press('Tab'));
+  await howMany(app.getByLabel('Examples to add', {exact: true}), '999999');
+  await app.getByText(/^Only [\d,]+ are left in the ticked data sources\.$/).first().waitFor();
+  if (!(await app.getByRole('button', {name: /^Append/}).isDisabled())) throw new Error('Append is on for more items than are left');
+  await howMany(app.getByLabel('Examples to add', {exact: true}), String(N));
   await shot(page, '2a-dataset-pick');
-  await button(page, 'Create dataset').click();
+  await button(app, `Append ${N}`).click();
+  await app.waitFor({state: 'detached', timeout: 10000});
   const next = button(page, 'Next: Gold Labels');
   await next.waitFor({timeout: 60000});
   await page.waitForFunction(() => [...document.querySelectorAll('button')].some(b => b.textContent === 'Next: Gold Labels' && !b.disabled), null, {timeout: 10000});
+  await page.getByRole('radio', {name: `All ${N}`}).waitFor({timeout: 10000});
   if (await page.getByText('Split', {exact: true}).count()) throw new Error('the Dataset page still has a split');
-  if (await button(page, 'Check labels').count()) throw new Error('the Dataset page still has the Check labels card');
-  log('dataset:', (await page.locator('main .metrics').innerText()).replace(/\s+/g, ' '));
+  log('dataset:', (await page.locator('main [role=radiogroup]').first().innerText()).replace(/\s+/g, ' '));
   await shot(page, '2-dataset');
   await next.click();
 
@@ -576,36 +598,45 @@ let current = null;
   // Eval dataset governance (spec 4.3, 4.4): the removed example is named next to the score; added
   // examples wait for gold labels without making scores stale; removals are listed and restorable.
   await page.goto(url('/dataset/'));
-  await page.getByRole('heading', {name: 'Removed (1)'}).waitFor({timeout: 10000});
-  await page.getByRole('heading', {name: 'Label balance'}).waitFor();
-  if (await page.locator('section.card', {hasText: 'Label balance'}).locator('.code').count()) throw new Error('Label balance still shows a field name');
+  const tab = name => page.getByRole('radio', {name});
+  await tab(`Removed 1`).waitFor({timeout: 10000});
+  await page.getByRole('heading', {name: 'Label Distribution'}).waitFor();
+  await page.getByText(new RegExp(`Model \\(v\\d+(\\.\\d+)?, best\\)`)).waitFor({timeout: 10000});
   await shot(page, '2b-dataset-balance');
-  // Add examples (#29): more from a data source; the Examples card says where they came from.
-  await page.waitForFunction(() => +document.querySelector('[aria-label="Examples from Sample data"]')?.value > 0, null, {timeout: 10000});
-  await page.getByLabel('Examples from Sample data').fill('5');
-  await button(page, 'Add examples').click();
-  await page.getByRole('heading', {name: 'Examples', exact: true}).waitFor({timeout: 30000});
-  await page.waitForFunction(() => /Waiting for gold labels\s*5(?!\d)/.test(document.querySelector('main .metrics')?.textContent ?? ''), null, {timeout: 30000});
-  log('dataset after adding:', (await page.locator('main .metrics').innerText()).replace(/\s+/g, ' '));
-  const fromSample = (await page.locator('main tr', {hasText: 'Sample data'}).first().locator('td').allInnerTexts()).map(x => x.trim());
-  // Live examples only: the one removed above leaves the count.
-  if (fromSample[1] !== String(N + 5 - 1)) throw new Error(`the Examples card says ${fromSample.join(' | ')} from Sample data`);
+  // Append examples (#29): more from a data source; they wait for gold labels.
+  await button(page, 'Append examples').click();
+  await howMany(page.locator('dialog[open]').getByLabel('Examples to add', {exact: true}), '5');
+  await button(page.locator('dialog[open]'), 'Append 5').click();
+  await tab('No label 5').waitFor({timeout: 30000});
+  await tab(`All ${N + 5 - 1}`).waitFor({timeout: 10000});
   await shot(page, '2d-dataset-add-examples');
   await page.goto(url('/prompt/'));
   await versionsRow.waitFor();
   await page.getByText(/^Scored on [\d,]+ examples/).first().waitFor({timeout: 10000});
   if (await page.getByText(/changed after these scores were built/).count()) throw new Error('adding unlabeled examples made scores stale');
   await shot(page, '5i-pending');
+  // Remove (W-EvalDataset-Remove): one unlabeled sample, for another reason with a note; it keeps
+  // its number under Removed and comes back with Restore.
   await page.goto(url('/dataset/'));
-  await button(page, 'Remove unlabeled').click();
-  const prune = page.getByRole('dialog');
-  await prune.getByLabel('Unlabeled examples to keep').fill('0');
-  await button(prune, 'Remove').click();
-  await page.getByRole('heading', {name: 'Removed (6)'}).waitFor({timeout: 10000});
-  await page.locator('tr', {hasText: 'Unlabeled extra'}).first().getByRole('button', {name: 'Restore'}).click();
-  await page.getByRole('heading', {name: 'Removed (5)'}).waitFor({timeout: 10000});
+  await tab('No label 5').click();
+  const firstNew = page.locator('main tbody tr').first();
+  const removedNumber = (await firstNew.locator('td').first().innerText()).trim();
+  await firstNew.hover();
+  await firstNew.getByRole('button', {name: 'Remove', exact: true}).click();
+  const rmd = page.locator('dialog[open]');
+  await rmd.getByRole('radio', {name: /Other/}).click();
+  await rmd.getByRole('textbox', {name: /Note/}).fill('A duplicate upload');
+  await shot(page, '2e-dataset-remove');
+  await button(rmd, 'Remove').click();
+  await tab('Removed 2').waitFor({timeout: 10000});
+  await tab('Removed 2').click();
+  const back = page.locator('main tbody tr', {hasText: 'Other'});
+  if ((await back.locator('td').first().innerText()).trim() !== removedNumber) throw new Error('the removed sample lost its number');
   await shot(page, '2c-dataset-removed');
-  log('dataset after pruning and one restore:', (await page.locator('main .metrics').innerText()).replace(/\s+/g, ' '));
+  await back.hover();
+  await back.getByRole('button', {name: 'Restore'}).click();
+  await tab('Removed 1').waitFor({timeout: 10000});
+  log('dataset after one removal and its restore:', await page.locator('main [role=radiogroup]').first().innerText().then(x => x.replace(/\s+/g, ' ')));
 
   // #91: Project settings opens from the project overview, and the project name in the top bar follows a rename.
   await page.goto(url('/overview/'));

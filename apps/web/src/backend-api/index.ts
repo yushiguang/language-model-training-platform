@@ -16,6 +16,9 @@ import type {
   DatasetRemoval,
   LabelComment,
   RemovalReason,
+  SampleFilter,
+  SamplePage,
+  SampleRow,
   ModelSettings,
   NewVersion,
   NodeId,
@@ -26,6 +29,7 @@ import type {
   PromptVersion,
   RuntimeInfo,
   Schema,
+  TenantSummary,
   SetupVersion,
   SourceFile,
   StructuredPrompt,
@@ -42,10 +46,14 @@ import {client as chosen} from '@yushiguang/sprint-client-impl';
  */
 export const client: BffClient = chosen;
 
+export {currentTenant, rememberTenant} from './tenant';
+
 export const {
   getRuntimeInfo,
   signOut,
   requestAccess,
+  listTenants,
+  createTenant,
   listProjects,
   createProject,
   getProject,
@@ -67,6 +75,7 @@ export const {
   takeExamples,
   stopSampleDataset,
   removeExamples,
+  listSamples,
   restoreExamples,
   pruneDataset,
   addComment,
@@ -127,6 +136,9 @@ export type {
   DatasetRemoval,
   LabelComment,
   RemovalReason,
+  SampleFilter,
+  SamplePage,
+  SampleRow,
   ModelSettings,
   NodeId,
   Prediction,
@@ -135,4 +147,5 @@ export type {
   Schema,
   SetupVersion,
   SourceFile,
+  TenantSummary,
 };

@@ -6,10 +6,10 @@ import {Avatar, Button, DropdownMenu, type DropdownMenuOption, Icon, IconButton,
 import {ArrowRightIcon, ArrowRightStartOnRectangleIcon, CheckCircleIcon, ChevronDownIcon, LanguageIcon, MagnifyingGlassIcon, SparklesIcon} from '@heroicons/react/24/outline';
 import {LOCALES, NODES} from '@yushiguang/sprint-domain';
 import type {NodeId, Project} from '@yushiguang/sprint-contracts';
-import {listProjects, signOut, type ProjectState} from '@/backend-api';
+import {listProjects, listTenants, signOut, type ProjectState, type TenantSummary} from '@/backend-api';
 import {t, useLocale} from '@/i18n';
 import {useRuntime} from '../session';
-import {hrefFor} from '../ProjectContext';
+import {hrefFor, tenantHref} from '../ProjectContext';
 import {stepStates} from '../steps';
 import {recentProjects, rememberProject} from './recent';
 
@@ -70,9 +70,7 @@ function Crumbs({where}: {where: Where}) {
           <span className="sp-sep" aria-hidden="true">
             /
           </span>
-          <Link className="sp-crumb" href="/tenant/" title={tenant?.name}>
-            <span className="sp-crumb-name">{tenant?.name ?? '…'}</span>
-          </Link>
+          <TenantSwitch name={tenant?.name} id={tenant?.id} here={'tenant' in where} />
         </>
       )}
       {'project' in where && (
@@ -123,7 +121,7 @@ function ProjectSwitch({project}: {project: Project}) {
         : [{id: 'none', label: t('No project matches'), isDisabled: true}],
     },
     {type: 'divider'},
-    {id: 'all', label: t('All projects'), href: '/tenant/', endContent: <Icon icon={ArrowRightIcon} size="sm" color="secondary" />},
+    {id: 'all', label: t('All projects'), href: tenantHref(), endContent: <Icon icon={ArrowRightIcon} size="sm" color="secondary" />},
   ];
   return (
     <DropdownMenu
@@ -142,6 +140,70 @@ function ProjectSwitch({project}: {project: Project}) {
         </button>
       )}
     />
+  );
+}
+
+/**
+ * The tenant's name links to its tenant page (and on that page opens the menu); the arrow beside
+ * it, shown on hover, opens the switch menu (#94): the user's tenants, this one ticked, and All
+ * tenants (the home page).
+ */
+function TenantSwitch({name, id, here}: {name?: string; id?: string; here: boolean}) {
+  const [open, setOpen] = useState(false);
+  const [list, setList] = useState<TenantSummary[] | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    listTenants().then(
+      l => live && setList(l),
+      () => live && setList([]),
+    );
+    return () => {
+      live = false;
+    };
+  }, [open]);
+  const mine = list ?? (id && name ? [{id, name}] : []);
+  const items: DropdownMenuOption[] = [
+    {
+      type: 'section',
+      title: t('Your tenants'),
+      items: mine.map(x => ({id: x.id, label: x.name, href: tenantHref('/tenant/', x.id), endContent: x.id === id ? <Icon icon={CheckCircleIcon} size="sm" color="secondary" /> : undefined})),
+    },
+    {type: 'divider'},
+    {id: 'all', label: t('All tenants'), href: '/', endContent: <Icon icon={ArrowRightIcon} size="sm" color="secondary" />},
+  ];
+  const label = name ?? '…';
+  return (
+    <span className="sp-crumb-wrap">
+      {!here && (
+        <Link className="sp-crumb" href={tenantHref('/tenant/', id)} title={name}>
+          <span className="sp-crumb-name">{label}</span>
+        </Link>
+      )}
+      <DropdownMenu
+        isMenuOpen={open}
+        onOpenChange={setOpen}
+        menuWidth={280}
+        menuMaxHeight={420}
+        items={items}
+        renderTrigger={props =>
+          here ? (
+            <button type="button" {...props} className="sp-crumb" aria-label={t('Switch {name}', {name: label})} title={t('Switch {name}', {name: label})}>
+              <span className="sp-crumb-name">{label}</span>
+              <span className="sp-chev" aria-hidden="true">
+                <Icon icon={ChevronDownIcon} size="xsm" color="secondary" />
+              </span>
+            </button>
+          ) : (
+            <button type="button" {...props} className="sp-crumb sp-chev-only" aria-label={t('Switch {name}', {name: label})} title={t('Switch {name}', {name: label})}>
+              <span className="sp-chev" aria-hidden="true">
+                <Icon icon={ChevronDownIcon} size="xsm" color="secondary" />
+              </span>
+            </button>
+          )
+        }
+      />
+    </span>
   );
 }
 

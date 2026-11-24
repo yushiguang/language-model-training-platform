@@ -14,11 +14,13 @@ import {themes, defaultThemeSlug} from '../astryx-themes';
  * check enforces it), so an Astryx upgrade or a wrapper of our own changes one file.
  */
 export {Avatar} from '@astryxdesign/core/Avatar';
+export {Banner} from '@astryxdesign/core/Banner';
 export {Badge} from '@astryxdesign/core/Badge';
 export {Banner} from '@astryxdesign/core/Banner';
 export {Button} from '@astryxdesign/core/Button';
 export {Card} from '@astryxdesign/core/Card';
 export {CheckboxInput} from '@astryxdesign/core/CheckboxInput';
+export {CheckboxList, CheckboxListItem} from '@astryxdesign/core/CheckboxList';
 export {CodeBlock} from '@astryxdesign/core/CodeBlock';
 export {ClickableCard} from '@astryxdesign/core/ClickableCard';
 export {Dialog} from '@astryxdesign/core/Dialog';
@@ -32,17 +34,20 @@ export {IconButton} from '@astryxdesign/core/IconButton';
 export {InfoTip} from '@astryxdesign/core/InfoTip';
 export {HStack, Layout, LayoutContent, StackItem, VStack} from '@astryxdesign/core/Layout';
 export {Link} from '@astryxdesign/core/Link';
-export {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl';
 export {MetadataList, MetadataListItem} from '@astryxdesign/core/MetadataList';
 export {MoreMenu} from '@astryxdesign/core/MoreMenu';
+export {NumberInput} from '@astryxdesign/core/NumberInput';
+export {Pagination} from '@astryxdesign/core/Pagination';
 export {ProgressBar} from '@astryxdesign/core/ProgressBar';
+export {RadioList, RadioListItem} from '@astryxdesign/core/RadioList';
+export {SegmentedControl, SegmentedControlItem} from '@astryxdesign/core/SegmentedControl';
 export {SideNav, SideNavItem, SideNavSection} from '@astryxdesign/core/SideNav';
 export {Spinner} from '@astryxdesign/core/Spinner';
-export {pixel, proportional, Table, type TableColumn} from '@astryxdesign/core/Table';
+export {pixel, proportional, Table, useTableSortable, type TableColumn, type TableSortState} from '@astryxdesign/core/Table';
 export {Heading, Text} from '@astryxdesign/core/Text';
 export {TextArea} from '@astryxdesign/core/TextArea';
 export {TextInput} from '@astryxdesign/core/TextInput';
-export {Token} from '@astryxdesign/core/Token';
+export {Token, type TokenColor} from '@astryxdesign/core/Token';
 export {Toolbar} from '@astryxdesign/core/Toolbar';
 export {TopNav, TopNavItem} from '@astryxdesign/core/TopNav';
 
