@@ -37,6 +37,7 @@ export const DEFAULT_SYSTEM_CONFIG: SystemConfig = {
   project: {nameMaxChars: 80},
   jobs: {limit: {model: 1, compute: 10}},
   reports: {diagnosticsKeep: 10, actionLines: 15, messageMaxChars: 300},
+  tenant: {minAdmins: 1},
 };
 
 const isPlain = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -92,6 +93,7 @@ const isModelLimits = (x: unknown) => isPlain(x) && TIERS.has(x.tier as string) 
 const STRICT: Record<string, (raw: string) => unknown> = {
   'jobs.limit.model': raw => parseJobLimit(raw) ?? undefined,
   'jobs.limit.compute': raw => parseJobLimit(raw) ?? undefined,
+  'tenant.minAdmins': raw => parseJobLimit(raw) ?? undefined,
   'gateway.unknownModelLimits.tier': raw => (TIERS.has(raw.trim()) ? raw.trim() : undefined),
   'gateway.assumedLimits': raw => {
     const v = parseLike({}, raw);

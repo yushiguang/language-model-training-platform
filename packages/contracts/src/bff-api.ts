@@ -74,6 +74,10 @@ export interface RuntimeInfo {
    * Missing when the caller is not in it (the site then goes to the home page).
    */
   tenant?: TenantInfo;
+  /** Minimum admins a tenant starts with and keeps, set when greater than 1. */
+  minTenantAdmins?: number;
+  /** Set to `'redirect'` when access requests open the permission platform's own form via `applyUrl`. */
+  accessRequestMode?: 'submit' | 'redirect';
 }
 
 /** The caller's current tenant (docs/design/server.md, 2). */
@@ -108,6 +112,8 @@ export interface TenantMemberView {
  */
 export interface CreateTenantRequest {
   name: string;
+  /** Additional initial admins alongside the creator, when a deployment requires more than one. */
+  adminIds?: string[];
 }
 
 /** The new tenant, its creator its admin; or why nothing was created (shown under the name field). */
@@ -244,6 +250,8 @@ export interface RequestAccessRequest {
 export interface RequestAccessResult {
   /** Where the caller can follow the request on the permission platform, when it has such a page. */
   trackUrl?: string;
+  /** Where the caller fills out the request on the permission platform, when it uses its own form. */
+  applyUrl?: string;
 }
 
 /** Paid or mutating starts take an optional key: the same key never starts the same work twice. */

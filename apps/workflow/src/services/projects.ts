@@ -55,7 +55,11 @@ export async function createProject(w: Scope, name: string): Promise<Project> {
   if (w.permissionAdmin) {
     const admin = w.permissionAdmin;
     try {
-      await withRetries(() => admin.grantProjectWrite(w.ctx, p.tenantId, p.id, u.id), 3, w.grantRetryMs ?? 200);
+      await withRetries(
+        () => (admin.createProject ? admin.createProject(w.ctx, {tenantId: p.tenantId, projectId: p.id, name: p.name, creatorId: u.id}) : admin.grantProjectWrite(w.ctx, p.tenantId, p.id, u.id)),
+        3,
+        w.grantRetryMs ?? 200,
+      );
     } catch {
       await catalog.deleteProject(p.id);
       throw new Error('The project could not be created: edit access for you could not be saved. Try again.');
@@ -378,10 +382,15 @@ export async function runDelete(w: Scope, job: Job, waitMs = STOP_WAIT_MS): Prom
     if (Date.now() >= until) throw new Error(`${left.length} job${left.length === 1 ? '' : 's'} of the project did not stop in time.`);
     await new Promise(r => setTimeout(r, 50));
   }
+  const proj = await w.catalog.get('projects', projectId);
+  const tid = proj?.tenantId ?? tenantOf(w);
   await w.optimiser?.deleteProject(projectId);
   await w.labeling.deleteProject(projectId);
   // Its segments of data sources stay taken, retired (#30): never handed out again.
   await retireCuts(w, projectId);
+  if (w.permissionAdmin?.deleteProject) {
+    await withRetries(() => w.permissionAdmin!.deleteProject!(w.ctx, tid, projectId), 3, w.grantRetryMs ?? 200);
+  }
   await w.catalog.deleteProject(projectId);
   w.emitChange(projectId);
   return {state: 'done'};

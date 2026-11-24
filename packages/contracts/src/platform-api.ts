@@ -816,8 +816,10 @@ export interface AccessRequest {
  * Request access). Throw when the platform cannot be reached; the page says the request failed.
  */
 export interface AccessRequestPort {
-  /** `trackUrl`: where the caller can follow the request on the platform, when it has such a page. */
-  request(ctx: RequestContext, request: AccessRequest): Promise<{trackUrl?: string}>;
+  /** `'redirect'`: skip the in-app reason box and open `applyUrl` on the permission platform (defaults to `'submit'`). */
+  mode?: 'submit' | 'redirect';
+  /** `trackUrl`: where to follow a submitted request; `applyUrl`: where to open and submit the form on the platform. */
+  request(ctx: RequestContext, request: AccessRequest): Promise<{trackUrl?: string; applyUrl?: string}>;
 }
 
 /** A member's role in a tenant: `admin` holds `tenant_write`. */
@@ -856,6 +858,14 @@ export interface PermissionAdminPort {
   listProjectWriters(tenantId: string, projectId: string): Promise<string[]>;
   grantProjectWrite(ctx: RequestContext, tenantId: string, projectId: string, userId: string): Promise<void>;
   revokeProjectWrite(ctx: RequestContext, tenantId: string, projectId: string, userId: string): Promise<void>;
+  /** Optional: provisions the tenant resource on the permission platform with its initial admins. */
+  createTenant?(ctx: RequestContext, tenant: {tenantId: string; name: string; adminIds: string[]}): Promise<void>;
+  /** Optional: deletes the tenant resource and its roles from the permission platform. */
+  deleteTenant?(ctx: RequestContext, tenantId: string): Promise<void>;
+  /** Optional: provisions the project resource on the permission platform and grants `project_write` to its creator. */
+  createProject?(ctx: RequestContext, project: {tenantId: string; projectId: string; name: string; creatorId: string}): Promise<void>;
+  /** Optional: deletes the project resource from the permission platform. */
+  deleteProject?(ctx: RequestContext, tenantId: string, projectId: string): Promise<void>;
 }
 
 /** A person as the company directory knows them (#111). */

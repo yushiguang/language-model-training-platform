@@ -3,6 +3,12 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-24 (Permission platform lifecycle and minimum admins, #120)
+
+- **Permission platform lifecycle is optional on `PermissionAdminPort`**: deployments that provision dedicated resources or roles per tenant and project can implement `createTenant`, `deleteTenant`, `createProject` and `deleteProject`, while simpler adapters keep using member and project-writer grants alone.
+- **Minimum tenant admins are configurable (`tenant.minAdmins`, default `1`)**: deployments whose permission platform requires multiple resource owners can raise it so creating a tenant accepts co-admins (`adminIds`), directory search (`searchPeople`) is open to any signed-in user picking initial co-admins, and demotions/removals preserve the minimum.
+- **Access requests support external approval forms (`mode: 'redirect'`, `applyUrl`)**: deployments where users submit requests on the permission platform itself can redirect instead of asking for a reason inside Sprint.
+
 ## 2026-11-24 (Project editors, #118)
 
 - **Project Settings lists who can edit**: the creator first, who can always edit and cannot be removed, then everyone added, with when. Anyone who can edit adds tenant members or removes them; everyone in the tenant can still open and read the project.
