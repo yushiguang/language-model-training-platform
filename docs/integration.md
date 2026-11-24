@@ -152,12 +152,23 @@ A deployment supplies three optional ports in `Platform`:
   for the members pages and labelers. Every method must be idempotent; the ones that change
   something get the caller's context first, for the platform's audit trail. `listUserTenants(userId)`
   (#94) lists the tenants a user is in, with the role in each: the home page lists them, and the
-  runtime info leaves out the tenant (the site goes home) when the caller is not in it.
+  runtime info leaves out the tenant (the site goes home) when the caller is not in it. Optional
+  lifecycle hooks (`createTenant`, `deleteTenant`, `createProject`, `deleteProject`) let a
+  deployment provision and tear down tenant/project resources on the permission platform alongside
+  initial owners (`adminIds`) and project creators; during tenant deletion, `deleteProject` is
+  invoked for each project before `deleteTenant` (omitting `deleteProject` leaves project deletion
+  as a no-op on the permission platform, while omitting the other hooks falls back to
+  `addTenantMember`, `removeTenantMember` and `grantProjectWrite`). Deployments whose permission
+  platform requires multiple resource owners can raise `tenant.minAdmins` (1 to 50, default `1`) in
+  config so tenants are created with and keep at least that many admins; directory search
+  (`people`) is open to any signed-in user so tenant creators can pick initial co-admins.
 - `accessRequests` (`AccessRequestPort`): `request(ctx, {tenantId, permission, projectId?,
-  reason?})` sends a request from the "insufficient access" dialog to the platform, where
-  approvers handle it; return `trackUrl` when the platform has a page to follow it on. Sprint
-  stores and approves nothing (#91). The stand-ins keep requests in memory
-  (`memoryAccessRequests`); a deployment without it refuses requests for access.
+  reason?})` handles a request from the "insufficient access" dialog, where approvers handle it
+  on the permission platform. By default (`mode: 'submit'`), return `trackUrl` when the platform
+  has a page to follow the request on; set `mode: 'redirect'` and return `applyUrl` when users fill
+  out the request directly on the permission platform's own form (`RuntimeInfo.accessRequestMode`
+  exposes `'redirect'` to pages). Sprint stores and approves nothing (#91). The stand-ins keep
+  requests in memory (`memoryAccessRequests`); a deployment without it refuses requests for access.
 
 Pass them to `createWorkflow` (`authorization`, `permissionAdmin`, `accessRequests`), as the
 in-process root does. The top bar names the tenant by its record (tenants created in Sprint,

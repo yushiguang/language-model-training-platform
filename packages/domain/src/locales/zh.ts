@@ -1086,6 +1086,8 @@ export const ZH: Readonly<Record<string, string>> = {
   "Everyone in it loses access to its projects, data sources and models. This cannot be undone.": "所有成员都将失去对其项目、数据源和模型的访问。无法撤销。",
   "Type the tenant name to confirm": "输入租户名称以确认",
   "The last admin can't be changed. Make someone else an admin first.": "最后一位管理员不能修改。请先把其他人设为管理员。",
+  "A tenant must keep at least 2 admins. Make someone else an admin first.": "租户至少需要保留 2 位管理员。请先把其他人设为管理员。",
+  "Pick at least one other admin.": "请至少再选择一位管理员。",
   "Pick someone to add.": "请选择要添加的人。",
   "This person is not in the tenant.": "此人不在本租户中。",
   "Type the tenant name to confirm.": "请输入租户名称以确认。",

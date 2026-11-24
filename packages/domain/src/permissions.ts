@@ -41,7 +41,8 @@ export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: Acti
   addTenantMembers: admin,
   setTenantRole: admin,
   removeTenantMember: admin,
-  searchPeople: admin,
+  // Any signed-in caller may search the directory so a tenant creator can pick initial co-admins.
+  searchPeople: {permission: null, project: null},
   projectDefaults: read(),
   newProject: read(),
   getProject: read('arg'),
