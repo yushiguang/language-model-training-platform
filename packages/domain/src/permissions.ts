@@ -50,6 +50,10 @@ export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: Acti
   approveNode: write('arg'),
   deleteProject: write('request'),
   renameProject: write('request'),
+  // Who can edit a project (#118): anyone who opens it reads them; editors change them.
+  listProjectEditors: read('request'),
+  addProjectEditors: write('request'),
+  removeProjectEditor: write('request'),
   // The pages' check of what should run: the work it queues runs as Sprint itself.
   tick: read('request'),
   saveSettings: write('request'),

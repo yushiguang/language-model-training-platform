@@ -3,6 +3,10 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-24 (Project editors, #118)
+
+- **Project Settings lists who can edit**: the creator first, who can always edit and cannot be removed, then everyone added, with when. Anyone who can edit adds tenant members or removes them; everyone in the tenant can still open and read the project.
+
 ## 2026-11-24 (Tenant settings, #111)
 
 - **Admins manage the tenant in one settings dialog**: rename it (same rules as a new name), add people from the company directory by name or email, change roles, remove members, delete the tenant. Only admins change anything; members only read.
