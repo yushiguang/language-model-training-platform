@@ -60,6 +60,8 @@ body { background: var(--color-background-surface, #fff); }
 .sp-dlg-foot { padding: 0 24px 24px; }
 .sp-settings { height: min(640px, calc(100vh - 64px)); display: flex; }
 .sp-settings > * { flex: 1; min-width: 0; }
+/* The sections column keeps one width on every section (the content would squeeze it). */
+.sp-settings nav { width: 260px; min-width: 260px; }
 .sp-settings-main { display: flex; flex-direction: column; min-height: 100%; }
 .sp-settings-body { flex: 1; padding: 24px; }
 .sp-settings-foot { position: sticky; bottom: 0; padding: 16px 24px; background: var(--color-background-surface, #fff); border-top: 1px solid var(--color-border, #e5e5e5); }
@@ -86,3 +88,7 @@ body { background: var(--color-background-surface, #fff); }
 /* The tenant page (#103): an Admin card's mark for what a project needs first; the thresholds' rows. */
 .sp-needed { display: inline-flex; color: var(--color-text-warning, #b54708); }
 .sp-threshold { padding: 12px 16px; }
+/* Tenant settings (#111): a row's own buttons (remove, edit) show on hover, as in tables. */
+.sp-hover-acts { display: inline-flex; opacity: 0; }
+.sp-settings-row:hover .sp-hover-acts, .sp-hover-acts:focus-within { opacity: 1; }
+@media (hover: none) { .sp-hover-acts { opacity: 1; } }

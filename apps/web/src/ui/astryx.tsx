@@ -51,6 +51,7 @@ export {TextInput} from '@astryxdesign/core/TextInput';
 export {Token, type TokenColor} from '@astryxdesign/core/Token';
 export {Toolbar} from '@astryxdesign/core/Toolbar';
 export {TopNav, TopNavItem} from '@astryxdesign/core/TopNav';
+export {Typeahead, type SearchableItem, type SearchSource} from '@astryxdesign/core/Typeahead';
 
 /**
  * Astryx links (Link, a Button or menu item with `href`) go through Next's Link, so they move
