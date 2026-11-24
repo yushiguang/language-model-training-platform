@@ -26,6 +26,8 @@ export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: Acti
   // A caller's own tenants, and a new one: any signed-in caller (#94).
   listTenants: {permission: null, project: null},
   createTenant: {permission: null, project: null},
+  // The tenant's members: any member reads them (label set labelers, tenant settings).
+  listTenantMembers: read(),
 
   listProjects: read(),
   // Any member of the tenant creates projects, and becomes the project's first writer.
@@ -33,6 +35,13 @@ export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: Acti
   // The tenant page (#103): any member reads the rows and counts, and creates projects.
   listProjectRows: read(),
   getTenant: read(),
+  // Tenant settings (#111).
+  renameTenant: admin,
+  deleteTenant: admin,
+  addTenantMembers: admin,
+  setTenantRole: admin,
+  removeTenantMember: admin,
+  searchPeople: admin,
   projectDefaults: read(),
   newProject: read(),
   getProject: read('arg'),
@@ -41,6 +50,10 @@ export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: Acti
   approveNode: write('arg'),
   deleteProject: write('request'),
   renameProject: write('request'),
+  // Who can edit a project (#118): anyone who opens it reads them; editors change them.
+  listProjectEditors: read('request'),
+  addProjectEditors: write('request'),
+  removeProjectEditor: write('request'),
   // The pages' check of what should run: the work it queues runs as Sprint itself.
   tick: read('request'),
   saveSettings: write('request'),
@@ -66,6 +79,7 @@ export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: Acti
   removeExamples: write('request'),
   listSamples: read('request'),
   listLabelSets: read('arg'),
+  previewLabelSets: read('request'),
   // Labelers are picked by whoever edits the project; each gets project write when added.
   createLabelSet: write('request'),
   createLabelSets: write('request'),

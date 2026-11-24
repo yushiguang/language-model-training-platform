@@ -35,7 +35,7 @@ import type {
   StructuredPrompt,
   TenantModel,
 } from './types.ts';
-import type {ExampleMedia, FeatureInfo, PermissionPoint, TenantRole} from './platform-api.ts';
+import type {ExampleMedia, FeatureInfo, PermissionPoint, Person, TenantRole} from './platform-api.ts';
 
 /**
  * Contract 1: Frontend Web App <-> BFF Service (`@yushiguang/sprint-contracts/bff-api`).
@@ -91,6 +91,18 @@ export interface TenantSummary extends TenantInfo {
 }
 
 /**
+ * A member of the page's tenant (#107): the one list of members the pages read (label set
+ * labelers, tenant settings). `name` is the platform's display name, or the user id when it has none.
+ */
+export interface TenantMemberView {
+  userId: string;
+  name: string;
+  /** Shown under the name where the platform knows it. */
+  email?: string;
+  role: TenantRole;
+}
+
+/**
  * A new tenant (#94). The name is trimmed with its runs of spaces made one; it must not be empty
  * and no other tenant may have it (compared without case).
  */
@@ -102,6 +114,47 @@ export interface CreateTenantRequest {
 export interface CreateTenantResult {
   tenant?: TenantSummary;
   error?: string;
+}
+
+/** A new name for the page's tenant (#111): checked like a new tenant's (not blank, no other tenant's). */
+export interface RenameTenantRequest {
+  name: string;
+}
+
+/** The name as saved; or why it was not (shown under the field). */
+export interface RenameTenantResult {
+  name?: string;
+  error?: string;
+}
+
+/** Delete the page's tenant (#111): `name` is what the admin typed to confirm, and must be its name. */
+export interface DeleteTenantRequest {
+  name: string;
+}
+
+/** People to add to the page's tenant (#111), all with one role; those already in it are left as they are. */
+export interface AddTenantMembersRequest {
+  userIds: string[];
+  role: TenantRole;
+}
+
+export interface SetTenantRoleRequest {
+  userId: string;
+  role: TenantRole;
+}
+
+export interface RemoveTenantMemberRequest {
+  userId: string;
+}
+
+/** A member change done; or why not (the last admin stays an admin). */
+export interface MemberChangeResult {
+  error?: string;
+}
+
+/** Find people to add (#111), by name or email. */
+export interface SearchPeopleRequest {
+  query: string;
 }
 
 /** The page's tenant with what its Admin cards count (#103). `members`: null without a permission platform. */
@@ -437,14 +490,20 @@ export interface SamplePage {
   counts: Record<SampleFilter, number>;
 }
 
-/** A label set with its counts: samples in its range that are not removed, and how many of them have a gold label. */
-export type LabelSetView = LabelSet & {samples: number; labeled: number};
+/**
+ * A label set with its counts: samples in its range that are not removed, how many of them have a
+ * gold label, and how many of those disagree with the model (the Mismatch tab's rule, see `SampleRow`).
+ */
+export type LabelSetView = LabelSet & {samples: number; labeled: number; mismatch: number};
 
 export interface LabelSetList {
   /** By number. */
   sets: LabelSetView[];
   /** Samples not removed and in no label set yet: what the next sets take from. */
   unassigned: number;
+  /** Over the whole dataset (samples not removed, in a set or not): gold-labeled, and of those the mismatches. */
+  labeled: number;
+  mismatch: number;
 }
 
 /**
@@ -458,12 +517,40 @@ export interface CreateLabelSetRequest {
   labelerIds?: string[];
 }
 
-/** Splits every sample not in a set into label sets: `sets` of them (sizes as even as can be), or `perSet` samples each (the last may be smaller). Give one of the two. */
+/**
+ * Splits every sample not in a set into label sets: `sets` of them (sizes as even as can be), or
+ * `perSet` samples each (the last may be smaller). Give one of the two. `labelers`: the labeler of
+ * each new set in order (null or missing for none); each must be a member of the tenant and gets
+ * project write, as in `CreateLabelSetRequest`.
+ */
 export interface CreateLabelSetsRequest {
   projectId: string;
   sets?: number;
   perSet?: number;
+  labelers?: (string | null)[];
 }
+
+/**
+ * What creating would make, without saving (#107): `count` for one set (`createLabelSet`), or
+ * `sets` / `perSet` for several (`createLabelSets`). Give one of the three.
+ */
+export interface PreviewLabelSetsRequest {
+  projectId: string;
+  count?: number;
+  sets?: number;
+  perSet?: number;
+}
+
+/** One set a create would make: the number and range it would get, and its samples (removed ones are skipped). */
+export interface LabelSetPreview {
+  number: number;
+  first: number;
+  last: number;
+  samples: number;
+}
+
+/** The sets a create would make, in order, or why it would be refused (the message the create would give). */
+export type LabelSetsPreview = {sets: LabelSetPreview[]; unassigned: number; error?: string};
 
 /** Changes a label set's name or labelers; its range never changes. A field left out stays as it is. */
 export interface UpdateLabelSetRequest {
@@ -533,6 +620,33 @@ export interface DeleteProjectRequest {
 }
 
 /** Spec 1.1.0, 1.2: a new name for a project (trimmed, not empty, cut at `project.nameMaxChars`). */
+/** Someone who can edit a project (#118): its creator, or someone added in Project Settings. */
+export interface ProjectEditor {
+  userId: string;
+  name: string;
+  /** Shown under the name where the platform knows it. */
+  email?: string;
+  /** The creator can always edit the project and cannot be removed. */
+  creator: boolean;
+  /** When they were added (ISO time); null for the creator and for grants made elsewhere. */
+  addedAt: string | null;
+}
+
+export interface ProjectEditorsRequest {
+  projectId: string;
+}
+
+/** Give tenant members edit access to a project (#118); those who have it keep it. */
+export interface AddProjectEditorsRequest {
+  projectId: string;
+  userIds: string[];
+}
+
+export interface RemoveProjectEditorRequest {
+  projectId: string;
+  userId: string;
+}
+
 export interface RenameProjectRequest {
   projectId: string;
   name: string;
@@ -562,6 +676,8 @@ export interface BffContract {
   listTenants(): Promise<TenantSummary[]>;
   /** Creates a tenant; the caller becomes its admin. */
   createTenant(req: CreateTenantRequest): Promise<CreateTenantResult>;
+  /** The members of the page's tenant, by name (#107). Any member may read them. */
+  listTenantMembers(): Promise<TenantMemberView[]>;
 
   // Projects & workflow gates
   listProjects(): Promise<Project[]>;
@@ -569,6 +685,21 @@ export interface BffContract {
   listProjectRows(req: ProjectRowsRequest): Promise<ProjectRows>;
   /** The page's tenant and its Admin cards' counts (#103). */
   getTenant(): Promise<TenantDetail>;
+
+  // Tenant settings (#111): tenant admins only.
+  /** Renames the page's tenant. */
+  renameTenant(req: RenameTenantRequest): Promise<RenameTenantResult>;
+  /**
+   * Deletes the page's tenant: its projects (each through its own delete job), data sources and
+   * models, then who is in it and its record. A tenant without a record (one from an organization,
+   * or `default`) cannot be deleted.
+   */
+  deleteTenant(req: DeleteTenantRequest): Promise<{error?: string}>;
+  addTenantMembers(req: AddTenantMembersRequest): Promise<MemberChangeResult>;
+  setTenantRole(req: SetTenantRoleRequest): Promise<MemberChangeResult>;
+  removeTenantMember(req: RemoveTenantMemberRequest): Promise<MemberChangeResult>;
+  /** People to add, from the company directory; empty without one. */
+  searchPeople(req: SearchPeopleRequest): Promise<Person[]>;
   /** What the new-project dialog offers and starts from (#103). */
   projectDefaults(): Promise<ProjectDefaults>;
   /** Creates a project with its model and thresholds (the new-project dialog, #103). */
@@ -594,6 +725,12 @@ export interface BffContract {
   deleteProject(req: DeleteProjectRequest): Promise<void>;
   /** Renames a project (from Project Settings); returns the name as saved. */
   renameProject(req: RenameProjectRequest): Promise<string>;
+  /** Who can edit the project (#118), the creator first. Anyone who can open the project reads it. */
+  listProjectEditors(req: ProjectEditorsRequest): Promise<ProjectEditor[]>;
+  /** Gives tenant members edit access (#118); `error` names who cannot be added. Needs project edit. */
+  addProjectEditors(req: AddProjectEditorsRequest): Promise<MemberChangeResult>;
+  /** Takes edit access away (#118); the creator keeps it (`error`). Needs project edit. */
+  removeProjectEditor(req: RemoveProjectEditorRequest): Promise<MemberChangeResult>;
 
   // Project Settings (the pass rule and the labeling model). Saving also confirms them.
   saveSettings(req: SaveSettingsRequest): Promise<void>;
@@ -663,6 +800,8 @@ export interface BffContract {
   listSamples(req: ListSamplesRequest): Promise<SamplePage>;
   /** The project's label sets with their counts. */
   listLabelSets(projectId: string): Promise<LabelSetList>;
+  /** The ranges a create would cut now, without saving (the create dialogs' preview). */
+  previewLabelSets(req: PreviewLabelSetsRequest): Promise<LabelSetsPreview>;
   createLabelSet(req: CreateLabelSetRequest): Promise<LabelSet>;
   createLabelSets(req: CreateLabelSetsRequest): Promise<LabelSet[]>;
   updateLabelSet(req: UpdateLabelSetRequest): Promise<LabelSet>;

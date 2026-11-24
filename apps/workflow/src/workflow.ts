@@ -8,6 +8,7 @@ import * as features from './services/features.ts';
 import * as mismatch from './services/mismatches.ts';
 import * as governance from './services/governance.ts';
 import * as projects from './services/projects.ts';
+import * as editors from './services/editors.ts';
 import * as prompts from './services/prompts.ts';
 import * as settings from './services/settings.ts';
 import * as scores from './services/scores.ts';
@@ -108,11 +109,18 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
 
     listTenants: ctx => tenants.listTenants(at(ctx)),
     createTenant: (ctx, r) => tenants.createTenant(at(ctx), r),
+    listTenantMembers: ctx => tenants.listTenantMembers(at(ctx)),
 
     listProjects: ctx => projects.listProjects(at(ctx)),
     createProject: (ctx, name) => projects.createProject(at(ctx), name),
     listProjectRows: (ctx, r) => projects.listProjectRows(at(ctx), r),
     getTenant: ctx => tenants.getTenant(at(ctx)),
+    renameTenant: (ctx, r) => tenants.renameTenant(at(ctx), r),
+    deleteTenant: (ctx, r) => tenants.deleteTenant(at(ctx), r),
+    addTenantMembers: (ctx, r) => tenants.addTenantMembers(at(ctx), r),
+    setTenantRole: (ctx, r) => tenants.setTenantRole(at(ctx), r),
+    removeTenantMember: (ctx, r) => tenants.removeTenantMember(at(ctx), r),
+    searchPeople: (ctx, r) => tenants.searchPeople(at(ctx), r),
     projectDefaults: ctx => projects.projectDefaults(at(ctx)),
     newProject: (ctx, r) => projects.newProject(at(ctx), r),
     getProject: (ctx, id) => projects.getProject(at(ctx), id),
@@ -128,6 +136,9 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     approveNode: (ctx, projectId, node) => projects.approveNode(at(ctx), projectId, node),
     deleteProject: (ctx, r) => projects.deleteProject(at(ctx), r.projectId),
     renameProject: (ctx, r) => projects.renameProject(at(ctx), r.projectId, r.name),
+    listProjectEditors: (ctx, r) => editors.listProjectEditors(at(ctx), r),
+    addProjectEditors: (ctx, r) => editors.addProjectEditors(at(ctx), r),
+    removeProjectEditor: (ctx, r) => editors.removeProjectEditor(at(ctx), r),
     // The caller only needs to read the project: the work its check queues runs as Sprint in the
     // project's tenant, as the server's sweep does (docs/design/server.md, 2.2).
     async tick(ctx, {projectId}) {
@@ -166,6 +177,7 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     },
     listSamples: (ctx, r) => samples.listSamples(at(ctx), r),
     listLabelSets: (ctx, projectId) => labelSets.listLabelSets(at(ctx), projectId),
+    previewLabelSets: (ctx, r) => labelSets.previewLabelSets(at(ctx), r),
     createLabelSet: (ctx, r) => labelSets.createLabelSet(at(ctx), r),
     createLabelSets: (ctx, r) => labelSets.createLabelSets(at(ctx), r),
     updateLabelSet: (ctx, r) => labelSets.updateLabelSet(at(ctx), r),

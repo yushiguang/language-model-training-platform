@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {memoryPermissionAdmin, standInAuthorization} from './enterprise.ts';
+import {memoryPeople, SAMPLE_PEOPLE} from './people.ts';
 
 const ctx = {requestId: 'rq_1', user: {id: 'u_admin', name: 'Admin'}};
 
@@ -62,4 +63,21 @@ test('standInAuthorization: allows everything, or only reading when the browser 
   } finally {
     g.localStorage = before;
   }
+});
+
+test('stand-in people (#111): the directory finds by name or email, and people added from it keep their names', async () => {
+  const people = memoryPeople();
+  // Names that start with the query come first.
+  assert.deepEqual((await people.search('an', 10)).map(p => p.name), ['Ana Souza', 'Dana Kim', 'Mei Wang']);
+  assert.deepEqual((await people.search('BEN.carter@', 5)).map(p => p.name), ['Ben Carter']);
+  assert.deepEqual(await people.search('  ', 5), []);
+  assert.equal((await people.search('a', 2)).length, 2);
+  const admin = memoryPermissionAdmin({people: SAMPLE_PEOPLE});
+  const ctx = {requestId: 'rq', user: {id: 'u', name: 'U'}};
+  await admin.addTenantMember(ctx, 't1', 'u-ben', 'member');
+  await admin.addTenantMember(ctx, 't1', 'u-zed', 'member');
+  assert.deepEqual(await admin.listTenantMembers('t1'), [
+    {userId: 'u-ben', role: 'member', name: 'Ben Carter', email: 'ben.carter@example.com'},
+    {userId: 'u-zed', role: 'member'},
+  ]);
 });

@@ -115,6 +115,7 @@ export function createBffApi(deps: BffDeps): BffContract {
       return list.map(t => (t.name === t.id ? {...t, name: nameOf(who, t.id)} : t));
     },
     createTenant: pass('createTenant'),
+    listTenantMembers: pass('listTenantMembers'),
 
     listProjects: pass('listProjects'),
     createProject: pass('createProject'),
@@ -125,6 +126,12 @@ export function createBffApi(deps: BffDeps): BffContract {
       return t.name === t.id ? {...t, name: nameOf(who, t.id)} : t;
     },
     projectDefaults: pass('projectDefaults'),
+    renameTenant: pass('renameTenant'),
+    deleteTenant: pass('deleteTenant'),
+    addTenantMembers: pass('addTenantMembers'),
+    setTenantRole: pass('setTenantRole'),
+    removeTenantMember: pass('removeTenantMember'),
+    searchPeople: pass('searchPeople'),
     newProject: pass('newProject'),
     getProject: pass('getProject'),
     loadProjectState: pass('loadProjectState'),
@@ -132,6 +139,9 @@ export function createBffApi(deps: BffDeps): BffContract {
     approveNode: pass('approveNode'),
     deleteProject: pass('deleteProject'),
     renameProject: pass('renameProject'),
+    listProjectEditors: pass('listProjectEditors'),
+    addProjectEditors: pass('addProjectEditors'),
+    removeProjectEditor: pass('removeProjectEditor'),
     tick: pass('tick'),
     saveSettings: pass('saveSettings'),
     listDataSources: pass('listDataSources'),
@@ -152,6 +162,7 @@ export function createBffApi(deps: BffDeps): BffContract {
     removeExamples: pass('removeExamples'),
     listSamples: pass('listSamples'),
     listLabelSets: pass('listLabelSets'),
+    previewLabelSets: pass('previewLabelSets'),
     createLabelSet: pass('createLabelSet'),
     createLabelSets: pass('createLabelSets'),
     updateLabelSet: pass('updateLabelSet'),

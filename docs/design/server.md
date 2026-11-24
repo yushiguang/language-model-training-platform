@@ -116,15 +116,17 @@
 
 - 记录：项目内的编号 `number`（1、2、3……，没起名时页面显示 `#1`）、名称（可空，最多 80 字）、样本序号闭区间 `first`–`last`、标注人 `labelerIds`、创建人和时间。
 - `createLabelSet({projectId, count, name?, labelerIds?})`：从上一个标注集之后开始，取接下来 `count` 条没被移除的样本，`last` 是第 `count` 条的序号，所以范围里可能夹着被移除的样本（看不到、不计数，恢复后回到这个标注集）。剩下的不够时报“只剩 N 条样本没有标注集”。
-- `createLabelSets({projectId, sets} | {projectId, perSet})`：把剩下的样本全部切开。按个数切时各标注集的样本数尽量平均（多出来的从前往后各加一条）；按每个的样本数切时最后一个可以少一些。两个参数必须且只能给一个。
+- `createLabelSets({projectId, sets} | {projectId, perSet}, labelers?)`：把剩下的样本全部切开。按个数切时各标注集的样本数尽量平均（多出来的从前往后各加一条）；按每个的样本数切时最后一个可以少一些。两个参数必须且只能给一个。`labelers` 按顺序给每个新标注集一个标注人（`null` 或缺省表示没有），所有标注人先检查再保存。
+- `previewLabelSets({projectId, count | sets | perSet})`（读权限，#107）：按现在剩下的样本算出创建会切出的各标注集（编号、范围、样本数），不加锁、不保存；创建会报的错放在 `error` 里返回。创建对话框用它显示范围预览。
 - 创建和修改都在 `label-sets:<projectId>` 锁里，所以两个人同时创建也不会重叠，编号连续。切分时在里面再拿数据集的 `samples:<snapshotId>` 锁（加锁顺序固定），所以不会在取样任务还在写样本时切出范围；批量切分的各标注集大小在锁里按当时剩下的样本数计算。范围创建后不能改，也不能删除（只随项目一起删除）。在一个标注集之后追加的样本不属于任何标注集，等新的标注集。
 - `updateLabelSet({projectId, labelSetId, name?, labelerIds?})`：只改名称和标注人，没给的字段不变。
-- `listLabelSets(projectId)`（读权限）：按编号排列，每个带样本数（不含被移除的）和已有人工标签的条数，另给出还没分配的样本数。
+- `listLabelSets(projectId)`（读权限）：按编号排列，每个带样本数（不含被移除的）、已有人工标签的条数和其中不一致的条数（规则和数据集页的“不一致”一样，#107），另给出还没分配的样本数，以及整个数据集的已标注数和不一致数。
 - 创建、修改都要项目写权限。
 
 **标注人**
 
 - 本次每个标注集最多一个标注人（`labelerIds` 是列表，以后可以放多个）。有 `PermissionAdminPort` 时，标注人必须在 `listTenantMembers` 里，否则报错。
+- 选标注人的列表来自 BFF 的 `listTenantMembers()`（读权限，#107）：当前租户的成员，带名字、邮箱（平台知道时）和角色，按名字排序。名字和邮箱来自 `TenantMember.name`、`TenantMember.email`；平台没给时，调用者自己用身份里的名字和邮箱，其他人名字显示用户 ID、不带邮箱。没有 `PermissionAdminPort` 时只有调用者自己（管理员）。这是页面读成员的唯一接口，租户设置的成员页也用它。
 - 新加的标注人先通过 `grantProjectWrite` 授予项目写权限（`withRetries`，最多重试 3 次）；授权失败时整个操作报错，什么都不保存。被换下的标注人保留项目写权限，因为不知道这个权限是不是因为别的原因给的。
 - 通知（第 8 节，尽力而为）：创建带标注人的标注集时发 `label_set_created` 给标注人；修改时只发 `labeler_added` 给新加的人。操作人自己不收。链接到 `/gold/?p=<projectId>&set=<labelSetId>`（以后的标注集详情页），内容只有标注集名称、样本序号范围和项目名。
 
@@ -407,6 +409,19 @@ export interface ConfigReader {
 - **Admin 卡片**：`getTenant()` 给当前租户的名称、角色、项目数，以及数据源数（和数据源页同一个列表）、租户自己的模型数、成员数（没接权限平台时为 null）。
 - **新建项目**：`projectDefaults()` 给可选模型（和项目设置同一个列表：租户的模型，然后平台默认）、默认模型、默认阈值（Macro-F1 取配置的默认值，Precision / Recall 关）。`newProject({name, model?, thresholds?})` 先检查（名称不能为空、模型要在列表里、阈值在 0 到 1 之间），错误由返回值给出；然后建项目、存项目设置，并算作已确认。两个都没给时和 `createProject` 一样，用默认值，之后再确认。
 
+### 9.4 租户设置（#111）
+
+- **改名**：`renameTenant({name})`，规则和新建一样（空白合并、不能为空、全局不重名，持有 `tenants:names` 锁）。没有记录的租户（`default`、organization）改名时用同一个 id 建一条记录。
+- **成员**：读用线 2 的 `listTenantMembers()`（#107）。改动只有管理员能做：`addTenantMembers({userIds, role})` 一次加多人（已在的人角色不变，一次最多 50 人），`setTenantRole({userId, role})`、`removeTenantMember({userId})`。租户至少留一个管理员：最后一个管理员不能降级或移除，返回 `error`。角色改动持有 `members:<租户>` 锁，两个管理员同时降级对方时也不会一个都不剩。
+- **找人**：`searchPeople({query})` 查公司目录（新的可选 `Platform.people`，`PeopleDirectory.search`），按名字或邮箱，最多 20 人；没接目录时返回空，页面只能按用户 id 加人。浏览器替身是几位虚构同事（example.com 邮箱）。
+- **删除租户**：`deleteTenant({name})` 要输入租户名称确认。依次删项目（各自走删除任务）、删数据源（内置样例除外）、删租户的模型并让网关重读、移除所有成员，最后删记录；中途失败可以再执行一次。没有记录的租户不能删。
+
+### 9.5 项目编辑者（#118）
+
+- **读**：`listProjectEditors({projectId})` 列出能编辑项目的人，创建人在最前（`creator: true`），其他人按名字排序。名字和邮箱来自 `listTenantMembers`，权限平台没给名字时，创建人用项目记录里的名字，其他人用用户 id。`addedAt` 来自项目操作记录 `project.editor_added`，创建人和在别处授权的人为 null。能打开项目的人都能读。
+- **加人**：`addProjectEditors({projectId, userIds})` 只收本租户成员（否则返回 `error`，什么都不改），已能编辑的人不变，一次最多 50 人。每人经 `grantProjectWrite` 授权（失败重试 3 次），并记一条操作记录。需要项目编辑权限。
+- **移除**：`removeProjectEditor({projectId, userId})` 经 `revokeProjectWrite` 撤销；创建人不能移除。持有 `editors:<项目>` 锁。需要项目编辑权限。
+
 ## 10. Contract 改动
 
 按 CONTRIBUTING，每个 contract 改动单独一个 PR，标明是新增还是破坏性：
@@ -428,6 +443,8 @@ export interface ConfigReader {
 | `Tenant` 和 catalog 的 `tenants` 集合、`listTenants` / `createTenant`、`RuntimeInfo.tenant` 在调用方不在租户时省略、`BffDeps.tenant` | 新增（#94） |
 | `PermissionAdminPort.listUserTenants` | 破坏性：部署方的权限平台适配器要实现（#94） |
 | 租户页：`listProjectRows`（每行当前步骤、最好分数、运行中任务数、最近改动时间，分页，`mine`）、`getTenant`（Admin 卡片的计数）、`projectDefaults`、`newProject`（名称、模型、阈值，存为已确认的项目设置）；步骤规则 `stepStates` / `currentStep` 移到 domain | 新增（#103）。`createProject(name)` 保留给脚本和测试 |
+| 租户设置：`renameTenant`、`deleteTenant`、`addTenantMembers` / `setTenantRole` / `removeTenantMember`、`searchPeople`；`PeopleDirectory`（`Platform.people` 可选） | 新增（#111）：部署方可以不接目录 |
+| 项目编辑者：`listProjectEditors`、`addProjectEditors`、`removeProjectEditor`，`ProjectEditor` | 新增（#118）：用已有的权限平台方法，部署方的适配器不用改 |
 | `ScoreBasis`、`EvalReport.basis`（可选，旧报告没有）、`ScoringState`、任务类型 `report.rescore`、`ProjectState.scoring`、`WorkflowFacts.scoringReady`、`rescore` 接口 | 新增：只有工作流产出和读取，部署方的适配器不用改（第 9 步，#86 已完成） |
 
 ## 11. 交付计划

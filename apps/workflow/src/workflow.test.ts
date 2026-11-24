@@ -6,7 +6,7 @@ import type {AgentRuntimeContract, AgentToolRequest, AgentTurnRequest, CallerUse
 import {createCatalog} from '@yushiguang/sprint-catalog';
 import {createLabeling, memoryLocks} from '@yushiguang/sprint-labeling';
 import {createJobs} from '@yushiguang/sprint-jobs';
-import {localDocRuntime, loopback, memoryAccessRequests, memoryJobStore, memoryPermissionAdmin, memorySharedState} from '@yushiguang/sprint-platform';
+import {localDocRuntime, loopback, memoryAccessRequests, memoryJobStore, memoryPeople, memoryPermissionAdmin, memorySharedState} from '@yushiguang/sprint-platform';
 import {createWorkflow} from './workflow.ts';
 import type {WorkflowDeps} from './services/app.ts';
 
@@ -24,7 +24,7 @@ const ctxOf = (user: CallerUser): RequestContext => ({requestId: `rq_${++n}`, us
 const page = (agent: PageContext['agent'] = 'front_desk'): PageContext => ({label: 'Projects', agent, intent: 'answer', context: {}, where: {page: 'projects', params: {}}});
 
 /** A workflow over the real catalog and labeling, with a fake model and the given helpers. */
-function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) => AgentRuntimeContract, documents?: DocumentSource, access: Pick<WorkflowDeps, 'authorization' | 'permissionAdmin' | 'accessRequests'> = {}) {
+function world(prefix: string, agents: (wf: ReturnType<typeof createWorkflow>) => AgentRuntimeContract, documents?: DocumentSource, access: Pick<WorkflowDeps, 'authorization' | 'permissionAdmin' | 'accessRequests' | 'people'> = {}) {
   const db = localDocRuntime(prefix);
   const catalog = createCatalog(db);
   const forgotten: string[] = [];
@@ -346,7 +346,7 @@ test('label sets (#82): members read them; changing them needs project write', a
   const {api} = world('wf-sets', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
   const p = await api.createProject(inTenant(alice, 't1'), 'Sets');
   const bobs = inTenant(bob, 't1');
-  assert.deepEqual(await api.listLabelSets(bobs, p.id), {sets: [], unassigned: 0}, 'a member reads');
+  assert.deepEqual(await api.listLabelSets(bobs, p.id), {sets: [], unassigned: 0, labeled: 0, mismatch: 0}, 'a member reads');
   assert.deepEqual(await api.listSamples(bobs, {projectId: p.id}), {items: [], total: 0, model: null, counts: {live: 0, no_label: 0, mismatch: 0, removed: 0}});
   const structured = {taskSummary: '', features: {video: [], photo_text: [], metadata: []}, label: {name: 'x', kind: 'single' as const, values: []}, ruleGroups: [], images: []};
   assert.equal(await api.goldLabelsCleared(bobs, {projectId: p.id, structured}), 0);
@@ -459,6 +459,25 @@ test('tenants (#94): anyone signed in creates one and becomes its admin; names a
   assert.equal((await catalog.find('tenants', {})).length, 2);
 });
 
+test('tenant members (#107): any member lists them by name, with the email the platform knows; a member without a name is named by the identity or the user id', async () => {
+  const perms = checking(memoryPermissionAdmin({seed: [{tenantId: 't1', userId: bob.id, role: 'member', name: 'Bob Smith', email: 'bob@example.com'}]}));
+  const {api} = world('wf-members', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
+  await perms.admin.addTenantMember(ctxOf(alice), 't1', alice.id, 'admin');
+  await perms.admin.addTenantMember(ctxOf(alice), 't1', 'u_zed', 'member');
+  const want = [
+    {userId: alice.id, name: 'Alice', role: 'admin'},
+    {userId: bob.id, name: 'Bob Smith', email: 'bob@example.com', role: 'member'},
+    {userId: 'u_zed', name: 'u_zed', role: 'member'},
+  ];
+  assert.deepEqual(await api.listTenantMembers(inTenant(alice, 't1')), want);
+  assert.deepEqual(await api.listTenantMembers(inTenant(bob, 't1')), [want[1], {...want[0], name: alice.id}, want[2]], "another member's name is the platform's to give; by name");
+  await assert.rejects(api.listTenantMembers(inTenant(eve, 't1')), {code: 'forbidden'}, 'not a member: refused');
+  const bare = world('wf-members-bare', noHelpers);
+  assert.deepEqual(await bare.api.listTenantMembers(inTenant(alice, 't9')), [{userId: alice.id, name: 'Alice', role: 'admin'}], 'no platform: the caller alone');
+  const withEmail = {...alice, email: 'alice@example.com'};
+  assert.deepEqual(await bare.api.listTenantMembers(inTenant(withEmail, 't9')), [{userId: alice.id, name: 'Alice', email: 'alice@example.com', role: 'admin'}], "the caller's own email comes from the identity");
+});
+
 test('tenants (#94): an admin that cannot be written removes the new tenant; without a permission platform none is made', async () => {
   const admin = memoryPermissionAdmin();
   let failures = Infinity;
@@ -543,6 +562,95 @@ test('tenant page (#103): the tenant and its counts; a new project takes the dia
   assert.deepEqual({...t, dataSources: undefined}, {id: 't1', name: 't1', role: 'member', projects: 3, dataSources: undefined, models: 1, members: 2});
   assert.equal(typeof t.dataSources, 'number');
   await assert.rejects(api.getTenant(inTenant(eve, 't1')), {code: 'forbidden'});
+});
+
+test('tenant settings (#111): admins rename the tenant, add people, change roles and remove members; the tenant always keeps an admin', async () => {
+  const perms = checking();
+  const {api, catalog} = world('wf-tenant-admin', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin, people: memoryPeople()});
+  const made = (await api.createTenant(ctxOf(alice), {name: 'Safety'})).tenant!;
+  await api.createTenant(ctxOf(bob), {name: 'Ads'});
+  const a = inTenant(alice, made.id);
+  assert.deepEqual(await api.renameTenant(a, {name: '  '}), {error: 'Enter a name. Spaces alone are not a name.'});
+  assert.deepEqual(await api.renameTenant(a, {name: 'ads'}), {error: 'A tenant with this name already exists. Pick another name.'});
+  assert.deepEqual(await api.renameTenant(a, {name: ' Content   Safety '}), {name: 'Content Safety'});
+  assert.deepEqual(await api.renameTenant(a, {name: 'content safety'}), {name: 'content safety'}, 'its own name, another case');
+  assert.equal((await catalog.get('tenants', made.id))?.name, 'content safety');
+  // A tenant without a record gets one under its id.
+  await perms.admin.addTenantMember(ctxOf(alice), 't-org', alice.id, 'admin');
+  assert.deepEqual(await api.renameTenant(inTenant(alice, 't-org'), {name: 'Org'}), {name: 'Org'});
+  assert.equal((await catalog.get('tenants', 't-org'))?.name, 'Org');
+
+  // People come from the directory; a blank query finds no one.
+  assert.deepEqual(await api.searchPeople(a, {query: ' '}), []);
+  assert.deepEqual((await api.searchPeople(a, {query: 'MEI'})).map(p => p.id), ['u-mei']);
+  assert.deepEqual(await api.addTenantMembers(a, {userIds: [], role: 'member'}), {error: 'Pick someone to add.'});
+  assert.deepEqual(await api.addTenantMembers(a, {userIds: [bob.id, 'u-mei', alice.id, bob.id], role: 'member'}), {});
+  assert.equal(perms.admin.roleOf(made.id, alice.id), 'admin', 'already in: keeps the role');
+  assert.equal(perms.admin.roleOf(made.id, bob.id), 'member');
+  // Members read; only admins change members.
+  const b = inTenant(bob, made.id);
+  await assert.rejects(api.addTenantMembers(b, {userIds: [eve.id], role: 'member'}), {code: 'forbidden'});
+  await assert.rejects(api.renameTenant(b, {name: 'Mine'}), {code: 'forbidden'});
+  await assert.rejects(api.searchPeople(b, {query: 'a'}), {code: 'forbidden'});
+
+  const last = "The last admin can't be changed. Make someone else an admin first.";
+  assert.deepEqual(await api.setTenantRole(a, {userId: alice.id, role: 'member'}), {error: last});
+  assert.deepEqual(await api.removeTenantMember(a, {userId: alice.id}), {error: last});
+  assert.deepEqual(await api.setTenantRole(a, {userId: bob.id, role: 'admin'}), {});
+  assert.deepEqual(await api.setTenantRole(a, {userId: alice.id, role: 'member'}), {}, 'Bob is an admin now');
+  assert.deepEqual(await api.removeTenantMember(b, {userId: 'u-mei'}), {});
+  assert.deepEqual(await api.removeTenantMember(b, {userId: 'u-mei'}), {error: 'This person is not in the tenant.'});
+  assert.deepEqual((await perms.admin.listTenantMembers(made.id)).map(m => [m.userId, m.role]).sort(), [[alice.id, 'member'], [bob.id, 'admin']]);
+  assert.ok((await catalog.find('audit_log', {action: 'tenant.role'})).length === 2);
+});
+
+test('tenant settings (#111): deleting a tenant takes its projects, sources, models and members with it', async () => {
+  const perms = checking();
+  const {api, catalog, forgotten} = world('wf-tenant-delete', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
+  const made = (await api.createTenant(ctxOf(alice), {name: 'Doomed'})).tenant!;
+  const a = inTenant(alice, made.id);
+  await api.addTenantMembers(a, {userIds: [bob.id], role: 'member'});
+  const p = await api.createProject(a, 'One');
+  await api.addModel(a, {name: 'Team', endpoint: 'https://models.example/team', qpm: 60, tpm: 100_000});
+  await assert.rejects(api.deleteTenant(inTenant(bob, made.id), {name: 'Doomed'}), {code: 'forbidden'});
+  assert.deepEqual(await api.deleteTenant(a, {name: 'doomed'}), {error: 'Type the tenant name to confirm.'});
+  assert.deepEqual(await api.deleteTenant(a, {name: 'Doomed'}), {});
+  assert.ok(!(await catalog.get('tenants', made.id)), 'its record is gone');
+  assert.deepEqual(await catalog.find('tenant_models', {tenantId: made.id}), []);
+  assert.ok(forgotten.includes(made.id), 'the gateway reads the models again');
+  assert.equal((await catalog.get('projects', p.id))?.deleting, true, 'its project is on its way out');
+  assert.deepEqual(await perms.admin.listTenantMembers(made.id), []);
+  assert.deepEqual(await api.listTenants(ctxOf(alice)), [], 'gone from the home page');
+  // A tenant without a record (the organization's own) cannot be deleted here.
+  await perms.admin.addTenantMember(ctxOf(alice), 't-org', alice.id, 'admin');
+  assert.deepEqual(await api.deleteTenant(inTenant(alice, 't-org'), {name: 't-org'}), {error: "This tenant comes with your organization. It can't be deleted."});
+});
+
+test('project editors (#118): the creator first and always; tenant members are added and removed; outsiders are not', async () => {
+  const perms = checking();
+  const sys = {requestId: 'rq_setup', user: {id: 'u_admin', name: 'Admin'}};
+  await perms.admin.addTenantMember(sys, 't1', alice.id, 'member');
+  await perms.admin.addTenantMember(sys, 't1', bob.id, 'member');
+  const {api, catalog} = world('wf-editors', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
+  const a = inTenant(alice, 't1');
+  const b = inTenant(bob, 't1');
+  const p = await api.createProject(a, 'Shared');
+  assert.deepEqual(await api.listProjectEditors(b, {projectId: p.id}), [{userId: alice.id, name: 'Alice', creator: true, addedAt: null}], 'any member reads them; the creator is named by the project');
+  await assert.rejects(api.addProjectEditors(b, {projectId: p.id, userIds: [bob.id]}), {code: 'forbidden'}, 'only editors add editors');
+  assert.deepEqual(await api.addProjectEditors(a, {projectId: p.id, userIds: []}), {error: 'Pick someone to add.'});
+  assert.deepEqual(await api.addProjectEditors(a, {projectId: p.id, userIds: [eve.id]}), {error: 'Only members of this tenant can edit its projects.'});
+  assert.deepEqual(await api.addProjectEditors(a, {projectId: p.id, userIds: [bob.id, bob.id, alice.id]}), {});
+  assert.ok(perms.admin.canWrite('t1', p.id, bob.id));
+  const list = await api.listProjectEditors(b, {projectId: p.id});
+  assert.deepEqual(list.map(e => [e.userId, e.creator]), [[alice.id, true], [bob.id, false]]);
+  assert.ok(list[1].addedAt, 'when Bob was added');
+  assert.equal((await catalog.find('audit_log', {projectId: p.id, action: 'project.editor_added'})).length, 1, 'the creator was not added again');
+  // Bob edits now, so he can take himself off; the creator stays.
+  assert.deepEqual(await api.removeProjectEditor(b, {projectId: p.id, userId: alice.id}), {error: 'The creator can always edit the project.'});
+  assert.deepEqual(await api.removeProjectEditor(b, {projectId: p.id, userId: bob.id}), {});
+  assert.ok(!perms.admin.canWrite('t1', p.id, bob.id));
+  assert.deepEqual(await api.removeProjectEditor(a, {projectId: p.id, userId: bob.id}), {error: 'This person cannot edit the project.'});
+  assert.deepEqual((await api.listProjectEditors(a, {projectId: p.id})).map(e => e.userId), [alice.id]);
 });
 
 test('page views carry the place of waiting work in its queue (#66)', async () => {

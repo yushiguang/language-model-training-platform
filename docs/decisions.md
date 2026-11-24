@@ -11,6 +11,24 @@ where it matters, why. The code follows these; change a line here when a decisio
 - **Suggestions** sit beside the scores. Until the AI evaluates each version, the card is the one code picks from the project's records, with its buttons ("Fix in Prompt Design" replaces Improve with AI) and Dismiss for this visit.
 - **The selected version is in the address** (`?v=`), so a reload or a language switch keeps it.
 
+## 2026-11-24 (Project editors, #118)
+
+- **Project Settings lists who can edit**: the creator first, who can always edit and cannot be removed, then everyone added, with when. Anyone who can edit adds tenant members or removes them; everyone in the tenant can still open and read the project.
+
+## 2026-11-24 (Tenant settings, #111)
+
+- **Admins manage the tenant in one settings dialog**: rename it (same rules as a new name), add people from the company directory by name or email, change roles, remove members, delete the tenant. Only admins change anything; members only read.
+- **A tenant always keeps an admin**: the last admin can't be made a member or removed; the page says to make someone else an admin first.
+- **Deleting a tenant takes everything in it**: its projects, data sources, models and members, once its name is typed. Tenants that come with the organization (no record here) can't be deleted.
+- **The dialog keeps name and member changes until Save; models save at once**: adds, role changes and removals show in the list first (Save applies them, promotions before demotions, so an admin is always left). Each model has its own Add or Save button. Delete tenant asks for the name in its own dialog.
+
+## 2026-11-23 (Label sets page, #107)
+
+- **One members read for every page**: `listTenantMembers()` gives the page's tenant's members with a name, an email where known, and a role. The label set labeler picker uses it now; the tenant settings Members tab builds add and remove on top of it. The platform's `TenantMember` carries an optional `name` and `email`.
+- **Create dialogs show the ranges before saving**: `previewLabelSets` cuts the same ranges as the create, skipping removed samples, so the dialog can show "#829–953" without guessing. Several sets can each get their own labeler in one create.
+- **The label set list counts mismatches** per set and for the dataset, by the Dataset page's rule.
+- The browser stand-in seeds four made-up colleagues in the default tenant, so there is someone to pick as a labeler.
+
 ## 2026-11-23 (Tenant page, #103)
 
 - **A new project's settings are chosen when it is made**: the new-project dialog asks for the name, the labeling model (the tenant's default first) and the three thresholds (Macro-F1 at the configured default, Precision and Recall off), and saving them there counts as confirming Project Settings, so no second confirmation comes before the first paid run. Names may still repeat; a blank one is shown under the field.

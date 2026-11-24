@@ -1,10 +1,12 @@
 /**
- * End-to-end check of the static build on the stand-ins, on the 1.0.0 four-step flow: the Projects
- * list (create, and Delete with the exact-name confirmation), Prompt Design (an existing prompt
+ * End-to-end check of the static build on the stand-ins, on the 1.0.0 four-step flow: the tenant
+ * page (#103: New project with its model and thresholds, the project rows, Delete with the
+ * exact-name confirmation), tenant settings (#111: a member added, the last admin kept, the tenant
+ * deleted), Prompt Design (an existing prompt
  * pasted into Ask AI is imported with its "Not carried over" list; a prompt drafted from a
  * description is approved as v1 with the page's Approve button, never in the chat), Dataset
  * (auto sampling, no split), Gold Labels (labeled on the page with the answers bundled with the
- * sample file), the Project Settings confirmation before the first paid run, then Prompt Tuning:
+ * sample file), Project Settings from the overview, then Prompt Tuning:
  * scoring, the fixed AI Suggestion cards, Mismatches, Improve with AI with word marks, Auto
  * Optimise until a version passes, Copy prompt and Finish; and the telemetry events and metrics.
  * 1.1.0: the Created by column, renaming in Project Settings, a problem report from Ask AI, and the
@@ -112,34 +114,72 @@ let current = null;
   await page.getByRole('heading', {name: 'My team'}).click();
   await page.waitForURL(/\?t=default/);
   await page.getByRole('button', {name: 'Switch My team'}).click();
-  await page.getByRole('menuitem', {name: 'Search Ads'}).waitFor();
-  await page.keyboard.press('Escape');
-  await page.goto(BASE + '/tenant/');
-  await page.getByPlaceholder('Short-video tagging').fill('Scratch project');
-  await button(page, 'Create project').click();
+  await page.getByRole('menuitem', {name: 'Search Ads'}).click();
+  await page.waitForURL(/\?t=tn_/);
+  // #111: tenant settings. Someone is added from the directory and kept with Save; the last admin
+  // can't be changed; the tenant is deleted once its name is typed and leaves Home.
+  await page.getByRole('heading', {name: 'Members', level: 4}).click();
+  const ts = page.getByRole('dialog');
+  await ts.getByRole('combobox', {name: "Evelyn's role"}).waitFor();
+  if ((await ts.getByRole('combobox', {name: "Evelyn's role"}).getAttribute('aria-disabled')) !== 'true') throw new Error("the last admin's role can be changed");
+  await ts.getByRole('combobox', {name: 'Add members'}).fill('ben');
+  await page.getByRole('option', {name: /Ben Carter/}).click();
+  await button(ts, 'Add').click();
+  await ts.getByRole('combobox', {name: "Ben Carter's role"}).waitFor();
+  await shot(page, '0d-tenant-members');
+  await button(ts, 'Save').click();
+  await ts.waitFor({state: 'detached'});
+  await page.getByText('2 members').waitFor();
+  await page.getByRole('heading', {name: 'Tenant settings', level: 4}).click();
+  await page.getByRole('dialog').getByRole('button', {name: 'Delete tenant'}).first().click();
+  await page.getByRole('dialog').getByRole('button', {name: 'Delete tenant'}).last().click();
+  const dt = page.getByRole('dialog').last();
+  await dt.getByLabel('Type the tenant name to confirm').fill('Search Ads');
+  await button(dt, 'Delete tenant').click();
+  await page.waitForURL(u => new URL(u).pathname === '/');
+  await page.getByRole('link', {name: 'Open My team'}).waitFor();
+  if (await page.getByRole('link', {name: 'Open Search Ads'}).count()) throw new Error('the deleted tenant is still on Home');
+  log('tenant settings: a member added, the last admin kept, the tenant deleted');
+  await page.goto(BASE + '/tenant/?t=default');
+  // #103: New project is a dialog: a name (a blank one is refused in the field), the labeling
+  // model and the three thresholds; the project opens on Prompt Design.
+  await button(page, 'New project').click();
+  const np = page.getByRole('dialog');
+  await np.getByLabel('Name', {exact: true}).fill('  ');
+  await button(np, 'Create').click();
+  await np.getByText('Enter a name. Spaces alone are not a name.').first().waitFor();
+  if ((await np.getByRole('spinbutton', {name: 'Macro-F1 threshold'}).inputValue()) !== '80') throw new Error('Macro-F1 is not prefilled with the default threshold');
+  if (!(await np.getByRole('spinbutton', {name: 'Precision threshold'}).isDisabled())) throw new Error('Precision is not off by default');
+  await np.getByLabel('Name', {exact: true}).fill('Scratch project');
+  await shot(page, '0c-new-project');
+  await button(np, 'Create').click();
   await page.waitForURL(/prompt-design/);
   await page.goto(BASE + '/tenant/');
   await page.getByRole('link', {name: 'Scratch project'}).waitFor();
-  if (await page.getByText('Current step', {exact: true}).count()) throw new Error('the Projects list still has a Current step column');
-  // 1.1.0: the list says who created each project.
-  const byCell = await page.locator('tr', {hasText: 'Scratch project'}).locator('td').nth(1).innerText();
-  if (!(await page.getByRole('columnheader', {name: 'Created by'}).count()) || !byCell.trim()) throw new Error('the Projects list has no Created by column');
-  await shot(page, '0b-projects-created-by');
-  await page.getByRole('button', {name: 'Delete Scratch project'}).click();
+  // The list says where each project stands and who created it.
+  const scratchRow = page.locator('tr', {hasText: 'Scratch project'});
+  const scratchCells = (await scratchRow.locator('td').allInnerTexts()).map(x => x.trim());
+  if (scratchCells[1] !== 'Prompt Design') throw new Error(`the new project is not at Prompt Design: ${scratchCells.join(' | ')}`);
+  if (!(await page.getByRole('columnheader', {name: 'Created by'}).count()) || !scratchCells[4]) throw new Error('the Projects list has no Created by column');
+  await shot(page, '0b-projects');
+  await scratchRow.hover();
+  await scratchRow.getByRole('button', {name: 'Project actions'}).click();
+  await page.getByRole('menuitem', {name: 'Delete project'}).click();
   const del = page.getByRole('dialog');
   await del.waitFor();
   if (!(await button(del, 'Delete project').isDisabled())) throw new Error('Delete project is on before the name is typed');
-  await del.getByLabel('Project name').fill('scratch project');
+  await del.getByLabel('Type the project name to confirm').fill('scratch project');
   if (!(await button(del, 'Delete project').isDisabled())) throw new Error('Delete project accepts a name that is not exact');
   await shot(page, '0-delete-project');
-  await del.getByLabel('Project name').fill('Scratch project');
+  await del.getByLabel('Type the project name to confirm').fill('Scratch project');
   await button(del, 'Delete project').click();
   await del.waitFor({state: 'detached', timeout: 10000});
   await page.getByRole('link', {name: 'Scratch project'}).waitFor({state: 'detached', timeout: 10000});
   log('project deleted after typing its exact name');
 
-  await page.getByPlaceholder('Short-video tagging').fill('Short-video tagging');
-  await button(page, 'Create project').click();
+  await button(page, 'New project').click();
+  await page.getByRole('dialog').getByLabel('Name', {exact: true}).fill('Short-video tagging');
+  await button(page.getByRole('dialog'), 'Create').click();
   await page.waitForURL(/prompt-design/);
   const pid = new URL(page.url()).searchParams.get('p');
   // Prompt Design (wireframes v346): a new project shows the empty prompt card and three starters in Ask AI; Save is off.
@@ -271,8 +311,47 @@ let current = null;
   await shot(page, '2-dataset');
   await next.click();
 
-  // Gold Labels: every eval example and some test examples, picked on the page
+  // Gold Labels (#107): the dataset's label sets. None yet: a preview of several sets shows their
+  // ranges, then one set of every example goes to the signed-in user, is renamed in its settings,
+  // and opens for labeling.
   await page.waitForURL(/gold/);
+  await page.getByText('No label sets yet', {exact: true}).waitFor({timeout: 10000});
+  await button(page, 'Create label sets').first().click();
+  const mk = page.locator('dialog[open]');
+  await mk.getByRole('radio', {name: 'Several sets'}).click();
+  await howMany(mk.getByLabel('Number of sets', {exact: true}), '2');
+  if ((await mk.getByLabel('Examples per set', {exact: true}).inputValue()) !== String(N / 2)) throw new Error('Examples per set did not follow Number of sets');
+  await mk.getByText(`#1–${N / 2} · ${N / 2} examples`).waitFor({timeout: 5000});
+  await mk.getByText(`#${N / 2 + 1}–${N} · ${N / 2} examples`).waitFor();
+  await shot(page, '3-labeling-batch');
+  await mk.getByRole('radio', {name: 'One set'}).click();
+  await howMany(mk.getByLabel('Examples', {exact: true}), String(N + 1));
+  await mk.getByText(`Only ${N} samples are left without a label set.`).first().waitFor({timeout: 5000});
+  if (!(await button(mk, 'Create').isDisabled())) throw new Error('Create is on for more examples than are left');
+  await howMany(mk.getByLabel('Examples', {exact: true}), String(N));
+  await mk.getByText(`Takes the next ones in order: #1–${N}`).waitFor({timeout: 5000});
+  await mk.getByRole('combobox', {name: 'Labeler'}).click();
+  await page.getByRole('option', {name: 'Evelyn'}).click();
+  await shot(page, '3-labeling-create');
+  await button(mk, 'Create').click();
+  await mk.waitFor({state: 'detached', timeout: 10000});
+  await page.getByRole('radio', {name: 'Mine 1'}).waitFor({timeout: 10000});
+  const setRow = page.locator('main tbody tr').first();
+  if (!/Set 1[\s\S]*#1–40[\s\S]*40[\s\S]*Evelyn[\s\S]*0 \/ 40/.test(await setRow.innerText())) throw new Error(`the label set row is not right: ${await setRow.innerText()}`);
+  await setRow.hover();
+  await page.getByRole('button', {name: 'Settings for Set 1'}).click();
+  const st = page.locator('dialog[open]');
+  if ((await st.getByLabel('Examples', {exact: true}).inputValue()) !== `#1–${N} · ${N}`) throw new Error('the settings do not show the fixed range');
+  await st.getByLabel('Name', {exact: true}).fill('First batch');
+  await button(st, 'Save').click();
+  await st.waitFor({state: 'detached', timeout: 10000});
+  await page.getByRole('link', {name: 'First batch'}).waitFor({timeout: 10000});
+  await shot(page, '3-labeling');
+  log('label sets:', (await page.locator('main').innerText()).replace(/\s+/g, ' ').slice(0, 200));
+  await page.getByRole('link', {name: 'First batch'}).click();
+
+  // The label set: every eval example and some test examples, picked on the page
+  await page.waitForURL(/gold\/set/);
   // Spec 5.3: nothing saves before Save; in To label, Save moves on to the next example.
   const labelSet = async n => {
     for (let i = 0; i < n; i++) {
@@ -330,8 +409,11 @@ let current = null;
   await page.getByRole('button', {name: `Labeled ${N - 1}`}).waitFor({timeout: 5000});
   log('removed one example; gold labels:', await page.getByRole('tablist', {name: 'Sets'}).innerText());
 
-  // The first paid run is about to start: Project Settings opens once, to be confirmed (spec 2.3)
-  await button(page, 'Next: Prompt Tuning').click();
+  // #103: the new-project dialog confirmed the settings, so none is asked before the first paid
+  // run. Project Settings still opens from the overview.
+  const goldUrl = page.url();
+  await page.goto(url('/overview/'));
+  await button(page, 'Project settings').click();
   const set = page.getByRole('dialog');
   await set.getByText('Project Settings', {exact: true}).waitFor({timeout: 5000});
   // Default shows its exact thresholds, locked; each check's meaning is a line under its name
@@ -364,11 +446,14 @@ let current = null;
   await listbox.waitFor({state: 'detached', timeout: 5000});
   if (!(await set.isVisible())) throw new Error('Escape in the model list closed Project Settings');
   await passRule.getByRole('button', {name: 'Default', exact: true}).click();
-  await button(set, 'Confirm').click();
+  await button(set, 'Save').click();
+  await set.waitFor({state: 'detached', timeout: 10000});
+  await page.goto(goldUrl);
+  await button(page, 'Next: Prompt Tuning').click();
   await page.waitForURL(/\/prompt\/?\?/);
   const versionsRow = page.locator('section[aria-label="Versions"]');
   await versionsRow.waitFor();
-  log('settings confirmed; scoring starts by itself');
+  log('settings were confirmed when the project was made; scoring starts by itself');
 
   const suggestion = async () => ((await page.locator('section[aria-label="Suggestions"]').count()) ? page.locator('section[aria-label="Suggestions"]').first().innerText() : '');
   // Right after the first score, the model disagrees with some gold labels: Review labels opens
@@ -832,7 +917,7 @@ let current = null;
   // uploaded file is one data source. Upload goes through a dialog (name from the file name); the
   // source page counts sample IDs, repeats kept once and rows without an ID. #91: the tenant page links here.
   await page.goto(BASE + '/tenant/');
-  await page.locator('main').getByRole('link', {name: 'Data sources'}).click();
+  await page.locator('main').getByRole('heading', {name: 'Data sources', level: 4}).click();
   await page.waitForURL(/\/sources\//, {timeout: 10000});
   await page.getByRole('heading', {name: 'Data sources', level: 1}).waitFor({timeout: 10000});
   await page.locator('tr', {hasText: 'Sample data'}).waitFor({timeout: 10000});

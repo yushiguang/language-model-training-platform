@@ -10,7 +10,7 @@ import {ErrorLine} from '../sources/dialogs';
 import {sourceError, sourceName} from '../sources';
 
 /** A failed change: the access dialog for a missing permission, else a sentence to show in the dialog. */
-async function attempt(fn: () => Promise<unknown>): Promise<string | null> {
+export async function attempt(fn: () => Promise<unknown>): Promise<string | null> {
   try {
     await fn();
     return null;

@@ -132,7 +132,7 @@ export function Suggestions({state, versionId, onOptimise, onSwitch}: {state: Pr
       case 'add_examples':
         return <Button key={act} label={t('Add examples')} variant={variant} size="sm" href={href('/dataset')} />;
       case 'review_labels':
-        return <Button key={act} label={t('Review labels')} variant={variant} size="sm" href={href('/gold', {tab: 'mismatches'})} />;
+        return <Button key={act} label={t('Review labels')} variant={variant} size="sm" href={href('/gold/set', {tab: 'mismatches'})} />;
       case 'auto_optimise':
         return <Button key={act} label={t('Optimise')} variant={'ai' as never} size="sm" onClick={onOptimise} />;
       case 'improve':
