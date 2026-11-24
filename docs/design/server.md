@@ -416,6 +416,12 @@ export interface ConfigReader {
 - **找人**：`searchPeople({query})` 查公司目录（新的可选 `Platform.people`，`PeopleDirectory.search`），按名字或邮箱，最多 20 人；没接目录时返回空，页面只能按用户 id 加人。浏览器替身是几位虚构同事（example.com 邮箱）。
 - **删除租户**：`deleteTenant({name})` 要输入租户名称确认。依次删项目（各自走删除任务）、删数据源（内置样例除外）、删租户的模型并让网关重读、移除所有成员，最后删记录；中途失败可以再执行一次。没有记录的租户不能删。
 
+### 9.5 项目编辑者（#118）
+
+- **读**：`listProjectEditors({projectId})` 列出能编辑项目的人，创建人在最前（`creator: true`），其他人按名字排序。名字和邮箱来自 `listTenantMembers`，权限平台没给名字时，创建人用项目记录里的名字，其他人用用户 id。`addedAt` 来自项目操作记录 `project.editor_added`，创建人和在别处授权的人为 null。能打开项目的人都能读。
+- **加人**：`addProjectEditors({projectId, userIds})` 只收本租户成员（否则返回 `error`，什么都不改），已能编辑的人不变，一次最多 50 人。每人经 `grantProjectWrite` 授权（失败重试 3 次），并记一条操作记录。需要项目编辑权限。
+- **移除**：`removeProjectEditor({projectId, userId})` 经 `revokeProjectWrite` 撤销；创建人不能移除。持有 `editors:<项目>` 锁。需要项目编辑权限。
+
 ## 10. Contract 改动
 
 按 CONTRIBUTING，每个 contract 改动单独一个 PR，标明是新增还是破坏性：
@@ -438,6 +444,7 @@ export interface ConfigReader {
 | `PermissionAdminPort.listUserTenants` | 破坏性：部署方的权限平台适配器要实现（#94） |
 | 租户页：`listProjectRows`（每行当前步骤、最好分数、运行中任务数、最近改动时间，分页，`mine`）、`getTenant`（Admin 卡片的计数）、`projectDefaults`、`newProject`（名称、模型、阈值，存为已确认的项目设置）；步骤规则 `stepStates` / `currentStep` 移到 domain | 新增（#103）。`createProject(name)` 保留给脚本和测试 |
 | 租户设置：`renameTenant`、`deleteTenant`、`addTenantMembers` / `setTenantRole` / `removeTenantMember`、`searchPeople`；`PeopleDirectory`（`Platform.people` 可选） | 新增（#111）：部署方可以不接目录 |
+| 项目编辑者：`listProjectEditors`、`addProjectEditors`、`removeProjectEditor`，`ProjectEditor` | 新增（#118）：用已有的权限平台方法，部署方的适配器不用改 |
 | `ScoreBasis`、`EvalReport.basis`（可选，旧报告没有）、`ScoringState`、任务类型 `report.rescore`、`ProjectState.scoring`、`WorkflowFacts.scoringReady`、`rescore` 接口 | 新增：只有工作流产出和读取，部署方的适配器不用改（第 9 步，#86 已完成） |
 
 ## 11. 交付计划

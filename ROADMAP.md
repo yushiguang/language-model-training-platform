@@ -13,7 +13,8 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
   records (create, list, the tenant of each call), then the home page. Piece 2 (#103): the
   tenant page's project rows and counts, and new projects with their model and thresholds, then
   the tenant page. Piece 3 (#111): renaming and deleting a tenant, its members and roles, and
-  finding people, then the tenant settings dialog.
+  finding people, then the tenant settings dialog. Piece 4 (#118): who can edit a project, then
+  the project settings dialog.
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
   tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are merged (see Done);
   step 3, action tools, is next, with their cards drawn on the UI design first.

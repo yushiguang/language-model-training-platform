@@ -626,6 +626,33 @@ test('tenant settings (#111): deleting a tenant takes its projects, sources, mod
   assert.deepEqual(await api.deleteTenant(inTenant(alice, 't-org'), {name: 't-org'}), {error: "This tenant comes with your organization. It can't be deleted."});
 });
 
+test('project editors (#118): the creator first and always; tenant members are added and removed; outsiders are not', async () => {
+  const perms = checking();
+  const sys = {requestId: 'rq_setup', user: {id: 'u_admin', name: 'Admin'}};
+  await perms.admin.addTenantMember(sys, 't1', alice.id, 'member');
+  await perms.admin.addTenantMember(sys, 't1', bob.id, 'member');
+  const {api, catalog} = world('wf-editors', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
+  const a = inTenant(alice, 't1');
+  const b = inTenant(bob, 't1');
+  const p = await api.createProject(a, 'Shared');
+  assert.deepEqual(await api.listProjectEditors(b, {projectId: p.id}), [{userId: alice.id, name: 'Alice', creator: true, addedAt: null}], 'any member reads them; the creator is named by the project');
+  await assert.rejects(api.addProjectEditors(b, {projectId: p.id, userIds: [bob.id]}), {code: 'forbidden'}, 'only editors add editors');
+  assert.deepEqual(await api.addProjectEditors(a, {projectId: p.id, userIds: []}), {error: 'Pick someone to add.'});
+  assert.deepEqual(await api.addProjectEditors(a, {projectId: p.id, userIds: [eve.id]}), {error: 'Only members of this tenant can edit its projects.'});
+  assert.deepEqual(await api.addProjectEditors(a, {projectId: p.id, userIds: [bob.id, bob.id, alice.id]}), {});
+  assert.ok(perms.admin.canWrite('t1', p.id, bob.id));
+  const list = await api.listProjectEditors(b, {projectId: p.id});
+  assert.deepEqual(list.map(e => [e.userId, e.creator]), [[alice.id, true], [bob.id, false]]);
+  assert.ok(list[1].addedAt, 'when Bob was added');
+  assert.equal((await catalog.find('audit_log', {projectId: p.id, action: 'project.editor_added'})).length, 1, 'the creator was not added again');
+  // Bob edits now, so he can take himself off; the creator stays.
+  assert.deepEqual(await api.removeProjectEditor(b, {projectId: p.id, userId: alice.id}), {error: 'The creator can always edit the project.'});
+  assert.deepEqual(await api.removeProjectEditor(b, {projectId: p.id, userId: bob.id}), {});
+  assert.ok(!perms.admin.canWrite('t1', p.id, bob.id));
+  assert.deepEqual(await api.removeProjectEditor(a, {projectId: p.id, userId: bob.id}), {error: 'This person cannot edit the project.'});
+  assert.deepEqual((await api.listProjectEditors(a, {projectId: p.id})).map(e => e.userId), [alice.id]);
+});
+
 test('page views carry the place of waiting work in its queue (#66)', async () => {
   const {api, catalog, jobs, labeling} = world('wf-queue', noHelpers);
   const ctx = inTenant(alice, 't1');
