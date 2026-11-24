@@ -89,6 +89,8 @@ export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: Acti
   restoreExamples: write('request'),
   pruneDataset: write('request'),
   addComment: write('request'),
+  editComment: write('request'),
+  deleteComment: write('request'),
   saveGold: write('arg'),
   uploadGold: write('request'),
   uploadGoldText: write('arg'),

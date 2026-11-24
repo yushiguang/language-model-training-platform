@@ -179,6 +179,8 @@ export interface EventProps {
   gold_labels_uploaded: {source: 'file' | 'bundled'; saved: Num; skipped: Num};
   gold_mismatch_reviewed: {outcome: 'kept' | 'changed'; with_note: boolean};
   label_comment_added: {where: 'eval' | 'mismatch'; chars: Num};
+  label_comment_edited: {chars: Num};
+  label_comment_deleted: Record<string, never>;
   // Prompt Engineering
   prompt_draft_requested: Record<string, never>;
   feature_toggled: {group: string; key: string; on: boolean};
@@ -249,6 +251,8 @@ export const EVENT_PROP_KEYS: {[E in EventName]: readonly (keyof EventProps[E] &
   gold_labels_uploaded: ['source', 'saved', 'skipped'],
   gold_mismatch_reviewed: ['outcome', 'with_note'],
   label_comment_added: ['where', 'chars'],
+  label_comment_edited: ['chars'],
+  label_comment_deleted: [],
   // Prompt Engineering
   prompt_draft_requested: [],
   feature_toggled: ['group', 'key', 'on'],

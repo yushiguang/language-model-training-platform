@@ -194,6 +194,8 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     restoreExamples: (ctx, r) => governance.restoreExamples(at(ctx), r.projectId, r.removalIds),
     pruneDataset: (ctx, r) => governance.pruneDataset(at(ctx), r.projectId, r.mode, r.keep, r.value),
     addComment: (ctx, r) => governance.addComment(at(ctx), r.projectId, r.exampleId, r.text, r.promptVersionId ?? null),
+    editComment: (ctx, r) => governance.editComment(at(ctx), r.projectId, r.commentId, r.text),
+    deleteComment: (ctx, r) => governance.deleteComment(at(ctx), r.projectId, r.commentId),
     async saveGold(ctx, projectId, exampleId, schemaVersion, answer, revealed, source) {
       const w = at(ctx);
       await checkGold(w, projectId, exampleId, answer);
@@ -214,7 +216,7 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
       const {state, schema, schemaVersion} = await withSchema(w, projectId);
       return dataset.importBundledGold(w, projectId, schema, schemaVersion, state.examples);
     },
-    mismatches: (ctx, projectId, versionId) => mismatch.mismatches(at(ctx), projectId, versionId),
+    mismatches: (ctx, projectId, versionId, labelSetId) => mismatch.mismatches(at(ctx), projectId, versionId, labelSetId),
     async reviewGold(ctx, r) {
       const w = at(ctx);
       if (r.outcome === 'changed') await checkGold(w, r.projectId, r.exampleId, r.answer);

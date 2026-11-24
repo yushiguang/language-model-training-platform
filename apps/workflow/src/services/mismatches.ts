@@ -1,5 +1,5 @@
 import type {Answer, Example, ExampleBrief, MismatchList, MismatchReview, Prediction, ProjectState} from '@yushiguang/sprint-contracts';
-import {withComments, isRight, versionLabel, visibleToAgents, systemConfig, sameAnswer} from '@yushiguang/sprint-domain';
+import {withComments, inRanges, isRight, versionLabel, visibleToAgents, systemConfig, sameAnswer} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {saveGold} from './dataset.ts';
 import {predictionsFor} from './evaluation.ts';
@@ -128,14 +128,22 @@ export async function versionAnswers(w: Scope, state: ProjectState): Promise<Ver
 /** A saved answer that does not match the gold label (an answer the safety filter stopped is not a mismatch). */
 export const isMismatch = (gold: Answer, p: Prediction | undefined) => !!p && !p.filtered && !isRight(gold, p.answer);
 
-export async function mismatches(w: Scope, projectId: string, versionId?: string | null): Promise<MismatchList> {
+/**
+ * The Mismatches review for one version. With `labelSetId` (#115) the items, reviews and counts are
+ * those of that label set's samples only; the versions and the best are still picked on the whole
+ * dataset, so every set compares with the same version by default.
+ */
+export async function mismatches(w: Scope, projectId: string, versionId?: string | null, labelSetId?: string | null): Promise<MismatchList> {
+  const set = labelSetId ? await w.catalog.get('label_sets', labelSetId) : null;
+  if (labelSetId && (!set || set.projectId !== projectId)) throw new Error('This label set does not exist.');
   const state = await loadProjectState(w, projectId);
   const empty: MismatchList = {versions: [], versionId: null, items: [], wrongEverywhere: 0, reviewed: 0, reviewedItems: [], reviewedAll: 0};
   if (!state?.setup?.schema || !state.setup.models[0] || !state.examples.some(e => e.split === 'eval' && !!state.gold[e.id])) return empty;
   const standing = await standingReviews(w, projectId, state);
   const found = await versionAnswers(w, state);
   if (!found) return {...empty, reviewedAll: standing.size};
-  const {evalEx, answers, versions, best} = found;
+  const {answers, versions, best} = found;
+  const evalEx = set ? found.evalEx.filter(e => inRanges(e, [{first: set.first, last: set.last}])) : found.evalEx;
   const picked = versionId && answers.has(versionId) ? versionId : best.id;
   const wrong = (vid: string, exId: string) => isMismatch(state.gold[exId]!.answer, answers.get(vid)!.get(exId));
   const of = answers.size;

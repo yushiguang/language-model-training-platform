@@ -224,7 +224,7 @@ function Steps({state, current}: {state: ProjectState; current: NodeId | 'overvi
               href={hrefFor(state.project.id, n.path)}
               isSelected={current === n.id}
               icon={
-                st[n.id] === 'done' ? <Icon icon={CheckCircleIcon} size="sm" color="success" label={t('Finished')} /> : st[n.id] === 'running' ? <Spinner size="sm" label={t('Running')} /> : undefined
+                st[n.id] === 'done' ? <Icon icon={CheckCircleIcon} size="sm" color="success" label={t('Finished')} /> : st[n.id] === 'running' ? <Spinner size="sm" aria-label={t('Running')} /> : undefined
               }
             />
           </span>
