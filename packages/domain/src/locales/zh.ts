@@ -1187,7 +1187,6 @@ export const ZH: Readonly<Record<string, string>> = {
   "Can edit": "可以编辑",
   "Can view": "可以查看",
   "Continue to {step}": "前往{step}",
-  "Labeling": "打标中",
   "Next in line": "下一个就轮到",
   "No version has a score yet.": "还没有版本有分数。",
   "No version meets the thresholds yet.": "还没有版本达到阈值。",
