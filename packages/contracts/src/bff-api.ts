@@ -97,6 +97,8 @@ export interface TenantSummary extends TenantInfo {
 export interface TenantMemberView {
   userId: string;
   name: string;
+  /** Shown under the name where the platform knows it. */
+  email?: string;
   role: TenantRole;
 }
 

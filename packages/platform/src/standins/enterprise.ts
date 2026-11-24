@@ -26,7 +26,7 @@ export const standInAuthorization = (): AuthorizationPort => ({
 export interface MemoryPermissionOptions {
   /**
    * Members it holds before anything is kept (the local user as an admin of `default`). Their
-   * names are always known, even when what was kept says who is in which tenant.
+   * names and emails are always known, even when what was kept says who is in which tenant.
    */
   seed?: (TenantMember & {tenantId: string})[];
   /** A local-storage key: what is written is kept there, so a reload keeps new tenants and members. */
@@ -46,7 +46,7 @@ export function memoryPermissionAdmin(opts: MemoryPermissionOptions = {}): Permi
   const members = new Map<string, Map<string, TenantRole>>();
   const writers = new Map<string, Set<string>>();
   const tenant = (id: string) => members.get(id) ?? members.set(id, new Map()).get(id)!;
-  const names = new Map((opts.seed ?? []).filter(m => m.name).map(m => [m.userId, m.name!]));
+  const profiles = new Map((opts.seed ?? []).filter(m => m.name || m.email).map(m => [m.userId, {...(m.name ? {name: m.name} : {}), ...(m.email ? {email: m.email} : {})}]));
   const project = (tenantId: string, projectId: string) => {
     const k = `${tenantId}/${projectId}`;
     return writers.get(k) ?? writers.set(k, new Set()).get(k)!;
@@ -72,7 +72,7 @@ export function memoryPermissionAdmin(opts: MemoryPermissionOptions = {}): Permi
     }
   };
   return {
-    listTenantMembers: async tenantId => [...tenant(tenantId)].map(([userId, role]): TenantMember => ({userId, role, ...(names.has(userId) ? {name: names.get(userId)} : {})})),
+    listTenantMembers: async tenantId => [...tenant(tenantId)].map(([userId, role]): TenantMember => ({userId, role, ...profiles.get(userId)})),
     listUserTenants: async userId => [...members].flatMap(([tenantId, m]): UserTenant[] => (m.has(userId) ? [{tenantId, role: m.get(userId)!}] : [])),
     async addTenantMember(_ctx, tenantId, userId, role) {
       tenant(tenantId).set(userId, role);

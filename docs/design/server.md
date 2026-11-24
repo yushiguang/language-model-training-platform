@@ -126,7 +126,7 @@
 **标注人**
 
 - 本次每个标注集最多一个标注人（`labelerIds` 是列表，以后可以放多个）。有 `PermissionAdminPort` 时，标注人必须在 `listTenantMembers` 里，否则报错。
-- 选标注人的列表来自 BFF 的 `listTenantMembers()`（读权限，#107）：当前租户的成员，带名字和角色，按名字排序。名字来自 `TenantMember.name`；平台没给名字时，调用者自己用身份里的名字，其他人显示用户 ID。没有 `PermissionAdminPort` 时只有调用者自己（管理员）。这是页面读成员的唯一接口，租户设置的成员页也用它。
+- 选标注人的列表来自 BFF 的 `listTenantMembers()`（读权限，#107）：当前租户的成员，带名字、邮箱（平台知道时）和角色，按名字排序。名字和邮箱来自 `TenantMember.name`、`TenantMember.email`；平台没给时，调用者自己用身份里的名字和邮箱，其他人名字显示用户 ID、不带邮箱。没有 `PermissionAdminPort` 时只有调用者自己（管理员）。这是页面读成员的唯一接口，租户设置的成员页也用它。
 - 新加的标注人先通过 `grantProjectWrite` 授予项目写权限（`withRetries`，最多重试 3 次）；授权失败时整个操作报错，什么都不保存。被换下的标注人保留项目写权限，因为不知道这个权限是不是因为别的原因给的。
 - 通知（第 8 节，尽力而为）：创建带标注人的标注集时发 `label_set_created` 给标注人；修改时只发 `labeler_added` 给新加的人。操作人自己不收。链接到 `/gold/?p=<projectId>&set=<labelSetId>`（以后的标注集详情页），内容只有标注集名称、样本序号范围和项目名。
 

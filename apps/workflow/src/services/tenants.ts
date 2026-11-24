@@ -52,7 +52,10 @@ export async function listTenantMembers(w: Scope): Promise<TenantMemberView[]> {
   const u = await w.user();
   const list = w.permissionAdmin ? await w.permissionAdmin.listTenantMembers(tenantOf(w)) : [{userId: u.id, role: 'admin' as const}];
   return list
-    .map(m => ({userId: m.userId, name: m.name?.trim() || (m.userId === u.id ? u.name : m.userId), role: m.role}))
+    .map((m): TenantMemberView => {
+      const email = m.email?.trim() || (m.userId === u.id ? u.email : undefined);
+      return {userId: m.userId, name: m.name?.trim() || (m.userId === u.id ? u.name : m.userId), ...(email ? {email} : {}), role: m.role};
+    })
     .sort((a, b) => a.name.localeCompare(b.name) || a.userId.localeCompare(b.userId));
 }
 

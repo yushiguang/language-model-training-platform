@@ -459,14 +459,14 @@ test('tenants (#94): anyone signed in creates one and becomes its admin; names a
   assert.equal((await catalog.find('tenants', {})).length, 2);
 });
 
-test('tenant members (#107): any member lists them by name; a member without a name is named by the identity or the user id', async () => {
-  const perms = checking(memoryPermissionAdmin({seed: [{tenantId: 't1', userId: bob.id, role: 'member', name: 'Bob Smith'}]}));
+test('tenant members (#107): any member lists them by name, with the email the platform knows; a member without a name is named by the identity or the user id', async () => {
+  const perms = checking(memoryPermissionAdmin({seed: [{tenantId: 't1', userId: bob.id, role: 'member', name: 'Bob Smith', email: 'bob@example.com'}]}));
   const {api} = world('wf-members', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
   await perms.admin.addTenantMember(ctxOf(alice), 't1', alice.id, 'admin');
   await perms.admin.addTenantMember(ctxOf(alice), 't1', 'u_zed', 'member');
   const want = [
     {userId: alice.id, name: 'Alice', role: 'admin'},
-    {userId: bob.id, name: 'Bob Smith', role: 'member'},
+    {userId: bob.id, name: 'Bob Smith', email: 'bob@example.com', role: 'member'},
     {userId: 'u_zed', name: 'u_zed', role: 'member'},
   ];
   assert.deepEqual(await api.listTenantMembers(inTenant(alice, 't1')), want);
@@ -474,6 +474,8 @@ test('tenant members (#107): any member lists them by name; a member without a n
   await assert.rejects(api.listTenantMembers(inTenant(eve, 't1')), {code: 'forbidden'}, 'not a member: refused');
   const bare = world('wf-members-bare', noHelpers);
   assert.deepEqual(await bare.api.listTenantMembers(inTenant(alice, 't9')), [{userId: alice.id, name: 'Alice', role: 'admin'}], 'no platform: the caller alone');
+  const withEmail = {...alice, email: 'alice@example.com'};
+  assert.deepEqual(await bare.api.listTenantMembers(inTenant(withEmail, 't9')), [{userId: alice.id, name: 'Alice', email: 'alice@example.com', role: 'admin'}], "the caller's own email comes from the identity");
 });
 
 test('tenants (#94): an admin that cannot be written removes the new tenant; without a permission platform none is made', async () => {

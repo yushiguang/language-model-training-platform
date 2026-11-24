@@ -14,10 +14,10 @@ import {memorySharedState} from './standins/shared-state.ts';
 
 /** Stand-in colleagues in the default tenant (#107), so label sets have someone to assign. */
 const COLLEAGUES = [
-  {userId: 'u-mei', name: 'Mei Wang'},
-  {userId: 'u-ravi', name: 'Ravi Kumar'},
-  {userId: 'u-ana', name: 'Ana Souza'},
-  {userId: 'u-tom', name: 'Tom Li'},
+  {userId: 'u-mei', name: 'Mei Wang', email: 'mei.wang@example.com'},
+  {userId: 'u-ravi', name: 'Ravi Kumar', email: 'ravi.kumar@example.com'},
+  {userId: 'u-ana', name: 'Ana Souza', email: 'ana.souza@example.com'},
+  {userId: 'u-tom', name: 'Tom Li', email: 'tom.li@example.com'},
 ];
 
 /**

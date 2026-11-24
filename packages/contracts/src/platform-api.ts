@@ -828,6 +828,8 @@ export interface TenantMember {
   role: TenantRole;
   /** The member's display name, when the platform knows it (#107); pages show the user id otherwise. */
   name?: string;
+  /** The member's email, when the platform knows it; the Members tab shows it under the name. */
+  email?: string;
 }
 
 /** A tenant a user is in, and as what (#94). */
