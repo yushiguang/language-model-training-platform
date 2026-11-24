@@ -8,6 +8,12 @@ where it matters, why. The code follows these; change a line here when a decisio
 - **The Overview shows what happened, in plain lines**: who did what and when, newest first, from the project's own records, the AI's suggestions, and the gold labels people saved (one line per person per day). Records Sprint keeps for itself (spend, tool calls) stay out.
 - **The Overview says whether you can edit**: "Can edit" or "Can view", from the permission platform.
 
+## 2026-11-24 (Permission platform lifecycle and minimum admins, #120)
+
+- **Permission platform lifecycle is optional on `PermissionAdminPort`**: deployments that provision dedicated resources or roles per tenant and project can implement `createTenant`, `deleteTenant`, `createProject` and `deleteProject`, while simpler adapters keep using member and project-writer grants alone.
+- **Minimum tenant admins are configurable (`tenant.minAdmins`, default `1`)**: deployments whose permission platform requires multiple resource owners can raise it so creating a tenant accepts co-admins (`adminIds`), directory search (`searchPeople`) is open to any signed-in user picking initial co-admins, and demotions/removals preserve the minimum.
+- **Access requests support external approval forms (`mode: 'redirect'`, `applyUrl`)**: deployments where users submit requests on the permission platform itself can redirect instead of asking for a reason inside Sprint.
+
 ## 2026-11-24 (Label set detail, #115)
 
 - **Comments can be edited and deleted by their author only** (wireframe round 9): `editComment` and `deleteComment` refuse anyone else's. A delete is soft, kept in the audit log with the earlier text of every edit, and a deleted comment no longer reaches the helpers.

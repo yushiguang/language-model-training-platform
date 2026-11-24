@@ -15,7 +15,8 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
   the tenant page. Piece 3 (#111): renaming and deleting a tenant, its members and roles, and
   finding people, then the tenant settings dialog. Piece 4 (#118): who can edit a project, then
   the project settings dialog. Piece 5 (#123): the Overview's access and activity, then the
-  project Overview.
+  project Overview. Permission platform contract additions (#120): optional lifecycle
+  hooks, configurable minimum admins and redirect access requests (PR 1 in review).
 - **Agent abilities** (#39). The user questions and actions the helpers should handle, turned into
   tools, skills and acceptance cases for any agent runtime. Steps 1 and 2 are merged (see Done);
   step 3, action tools, is next, with their cards drawn on the UI design first.

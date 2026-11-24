@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {memoryPermissionAdmin, standInAuthorization} from './enterprise.ts';
+import {memoryAccessRequests, memoryPermissionAdmin, standInAuthorization} from './enterprise.ts';
 import {memoryPeople, SAMPLE_PEOPLE} from './people.ts';
 
 const ctx = {requestId: 'rq_1', user: {id: 'u_admin', name: 'Admin'}};
@@ -80,4 +80,36 @@ test('stand-in people (#111): the directory finds by name or email, and people a
     {userId: 'u-ben', role: 'member', name: 'Ben Carter', email: 'ben.carter@example.com'},
     {userId: 'u-zed', role: 'member'},
   ]);
+});
+
+test('memoryPermissionAdmin & memoryAccessRequests (#120): lifecycle hooks and redirect applyUrl', async () => {
+  const p = memoryPermissionAdmin();
+  await p.createTenant!(ctx, {tenantId: 'tn_1', name: 'Safety', adminIds: ['u_1', 'u_2']});
+  assert.deepEqual((await p.listTenantMembers('tn_1')).map(m => [m.userId, m.role]), [['u_1', 'admin'], ['u_2', 'admin']]);
+  // Destructured/unbound calls still work without an explicit `this`.
+  const {createTenant, createProject} = p;
+  await createTenant!(ctx, {tenantId: 'tn_unbound', name: 'Unbound', adminIds: ['u_3']});
+  assert.equal(p.roleOf('tn_unbound', 'u_3'), 'admin');
+  await createProject!(ctx, {tenantId: 'tn_1', projectId: 'pr_1', name: 'Demo', creatorId: 'u_1'});
+  assert.equal(p.canWrite('tn_1', 'pr_1', 'u_1'), true);
+  await p.deleteProject!(ctx, 'tn_1', 'pr_1');
+  assert.equal(p.canWrite('tn_1', 'pr_1', 'u_1'), false);
+  await p.createProject!(ctx, {tenantId: 'tn_1', projectId: 'pr_2', name: 'Demo 2', creatorId: 'u_2'});
+  await p.deleteTenant!(ctx, 'tn_1');
+  assert.deepEqual(await p.listTenantMembers('tn_1'), []);
+  assert.equal(p.canWrite('tn_1', 'pr_2', 'u_2'), false);
+
+  const plain = memoryAccessRequests();
+  assert.equal(plain.mode, undefined);
+  assert.deepEqual(await plain.request(ctx, {tenantId: 'tn_1', permission: 'read'}), {});
+
+  const redirect = memoryAccessRequests({
+    mode: 'redirect',
+    applyUrl: req => `https://perm.example/apply?t=${req.tenantId}&p=${req.permission}`,
+  });
+  assert.equal(redirect.mode, 'redirect');
+  assert.deepEqual(await redirect.request(ctx, {tenantId: 'tn_1', permission: 'tenant_write'}), {
+    applyUrl: 'https://perm.example/apply?t=tn_1&p=tenant_write',
+  });
+  assert.equal(redirect.sent.length, 1);
 });
