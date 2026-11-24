@@ -35,7 +35,7 @@ import type {
   StructuredPrompt,
   TenantModel,
 } from './types.ts';
-import type {ExampleMedia, FeatureInfo, PermissionPoint, TenantRole} from './platform-api.ts';
+import type {ExampleMedia, FeatureInfo, PermissionPoint, Person, TenantRole} from './platform-api.ts';
 
 /**
  * Contract 1: Frontend Web App <-> BFF Service (`@yushiguang/sprint-contracts/bff-api`).
@@ -114,6 +114,47 @@ export interface CreateTenantRequest {
 export interface CreateTenantResult {
   tenant?: TenantSummary;
   error?: string;
+}
+
+/** A new name for the page's tenant (#111): checked like a new tenant's (not blank, no other tenant's). */
+export interface RenameTenantRequest {
+  name: string;
+}
+
+/** The name as saved; or why it was not (shown under the field). */
+export interface RenameTenantResult {
+  name?: string;
+  error?: string;
+}
+
+/** Delete the page's tenant (#111): `name` is what the admin typed to confirm, and must be its name. */
+export interface DeleteTenantRequest {
+  name: string;
+}
+
+/** People to add to the page's tenant (#111), all with one role; those already in it are left as they are. */
+export interface AddTenantMembersRequest {
+  userIds: string[];
+  role: TenantRole;
+}
+
+export interface SetTenantRoleRequest {
+  userId: string;
+  role: TenantRole;
+}
+
+export interface RemoveTenantMemberRequest {
+  userId: string;
+}
+
+/** A member change done; or why not (the last admin stays an admin). */
+export interface MemberChangeResult {
+  error?: string;
+}
+
+/** Find people to add (#111), by name or email. */
+export interface SearchPeopleRequest {
+  query: string;
 }
 
 /** The page's tenant with what its Admin cards count (#103). `members`: null without a permission platform. */
@@ -617,6 +658,21 @@ export interface BffContract {
   listProjectRows(req: ProjectRowsRequest): Promise<ProjectRows>;
   /** The page's tenant and its Admin cards' counts (#103). */
   getTenant(): Promise<TenantDetail>;
+
+  // Tenant settings (#111): tenant admins only.
+  /** Renames the page's tenant. */
+  renameTenant(req: RenameTenantRequest): Promise<RenameTenantResult>;
+  /**
+   * Deletes the page's tenant: its projects (each through its own delete job), data sources and
+   * models, then who is in it and its record. A tenant without a record (one from an organization,
+   * or `default`) cannot be deleted.
+   */
+  deleteTenant(req: DeleteTenantRequest): Promise<{error?: string}>;
+  addTenantMembers(req: AddTenantMembersRequest): Promise<MemberChangeResult>;
+  setTenantRole(req: SetTenantRoleRequest): Promise<MemberChangeResult>;
+  removeTenantMember(req: RemoveTenantMemberRequest): Promise<MemberChangeResult>;
+  /** People to add, from the company directory; empty without one. */
+  searchPeople(req: SearchPeopleRequest): Promise<Person[]>;
   /** What the new-project dialog offers and starts from (#103). */
   projectDefaults(): Promise<ProjectDefaults>;
   /** Creates a project with its model and thresholds (the new-project dialog, #103). */

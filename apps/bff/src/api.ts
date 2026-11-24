@@ -126,6 +126,12 @@ export function createBffApi(deps: BffDeps): BffContract {
       return t.name === t.id ? {...t, name: nameOf(who, t.id)} : t;
     },
     projectDefaults: pass('projectDefaults'),
+    renameTenant: pass('renameTenant'),
+    deleteTenant: pass('deleteTenant'),
+    addTenantMembers: pass('addTenantMembers'),
+    setTenantRole: pass('setTenantRole'),
+    removeTenantMember: pass('removeTenantMember'),
+    searchPeople: pass('searchPeople'),
     newProject: pass('newProject'),
     getProject: pass('getProject'),
     loadProjectState: pass('loadProjectState'),

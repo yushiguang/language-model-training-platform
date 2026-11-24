@@ -1,10 +1,10 @@
-import type {CreateTenantRequest, CreateTenantResult, Tenant, TenantDetail, TenantMemberView, TenantRole, TenantSummary} from '@yushiguang/sprint-contracts';
+import type {AddTenantMembersRequest, CreateTenantRequest, CreateTenantResult, DeleteTenantRequest, MemberChangeResult, Person, RemoveTenantMemberRequest, RenameTenantRequest, RenameTenantResult, SearchPeopleRequest, SetTenantRoleRequest, Tenant, TenantDetail, TenantMemberView, TenantRole, TenantSummary} from '@yushiguang/sprint-contracts';
 import {newId, systemConfig} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {tenantRole, withRetries} from './access.ts';
-import {listModels} from './models.ts';
-import {backfillTenants} from './projects.ts';
-import {listDataSources, tenantOf, withLock} from './sources.ts';
+import {listModels, withModelsLock} from './models.ts';
+import {backfillTenants, deleteProject, listProjects} from './projects.ts';
+import {deleteDataSource, listDataSources, tenantOf, withLock} from './sources.ts';
 
 /**
  * Tenants (#94): a record per tenant made in Sprint (name, creator), with who is in it kept on the
@@ -122,4 +122,118 @@ export async function getTenant(w: Scope): Promise<TenantDetail> {
     w.permissionAdmin ? w.permissionAdmin.listTenantMembers(id) : null,
   ]);
   return {id, name: name ?? id, role, projects: counts.get(id) ?? 0, dataSources: sources.length, models: models.length, members: members ? members.length : null};
+}
+
+const nameTaken = async (w: Scope, name: string, except?: string) => (await w.catalog.find('tenants', {})).some(t => t.id !== except && t.name.toLowerCase() === name.toLowerCase());
+
+/**
+ * Renames the page's tenant (#111), checked as a new name is. A tenant without a record (from an
+ * organization, or `default`) gets one now, under the same id, so the name sticks.
+ */
+export async function renameTenant(w: Scope, req: RenameTenantRequest): Promise<RenameTenantResult> {
+  const name = cleanTenantName(req.name);
+  if (!name) return {error: NAME_BLANK};
+  const id = tenantOf(w);
+  const u = await w.user();
+  const done = await withLock(
+    w,
+    'tenants:names',
+    async () => {
+      if (await nameTaken(w, name, id)) return false;
+      const rec = await w.catalog.get('tenants', id);
+      if (rec) await w.catalog.patch('tenants', id, {name});
+      else await w.catalog.insert('tenants', {id, name, createdAt: now(), createdBy: u.name, createdById: u.id});
+      return true;
+    },
+    'Tenants are being created. Try again in a minute.',
+  );
+  if (!done) return {error: NAME_TAKEN};
+  await w.catalog.audit(null, u.name, 'tenant.rename', {tenantId: id});
+  w.emitChange(null);
+  return {name};
+}
+
+export const LAST_ADMIN = "The last admin can't be changed. Make someone else an admin first.";
+const NO_MEMBERS = 'Members cannot be changed here.';
+
+/**
+ * Deletes the page's tenant (#111) once its name is typed: its projects go through their own delete
+ * jobs, its data sources and models go, then everyone is taken out of it and its record removed,
+ * so it leaves every list at once. Safe to run again after a failure part way.
+ */
+export async function deleteTenant(w: Scope, req: DeleteTenantRequest): Promise<{error?: string}> {
+  const id = tenantOf(w);
+  const rec = await w.catalog.get('tenants', id);
+  if (!rec) return {error: "This tenant comes with your organization. It can't be deleted."};
+  if (String(req.name ?? '').trim() !== rec.name) return {error: 'Type the tenant name to confirm.'};
+  const u = await w.user();
+  for (const p of await listProjects(w)) await deleteProject(w, p.id);
+  for (const s of await listDataSources(w)) if (!s.builtIn) await deleteDataSource(w, {sourceId: s.id});
+  await withModelsLock(w, async () => {
+    for (const m of await w.catalog.find('tenant_models', {tenantId: id})) await w.catalog.remove('tenant_models', m.id);
+  });
+  w.gateway.forgetTenant(id);
+  if (w.permissionAdmin) for (const m of await w.permissionAdmin.listTenantMembers(id)) await w.permissionAdmin.removeTenantMember(w.ctx, id, m.userId);
+  await w.catalog.remove('tenants', id);
+  await w.catalog.audit(null, u.name, 'tenant.delete', {tenantId: id});
+  w.emitChange(null);
+  return {};
+}
+
+/** Adds people to the page's tenant (#111) with one role; those already in it keep theirs. */
+export async function addTenantMembers(w: Scope, req: AddTenantMembersRequest): Promise<MemberChangeResult> {
+  const admin = w.permissionAdmin;
+  if (!admin) return {error: NO_MEMBERS};
+  const ids = [...new Set((req.userIds ?? []).map(x => String(x).trim()).filter(Boolean))].slice(0, 50);
+  if (!ids.length) return {error: 'Pick someone to add.'};
+  const role: TenantRole = req.role === 'admin' ? 'admin' : 'member';
+  const id = tenantOf(w);
+  const inIt = new Set((await admin.listTenantMembers(id)).map(m => m.userId));
+  for (const userId of ids) if (!inIt.has(userId)) await admin.addTenantMember(w.ctx, id, userId, role);
+  await w.catalog.audit(null, (await w.user()).name, 'tenant.members_added', {tenantId: id, count: ids.filter(x => !inIt.has(x)).length});
+  w.emitChange(null);
+  return {};
+}
+
+/** Changes a member's role (#111). The tenant always keeps an admin. */
+export async function setTenantRole(w: Scope, req: SetTenantRoleRequest): Promise<MemberChangeResult> {
+  return changeMember(w, req.userId, req.role === 'admin' ? 'admin' : 'member');
+}
+
+/** Takes someone out of the page's tenant (#111). The tenant always keeps an admin. */
+export async function removeTenantMember(w: Scope, req: RemoveTenantMemberRequest): Promise<MemberChangeResult> {
+  return changeMember(w, req.userId, null);
+}
+
+/** One member's role changed (`role`) or the member removed (null), under the tenant's members lock. */
+async function changeMember(w: Scope, userId: string, role: TenantRole | null): Promise<MemberChangeResult> {
+  const admin = w.permissionAdmin;
+  if (!admin) return {error: NO_MEMBERS};
+  const id = tenantOf(w);
+  const out = await withLock(
+    w,
+    `members:${id}`,
+    async (): Promise<MemberChangeResult> => {
+      const members = await admin.listTenantMembers(id);
+      const m = members.find(x => x.userId === userId);
+      if (!m) return {error: 'This person is not in the tenant.'};
+      if (m.role === role) return {};
+      if (m.role === 'admin' && members.filter(x => x.role === 'admin').length === 1) return {error: LAST_ADMIN};
+      if (role) await admin.setTenantRole(w.ctx, id, userId, role);
+      else await admin.removeTenantMember(w.ctx, id, userId);
+      return {};
+    },
+    'Members are being changed. Try again in a minute.',
+  );
+  if (out.error) return out;
+  await w.catalog.audit(null, (await w.user()).name, role ? 'tenant.role' : 'tenant.member_removed', {tenantId: id, role});
+  w.emitChange(null);
+  return {};
+}
+
+/** People to add, from the company directory (#111): 20 at most; none for a blank query or without a directory. */
+export async function searchPeople(w: Scope, req: SearchPeopleRequest): Promise<Person[]> {
+  const q = String(req.query ?? '').trim().slice(0, 100);
+  if (!q || !w.people) return [];
+  return (await w.people.search(q, 20)).slice(0, 20);
 }

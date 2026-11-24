@@ -18,3 +18,4 @@ export * from './standins/limiter-store.ts';
 export * from './standins/lock-store.ts';
 export * from './standins/config-store.ts';
 export * from './standins/object-store.ts';
+export * from './standins/people.ts';

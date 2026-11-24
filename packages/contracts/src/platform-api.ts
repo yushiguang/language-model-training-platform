@@ -858,6 +858,22 @@ export interface PermissionAdminPort {
   revokeProjectWrite(ctx: RequestContext, tenantId: string, projectId: string, userId: string): Promise<void>;
 }
 
+/** A person as the company directory knows them (#111). */
+export interface Person {
+  id: string;
+  name: string;
+  email?: string;
+}
+
+/**
+ * The company directory (#111): tenant admins find people to add by name or email. Optional: a
+ * deployment without it adds people by their exact user id only.
+ */
+export interface PeopleDirectory {
+  /** People whose name or email matches the query (no case), best first, at most `limit`. */
+  search(query: string, limit: number): Promise<Person[]>;
+}
+
 export interface Platform {
   db: DocRuntime;
   models: LabelingModels;
@@ -909,6 +925,8 @@ export interface Platform {
    * refuses requests for access.
    */
   accessRequests?: AccessRequestPort;
+  /** The company directory for adding members (#111). Optional: without it people are added by user id. */
+  people?: PeopleDirectory;
   /**
    * Where background jobs are kept (`jobs-api.ts`). Optional: without it the job module keeps them
    * in the memory of its own process (`memoryJobStore`), which is right for the browser build.
