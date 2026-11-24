@@ -9,3 +9,4 @@
 @import '../ui/app.css' layer(legacy);
 @import '../components/shell/shell.css';
 @import '../components/prompt/prompt.css';
+@import '../components/tuning/tuning.css';

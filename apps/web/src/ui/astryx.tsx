@@ -15,6 +15,7 @@ import {themes, defaultThemeSlug} from '../astryx-themes';
  */
 export {Avatar} from '@astryxdesign/core/Avatar';
 export {Badge} from '@astryxdesign/core/Badge';
+export {Banner} from '@astryxdesign/core/Banner';
 export {Button} from '@astryxdesign/core/Button';
 export {Card} from '@astryxdesign/core/Card';
 export {CheckboxInput} from '@astryxdesign/core/CheckboxInput';
