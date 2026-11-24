@@ -364,9 +364,9 @@ second press adds nothing. One Rescore per project runs at a time (shared lock),
 if the basis moved while it ran. It gives every version of the current label on the project's
 model, with saved answers for today's samples, a fresh report (nothing labeled); a version missing
 answers is skipped and recorded in shared state for that basis, so no process lists it as out of
-date again (scoring it again fills in the answers). The old in-request `rebuildReports` stays for
-the current Prompt versions page, where Edit prompt, Improve with AI and Auto Optimise ask "Rebuild
-scores first?" and the AI Suggestion reads each version's newest score (`withNewestReports`).
+date again (scoring it again fills in the answers). The old in-request `rebuildReports` call is
+gone (#129): Prompt Tuning only queues Rescore, and the AI Suggestion reads each version's newest
+score (`withNewestReports`).
 `tick` builds only a version's first report. Saved answers on the whole eval set are kept in memory
 per version for the Mismatches list.
 
