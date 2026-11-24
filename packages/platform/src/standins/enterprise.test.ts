@@ -86,7 +86,11 @@ test('memoryPermissionAdmin & memoryAccessRequests (#120): lifecycle hooks and r
   const p = memoryPermissionAdmin();
   await p.createTenant!(ctx, {tenantId: 'tn_1', name: 'Safety', adminIds: ['u_1', 'u_2']});
   assert.deepEqual((await p.listTenantMembers('tn_1')).map(m => [m.userId, m.role]), [['u_1', 'admin'], ['u_2', 'admin']]);
-  await p.createProject!(ctx, {tenantId: 'tn_1', projectId: 'pr_1', name: 'Demo', creatorId: 'u_1'});
+  // Destructured/unbound calls still work without an explicit `this`.
+  const {createTenant, createProject} = p;
+  await createTenant!(ctx, {tenantId: 'tn_unbound', name: 'Unbound', adminIds: ['u_3']});
+  assert.equal(p.roleOf('tn_unbound', 'u_3'), 'admin');
+  await createProject!(ctx, {tenantId: 'tn_1', projectId: 'pr_1', name: 'Demo', creatorId: 'u_1'});
   assert.equal(p.canWrite('tn_1', 'pr_1', 'u_1'), true);
   await p.deleteProject!(ctx, 'tn_1', 'pr_1');
   assert.equal(p.canWrite('tn_1', 'pr_1', 'u_1'), false);

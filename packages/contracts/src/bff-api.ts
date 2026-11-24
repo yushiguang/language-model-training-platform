@@ -76,7 +76,7 @@ export interface RuntimeInfo {
   tenant?: TenantInfo;
   /** Minimum admins a tenant starts with and keeps, set when greater than 1. */
   minTenantAdmins?: number;
-  /** Set to `'redirect'` when access requests open the permission platform's own form via `applyUrl`. */
+  /** Emitted as `'redirect'` when access requests open the permission platform's own form via `applyUrl` (omitted otherwise). */
   accessRequestMode?: 'submit' | 'redirect';
 }
 

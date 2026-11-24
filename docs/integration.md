@@ -155,10 +155,13 @@ A deployment supplies three optional ports in `Platform`:
   runtime info leaves out the tenant (the site goes home) when the caller is not in it. Optional
   lifecycle hooks (`createTenant`, `deleteTenant`, `createProject`, `deleteProject`) let a
   deployment provision and tear down tenant/project resources on the permission platform alongside
-  initial owners (`adminIds`) and project creators; when omitted, Sprint falls back to
-  `addTenantMember`, `removeTenantMember` and `grantProjectWrite`. Deployments whose permission
-  platform requires multiple resource owners can raise `tenant.minAdmins` (default `1`) in config
-  so tenants are created with and keep at least that many admins.
+  initial owners (`adminIds`) and project creators; during tenant deletion, `deleteProject` is
+  invoked for each project before `deleteTenant` (omitting `deleteProject` leaves project deletion
+  as a no-op on the permission platform, while omitting the other hooks falls back to
+  `addTenantMember`, `removeTenantMember` and `grantProjectWrite`). Deployments whose permission
+  platform requires multiple resource owners can raise `tenant.minAdmins` (1 to 50, default `1`) in
+  config so tenants are created with and keep at least that many admins; directory search
+  (`people`) is open to any signed-in user so tenant creators can pick initial co-admins.
 - `accessRequests` (`AccessRequestPort`): `request(ctx, {tenantId, permission, projectId?,
   reason?})` handles a request from the "insufficient access" dialog, where approvers handle it
   on the permission platform. By default (`mode: 'submit'`), return `trackUrl` when the platform

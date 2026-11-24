@@ -103,7 +103,7 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
       const w = at(ctx);
       // A caller who is not in the tenant the channel names gets no role: the site sends them home.
       const [member, name] = await Promise.all([tenants.inTenant(w), tenants.tenantName(w)]);
-      const min = Math.max(1, Math.floor(systemConfig().tenant.minAdmins));
+      const min = Math.min(50, Math.max(1, Math.floor(systemConfig().tenant.minAdmins)));
       return {
         standIns: w.standIns,
         endpoints: w.gateway.labelingEndpoints(),

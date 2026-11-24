@@ -1,7 +1,7 @@
-import {DEFAULT_TENANT, DocFieldValue, type EndpointId, type GateApproval, type NewProjectRequest, type NewProjectResult, type ProjectDefaults, type ProjectRow, type ProjectRows, type ProjectRowsRequest, type Job, type JobOutcome, type LabelComment, type NodeId, type Project, type ProjectState, type ProjectStatus, type ScoringState, type WorkflowFacts} from '@yushiguang/sprint-contracts';
+import {DEFAULT_TENANT, DocFieldValue, SYSTEM_CALLER, type EndpointId, type GateApproval, type NewProjectRequest, type NewProjectResult, type ProjectDefaults, type ProjectRow, type ProjectRows, type ProjectRowsRequest, type Job, type JobOutcome, type LabelComment, type NodeId, type Project, type ProjectState, type ProjectStatus, type ScoringState, type WorkflowFacts} from '@yushiguang/sprint-contracts';
 import {asAnswerOrNull, bestReport, compareVersions, currentStep, DEFAULT_THRESHOLDS, gate, inRanges, judge, labelSetProgress, newId, scoreBasis, staleScores, systemConfig} from '@yushiguang/sprint-domain';
 import {now, type Instance, type Scope} from './app.ts';
-import {withRetries} from './access.ts';
+import {systemScope, withRetries} from './access.ts';
 import {getSamplingTask} from './dataset.ts';
 import {datasetSources, retireCuts, tenantOf} from './sources.ts';
 import {cannotBuildOn, latestGold, rescoresLeft} from './evaluation.ts';
@@ -61,6 +61,11 @@ export async function createProject(w: Scope, name: string): Promise<Project> {
         w.grantRetryMs ?? 200,
       );
     } catch {
+      await withRetries(
+        () => (admin.deleteProject ? admin.deleteProject(w.ctx, p.tenantId, p.id) : admin.revokeProjectWrite(w.ctx, p.tenantId, p.id, u.id)),
+        1,
+        w.grantRetryMs ?? 200,
+      ).catch(() => undefined);
       await catalog.deleteProject(p.id);
       throw new Error('The project could not be created: edit access for you could not be saved. Try again.');
     }
@@ -345,14 +350,15 @@ export async function approveNode(w: Scope, projectId: string, node: NodeId): Pr
  * the project is marked as being deleted, so no read returns it any more, and a `project.delete`
  * job stops its work and removes its records in bulk.
  */
-export async function deleteProject(w: Scope, projectId: string): Promise<void> {
+export async function deleteProject(w: Scope, projectId: string, opts?: {asSystem?: boolean}): Promise<void> {
   const {catalog, user} = w;
   const state = await loadProjectState(w, projectId);
   if (!state) throw new Error('This project does not exist.');
   await catalog.patch('projects', projectId, {deleting: true});
   await catalog.audit(null, (await user()).name, 'project.deleted', {projectId});
   w.tm.event('project_deleted', {versions: state.versions.length, examples: state.examples.length, gold_labels: Object.keys(state.gold).length});
-  await w.jobs.enqueue(w.ctx, {kind: 'project.delete', projectId, concurrencyKey: computeKey(w), args: {}, idempotencyKey: `delete:${projectId}`});
+  const jobCtx = opts?.asSystem ? systemScope(w, state.project.tenantId, w.ctx).ctx : w.ctx;
+  await w.jobs.enqueue(jobCtx, {kind: 'project.delete', projectId, concurrencyKey: computeKey(w), args: {}, idempotencyKey: `delete:${projectId}`});
   w.emitChange(projectId);
 }
 
@@ -388,7 +394,7 @@ export async function runDelete(w: Scope, job: Job, waitMs = STOP_WAIT_MS): Prom
   await w.labeling.deleteProject(projectId);
   // Its segments of data sources stay taken, retired (#30): never handed out again.
   await retireCuts(w, projectId);
-  if (w.permissionAdmin?.deleteProject) {
+  if (w.permissionAdmin?.deleteProject && w.ctx.caller !== SYSTEM_CALLER) {
     await withRetries(() => w.permissionAdmin!.deleteProject!(w.ctx, tid, projectId), 3, w.grantRetryMs ?? 200);
   }
   await w.catalog.deleteProject(projectId);

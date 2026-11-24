@@ -93,7 +93,10 @@ const isModelLimits = (x: unknown) => isPlain(x) && TIERS.has(x.tier as string) 
 const STRICT: Record<string, (raw: string) => unknown> = {
   'jobs.limit.model': raw => parseJobLimit(raw) ?? undefined,
   'jobs.limit.compute': raw => parseJobLimit(raw) ?? undefined,
-  'tenant.minAdmins': raw => parseJobLimit(raw) ?? undefined,
+  'tenant.minAdmins': raw => {
+    const n = parseJobLimit(raw);
+    return n !== null && n <= 50 ? n : undefined;
+  },
   'gateway.unknownModelLimits.tier': raw => (TIERS.has(raw.trim()) ? raw.trim() : undefined),
   'gateway.assumedLimits': raw => {
     const v = parseLike({}, raw);

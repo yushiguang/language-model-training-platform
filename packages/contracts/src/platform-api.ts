@@ -864,7 +864,7 @@ export interface PermissionAdminPort {
   deleteTenant?(ctx: RequestContext, tenantId: string): Promise<void>;
   /** Optional: provisions the project resource on the permission platform and grants `project_write` to its creator. */
   createProject?(ctx: RequestContext, project: {tenantId: string; projectId: string; name: string; creatorId: string}): Promise<void>;
-  /** Optional: deletes the project resource from the permission platform. */
+  /** Optional: deletes the project resource from the permission platform (idempotent even if its parent tenant is already gone). */
   deleteProject?(ctx: RequestContext, tenantId: string, projectId: string): Promise<void>;
 }
 
@@ -876,7 +876,7 @@ export interface Person {
 }
 
 /**
- * The company directory (#111): tenant admins find people to add by name or email. Optional: a
+ * The company directory (#111, #120): signed-in users find people by name or email. Optional: a
  * deployment without it adds people by their exact user id only.
  */
 export interface PeopleDirectory {

@@ -3,7 +3,7 @@ import {newId, systemConfig} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
 import {tenantRole, withRetries} from './access.ts';
 import {listModels, withModelsLock} from './models.ts';
-import {backfillTenants, deleteProject, listProjects} from './projects.ts';
+import {backfillTenants, deleteProject} from './projects.ts';
 import {deleteDataSource, listDataSources, tenantOf, withLock} from './sources.ts';
 
 /**
@@ -71,12 +71,12 @@ export async function inTenant(w: Scope): Promise<boolean> {
   return (await w.permissionAdmin.listUserTenants(u.id)).some(t => t.tenantId === tenantOf(w));
 }
 
-const minTenantAdmins = (): number => Math.max(1, Math.floor(systemConfig().tenant.minAdmins));
+const minTenantAdmins = (): number => Math.min(50, Math.max(1, Math.floor(systemConfig().tenant.minAdmins)));
 
 /**
  * Creates a tenant and makes the caller (plus any requested co-admins) its admin. Names are unique
  * across Sprint (without case), checked under one lock. When writing the admins fails after retries,
- * any written members and the tenant record are removed again, so no tenant is left without owners.
+ * any written members/resources and the tenant record are removed again, so no tenant is left half-made.
  */
 export async function createTenant(w: Scope, req: CreateTenantRequest): Promise<CreateTenantResult> {
   const admin = w.permissionAdmin;
@@ -87,7 +87,7 @@ export async function createTenant(w: Scope, req: CreateTenantRequest): Promise<
   const extra = (req.adminIds ?? []).map(x => String(x).trim()).filter(Boolean);
   const adminIds = [...new Set([u.id, ...extra])].slice(0, 50);
   const min = minTenantAdmins();
-  if (adminIds.length < min) return {error: min === 2 ? 'Pick at least one other admin.' : `Pick at least ${min} admins.`};
+  if (adminIds.length < min) return {error: min === 2 ? 'Pick at least one other admin.' : `Pick at least ${min - 1} other admins.`};
   const tenant = await withLock(
     w,
     'tenants:names',
@@ -101,18 +101,20 @@ export async function createTenant(w: Scope, req: CreateTenantRequest): Promise<
     'Tenants are being created. Try again in a minute.',
   );
   if (!tenant) return {error: NAME_TAKEN};
-  const added: string[] = [];
   try {
     if (admin.createTenant) {
       await withRetries(() => admin.createTenant!(w.ctx, {tenantId: tenant.id, name: tenant.name, adminIds}), 3, w.grantRetryMs ?? 200);
     } else {
       for (const id of adminIds) {
         await withRetries(() => admin.addTenantMember(w.ctx, tenant.id, id, 'admin'), 3, w.grantRetryMs ?? 200);
-        added.push(id);
       }
     }
   } catch {
-    for (const id of added) await admin.removeTenantMember(w.ctx, tenant.id, id).catch(() => undefined);
+    if (admin.deleteTenant) {
+      await withRetries(() => admin.deleteTenant!(w.ctx, tenant.id), 1, w.grantRetryMs ?? 200).catch(() => undefined);
+    } else {
+      for (const id of adminIds) await withRetries(() => admin.removeTenantMember(w.ctx, tenant.id, id), 1, w.grantRetryMs ?? 200).catch(() => undefined);
+    }
     await w.catalog.remove('tenants', tenant.id);
     throw new Error('The tenant could not be created: you could not be made its admin. Try again.');
   }
@@ -182,13 +184,20 @@ export async function deleteTenant(w: Scope, req: DeleteTenantRequest): Promise<
   if (!rec) return {error: "This tenant comes with your organization. It can't be deleted."};
   if (String(req.name ?? '').trim() !== rec.name) return {error: 'Type the tenant name to confirm.'};
   const u = await w.user();
-  for (const p of await listProjects(w)) await deleteProject(w, p.id);
+  await backfillTenants(w);
+  const projects = await w.catalog.find('projects', {tenantId: id});
+  // Queue cleanup as the system caller so jobs still finish after members/roles are removed below
+  // and even when the admin did not hold `project_write` on every member's project.
+  for (const p of projects) if (!p.deleting) await deleteProject(w, p.id, {asSystem: true});
   for (const s of await listDataSources(w)) if (!s.builtIn) await deleteDataSource(w, {sourceId: s.id});
   await withModelsLock(w, async () => {
     for (const m of await w.catalog.find('tenant_models', {tenantId: id})) await w.catalog.remove('tenant_models', m.id);
   });
   w.gateway.forgetTenant(id);
   if (w.permissionAdmin) {
+    if (w.permissionAdmin.deleteProject) {
+      for (const p of projects) await withRetries(() => w.permissionAdmin!.deleteProject!(w.ctx, id, p.id), 3, w.grantRetryMs ?? 200);
+    }
     if (w.permissionAdmin.deleteTenant) await withRetries(() => w.permissionAdmin!.deleteTenant!(w.ctx, id), 3, w.grantRetryMs ?? 200);
     else for (const m of await w.permissionAdmin.listTenantMembers(id)) await w.permissionAdmin.removeTenantMember(w.ctx, id, m.userId);
   }

@@ -815,6 +815,9 @@ test('access redirect mode and configurable min tenant admins (#120)', async () 
     assert.deepEqual(await api.addTenantMembers(a, {userIds: [eve.id], role: 'admin'}), {});
     assert.deepEqual(await api.setTenantRole(a, {userId: bob.id, role: 'member'}), {});
     assert.deepEqual(await api.removeTenantMember(a, {userId: eve.id}), {error: keepTwo});
+
+    configureSystem({tenant: {minAdmins: 3}});
+    assert.deepEqual(await api.createTenant(ctxOf(alice), {name: 'Three Owners', adminIds: [bob.id]}), {error: 'Pick at least 2 other admins.'});
   } finally {
     configureSystem();
   }
@@ -890,4 +893,105 @@ test('permission platform lifecycle hooks (#120): custom hooks run and legacy ad
   assert.equal(minimal.canWrite(tn2.id, pr2.id, alice.id), true);
   await leg.api.deleteTenant(inTenant(alice, tn2.id), {name: 'Legacy'});
   assert.deepEqual(await minimal.listTenantMembers(tn2.id), []);
+});
+
+test('permission platform teardown order and partial-failure rollback (#120)', async () => {
+  // 1. deleteTenant deletes member projects on the permission platform before deleting the tenant,
+  //    and queued project.delete jobs succeed even when the admin lacks project_write on a member's project.
+  const perms = checking();
+  const order: string[] = [];
+  const admin = {
+    listTenantMembers: perms.admin.listTenantMembers,
+    listUserTenants: perms.admin.listUserTenants,
+    addTenantMember: perms.admin.addTenantMember,
+    removeTenantMember: perms.admin.removeTenantMember,
+    setTenantRole: perms.admin.setTenantRole,
+    listProjectWriters: perms.admin.listProjectWriters,
+    grantProjectWrite: perms.admin.grantProjectWrite,
+    revokeProjectWrite: perms.admin.revokeProjectWrite,
+    createTenant: perms.admin.createTenant,
+    createProject: perms.admin.createProject,
+    deleteProject: async (ctx: RequestContext, tenantId: string, projectId: string) => {
+      order.push(`deleteProject:${projectId}`);
+      await perms.admin.deleteProject!(ctx, tenantId, projectId);
+    },
+    deleteTenant: async (ctx: RequestContext, tenantId: string) => {
+      order.push(`deleteTenant:${tenantId}`);
+      await perms.admin.deleteTenant!(ctx, tenantId);
+    },
+  };
+  const {wf, api, jobs, catalog} = world('wf-teardown-order', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: admin});
+  const tn = (await api.createTenant(ctxOf(alice), {name: 'TearDown'})).tenant!;
+  const a = inTenant(alice, tn.id);
+  const b = inTenant(bob, tn.id);
+  await api.addTenantMembers(a, {userIds: [bob.id], role: 'member'});
+  const prBob = await api.createProject(b, 'Bobs Project');
+  assert.equal(perms.admin.canWrite(tn.id, prBob.id, alice.id), false);
+
+  assert.deepEqual(await api.deleteTenant(a, {name: 'TearDown'}), {});
+  assert.deepEqual(order, [`deleteProject:${prBob.id}`, `deleteTenant:${tn.id}`]);
+  const delJobs = await jobs.list(a, {projectId: prBob.id, kinds: ['project.delete']});
+  assert.equal(delJobs.length, 1);
+  const exec = wf.executors.find(e => e.kind === 'project.delete')!;
+  const outcome = await exec.run(delJobs[0], {heartbeat: async () => {}} as never);
+  assert.deepEqual(outcome, {state: 'done'});
+  assert.equal(await catalog.get('projects', prBob.id), null);
+  assert.deepEqual(order, [`deleteProject:${prBob.id}`, `deleteTenant:${tn.id}`], 'deleteProject is not called again after deleteTenant');
+
+  // 2. Partial failure during createTenant / createProject rolls back both catalog and permission platform.
+  const partialHookedInner = memoryPermissionAdmin();
+  let deletedOnRollback = '';
+  const partialHooked = {
+    listTenantMembers: partialHookedInner.listTenantMembers,
+    listUserTenants: partialHookedInner.listUserTenants,
+    addTenantMember: partialHookedInner.addTenantMember,
+    removeTenantMember: partialHookedInner.removeTenantMember,
+    setTenantRole: partialHookedInner.setTenantRole,
+    listProjectWriters: partialHookedInner.listProjectWriters,
+    grantProjectWrite: partialHookedInner.grantProjectWrite,
+    revokeProjectWrite: partialHookedInner.revokeProjectWrite,
+    createTenant: async (ctx: RequestContext, t: {tenantId: string; adminIds: string[]}) => {
+      await partialHookedInner.addTenantMember(ctx, t.tenantId, t.adminIds[0], 'admin');
+      throw new Error('second co-admin rejected');
+    },
+    deleteTenant: async (ctx: RequestContext, tenantId: string) => {
+      deletedOnRollback = tenantId;
+      await partialHookedInner.deleteTenant!(ctx, tenantId);
+    },
+    createProject: async () => {
+      throw new Error('project resource error');
+    },
+    deleteProject: async (_ctx: RequestContext, _tid: string, projectId: string) => {
+      deletedOnRollback = projectId;
+    },
+  };
+  const hWorld = world('wf-rollback-hooked', noHelpers, undefined, {permissionAdmin: partialHooked});
+  await assert.rejects(hWorld.api.createTenant(ctxOf(alice), {name: 'Partial', adminIds: [bob.id]}), /could not be created/);
+  assert.match(deletedOnRollback, /^tn_/);
+  assert.deepEqual(await hWorld.api.listTenants(ctxOf(alice)), [], 'partial admin cleaned up on rollback');
+  assert.deepEqual(await hWorld.catalog.find('tenants', {}), []);
+  await partialHookedInner.addTenantMember(ctxOf(alice), 't1', alice.id, 'admin');
+  deletedOnRollback = '';
+  await assert.rejects(hWorld.api.createProject(inTenant(alice, 't1'), 'Partial Project'), /could not be created/);
+  assert.match(deletedOnRollback, /^pr_/);
+  assert.deepEqual(await hWorld.catalog.find('projects', {}), []);
+
+  // Legacy adapter without createTenant/deleteTenant cleans up already-written first admin if second fails.
+  const legacyInner = memoryPermissionAdmin();
+  const legacyPartial = {
+    listTenantMembers: legacyInner.listTenantMembers,
+    listUserTenants: legacyInner.listUserTenants,
+    addTenantMember: async (ctx: RequestContext, tenantId: string, userId: string, role: 'admin' | 'member') => {
+      if (userId === bob.id) throw new Error('second admin failed');
+      await legacyInner.addTenantMember(ctx, tenantId, userId, role);
+    },
+    removeTenantMember: legacyInner.removeTenantMember,
+    setTenantRole: legacyInner.setTenantRole,
+    listProjectWriters: legacyInner.listProjectWriters,
+    grantProjectWrite: legacyInner.grantProjectWrite,
+    revokeProjectWrite: legacyInner.revokeProjectWrite,
+  };
+  const lWorld = world('wf-rollback-legacy', noHelpers, undefined, {permissionAdmin: legacyPartial});
+  await assert.rejects(lWorld.api.createTenant(ctxOf(alice), {name: 'Partial Legacy', adminIds: [bob.id]}), /could not be created/);
+  assert.deepEqual(await lWorld.api.listTenants(ctxOf(alice)), [], 'first admin removed when co-admin failed');
 });

@@ -74,7 +74,10 @@ export function memoryPermissionAdmin(opts: MemoryPermissionOptions = {}): Permi
       // Storage full or blocked: this page keeps the change.
     }
   };
-  return {
+  const admin: PermissionAdminPort & {
+    roleOf(tenantId: string, userId: string): TenantRole | null;
+    canWrite(tenantId: string, projectId: string, userId: string): boolean;
+  } = {
     listTenantMembers: async tenantId => [...tenant(tenantId)].map(([userId, role]): TenantMember => ({userId, role, ...profiles.get(userId)})),
     listUserTenants: async userId => [...members].flatMap(([tenantId, m]): UserTenant[] => (m.has(userId) ? [{tenantId, role: m.get(userId)!}] : [])),
     async addTenantMember(_ctx, tenantId, userId, role) {
@@ -98,16 +101,17 @@ export function memoryPermissionAdmin(opts: MemoryPermissionOptions = {}): Permi
       project(tenantId, projectId).delete(userId);
       save();
     },
-    async createTenant(this: PermissionAdminPort, ctx, {tenantId, adminIds}) {
-      for (const userId of adminIds) await this.addTenantMember(ctx, tenantId, userId, 'admin');
+    async createTenant(this: PermissionAdminPort | undefined, ctx, {tenantId, adminIds}) {
+      const target = this ?? admin;
+      for (const userId of adminIds) await target.addTenantMember(ctx, tenantId, userId, 'admin');
     },
     async deleteTenant(_ctx, tenantId) {
       members.delete(tenantId);
       for (const k of [...writers.keys()]) if (k.startsWith(`${tenantId}/`)) writers.delete(k);
       save();
     },
-    async createProject(this: PermissionAdminPort, ctx, {tenantId, projectId, creatorId}) {
-      await this.grantProjectWrite(ctx, tenantId, projectId, creatorId);
+    async createProject(this: PermissionAdminPort | undefined, ctx, {tenantId, projectId, creatorId}) {
+      await (this ?? admin).grantProjectWrite(ctx, tenantId, projectId, creatorId);
     },
     async deleteProject(_ctx, tenantId, projectId) {
       writers.delete(`${tenantId}/${projectId}`);
@@ -116,6 +120,7 @@ export function memoryPermissionAdmin(opts: MemoryPermissionOptions = {}): Permi
     roleOf: (tenantId, userId) => members.get(tenantId)?.get(userId) ?? null,
     canWrite: (tenantId, projectId, userId) => writers.get(`${tenantId}/${projectId}`)?.has(userId) ?? false,
   };
+  return admin;
 }
 
 export interface MemoryAccessRequestOptions {

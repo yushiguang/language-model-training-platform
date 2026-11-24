@@ -113,7 +113,7 @@ export interface SystemConfig {
     messageMaxChars: number;
   };
   tenant: {
-    /** Minimum admins a tenant starts with and keeps (raise when the permission platform needs multiple owners). */
+    /** Minimum admins a tenant starts with and keeps (1 to 50; raise when the permission platform needs multiple owners). */
     minAdmins: number;
   };
 }
