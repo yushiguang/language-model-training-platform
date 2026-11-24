@@ -217,7 +217,7 @@ export async function loadProjectState(w: Scope, projectId: string): Promise<Pro
   const examples = allExamples.filter(e => !e.removed).map(indexOnly);
   const removals = rawRemovals.filter(r => !r.restoredAt).map(r => (r.gold == null ? r : {...r, gold: asAnswerOrNull(r.gold)}));
   const comments: Record<string, LabelComment[]> = {};
-  for (const c of rawComments) (comments[c.exampleId] ??= []).push(c);
+  for (const c of rawComments) if (!c.deletedAt) (comments[c.exampleId] ??= []).push(c);
   const versions = rawVersions.sort((a, b) => compareVersions(b, a));
   const evalExamples = examples.filter(e => e.split === 'eval');
   // Scores rest on the eval samples inside label sets, once every set is finished (server.md 4.3).

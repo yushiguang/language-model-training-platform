@@ -1359,6 +1359,34 @@ test('comments are append-only, cut to the limit, and reach helpers only for the
   assert.deepEqual([...seen.keys()], [mine.id]);
 });
 
+test('comments (#115): the author edits or deletes their own; anyone else is refused; a deleted one leaves every read but stays in the audit', async () => {
+  const w = await world('g4e');
+  const s0 = await w.state();
+  const {addComment, editComment, deleteComment} = await import('./governance.ts');
+  const {labelComments} = await import('./mismatches.ts');
+  const ex = s0.examples.find(e => e.optimiserHalf)!;
+  const c = await addComment(w.ws, w.projectId, ex.id, 'first take');
+  const edited = await editComment(w.ws, w.projectId, c.id, '  second take  ');
+  assert.equal(edited.text, 'second take');
+  assert.ok(edited.editedAt);
+  assert.equal((await editComment(w.ws, w.projectId, c.id, 'second take')).editedAt, edited.editedAt, 'the same text changes nothing');
+  await assert.rejects(editComment(w.ws, w.projectId, c.id, '  '), /empty/);
+  const other = w.inst.scope({requestId: 'rq_other', user: {id: 'u_2', name: 'Other'}, caller: 'test'});
+  await assert.rejects(editComment(other, w.projectId, c.id, 'mine now'), /your own/);
+  await assert.rejects(deleteComment(other, w.projectId, c.id), /your own/);
+  let s = await w.state();
+  assert.deepEqual(s.comments[ex.id].map(x => x.text), ['second take']);
+  await deleteComment(w.ws, w.projectId, c.id);
+  s = await w.state();
+  assert.equal(s.comments[ex.id], undefined, 'a deleted comment is not read back');
+  assert.equal((await labelComments(w.ws, w.projectId, s)).has(ex.id), false, 'nor does it reach helpers');
+  await assert.rejects(editComment(w.ws, w.projectId, c.id, 'again'), /does not exist/);
+  await assert.rejects(deleteComment(w.ws, w.projectId, c.id), /does not exist/);
+  const trail = await w.catalog.find('audit_log', {projectId: w.projectId});
+  assert.deepEqual(trail.filter(a => a.action.startsWith('label_comments.')).map(a => a.action), ['label_comments.edit', 'label_comments.delete']);
+  assert.equal((trail.find(a => a.action === 'label_comments.edit')!.data as {previousText?: string}).previousText, 'first take');
+});
+
 test('the first read of examples by a helper locks the halves', async () => {
   const w = await world('g5');
   assert.equal((await w.state()).project.holdoutLocked, undefined);
@@ -3013,6 +3041,32 @@ test('label set lists count mismatches (#107) per set and for the whole dataset,
   const inSet = await listSamples(w.ws, {projectId: w.projectId, labelSetId: list.sets[0].id});
   assert.deepEqual([list.sets[0].samples, list.sets[0].labeled, list.sets[0].mismatch], [6, 6, inSet.counts.mismatch]);
   assert.ok(list.mismatch > 0);
+});
+
+test('mismatches for one label set (#115) list only its samples, against the same version as the whole dataset', async () => {
+  const w = await world('ls6', {answer: ruled, macroF1: 0.99, gold: goldOf});
+  const {createLabelSets} = await import('./label-sets.ts');
+  const {mismatches} = await import('./mismatches.ts');
+  const {listSamples} = await import('./samples.ts');
+  const sets = await createLabelSets(w.ws, {projectId: w.projectId, sets: 2});
+  await w.newVersion('RULE 1');
+  await tick(w.ws, await w.state());
+  await until(async () => (await w.state()).reports.length === 1, 'v1 scored');
+  const all = await mismatches(w.ws, w.projectId);
+  const each = await Promise.all(sets.map(set => mismatches(w.ws, w.projectId, null, set.id)));
+  assert.ok(all.items.length > 0);
+  assert.deepEqual(each.map(m => m.versionId), [all.versionId, all.versionId], 'every set compares with the same version');
+  assert.deepEqual(each.flatMap(m => m.items.map(i => i.exampleId)).sort(), all.items.map(i => i.exampleId).sort(), 'the sets split the whole list');
+  const s = await w.state();
+  for (const [i, set] of sets.entries()) {
+    for (const it of each[i].items) {
+      const n = s.examples.find(e => e.id === it.exampleId)!.number!;
+      assert.ok(n >= set.first && n <= set.last, 'inside the set');
+    }
+    const page = await listSamples(w.ws, {projectId: w.projectId, labelSetId: set.id});
+    assert.equal(each[i].items.length, page.counts.mismatch, "the set's Mismatch tab count");
+  }
+  await assert.rejects(mismatches(w.ws, w.projectId, null, 'ls_nope'), /does not exist/);
 });
 
 test('a label change clears only the gold labels it makes wrong; the rest carry over, and the count is known before saving', async () => {

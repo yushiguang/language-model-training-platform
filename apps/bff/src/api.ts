@@ -171,6 +171,8 @@ export function createBffApi(deps: BffDeps): BffContract {
     restoreExamples: pass('restoreExamples'),
     pruneDataset: pass('pruneDataset'),
     addComment: pass('addComment'),
+    editComment: pass('editComment'),
+    deleteComment: pass('deleteComment'),
     saveGold: pass('saveGold'),
     uploadGold: pass('uploadGold'),
     uploadGoldText: pass('uploadGoldText'),

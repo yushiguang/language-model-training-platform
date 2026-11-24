@@ -54,7 +54,7 @@
 | --- | --- |
 | 只要登录 | `runtimeInfo` |
 | 读 | 列表和读取（`listProjects`、`getProject`、`loadProjectState`、`projectStatus`、数据源列表和详情、模型列表（`listModels`）、样本、特征、不一致、预测、聊天记录、提议列表）；`createProject`（任何成员都能建）；`tick`；`sendUserMessage`（问 AI 是读，AI 要开始工作时它的工具再查项目写） |
-| 项目写 | 其余改项目的方法：下一步、改名、删除、设置、取样本和增删、人工标签、复核、重建分数、建版本、打分、停止、优化器开始 / 停止 / 重试、Improve with AI、写评论、处理提议 |
+| 项目写 | 其余改项目的方法：下一步、改名、删除、设置、取样本和增删、人工标签、复核、重建分数、建版本、打分、停止、优化器开始 / 停止 / 重试、Improve with AI、写评论（改和删只限作者本人）、处理提议 |
 | 租户写 | `createDataSource`、`addSourceFile`、`addModel`、`updateModel`、`removeModel`、`setDefaultModel` |
 
 **校验在哪里做**（`apps/workflow/src/services/access.ts` 的 `authorize`）：
