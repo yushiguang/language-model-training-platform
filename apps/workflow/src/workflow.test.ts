@@ -653,6 +653,48 @@ test('project editors (#118): the creator first and always; tenant members are a
   assert.deepEqual((await api.listProjectEditors(a, {projectId: p.id})).map(e => e.userId), [alice.id]);
 });
 
+test('project overview (#123): who can edit, and what happened, newest first', async () => {
+  const perms = checking();
+  const sys = {requestId: 'rq_setup', user: {id: 'u_admin', name: 'Admin'}};
+  await perms.admin.addTenantMember(sys, 't1', alice.id, 'member');
+  await perms.admin.addTenantMember(sys, 't1', bob.id, 'member');
+  const {api, catalog} = world('wf-overview', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
+  const a = inTenant(alice, 't1');
+  const b = inTenant(bob, 't1');
+  const p = await api.createProject(a, 'Topics');
+  assert.equal((await api.getProjectOverview(b, {projectId: p.id})).canEdit, false, 'a member who was not added only reads');
+  await api.renameProject(a, {projectId: p.id, name: 'Video topics'});
+  await api.addProjectEditors(a, {projectId: p.id, userIds: [bob.id]});
+  await catalog.audit(p.id, 'Alice', 'dataset.create', {source: 'file', rows: 10, notSaved: 2});
+  await catalog.audit(p.id, 'agent:prompt', 'agent.tool', {name: 'get_report'});
+  await catalog.audit(p.id, 'system', 'auto_spend', {costUsd: 1});
+  await catalog.audit(p.id, 'Alice', 'dataset.restore', {count: 0});
+  await catalog.insert('agent_proposals', {id: 'ap_1', projectId: p.id, agent: 'prompt_agent', kind: 'prompt', payload: {} as never, brief: 'a clearer definition for Practical', state: 'open', createdAt: new Date(Date.now() + 1000).toISOString()});
+  const day = new Date(Date.now() + 2000).toISOString();
+  for (const [i, at] of [day, day.replace(/\d\d\.\d+Z$/, '00.000Z')].entries()) {
+    await catalog.insert('gold_labels', {id: `gl_${i}`, projectId: p.id, exampleId: `ex_${i}`, schemaVersion: 1, answer: ['Food'], source: 'labeled', revealed: false, createdAt: at, createdBy: 'Bob'});
+  }
+  await catalog.insert('gold_labels', {id: 'gl_up', projectId: p.id, exampleId: 'ex_9', schemaVersion: 1, answer: ['Food'], source: 'uploaded', revealed: false, createdAt: day, createdBy: 'Alice'});
+
+  const view = await api.getProjectOverview(b, {projectId: p.id});
+  assert.equal(view.canEdit, true, 'Bob edits once added');
+  const lines = view.activity.map(x => [x.kind, x.by.kind, x.by.name, x.count ?? null, x.text ?? null]);
+  assert.deepEqual(lines.slice(0, 2), [
+    ['examples_labeled', 'person', 'Bob', 2, null],
+    ['ai_suggested', 'ai', 'AI', null, 'a clearer definition for Practical'],
+  ], 'labels one line per person per day; the AI suggestion; newest first');
+  const rest = new Map(lines.slice(2).map(l => [l[0], l]));
+  assert.deepEqual(rest.get('examples_added'), ['examples_added', 'person', 'Alice', 8, null], 'rows less those not saved');
+  assert.deepEqual(rest.get('editor_added'), ['editor_added', 'person', 'Alice', null, 'Bob']);
+  assert.deepEqual(rest.get('project_renamed'), ['project_renamed', 'person', 'Alice', null, 'Video topics']);
+  assert.ok(rest.has('project_created'));
+  assert.ok(!rest.has('examples_restored'), 'a count of 0 says nothing');
+  assert.equal(lines.length, 6, "Sprint's own records stay out");
+  assert.ok(view.activity.every((x, i, all) => i === 0 || all[i - 1].at >= x.at), 'newest first');
+  assert.deepEqual((await api.getProjectOverview(a, {projectId: p.id, limit: 1})).activity.map(x => x.kind), ['examples_labeled']);
+  await assert.rejects(api.getProjectOverview(inTenant(eve, 't2'), {projectId: p.id}));
+});
+
 test('page views carry the place of waiting work in its queue (#66)', async () => {
   const {api, catalog, jobs, labeling} = world('wf-queue', noHelpers);
   const ctx = inTenant(alice, 't1');

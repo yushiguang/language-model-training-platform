@@ -54,6 +54,8 @@ export const WORKFLOW_PERMISSIONS: {readonly [K in keyof WorkflowContract]: Acti
   listProjectEditors: read('request'),
   addProjectEditors: write('request'),
   removeProjectEditor: write('request'),
+  // The Overview (#123): anyone who opens the project.
+  getProjectOverview: read('request'),
   // The pages' check of what should run: the work it queues runs as Sprint itself.
   tick: read('request'),
   saveSettings: write('request'),

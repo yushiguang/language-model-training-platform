@@ -142,6 +142,7 @@ export function createBffApi(deps: BffDeps): BffContract {
     listProjectEditors: pass('listProjectEditors'),
     addProjectEditors: pass('addProjectEditors'),
     removeProjectEditor: pass('removeProjectEditor'),
+    getProjectOverview: pass('getProjectOverview'),
     tick: pass('tick'),
     saveSettings: pass('saveSettings'),
     listDataSources: pass('listDataSources'),

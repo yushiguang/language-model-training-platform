@@ -3,6 +3,11 @@
 Product and design decisions behind the MVP, newest first. Each line says what was decided and,
 where it matters, why. The code follows these; change a line here when a decision changes.
 
+## 2026-11-24 (Project Overview, #123)
+
+- **The Overview shows what happened, in plain lines**: who did what and when, newest first, from the project's own records, the AI's suggestions, and the gold labels people saved (one line per person per day). Records Sprint keeps for itself (spend, tool calls) stay out.
+- **The Overview says whether you can edit**: "Can edit" or "Can view", from the permission platform.
+
 ## 2026-11-24 (Project editors, #118)
 
 - **Project Settings lists who can edit**: the creator first, who can always edit and cannot be removed, then everyone added, with when. Anyone who can edit adds tenant members or removes them; everyone in the tenant can still open and read the project.
