@@ -1042,7 +1042,6 @@ export const ZH: Readonly<Record<string, string>> = {
   "This label set does not exist": "这个标注集不存在",
   "Nothing to label with yet": "还没有可以标注的标签",
   "It may have been made in another project. Open one from Gold Labels.": "它可能属于别的项目。请从人工标注页打开一个标注集。",
-  "Open Gold Labels": "打开人工标注",
   "No labeler yet": "还没有标注人",
   "{done} of {total} labeled": "{total} 个里已标注 {done} 个",
   "Previous example": "上一个样本",
