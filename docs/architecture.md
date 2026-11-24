@@ -429,8 +429,9 @@ side is right.
   `PermissionAdminPort` and sends `label_set_created` / `labeler_added`. A label signature change
   carries the gold labels that still answer the label to the new schema version
   (`goldLabelsCleared` counts the others for the confirm dialog).
-- *Comments.* `LabelComment` records (`label_comments`), append-only, from Save on either Gold
-  Labels tab; a comment on Mismatches keeps the version. Helpers read comments on optimiser-half
+- *Comments.* `LabelComment` records (`label_comments`), from Save on either Gold Labels tab; a
+  comment on Mismatches keeps the version. Only its author edits or deletes it (#115): an edit
+  keeps the earlier text in the audit log, a delete marks it `deletedAt` and every read leaves it out. Helpers read comments on optimiser-half
   examples only.
 - *Rough reading.* Below `thresholds.minEval` gold-labeled eval examples a score never passes
   (`judge` returns `rough`); the Finish gate stays closed.

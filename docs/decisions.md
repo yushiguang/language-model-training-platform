@@ -11,6 +11,11 @@ where it matters, why. The code follows these; change a line here when a decisio
 - **Suggestions** sit beside the scores. Until the AI evaluates each version, the card is the one code picks from the project's records, with its buttons ("Fix in Prompt Design" replaces Improve with AI) and Dismiss for this visit.
 - **The selected version is in the address** (`?v=`), so a reload or a language switch keeps it.
 
+## 2026-11-24 (Label set detail, #115)
+
+- **Comments can be edited and deleted by their author only** (wireframe round 9): `editComment` and `deleteComment` refuse anyone else's. A delete is soft, kept in the audit log with the earlier text of every edit, and a deleted comment no longer reaches the helpers.
+- **A label set's Mismatch tab lists that set's samples only**: `mismatches(projectId, version, labelSetId)`. The versions and the default "Compare with" version are still picked on the whole dataset, so every set compares with the same version.
+
 ## 2026-11-24 (Project editors, #118)
 
 - **Project Settings lists who can edit**: the creator first, who can always edit and cannot be removed, then everyone added, with when. Anyone who can edit adds tenant members or removes them; everyone in the tenant can still open and read the project.
