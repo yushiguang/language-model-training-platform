@@ -620,6 +620,33 @@ export interface DeleteProjectRequest {
 }
 
 /** Spec 1.1.0, 1.2: a new name for a project (trimmed, not empty, cut at `project.nameMaxChars`). */
+/** Someone who can edit a project (#118): its creator, or someone added in Project Settings. */
+export interface ProjectEditor {
+  userId: string;
+  name: string;
+  /** Shown under the name where the platform knows it. */
+  email?: string;
+  /** The creator can always edit the project and cannot be removed. */
+  creator: boolean;
+  /** When they were added (ISO time); null for the creator and for grants made elsewhere. */
+  addedAt: string | null;
+}
+
+export interface ProjectEditorsRequest {
+  projectId: string;
+}
+
+/** Give tenant members edit access to a project (#118); those who have it keep it. */
+export interface AddProjectEditorsRequest {
+  projectId: string;
+  userIds: string[];
+}
+
+export interface RemoveProjectEditorRequest {
+  projectId: string;
+  userId: string;
+}
+
 export interface RenameProjectRequest {
   projectId: string;
   name: string;
@@ -698,6 +725,12 @@ export interface BffContract {
   deleteProject(req: DeleteProjectRequest): Promise<void>;
   /** Renames a project (from Project Settings); returns the name as saved. */
   renameProject(req: RenameProjectRequest): Promise<string>;
+  /** Who can edit the project (#118), the creator first. Anyone who can open the project reads it. */
+  listProjectEditors(req: ProjectEditorsRequest): Promise<ProjectEditor[]>;
+  /** Gives tenant members edit access (#118); `error` names who cannot be added. Needs project edit. */
+  addProjectEditors(req: AddProjectEditorsRequest): Promise<MemberChangeResult>;
+  /** Takes edit access away (#118); the creator keeps it (`error`). Needs project edit. */
+  removeProjectEditor(req: RemoveProjectEditorRequest): Promise<MemberChangeResult>;
 
   // Project Settings (the pass rule and the labeling model). Saving also confirms them.
   saveSettings(req: SaveSettingsRequest): Promise<void>;
