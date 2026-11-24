@@ -35,6 +35,9 @@ issues (`CONTRIBUTING.md`); an accepted issue lands here with its number.
 
 ## Done
 
+- 2026-11-24: Prompt Tuning on Astryx (#90 lane 3, #105): version cards (sort, pin, Best, change),
+  Macro-F1 / Precision / Recall cards against thresholds, per-value rows with false negative and
+  false positive rings, Rescore, the Optimise dialog and the running Optimiser's progress.
 - 2026-11-23: Prompt Design on Astryx (#90 lane 3, #96): one prompt card beside Ask AI with
   Sections, Changes and Full prompt, each part edited in a dialog, and flat version numbers (a save
   overwrites the version on screen; every save is kept).

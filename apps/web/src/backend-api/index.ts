@@ -121,6 +121,7 @@ export const {
   mismatches,
   reviewGold,
   rebuildReports,
+  rescore,
   createVersion,
   goldLabelsCleared,
   scoreVersion,

@@ -464,23 +464,34 @@ let current = null;
   await page.goto(goldUrl);
   await button(page, 'Next: Prompt Tuning').click();
   await page.waitForURL(/\/prompt\/?\?/);
-  await page.locator('nav.vlist').waitFor();
+  const versionsRow = page.locator('section[aria-label="Versions"]');
+  await versionsRow.waitFor();
   log('settings were confirmed when the project was made; scoring starts by itself');
 
-  const suggestion = async () => ((await page.locator('.card.ai').count()) ? page.locator('.card.ai').first().innerText() : '');
+  const suggestion = async () => ((await page.locator('section[aria-label="Suggestions"]').count()) ? page.locator('section[aria-label="Suggestions"]').first().innerText() : '');
   // Right after the first score, the model disagrees with some gold labels: Review labels opens
   // Gold Labels' Mismatches tab (review finding 2). One label is kept, one takes the model's answer.
-  for (let i = 0; i < 30 && !(await button(page, 'Review labels').count()) && !(await button(page, 'Improve with AI').count()); i++) await page.waitForTimeout(1000);
-  if (await button(page, 'Review labels').count()) {
+  // Review labels goes to Gold Labels, so it is a link.
+  const reviewLabels = page.locator('section[aria-label="Suggestions"]').getByRole('link', {name: 'Review labels', exact: true});
+  for (let i = 0; i < 30 && !(await reviewLabels.count()) && !(await button(page, 'Fix in Prompt Design').count()); i++) await page.waitForTimeout(1000);
+  if (await reviewLabels.count()) {
     log('suggestion:', (await suggestion()).replace(/\n/g, ' | '));
-    // 2026-11-16: the version card scores the label (Macro-F1) and lists every value.
-    const head = await page.locator('main .tbl thead').first().innerText();
-    if (!/Value[\s\S]*F1[\s\S]*Precision[\s\S]*Recall[\s\S]*Examples/.test(head)) throw new Error(`the version card is not per value: ${head}`);
-    if (await page.getByText('Lowest field macro-F1').count()) throw new Error('the version card still says lowest field');
-    // R4-6: the version card says what the score rests on.
-    log('left out:', await page.getByText(/^Scored on \d+ of \d+ examples/).first().innerText());
+    // Wireframes v346: Scores are Macro-F1, Precision and Recall; Values has one row per value, and
+    // an open row shows its false negatives and false positives.
+    const scores = await page.locator('section[aria-label="Scores"]').innerText();
+    if (!/Macro-F1[\s\S]*Precision[\s\S]*Recall/.test(scores)) throw new Error(`Scores is not Macro-F1, Precision and Recall: ${scores}`);
+    log('scores:', scores.replace(/\n/g, ' '));
+    log('subtitle:', await page.getByText(/^Scored on [\d,]+ examples with a person/).first().innerText());
+    const valuesSec = page.locator('section[aria-label="Values"]');
+    await valuesSec.locator('.sp-pt-vhead').first().click();
+    await valuesSec.getByText('False negatives', {exact: true}).waitFor({timeout: 5000});
+    await valuesSec.getByText('False positives', {exact: true}).waitFor();
+    await shot(page, '4a-values-open');
+    await button(valuesSec, 'Expand all').click();
+    if ((await valuesSec.locator('.sp-pt-vrow.open').count()) !== (await valuesSec.locator('.sp-pt-vrow').count())) throw new Error('Expand all left a value closed');
+    await button(valuesSec, 'Collapse all').click();
     await shot(page, '4b-disagree');
-    await button(page, 'Review labels').click();
+    await reviewLabels.click();
     // #115: Review labels opens a label set on its Mismatch tab; saving there records a review.
     await page.waitForURL(/gold\/set/);
     const tab = page.getByRole('tab', {name: /^Mismatch/});
@@ -523,36 +534,26 @@ let current = null;
     }
     log('mismatches after review:', await tab.innerText());
     await page.goto(url('/prompt/'));
-    await page.locator('nav.vlist').waitFor();
-    // 2026-11-12: a gold change leaves scores out of date until Rebuild scores is pressed.
+    await versionsRow.waitFor();
+    // 2026-11-12: a gold change leaves scores out of date until Rescore is pressed; the banner says why.
     if (before > 1) {
-      await page.getByText('Scores out of date', {exact: true}).first().waitFor({timeout: 5000});
+      const stale = page.getByText('Gold labels changed after these scores were built', {exact: true});
+      await stale.waitFor({timeout: 5000});
       await shot(page, '4e-scores-out-of-date');
-      // Resilience spec, 7: the advice stays, and its actions ask to rebuild first.
-      const act = (await button(page, 'Improve with AI').count()) ? 'Improve with AI' : (await button(page, 'Auto Optimise').count()) ? 'Auto Optimise' : null;
-      if (act) {
-        await button(page, act).first().click();
-        const dlg = page.getByRole('dialog');
-        await dlg.getByText('Rebuild scores first?', {exact: true}).waitFor({timeout: 5000});
-        await shot(page, '4f-rebuild-first');
-        await button(dlg, 'Rebuild scores').click();
-        await dlg.waitFor({state: 'detached', timeout: 10000});
-      } else {
-        log('no advice action while scores were out of date');
-        await button(page, 'Rebuild scores').click();
-      }
-      await page.getByText('Scores out of date', {exact: true}).first().waitFor({state: 'detached', timeout: 10000});
-      if (!(await button(page, 'Rebuild scores').isDisabled())) throw new Error('Rebuild scores is on with scores up to date');
-      log('scores rebuilt by hand', act ? `(asked from ${act})` : '');
+      await button(page, 'Rescore').click();
+      await stale.waitFor({state: 'detached', timeout: 15000});
+      for (let i = 0; i < 20 && !(await button(page, 'Rescore').isDisabled()); i++) await page.waitForTimeout(500);
+      if (!(await button(page, 'Rescore').isDisabled())) throw new Error('Rescore is on with scores up to date');
+      log('scores rebuilt by hand with Rescore');
     }
   }
 
   // Improve with AI puts the Prompt helper's draft in the editor, saved as v1.1. It is offered
   // below the bar and on a passing version too, so the check runs it whether or not v1 passed.
-  for (let i = 0; i < 30 && !(await button(page, 'Improve with AI').count()); i++) await page.waitForTimeout(1000);
-  if (await button(page, 'Improve with AI').count()) {
+  for (let i = 0; i < 30 && !(await button(page, 'Fix in Prompt Design').count()); i++) await page.waitForTimeout(1000);
+  if (await button(page, 'Fix in Prompt Design').count()) {
     // Discard first (#39, T8): the draft closes as discarded and does not come back on reload.
-    await button(page, 'Improve with AI').first().click();
+    await button(page, 'Fix in Prompt Design').first().click();
     await page.waitForURL(/prompt-design\/?\?.*v=/);
     await page.getByText('AI draft · not saved', {exact: true}).waitFor({timeout: 20000});
     await button(page.locator('main'), 'Discard').click();
@@ -564,8 +565,8 @@ let current = null;
     if (await page.getByText('AI draft · not saved', {exact: true}).count()) throw new Error('a discarded draft came back on reload');
     log('improve with AI: discarded draft stays discarded');
     await page.goto(url('/prompt/'));
-    for (let i = 0; i < 30 && !(await button(page, 'Improve with AI').count()); i++) await page.waitForTimeout(1000);
-    await button(page, 'Improve with AI').first().click();
+    for (let i = 0; i < 30 && !(await button(page, 'Fix in Prompt Design').count()); i++) await page.waitForTimeout(1000);
+    await button(page, 'Fix in Prompt Design').first().click();
     await page.waitForURL(/prompt-design\/?\?.*v=/);
     await page.getByText('AI draft · not saved', {exact: true}).waitFor({timeout: 20000});
     // The helper's draft opens on its marks against the saved version, each change with its reason.
@@ -585,88 +586,74 @@ let current = null;
     await page.goto(url('/prompt/'));
   }
 
-  // Auto Optimise until a version passes: the card then says to use it as the final prompt (T6)
+  // Optimise until a version passes: the suggestion then says to use it as the final prompt (T6).
+  // A running Optimiser has its own card in the Versions row; selected, it shows its Progress.
   let optimised = false;
   let starts = 0;
   for (let i = 0; i < 360; i++) {
     await page.waitForTimeout(1500);
     const text = await suggestion();
     if (/as your final prompt/.test(text)) break;
-    const panel = page.locator('section[aria-label="Optimiser"]');
-    if (await panel.count()) {
-      if (i % 4 === 0) log('optimiser:', (await panel.innerText()).replace(/\n/g, ' ').slice(0, 160));
-      if (!optimised) await shot(page, '5b-optimiser-running');
-      optimised = true;
-      if (await button(page, 'Retry').count()) throw new Error(`the Optimiser failed: ${await panel.innerText()}`);
-      // Round 6: a run that ended without a pass keeps its panel and says how it ended, until a
-      // version is picked.
-      if (await panel.getByText('Finished', {exact: true}).count()) {
-        const end = panel.getByRole('button', {name: /^Show v/});
-        await end.waitFor({timeout: 5000});
-        log('run ended:', (await panel.locator('.hov').first().innerText()).trim());
-        await shot(page, '5g-run-end');
-        await end.click();
-        await panel.waitFor({state: 'detached', timeout: 5000});
+    const progress = page.locator('section[aria-label="Progress"]');
+    if (await progress.count()) {
+      if (i % 4 === 0) log('optimiser:', (await progress.innerText()).replace(/\n/g, ' ').slice(0, 160));
+      if (!optimised) {
+        await shot(page, '5b-optimiser-running');
+        if (!(await versionsRow.locator('.sp-pt-vcard.selected').getByText(/Round \d+ of \d+/).count())) throw new Error('the Optimiser card does not say its round');
       }
+      optimised = true;
       continue;
     }
-    const auto = button(page, 'Auto Optimise');
-    if (await auto.count()) {
-      await auto.click();
-      // R4-3: Auto Optimise always opens one dialog: Start from (only when a better minor of the
-      // selected major exists) and Max rounds.
+    // While the Optimiser runs, another card may be selected: pick the Optimiser's card.
+    const running = versionsRow.locator('.sp-pt-vcard', {hasText: /Round \d+ of \d+/});
+    if (await running.count()) {
+      await running.first().locator('.sp-pt-vbtn').click();
+      continue;
+    }
+    const optimise = page.getByRole('button', {name: 'Optimise', exact: true}).first();
+    if ((await optimise.count()) && !(await optimise.isDisabled())) {
+      await optimise.click();
+      // Optimise opens one dialog: it starts from the selected version; Max rounds is prefilled.
       const dlg = page.getByRole('dialog');
       await dlg.waitFor({timeout: 5000});
       if ((await dlg.getByLabel('Max rounds').inputValue()) !== '10') throw new Error('Max rounds is not prefilled with 10');
       log('start dialog:', (await dlg.innerText()).replace(/\n/g, ' | '));
       await shot(page, '5e-start-dialog');
       await dlg.getByRole('button', {name: 'Start', exact: true}).click();
+      await dlg.waitFor({state: 'detached', timeout: 15000});
       if (++starts > 8) throw new Error(`no version passed after 8 Optimiser runs: ${text.replace(/\n/g, ' | ')}`);
-      log('auto optimise started:', text.replace(/\n/g, ' | ').slice(0, 200));
+      log('optimise started:', text.replace(/\n/g, ' | ').slice(0, 200));
     }
   }
   await shot(page, '5-prompt-versions');
   log('suggestion:', (await suggestion()).replace(/\n/g, ' | '));
-  log('versions:', (await page.locator('nav.vlist').innerText()).replace(/\n/g, ' '));
-  if (optimised) {
-    await button(page, 'Major').click();
-    await shot(page, '5c-versions-major');
-    await button(page, 'All').click();
-    const dropped = page.locator('nav.vlist').getByText('Dropped', {exact: true}).first();
-    if (await dropped.count()) {
-      await dropped.click();
-      await page.getByText('Dropped after dry run', {exact: true}).first().waitFor();
-      // A dropped version gets a suggestion too: switch back to the best one (T5), and its badge says why on hover
-      const back = page.getByRole('button', {name: /^Switch to v/});
-      await back.waitFor({timeout: 5000});
-      log('dropped suggestion:', (await suggestion()).replace(/\n/g, ' | '));
-      await page.locator('nav.vlist .hov', {hasText: 'Dropped'}).first().hover();
-      await page.getByRole('tooltip').getByText(/In the dry run/).waitFor({timeout: 5000});
-      await shot(page, '5d-dropped');
-      await page.mouse.move(5, 5);
-      await back.click();
-      await page.getByText('Dropped after dry run', {exact: true}).first().waitFor({state: 'detached', timeout: 5000});
-      await page.locator('nav.vlist button').first().click();
-      // R6-2: the eye button hides dropped versions, and shows them again.
-      await page.getByRole('button', {name: 'Hide dropped versions'}).click();
-      if (await page.locator('nav.vlist').getByText('Dropped', {exact: true}).count()) throw new Error('dropped versions still show');
-      await shot(page, '5f-dropped-hidden');
-      await page.getByRole('button', {name: 'Show dropped versions'}).click();
-      await page.locator('nav.vlist').getByText('Dropped', {exact: true}).first().waitFor();
-      log('hide dropped: works');
-    }
-  }
+  log('versions:', (await versionsRow.innerText()).replace(/\n/g, ' '));
+  if (!(await versionsRow.getByText('Best', {exact: true}).count())) throw new Error('no version card says Best');
+  // Newest sorts by version; a pinned card stays first in either order.
+  const firstLabel = async () => (await versionsRow.locator('.sp-pt-vcard').first().locator('.sp-pt-vbtn').getAttribute('aria-label')) ?? '';
+  await versionsRow.getByRole('radio', {name: 'Newest', exact: true}).click();
+  const newest = await firstLabel();
+  const last = versionsRow.locator('.sp-pt-vcard').last();
+  const lastLabel = (await last.locator('.sp-pt-vbtn').getAttribute('aria-label')) ?? '';
+  await last.hover();
+  await last.locator('.sp-pt-pin').click();
+  if ((await firstLabel()) !== lastLabel) throw new Error(`the pinned ${lastLabel} is not first`);
+  await shot(page, '5c-versions-pinned');
+  await versionsRow.locator('.sp-pt-vcard').first().locator('.sp-pt-pin').click();
+  if ((await firstLabel()) !== newest) throw new Error('unpinning did not restore the order');
+  await versionsRow.getByRole('radio', {name: 'Score', exact: true}).click();
+  log('sort and pin: work');
 
   // T6: copy the final prompt, then mark the project finished
-  await page.locator('nav.vlist button').first().click();
-  await page.getByRole('button', {name: 'Copy prompt', exact: true}).click();
-  await page.getByRole('button', {name: 'Copied', exact: true}).waitFor({timeout: 5000});
-  await button(page, 'Finish').click();
-  await page.locator('.card.ai').getByText('Finished', {exact: true}).waitFor({timeout: 10000});
+  const suggestions = page.locator('section[aria-label="Suggestions"]');
+  await suggestions.getByRole('button', {name: 'Copy prompt', exact: true}).click();
+  await suggestions.getByRole('button', {name: 'Copied', exact: true}).waitFor({timeout: 5000});
+  await button(suggestions, 'Finish').click();
+  await suggestions.getByText('Finished', {exact: true}).waitFor({timeout: 10000});
   await shot(page, '5h-finished');
 
   // A version opens on Prompt Design: each part edited in its dialog, word marks against the saved text.
-  await page.locator('main').getByRole('link', {name: 'Edit prompt', exact: true}).click();
+  await page.getByRole('link', {name: 'Edit', exact: true}).first().click();
   await page.waitForURL(/prompt-design\/?\?.*v=/);
   await page.locator('main h3', {hasText: 'Persona & Task'}).waitFor();
   await shot(page, '6-prompt-edit');
@@ -699,9 +686,6 @@ let current = null;
 
   // Eval dataset governance (spec 4.3, 4.4): the removed example is named next to the score; added
   // examples wait for gold labels without making scores stale; removals are listed and restorable.
-  await page.goto(url('/prompt/'));
-  await page.locator('nav.vlist').waitFor();
-  await page.getByText(/1 gold-labeled example removed/).first().waitFor({timeout: 10000});
   await page.goto(url('/dataset/'));
   const tab = name => page.getByRole('radio', {name});
   await tab(`Removed 1`).waitFor({timeout: 10000});
@@ -716,9 +700,9 @@ let current = null;
   await tab(`All ${N + 5 - 1}`).waitFor({timeout: 10000});
   await shot(page, '2d-dataset-add-examples');
   await page.goto(url('/prompt/'));
-  await page.locator('nav.vlist').waitFor();
-  await page.getByText(/5 new examples wait for gold labels/).first().waitFor({timeout: 10000});
-  if (await page.getByText('Scores out of date', {exact: true}).count()) throw new Error('adding unlabeled examples made scores stale');
+  await versionsRow.waitFor();
+  await page.getByText(/^Scored on [\d,]+ examples/).first().waitFor({timeout: 10000});
+  if (await page.getByText(/changed after these scores were built/).count()) throw new Error('adding unlabeled examples made scores stale');
   await shot(page, '5i-pending');
   // Remove (W-EvalDataset-Remove): one unlabeled sample, for another reason with a note; it keeps
   // its number under Removed and comes back with Restore.
