@@ -10,6 +10,11 @@ where it matters, why. The code follows these; change a line here when a decisio
 - **The label set list counts mismatches** per set and for the dataset, by the Dataset page's rule.
 - The browser stand-in seeds four made-up colleagues in the default tenant, so there is someone to pick as a labeler.
 
+## 2026-11-23 (Tenant page, #103)
+
+- **A new project's settings are chosen when it is made**: the new-project dialog asks for the name, the labeling model (the tenant's default first) and the three thresholds (Macro-F1 at the configured default, Precision and Recall off), and saving them there counts as confirming Project Settings, so no second confirmation comes before the first paid run. Names may still repeat; a blank one is shown under the field.
+- **The projects list shows where each project stands**: its step (the step bar's rule, now shared by the server and the pages), its best current score with Passed or Below, how many of its tasks run, and when anything in it last changed. Newest first, 10 a page, All or Created by me.
+
 ## 2026-11-23 (Prompt Design on Astryx, #96)
 
 - **Versions show flat numbers** (v1, v2…; wireframes v346): one per major. A save over a version is the next minor of its major (`kind: 'minor'`), so the version keeps its number on screen and shows its newest save; every save stays in the records. An Optimiser run's major shows the best try it kept, never its tries one by one. `shownVersions` in `@yushiguang/sprint-domain` is the one rule the pages use. No contract change.

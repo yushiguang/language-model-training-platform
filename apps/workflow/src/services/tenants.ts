@@ -1,9 +1,10 @@
-import type {CreateTenantRequest, CreateTenantResult, Tenant, TenantMemberView, TenantRole, TenantSummary} from '@yushiguang/sprint-contracts';
+import type {CreateTenantRequest, CreateTenantResult, Tenant, TenantDetail, TenantMemberView, TenantRole, TenantSummary} from '@yushiguang/sprint-contracts';
 import {newId, systemConfig} from '@yushiguang/sprint-domain';
 import {now, type Scope} from './app.ts';
-import {withRetries} from './access.ts';
+import {tenantRole, withRetries} from './access.ts';
+import {listModels} from './models.ts';
 import {backfillTenants} from './projects.ts';
-import {tenantOf, withLock} from './sources.ts';
+import {listDataSources, tenantOf, withLock} from './sources.ts';
 
 /**
  * Tenants (#94): a record per tenant made in Sprint (name, creator), with who is in it kept on the
@@ -100,4 +101,22 @@ export async function createTenant(w: Scope, req: CreateTenantRequest): Promise<
   await w.catalog.audit(null, u.name, 'tenant.create', {tenantId: tenant.id});
   w.emitChange(null);
   return {tenant: {id: tenant.id, name: tenant.name, role: 'admin', projects: 0}};
+}
+
+/**
+ * The page's tenant (#103) with what its Admin cards count: data sources (as the data sources page
+ * lists them), the tenant's own models, and its members (null without a permission platform). The
+ * bff names a tenant without a record.
+ */
+export async function getTenant(w: Scope): Promise<TenantDetail> {
+  const id = tenantOf(w);
+  const [name, role, counts, sources, models, members] = await Promise.all([
+    tenantName(w),
+    tenantRole(w),
+    projectCounts(w, [id]),
+    listDataSources(w),
+    listModels(w),
+    w.permissionAdmin ? w.permissionAdmin.listTenantMembers(id) : null,
+  ]);
+  return {id, name: name ?? id, role, projects: counts.get(id) ?? 0, dataSources: sources.length, models: models.length, members: members ? members.length : null};
 }

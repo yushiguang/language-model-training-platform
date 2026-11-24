@@ -496,6 +496,72 @@ test('tenants (#94): an admin that cannot be written removes the new tenant; wit
   assert.deepEqual(await bare.api.listTenants(inTenant(alice, 't9')), [{id: 't9', name: 't9', role: 'admin', projects: 0}], 'no platform: the current tenant alone');
 });
 
+test('tenant page (#103): project rows page by page, mine only, with step, score, running work and last change', async () => {
+  const perms = checking();
+  const sys = {requestId: 'rq_setup', user: {id: 'u_admin', name: 'Admin'}};
+  await perms.admin.addTenantMember(sys, 't1', alice.id, 'admin');
+  await perms.admin.addTenantMember(sys, 't1', bob.id, 'member');
+  const {api} = world('wf-project-rows', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
+  const a = inTenant(alice, 't1');
+  const b = inTenant(bob, 't1');
+  // Made a moment apart, so newest first is one order.
+  const later = () => new Promise(r => setTimeout(r, 3));
+  const one = await api.createProject(a, 'One');
+  await later();
+  const two = await api.createProject(b, 'Two');
+  await later();
+  const three = await api.createProject(a, 'Three');
+  const all = await api.listProjectRows(b, {});
+  assert.equal(all.total, 3);
+  assert.deepEqual(all.rows.map(r => r.name), ['Three', 'Two', 'One'], 'newest first');
+  const row = all.rows[2];
+  assert.deepEqual({...row, updatedAt: undefined, createdAt: undefined}, {id: one.id, name: 'One', createdBy: 'Alice', createdById: alice.id, createdAt: undefined, step: 'prompt_design', best: null, running: 0, updatedAt: undefined});
+  assert.ok(row.updatedAt >= row.createdAt, 'the last change: its creation, so far');
+  assert.deepEqual((await api.listProjectRows(a, {mine: true})).rows.map(r => r.id), [three.id, one.id]);
+  const page2 = await api.listProjectRows(a, {offset: 1, limit: 1});
+  assert.deepEqual([page2.total, page2.rows.map(r => r.id)], [3, [two.id]]);
+  // A rename is a change: the row says when.
+  await api.renameProject(a, {projectId: one.id, name: 'First'});
+  const renamed = (await api.listProjectRows(a, {})).rows.find(r => r.id === one.id)!;
+  assert.equal(renamed.name, 'First');
+  assert.ok(renamed.updatedAt >= row.updatedAt);
+  await assert.rejects(api.listProjectRows(inTenant(eve, 't1'), {}), {code: 'forbidden'}, 'not a member');
+});
+
+test('tenant page (#103): the tenant and its counts; a new project takes the dialog\'s model and thresholds, confirmed', async () => {
+  const perms = checking();
+  const sys = {requestId: 'rq_setup', user: {id: 'u_admin', name: 'Admin'}};
+  await perms.admin.addTenantMember(sys, 't1', alice.id, 'admin');
+  await perms.admin.addTenantMember(sys, 't1', bob.id, 'member');
+  const {api} = world('wf-new-project', noHelpers, undefined, {authorization: perms.authorization, permissionAdmin: perms.admin});
+  const a = inTenant(alice, 't1');
+  const b = inTenant(bob, 't1');
+  assert.deepEqual(await api.projectDefaults(b), {models: [{id: 'A', name: 'Model A'}], model: 'A', thresholds: {macroF1: 0.8, precision: null, recall: null}}, 'the configured default Macro-F1');
+  const team = (await api.addModel(a, {name: 'Team', endpoint: 'https://models.example/team', qpm: 60, tpm: 100_000})).model!;
+  const d = await api.projectDefaults(b);
+  assert.deepEqual([d.models.map(m => m.id), d.model], [[team.id, 'A'], team.id], "the tenant's default comes first");
+
+  assert.deepEqual(await api.newProject(b, {name: '   '}), {error: 'Enter a name. Spaces alone are not a name.'});
+  assert.deepEqual(await api.newProject(b, {name: 'X', model: 'nope'}), {error: 'This model is not available.'});
+  assert.deepEqual(await api.newProject(b, {name: 'X', thresholds: {macroF1: 1.5, precision: null, recall: null}}), {error: 'Thresholds are between 0% and 100%.'});
+  assert.equal((await api.listProjects(b)).length, 0, 'nothing made on an error');
+
+  const made = await api.newProject(b, {name: ' Ads  check ', model: 'A', thresholds: {macroF1: 0.9, precision: 0.8, recall: null}});
+  assert.equal(made.project?.name, 'Ads check');
+  assert.equal(made.project?.settingsConfirmed, true, 'the dialog confirmed the settings');
+  const s = (await api.loadProjectState(b, made.project!.id))!;
+  assert.deepEqual([s.setup!.models[0].endpoint, s.setup!.thresholds!.mode, s.setup!.thresholds!.macroF1, s.setup!.thresholds!.precision, s.setup!.thresholds!.recall], ['A', 'custom', 0.9, 0.8, null]);
+  const plain = await api.newProject(b, {name: 'Plain', model: team.id, thresholds: {macroF1: 0.8, precision: null, recall: null}});
+  assert.equal((await api.loadProjectState(b, plain.project!.id))!.setup!.thresholds!.mode, 'default', 'the default thresholds stay the default');
+  const bare = await api.newProject(b, {name: 'Bare'});
+  assert.equal(bare.project?.settingsConfirmed, false, 'no choices made: confirmed later, as before');
+
+  const t = await api.getTenant(b);
+  assert.deepEqual({...t, dataSources: undefined}, {id: 't1', name: 't1', role: 'member', projects: 3, dataSources: undefined, models: 1, members: 2});
+  assert.equal(typeof t.dataSources, 'number');
+  await assert.rejects(api.getTenant(inTenant(eve, 't1')), {code: 'forbidden'});
+});
+
 test('page views carry the place of waiting work in its queue (#66)', async () => {
   const {api, catalog, jobs, labeling} = world('wf-queue', noHelpers);
   const ctx = inTenant(alice, 't1');

@@ -119,6 +119,14 @@ export function createBffApi(deps: BffDeps): BffContract {
 
     listProjects: pass('listProjects'),
     createProject: pass('createProject'),
+    listProjectRows: pass('listProjectRows'),
+    async getTenant() {
+      const who = await currentUser();
+      const t = await workflow.getTenant(await context(undefined, who));
+      return t.name === t.id ? {...t, name: nameOf(who, t.id)} : t;
+    },
+    projectDefaults: pass('projectDefaults'),
+    newProject: pass('newProject'),
     getProject: pass('getProject'),
     loadProjectState: pass('loadProjectState'),
     projectStatus: pass('projectStatus'),
