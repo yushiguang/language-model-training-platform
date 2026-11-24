@@ -1038,7 +1038,6 @@ export const ZH: Readonly<Record<string, string>> = {
   "Split the dataset into label sets and give each one a labeler.": "把数据集分成标注集，每个指定一个标注人。",
   "Splits the {n} examples not in a set. Change either number; the other follows.": "把不在标注集里的 {n} 个样本分开。改其中一个数，另一个跟着变。",
   "The label sets could not load: {why}": "标注集没有加载出来：{why}",
-  "{n} examples": "{n} 个样本",
   "{n} not in a set. Takes the next ones in order.": "还有 {n} 个不在标注集里。按顺序取接下来的样本。",
   "{n} not in a set. Takes the next ones in order: {range}": "还有 {n} 个不在标注集里。按顺序取接下来的样本：{range}",
   "{n} of {total} examples are in a label set.": "{total} 个样本里有 {n} 个在标注集里。",
