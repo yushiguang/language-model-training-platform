@@ -8,6 +8,7 @@ import * as features from './services/features.ts';
 import * as mismatch from './services/mismatches.ts';
 import * as governance from './services/governance.ts';
 import * as projects from './services/projects.ts';
+import * as overview from './services/overview.ts';
 import * as editors from './services/editors.ts';
 import * as prompts from './services/prompts.ts';
 import * as settings from './services/settings.ts';
@@ -148,6 +149,7 @@ export function createWorkflow(deps: WorkflowDeps): Workflow {
     listProjectEditors: (ctx, r) => editors.listProjectEditors(at(ctx), r),
     addProjectEditors: (ctx, r) => editors.addProjectEditors(at(ctx), r),
     removeProjectEditor: (ctx, r) => editors.removeProjectEditor(at(ctx), r),
+    getProjectOverview: (ctx, r) => overview.getProjectOverview(at(ctx), r),
     // The caller only needs to read the project: the work its check queues runs as Sprint in the
     // project's tenant, as the server's sweep does (docs/design/server.md, 2.2).
     async tick(ctx, {projectId}) {
