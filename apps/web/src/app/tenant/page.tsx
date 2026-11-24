@@ -10,6 +10,7 @@ import {ErrorLine} from '@/components/sources/dialogs';
 import {addedWhen} from '@/components/sources';
 import {hrefFor, tenantHref} from '@/components/ProjectContext';
 import {ThresholdFields} from '@/components/thresholds';
+import {TenantSettings, type TenantSettingsTab} from '@/components/TenantSettings';
 import {useGo} from '@/components/nav';
 import {useRuntime} from '@/components/session';
 import {Avatar, Badge, Button, Card, ClickableCard, EmptyState, Grid, Heading, HStack, Icon, Link, MoreMenu, Pagination, pixel, proportional, SegmentedControl, SegmentedControlItem, Selector, Spinner, Table, Text, TextInput, VStack, type TableColumn} from '@/ui/astryx';
@@ -36,6 +37,7 @@ function TenantView() {
   const [tenant, setTenant] = useState<TenantDetail | null>(null);
   const [defaults, setDefaults] = useState<ProjectDefaults | null>(null);
   const [creating, setCreating] = useState(false);
+  const [settings, setSettings] = useState<TenantSettingsTab | null>(null);
   // Bumped after a delete: the counts and the rows read again.
   const [changed, setChanged] = useState(0);
   useEffect(() => {
@@ -58,9 +60,10 @@ function TenantView() {
     <TenantPage head={<PageTitle title={name} subtitle={t('Everyone in {tenant} can open these projects.', {tenant: name})} />}>
       <VStack gap={10}>
         <Projects newButton={newButton} empty={tenant ? tenant.projects === 0 : null} onDeleted={() => setChanged(n => n + 1)} changed={changed} />
-        {admin && tenant && <AdminCards tenant={tenant} noModels={!!defaults && defaults.models.length === 0} />}
+        {admin && tenant && <AdminCards tenant={tenant} noModels={!!defaults && defaults.models.length === 0} onOpen={setSettings} />}
       </VStack>
       {creating && <NewProject defaults={defaults} onClose={() => setCreating(false)} />}
+      {settings && tenant && <TenantSettings tenant={tenant} me={info?.user.id} tab={settings} onClose={() => setSettings(null)} onChanged={() => setChanged(n => n + 1)} />}
     </TenantPage>
   );
 }
@@ -358,8 +361,8 @@ function NewProject({defaults, onClose}: {defaults: ProjectDefaults | null; onCl
  * Admin (W-Projects): data sources open their page; models, members and tenant settings live in
  * the tenant settings dialog. A tenant with no data sources, or no model at all, says it needs them.
  */
-function AdminCards({tenant, noModels}: {tenant: TenantDetail; noModels: boolean}) {
-  const cards: {key: string; title: string; icon: typeof UsersIcon; line: string; needed?: boolean; href?: string}[] = [
+function AdminCards({tenant, noModels, onOpen}: {tenant: TenantDetail; noModels: boolean; onOpen: (tab: TenantSettingsTab) => void}) {
+  const cards: {key: string; title: string; icon: typeof UsersIcon; line: string; needed?: boolean; href?: string; tab?: TenantSettingsTab}[] = [
     {
       key: 'sources',
       title: t('Data sources'),
@@ -368,9 +371,9 @@ function AdminCards({tenant, noModels}: {tenant: TenantDetail; noModels: boolean
       needed: !tenant.dataSources,
       href: tenantHref('/sources/'),
     },
-    {key: 'models', title: t('Models'), icon: CpuChipIcon, line: tenant.models ? (tenant.models === 1 ? t('1 model') : t('{n} models', {n: tenant.models})) : t('No models yet'), needed: noModels},
-    ...(tenant.members != null ? [{key: 'members', title: t('Members'), icon: UsersIcon, line: tenant.members === 1 ? t('1 member') : t('{n} members', {n: tenant.members})}] : []),
-    {key: 'settings', title: t('Tenant settings'), icon: Cog6ToothIcon, line: ''},
+    {key: 'models', title: t('Models'), icon: CpuChipIcon, line: tenant.models ? (tenant.models === 1 ? t('1 model') : t('{n} models', {n: tenant.models})) : t('No models yet'), needed: noModels, tab: 'models'},
+    ...(tenant.members != null ? [{key: 'members', title: t('Members'), icon: UsersIcon, line: tenant.members === 1 ? t('1 member') : t('{n} members', {n: tenant.members}), tab: 'members' as const}] : []),
+    {key: 'settings', title: t('Tenant settings'), icon: Cog6ToothIcon, line: '', tab: 'general'},
   ];
   return (
     <VStack gap={4}>
@@ -395,15 +398,11 @@ function AdminCards({tenant, noModels}: {tenant: TenantDetail; noModels: boolean
               </div>
             </VStack>
           );
-          // Models, members and tenant settings open the tenant settings dialog (#90 lane 1, piece 3).
-          return c.href ? (
-            <ClickableCard key={c.key} label={c.title} href={c.href} padding={5}>
+          // Models, members and tenant settings open the tenant settings dialog at their section (#111).
+          return (
+            <ClickableCard key={c.key} label={c.title} {...(c.href ? {href: c.href} : {onClick: () => onOpen(c.tab!)})} padding={5}>
               {body}
             </ClickableCard>
-          ) : (
-            <Card key={c.key} padding={5}>
-              {body}
-            </Card>
           );
         })}
       </Grid>
