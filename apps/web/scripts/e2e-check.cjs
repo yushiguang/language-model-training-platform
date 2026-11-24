@@ -350,43 +350,73 @@ let current = null;
   log('label sets:', (await page.locator('main').innerText()).replace(/\s+/g, ' ').slice(0, 200));
   await page.getByRole('link', {name: 'First batch'}).click();
 
-  // The label set: every eval example and some test examples, picked on the page
+  // The label set (#115): Unlabeled, labeled on the page one by one; the model answer starts hidden.
   await page.waitForURL(/gold\/set/);
-  // Spec 5.3: nothing saves before Save; in To label, Save moves on to the next example.
+  const itemId = async () => (await page.locator('.sp-item-id').innerText()).trim();
+  const tabOf = name => page.getByRole('tab', {name: new RegExp(`^${name}`)});
+  const countOf = async name => +((await tabOf(name).innerText()).match(/(\d[\d,]*)\s*$/) || [0, '0'])[1].replace(/,/g, '');
+  await tabOf('Unlabeled').waitFor({timeout: 10000});
+  if ((await countOf('All')) !== N || (await countOf('Unlabeled')) !== N) throw new Error(`the label set does not have ${N} examples to label`);
+  await tabOf('Unlabeled').click();
+  // Spec 5.3: nothing saves before Save; in Unlabeled, Save moves on to the next example.
   const labelSet = async n => {
     for (let i = 0; i < n; i++) {
-      const id = (await page.locator('.media small').innerText()).trim();
+      const id = await itemId();
       const answer = LABELS.get(id);
       if (!answer) throw new Error(`No bundled label for ${id}`);
+      if (i === 0 && !(await page.getByText('Hidden until you answer', {exact: true}).count())) throw new Error('the model answer is not hidden before the first label');
       await page.getByRole('group', {name: 'primary_value'}).getByRole('button', {name: answer, exact: true}).click();
       if (i === 0) {
         await page.waitForTimeout(400);
         if (await page.getByText('Saved', {exact: true}).count()) throw new Error('a label saved before Save');
       }
       await button(page, 'Save').click();
-      if (i < n - 1) await page.waitForFunction(was => document.querySelector('.media small')?.textContent?.trim() !== was, id, {timeout: 5000});
+      if (i < n - 1) await page.waitForFunction(was => document.querySelector('.sp-item-id')?.textContent?.trim() !== was, id, {timeout: 5000});
       else await page.getByText('Every example is labeled', {exact: true}).waitFor({timeout: 5000});
     }
   };
-  const nEval = +((await page.getByRole('tab', {name: /^Eval set/}).innerText()).match(/\/\s*(\d+)/) || [0, 0])[1];
-  if (nEval !== N) throw new Error(`the eval set has ${nEval} examples, not ${N}`);
-  if (await page.getByRole('tab', {name: /^Test set/}).count()) throw new Error('Gold Labels still has a Test set tab');
-  if (!(await page.getByRole('button', {name: `To label ${N}`}).count())) throw new Error('Gold Labels has no To label filter');
   if (await page.getByText("Use the model's answer").count()) throw new Error("Use the model's answer is still there");
   await shot(page, '3-gold-labels');
-  await labelSet(nEval);
-  log('gold labels:', await page.getByRole('tablist', {name: 'Sets'}).innerText());
-  // Labeled: Save updates in place; a comment is added and listed with who and when (spec 5.4).
-  await page.getByRole('button', {name: /^Labeled \d+$/}).click();
-  const firstId = (await page.locator('.media small').innerText()).trim();
+  await labelSet(N);
+  log('label set tabs:', (await page.getByRole('tablist').innerText()).replace(/\s+/g, ' '));
+  // All: Save updates in place; a comment is added and listed with who and when (spec 5.4); its
+  // author edits and deletes it (round 9), the buttons showing on hover.
+  await tabOf('All').click();
+  const firstId = await itemId();
   await page.getByLabel('Add a comment').fill('Shot at home, so it counts as a vlog');
   await page.getByText('Not saved', {exact: true}).waitFor();
   await button(page, 'Save').click();
-  await page.locator('.cmts').getByText('Shot at home, so it counts as a vlog').waitFor({timeout: 5000});
-  if ((await page.locator('.media small').innerText()).trim() !== firstId) throw new Error('saving in Labeled moved to another example');
+  const cmts = page.locator('.sp-cmts');
+  await cmts.getByText('Shot at home, so it counts as a vlog').waitFor({timeout: 5000});
+  if ((await itemId()) !== firstId) throw new Error('saving in All moved to another example');
+  await cmts.locator('.sp-cmt').first().hover();
   await shot(page, '3a-gold-comment');
-  // Upload labels (#31): rows are matched to the dataset; an unknown item is skipped, a value
-  // outside the label is refused by row, and the same label again saves nothing.
+  await button(cmts, 'Edit comment').click();
+  await cmts.getByLabel('Edit comment').fill('Shot at home, so it is a vlog');
+  await button(cmts, 'Save comment').click();
+  await cmts.getByText('Shot at home, so it is a vlog').waitFor({timeout: 5000});
+  if (!/edited/.test(await cmts.innerText())) throw new Error('an edited comment does not say so');
+  await page.getByLabel('Add a comment').fill('A second thought');
+  await button(page, 'Save').click();
+  await cmts.getByText('A second thought').waitFor({timeout: 5000});
+  await cmts.locator('.sp-cmt').nth(1).hover();
+  await button(cmts.locator('.sp-cmt').nth(1), 'Delete comment').click();
+  await cmts.getByText('A second thought').waitFor({state: 'detached', timeout: 5000});
+  // Remove example: out of scope; it leaves the set and shows under Removed on Dataset.
+  await button(page, 'Next example').click();
+  await button(page, 'Remove example').click();
+  const rm = page.locator('dialog[open]');
+  await rm.getByRole('radio', {name: /Out of scope/}).click({force: true});
+  await shot(page, '3c-remove-example');
+  await button(rm, 'Remove').click();
+  for (let k = 0; k < 50 && (await countOf('All')) !== N - 1; k++) await page.waitForTimeout(200);
+  if ((await countOf('All')) !== N - 1) throw new Error(`All did not drop to ${N - 1}: ${await tabOf('All').innerText()}`);
+  log('removed one example; label set tabs:', (await page.getByRole('tablist').innerText()).replace(/\s+/g, ' '));
+  // Upload labels (#31), on Gold Labels: rows are matched to the dataset; an unknown item is
+  // skipped, a value outside the label is refused by row, and the same label again saves nothing.
+  await page.getByRole('link', {name: 'Gold Labels'}).first().click();
+  await page.waitForURL(/\/gold\/?\?/);
+  await button(page, 'Upload labels').first().waitFor({timeout: 10000});
   const labelsFile = (name, text) => page.locator('input[aria-label="Upload labels"]').setInputFiles({name, mimeType: 'text/csv', buffer: Buffer.from(text)});
   const firstAnswer = LABELS.get(firstId);
   await labelsFile('labels.csv', `item_id,answer\nnot_in_this_dataset,${firstAnswer}\n${firstId},Not a value\n`);
@@ -398,16 +428,6 @@ let current = null;
   await shot(page, '3e-gold-upload-saved');
   await button(page, 'Dismiss').click();
   if (await page.getByText(/already had this label/).count()) throw new Error('Dismiss left the upload result');
-  if ((await page.locator('.media small').innerText()).trim() !== firstId) throw new Error('uploading labels moved to another example');
-  // Remove example: out of scope; it leaves the eval set and shows under Removed on Dataset.
-  await button(page, 'Next').click();
-  await button(page, 'Remove example').click();
-  const rm = page.getByRole('dialog');
-  await rm.getByRole('radio', {name: /Out of scope/}).click();
-  await shot(page, '3c-remove-example');
-  await button(rm, 'Remove').click();
-  await page.getByRole('button', {name: `Labeled ${N - 1}`}).waitFor({timeout: 5000});
-  log('removed one example; gold labels:', await page.getByRole('tablist', {name: 'Sets'}).innerText());
 
   // #103: the new-project dialog confirmed the settings, so none is asked before the first paid
   // run. Project Settings still opens from the overview.
@@ -461,54 +481,45 @@ let current = null;
     log('left out:', await page.getByText(/^Scored on \d+ of \d+ examples/).first().innerText());
     await shot(page, '4b-disagree');
     await button(page, 'Review labels').click();
-    await page.waitForURL(/gold/);
-    const tab = page.getByRole('tab', {name: /^Mismatches/});
+    // #115: Review labels opens a label set on its Mismatch tab; saving there records a review.
+    await page.waitForURL(/gold\/set/);
+    const tab = page.getByRole('tab', {name: /^Mismatch/});
     await tab.waitFor();
-    const before = +((await tab.innerText()).match(/(\d+)\s*$/) || [0, 0])[1];
-    const cmp = page.locator('.select-sm .select-btn');
-    await cmp.waitFor();
-    if (await page.locator('select').count()) throw new Error('Gold Labels still uses a native select');
+    if ((await tab.getAttribute('aria-selected')) !== 'true') throw new Error('Review labels did not open the Mismatch tab');
+    const tabCount = async () => +((await tab.innerText()).match(/(\d+)\s*$/) || [0, 0])[1];
+    const cmp = page.getByRole('combobox', {name: 'Compare with'});
+    await cmp.waitFor({timeout: 10000});
+    for (let k = 0; k < 50 && !(await tabCount()); k++) await page.waitForTimeout(200);
+    const before = await tabCount();
     log('mismatches:', before, '· compare with', await cmp.innerText());
     await cmp.click();
-    await page.locator('.select-pop [role=option]').first().waitFor();
+    await page.getByRole('option').first().waitFor();
     await shot(page, '4c-compare-with');
     await page.keyboard.press('Escape');
-    const why = await page.locator('section.card', {hasText: 'Model answer'}).innerText();
-    log('model answer card:', why.replace(/\n/g, ' | ').slice(0, 200));
-    if (!/Model's reason|Not readable/.test(why)) throw new Error("the Model answer card shows no reason");
+    if (await page.getByText('Hidden until you answer', {exact: true}).count()) throw new Error('the model answer is hidden on the Mismatch tab');
+    if (!(await page.locator('.sp-model-answer, .sp-error').count())) throw new Error('the Model answer card shows no answer');
+    log('model answer card:', (await page.locator('.sp-model-answer, .sp-error').first().innerText()).replace(/\n/g, ' | ').slice(0, 200));
     await page.getByLabel('Add a comment').fill('The clip is cut from a show');
     await shot(page, '4c-mismatches');
-    const tabCount = n => page.waitForFunction(k => +((document.querySelector('[role=tab][aria-selected=true]')?.textContent ?? '').match(/(\d+)\s*$/) || [0, 0])[1] === k, n, {timeout: 10000});
-    // R6-3: nothing saves before Save.
+    const waitCount = async n => {
+      for (let k = 0; k < 50 && (await tabCount()) !== n; k++) await page.waitForTimeout(200);
+      if ((await tabCount()) !== n) throw new Error(`the Mismatch tab did not drop to ${n}: ${await tab.innerText()}`);
+    };
+    // R6-3: nothing saves before Save; keeping the label with a comment is a review.
     await button(page, 'Save').click();
-    await tabCount(before - 1);
-    // The review shows under Reviewed with its comment listed; Save adds a review in place.
-    await page.getByRole('button', {name: /^Reviewed \d+$/}).click();
-    await page.getByText('Kept my label', {exact: true}).waitFor({timeout: 5000});
-    await page.locator('.cmts').getByText('The clip is cut from a show').waitFor({timeout: 5000});
-    if (!(await button(page, 'Save').isDisabled())) throw new Error('Save is on before anything changed');
-    await page.getByLabel('Add a comment').fill('Looked again: it is cut from a show');
-    await page.getByText('Not saved', {exact: true}).waitFor();
-    await shot(page, '4d-reviewed-editing');
-    const reviewedTab = await page.getByRole('button', {name: /^Reviewed \d+$/}).innerText();
-    await button(page, 'Save').click();
-    await page.getByText('2 reviews', {exact: true}).waitFor({timeout: 5000});
-    if ((await page.getByRole('button', {name: /^Reviewed \d+$/}).innerText()) !== reviewedTab) throw new Error('editing a review moved it');
-    log('reviewed item edited in place:', reviewedTab);
-    await page.getByRole('button', {name: /^To review \d+$/}).click();
+    await waitCount(before - 1);
     if (before > 1) {
-      // Take the model's answer by picking its chips (the shortcut button is gone, spec 5.3).
-      const model = page.locator('section.card', {hasText: 'Model answer'});
-      if (await model.locator('.code').count()) throw new Error('the Model answer card still names a field');
+      // Take the model's answer by picking its value (the shortcut button is gone, spec 5.3).
+      const model = page.locator('.sp-model-answer');
       // An invalid model answer has no value to take: move on to one that has.
-      for (let k = 0; k < 10 && !(await model.locator('.ch').count()); k++) {
-        await page.getByRole('button', {name: 'Next', exact: true}).click();
+      for (let k = 0; k < 10 && !(await model.count()); k++) {
+        await button(page, 'Next example').click();
         await page.waitForTimeout(400);
       }
-      const pick = (await model.locator('.ch').first().innerText()).trim();
-      await page.locator('section.card', {hasText: 'Your answer'}).getByRole('group', {name: 'primary_value'}).getByRole('button', {name: pick, exact: true}).click();
+      const pick = (await model.locator('> div').first().innerText()).split('\n')[0].trim();
+      await page.getByRole('group', {name: 'primary_value'}).getByRole('button', {name: pick, exact: true}).click();
       await button(page, 'Save').click();
-      await page.waitForFunction(n => +((document.querySelector('[role=tab][aria-selected=true]')?.textContent ?? '').match(/(\d+)\s*$/) || [0, 0])[1] === n - 2, before, {timeout: 10000});
+      await waitCount(before - 2);
     }
     log('mismatches after review:', await tab.innerText());
     await page.goto(url('/prompt/'));

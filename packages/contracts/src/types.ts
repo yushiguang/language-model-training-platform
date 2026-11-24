@@ -318,6 +318,10 @@ export interface LabelComment {
   /** The version compared when it was written on Mismatches; null on the eval set. */
   promptVersionId: string | null;
   createdAt: string;
+  /** When its author last edited it (#115); absent on a comment never edited. */
+  editedAt?: string;
+  /** When its author deleted it (#115). Kept for the audit; reads never return a deleted comment. */
+  deletedAt?: string;
 }
 
 /**
